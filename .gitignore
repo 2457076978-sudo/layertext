@@ -1,0 +1,10 @@
+node_modules/
+dist/
+*.log
+.DS_Store
+
+# 运行时自动落盘的质检报告（生成物，不入库）
+质检报告_*.json
+
+# 本地开发用的 Animal Farm 预设（仅本地对照测试，绝不入库）
+tools/_af_*
