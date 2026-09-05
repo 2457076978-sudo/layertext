@@ -1,0 +1,6 @@
+{
+  "identifier": "default",
+  "description": "LayerText 默认权限：窗口基础能力与文件对话框（文件读写走自定义命令）",
+  "windows": ["main"],
+  "permissions": ["core:default", "dialog:default"]
+}

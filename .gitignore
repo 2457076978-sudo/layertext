@@ -1,5 +1,11 @@
 node_modules/
 dist/
+
+# Tauri 应用（app/）
+app/dist/
+app/src-tauri/target/
+app/src-tauri/gen/schemas/
+
 *.log
 .DS_Store
 

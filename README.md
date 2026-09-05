@@ -26,13 +26,37 @@
 | 里程碑 | 内容 | 状态 |
 |---|---|---|
 | M1 | QC 引擎 TypeScript 移植 + CLI + 与 Python 原型对照测试 | ✅ 完成（21/21 回归测试，双引擎 76/76 字段一致） |
-| M2 | 审校工作台 UI（导入→质检→标记→执行→导出全流程） | 🚧 进行中 |
-| M3 | macOS dmg 打包 | ⏳ |
+| M3（先行） | macOS 应用安装包（Tauri 2 · Universal dmg）：导入 → 质检报告 → 三态高亮正文 | ✅ v0.1 先行版 |
+| M2 | 审校工作台（点词/划句标记、配额、门禁、多版本、修订执行） | 🚧 下一版 |
 | M4 | GitHub Release v0.1.0 | ⏳ |
 
 详见 [docs/M1-对照测试报告.md](docs/M1-对照测试报告.md) 与 [路线图](#路线图)。
 
-## 快速开始（当前为 CLI 形态，M2 起提供图形界面）
+## 安装（macOS）
+
+1. 下载 `LayerText_0.1.0_universal.dmg`（[Releases](../../releases) 页，或本地构建见下）；
+2. 双击打开 dmg，把 **LayerText** 拖入"应用程序"文件夹；
+3. 首次打开：**右键 → 打开 → 再点"打开"**（开源个人项目未做苹果签名公证，此提示属正常）。
+
+本地构建 dmg：
+
+```bash
+npm install && cd app && npm install
+npm run tauri build --target universal-apple-darwin
+# 产物：app/src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+```
+
+## 图形界面（v0.1 先行版）
+
+打开应用后三步上手：
+
+1. 点 **「载入示例」**（或"打开章节文件…"选择自己的 md/txt）；
+2. 点 **「▶ 开始质检」**，查看指标报告（覆盖率/生词率/句长/被动/定从/过去完成/专名一致性…）与 OOV 生词清单；
+3. 切到 **「正文」** 页看三态高亮：词表外（红点）/待定词（橙点）/术语（蓝点），风险句淡红底并带「被/从/完/长」角标。
+
+报告自动落盘：文件模式存到源文件同目录，示例模式存到 `文稿/LayerText质检报告/`。
+
+## 命令行（CLI）
 
 ```bash
 git clone https://github.com/<your-org>/layertext.git
@@ -65,8 +89,9 @@ node dist/src/cli.js qc examples/texts/school_story_club.md \
 ## 仓库结构
 
 ```
-src/core/    QC 引擎（纯 TypeScript，无框架依赖：irregular / lexicon / textpipe / qc）
+src/core/    QC 引擎（纯 TypeScript，无框架依赖：irregular / lexicon / textpipe / qc / risks）
 src/cli.ts   命令行入口
+app/         macOS 桌面应用（Tauri 2：前端 Vite + 主进程 Rust，复用 src/core）
 tests/       防坑规则回归测试（node:test）
 tools/       qc_chapter_ref.py（Python 参照版）、convert_wordlist.py、compare.ts（对照测试）
 docs/        QC 指标说明、M1 对照测试报告
