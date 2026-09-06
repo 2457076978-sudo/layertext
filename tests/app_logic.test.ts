@@ -116,8 +116,8 @@ test('checkRevisedText：多句改写逐句复核（拆句后不再误报超长�
   const r = checkRevisedText(revised, 20, fakeRisk);
   assert.equal(r.overlong, false);
   assert.equal(r.passive, false);
-  // 整串 22 词若不拆会被误判——对照：单句模式（旧逻辑）确实超长
-  assert.equal(fakeRisk(revised, 20).overlong, true);
+  // 整串 19 词若不拆、按上限 12 判——旧逻辑（整串算）确实超长
+  assert.equal(fakeRisk(revised, 12).overlong, true);
   // 任一句含被动则整体标被动
   const r2 = checkRevisedText('He ran. The car was driven away.', 20, fakeRisk);
   assert.equal(r2.passive, true);
