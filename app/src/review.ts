@@ -93,6 +93,7 @@ export function renderSidebar(
     onQuotaRemove: (i: number) => void;
     onQuotaAdd: (text: string) => void;
     onGateToggle: (g: string) => void;
+    onGateHelp: (g: string, anchor: HTMLElement) => void;
     onMarkJump: (m: Mark) => void;
     onMarkRemove: (m: Mark) => void;
   },
@@ -118,7 +119,8 @@ export function renderSidebar(
 
   const gateHtml = GATES.map(
     (g) => `
-    <li><label><input type="checkbox" data-gate="${esc(g)}" ${r.gate[g] ? 'checked' : ''} /> ${g}</label></li>`,
+    <li><label><input type="checkbox" data-gate="${esc(g)}" ${r.gate[g] ? 'checked' : ''} /> ${g}</label>
+        <button class="qmark" data-gate-help="${esc(g)}" title="这是什么？">?</button></li>`,
   ).join('');
 
   const listHtml = allTypes
@@ -167,6 +169,12 @@ export function renderSidebar(
   );
   side.querySelectorAll('[data-gate]').forEach((el) =>
     el.addEventListener('change', () => handlers.onGateToggle((el as HTMLElement).dataset.gate!)),
+  );
+  side.querySelectorAll('[data-gate-help]').forEach((el) =>
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      handlers.onGateHelp((el as HTMLElement).dataset.gateHelp!, el as HTMLElement);
+    }),
   );
   side.querySelectorAll('[data-jump]').forEach((el) => {
     const m = r.marks.find((x) => x.id === (el as HTMLElement).dataset.jump);

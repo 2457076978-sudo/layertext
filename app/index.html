@@ -125,6 +125,27 @@
     .mitem .jump:hover { color: var(--brand); text-decoration: underline; }
     .mitem .note-dot { color: var(--pending); }
 
+    /* 门禁 ？帮助 */
+    .qmark {
+      margin-left: auto; border: 1px solid var(--line); background: #fafbfc; color: var(--muted);
+      width: 18px; height: 18px; border-radius: 50%; padding: 0; font-size: 11px; line-height: 1;
+      flex-shrink: 0;
+    }
+    .qmark:hover { border-color: var(--brand); color: var(--brand); }
+    #gate-pop {
+      position: fixed; z-index: 55; display: none; width: 380px; max-width: 92vw;
+      background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+      box-shadow: 0 8px 30px rgba(15, 23, 42, .14); padding: 14px; font-size: 13px;
+      max-height: 70vh; overflow-y: auto;
+    }
+    #gate-pop.open { display: block; }
+    #gate-pop p { margin: 6px 0; line-height: 1.7; }
+    #gate-pop .dim { color: var(--muted); font-size: 12px; }
+    #gate-pop .gtable { border-collapse: collapse; width: 100%; margin: 8px 0; font-size: 12px; }
+    #gate-pop .gtable th, #gate-pop .gtable td { border: 1px solid var(--line); padding: 4px 8px; text-align: left; }
+    #gate-pop .gtable th { background: #fafbfc; color: var(--muted); font-weight: 500; }
+    #gate-pop .gtable .warnrow td { background: #fef9ec; color: #92400e; }
+
     /* ---------- 弹层面板 ---------- */
     #pop {
       position: fixed; z-index: 50; display: none; width: 300px; max-width: 90vw;
@@ -204,6 +225,7 @@
   </div>
 
   <div id="pop"></div>
+  <div id="gate-pop"></div>
   <div id="demo-menu"></div>
 
   <script type="module" src="/src/main.ts"></script>

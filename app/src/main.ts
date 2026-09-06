@@ -20,7 +20,7 @@ import {
 import { sentenceRisks } from '../../src/core/risks.js';
 import { jumpTo, refreshMarkDom, removeMarkDom, renderSidebar, restoreAllMarkDom, scheduleSave } from './review.js';
 import {
-  GATES, SENT_TYPES, WORD_TYPES, newMarkId, newReviewState, typeLabel,
+  GATES, GATE_HELP, SENT_TYPES, TIER_MAX_LEN, WORD_TYPES, newMarkId, newReviewState, typeLabel,
   type FileSession, type Mark, type MarkType,
 } from './types.js';
 
@@ -395,6 +395,7 @@ const sidebarHandlers = {
     renderSidebar(s, sidebarHandlers);
     scheduleSave(s, () => undefined);
   },
+  onGateHelp: (g: string, anchor: HTMLElement) => showGateHelp(g, anchor),
   onMarkJump: (m: Mark) => jumpTo(m),
   onMarkRemove: (m: Mark) => {
     const s = activeSession();
@@ -758,6 +759,60 @@ void listen<string>('menu-action', (ev) => {
     case 'qc-run': void runQcCurrent(); break;
     case 'view-text': switchView('text'); break;
     case 'view-report': switchView('report'); break;
+  }
+});
+
+/* ---------- 门禁说明弹层 ---------- */
+
+const gatePop = $('gate-pop');
+
+function hideGatePop(): void {
+  gatePop.classList.remove('open');
+}
+
+function showGateHelp(gate: string, anchor: HTMLElement): void {
+  const rect = anchor.getBoundingClientRect();
+  const isQc = gate === 'QC 指标达标';
+  let body = `<p>${esc(GATE_HELP[gate] ?? '')}</p>`;
+  const s = activeSession();
+  if (isQc) {
+    const tier = (s?.report?.tier ?? ($('tier') as HTMLSelectElement).value) as Tier;
+    const maxLen = TIER_MAX_LEN[tier] ?? 16;
+    if (s?.report) {
+      const r = s.report;
+      const gates2 = r.gates;
+      const row = (name: string, value: string, ref: string, warn = false) =>
+        `<tr class="${warn ? 'warnrow' : ''}"><td>${name}</td><td>${value}</td><td>${ref}</td></tr>`;
+      body += `
+        <table class="gtable">
+          <tr><th>指标</th><th>本章实际</th><th>参考</th></tr>
+          ${row('词表覆盖率', (r.coverage * 100).toFixed(1) + '%', '越接近词库上限越好')}
+          ${row('生词率（词型）', (r.newWordRate * 100).toFixed(1) + '%', '越低越好')}
+          ${row('平均句长', r.avgLenNarrRaw.toFixed(1) + ' 词', `≤ ${maxLen} 词（${tier} 层）`, r.avgLenNarrRaw > maxLen)}
+          ${row('单句最长', r.maxLen + ' 词', '≤ 20 词', r.maxLen > 20)}
+          ${row('超 20 词句数', String(r.over20), '0（个别文学长句可人工放行）', r.over20 > 0)}
+          ${row('被动式', String(r.passive), gates2.passiveOk ? '已解禁（第5章起）·建议人工复核' : '0', !gates2.passiveOk && r.passive > 0)}
+          ${row('定语从句', String(r.relcl), gates2.relclOk ? '已解禁（第8章起）·建议人工复核' : '0', !gates2.relclOk && r.relcl > 0)}
+          ${row('过去完成', String(r.pastperf), '0', r.pastperf > 0)}
+          ${row('待定词命中', String(r.pendingHits), '逐个复核后定去留', r.pendingHits > 0)}
+        </table>`;
+    } else {
+      body += `<p class="dim">本章尚未质检——先点「▶ 质检本章」，再回来核对。</p>`;
+    }
+    body += `<p class="dim">参考值源自原型项目三层设计；黄色行 = 超出参考，需你复核后决定。达标与否由你勾选确认（AI 只出数字，教师定稿）。</p>`;
+  }
+  gatePop.innerHTML = `<div class="pop-h">${esc(gate)}</div>${body}`;
+  gatePop.classList.add('open');
+  const popRect = gatePop.getBoundingClientRect();
+  const px = Math.min(Math.max(8, rect.left - popRect.width - 8), window.innerWidth - popRect.width - 8);
+  const py = Math.min(Math.max(8, rect.top), window.innerHeight - popRect.height - 8);
+  gatePop.style.left = px + 'px';
+  gatePop.style.top = py + 'px';
+}
+
+document.addEventListener('mousedown', (e) => {
+  if (gatePop.classList.contains('open') && !(e.target as HTMLElement).closest('#gate-pop') && !(e.target as HTMLElement).closest('.qmark')) {
+    hideGatePop();
   }
 });
 

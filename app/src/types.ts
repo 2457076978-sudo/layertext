@@ -47,6 +47,17 @@ export interface FileSession {
 
 export const GATES = ['事实核对', '情节要点齐全', '段落对齐', 'QC 指标达标'] as const;
 
+/** 终审门禁各项的一句话说明（？点击查看） */
+export const GATE_HELP: Record<string, string> = {
+  事实核对: '人名、事件、数字、时间线与原著（或史实）一致，无改编失真。',
+  情节要点齐全: '本章应保留的情节点与伏笔都在——对照上方"要点配额"逐项核对。',
+  段落对齐: '简化版段落与原文段落一一对应，无漏段、无并段丢失信息。',
+  'QC 指标达标': '自动质检的各项指标达到本层级参考标准（点击查看本章实际数字与参考值的核对表）。',
+};
+
+/** 各层级句长参考上限（词/句），源自原型项目三层设计 */
+export const TIER_MAX_LEN: Record<string, number> = { B: 14, M: 16, A: 20 };
+
 export const WORD_TYPES: { key: WordMarkType; label: string; badge: string; cls: string }[] = [
   { key: 'simpl', label: '词汇简化', badge: '简', cls: 'mk-simpl' },
   { key: 'zh', label: '加中文标注', badge: '注', cls: 'mk-zh' },

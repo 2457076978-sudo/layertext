@@ -106,6 +106,7 @@ test('侧栏：配额增删勾、门禁、清单分组渲染与回调', () => {
       onQuotaRemove: (i) => events.push('quota-remove:' + i),
       onQuotaAdd: (t) => events.push('quota-add:' + t),
       onGateToggle: (g) => events.push('gate:' + g),
+      onGateHelp: () => {},
       onMarkJump: (m) => events.push('jump:' + m.id),
       onMarkRemove: (m) => events.push('rm:' + m.id),
     },
@@ -122,6 +123,8 @@ test('侧栏：配额增删勾、门禁、清单分组渲染与回调', () => {
   (side.querySelector('#quota-input') as unknown as HTMLInputElement).value = '新要点';
   side.querySelector('#quota-add-btn')!.dispatchEvent(new win.Event('click'));
   assert.ok(events.includes('quota-add:新要点'));
+  // 门禁：？帮助按钮存在且可点
+  assert.equal(side.querySelectorAll('.qmark').length, 4);
   // 门禁：已勾项 + 未勾项回调
   assert.ok((side.querySelector('[data-gate="事实核对"]') as unknown as HTMLInputElement).checked);
   side.querySelector('[data-gate="段落对齐"]')!.dispatchEvent(new win.Event('change'));
@@ -142,7 +145,7 @@ test('侧栏：配额增删勾、门禁、清单分组渲染与回调', () => {
   review.gate = Object.fromEntries(GATES.map((g) => [g, true]));
   renderSidebar({ review } as never, {
     onQuotaToggle: () => {}, onQuotaRemove: () => {}, onQuotaAdd: () => {},
-    onGateToggle: () => {}, onMarkJump: () => {}, onMarkRemove: () => {},
+    onGateToggle: () => {}, onGateHelp: () => {}, onMarkJump: () => {}, onMarkRemove: () => {},
   });
   assert.ok(win.document.getElementById('sidebar')!.textContent!.includes('✅ 已通过'));
 });
