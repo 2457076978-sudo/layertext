@@ -870,6 +870,7 @@ void listen<string>('menu-action', (ev) => {
     case 'draft': showDraftPop(); break;
     case 'tier-plan': showTierPlanPop(); break;
     case 'book-config': void saveBookConfig(); break;
+    case 'rewrite-rules': showRewritePop(); break;
     case 'help-key': void invoke('open_help_window', { which: 'key' }); break;
     case 'export-docx': void exportDocx(); break;
     case 'export-tts': void exportTts(); break;
@@ -1031,11 +1032,10 @@ async function callChat(
   }
 }
 
-/** 组装 system 提示词（含用户的长期审校约定） */
+/** 组装 system 提示词（含用户的长期审校约定 + 书级改写规则） */
 async function buildSystemPrompt(): Promise<string> {
-  const cfg = appConfig;
-  const custom = (cfg.instructions ?? '').trim();
-  return AI_SYSTEM_PROMPT + (custom ? `\n\n6. 教师的长期审校约定（优先级最高）：\n${custom}` : '');
+  const custom = (appConfig.instructions ?? '').trim();
+  return AI_SYSTEM_PROMPT + (custom ? `\n\n6. 教师的长期审校约定（优先级最高）：\n${custom}` : '') + rewritePrompt();
 }
 
 /** 内置提示词模板：词库边界 + 句法黑名单 + 句长上限 + 方法论约束 */
@@ -1481,7 +1481,6 @@ async function generateDraft(): Promise<void> {
 - 情节零丢失：每个情节点、人物动作、因果、伏笔都必须保留；这是底线。
 - 输出：保持输入段落的 [P##] 标记原样开头，直接输出该段简化文本，不要任何解释、标题或代码块。
 ${instructions ? `\n教师方向指令（最高优先级）：${instructions}` : ''}`;
-
     const out: string[] = [];
     for (let i = 0; i < segs.length; i++) {
       $('draft-step').textContent = `正在简化第 ${i + 1}/${segs.length} 段（${segs[i].slice(0, 8).trim()}…）`;
@@ -1495,7 +1494,7 @@ ${instructions ? `\n教师方向指令（最高优先级）：${instructions}` :
         },
       ], 2500, draftAbort!.signal);
       tokens += Number(usage.match(/(\d+) 出/)?.[1] ?? 0);
-      out.push(cleanDraftSeg(content, segs[i].match(/\[P\d+\]/)![0]));
+      out.push(applyRewrite(cleanDraftSeg(content, segs[i].match(/\[P\d+\]/)![0])));
     }
     ($('draft-bar') as HTMLElement).style.width = '100%';
     $('draft-step').textContent = '生成完毕，正在保存并质检…';
@@ -1605,6 +1604,7 @@ async function saveBookConfig(): Promise<void> {
     terms: termsText ?? null,
     proper: properRows.length ? properRows : null,
     instructions: appConfig.instructions ?? null,
+    rewrite: rewriteRules.replacements.length || rewriteRules.viewpoint !== 'keep' || rewriteRules.extra ? rewriteRules : null,
     savedAt: new Date().toLocaleString('zh-CN'),
   };
   try {
@@ -1619,12 +1619,13 @@ async function saveBookConfig(): Promise<void> {
 async function loadBookConfig(dir: string): Promise<boolean> {
   try {
     const raw = await invoke<string>('read_text_file', { path: `${dir}/${BOOK_CONFIG}` });
-    const cfg = JSON.parse(raw) as { vocabCsv?: string | null; vocabName?: string; terms?: string | null; proper?: string[] | null; instructions?: string | null };
+    const cfg = JSON.parse(raw) as { vocabCsv?: string | null; vocabName?: string; terms?: string | null; proper?: string[] | null; instructions?: string | null; rewrite?: typeof rewriteRules };
     if (cfg.vocabCsv) { vocabCsvText = cfg.vocabCsv; vocabName = cfg.vocabName ?? '本书词库'; }
     if (cfg.terms) termsText = cfg.terms;
     properRows = cfg.proper ?? [];
     if (cfg.instructions) appConfig.instructions = cfg.instructions;
-    return Boolean(cfg.vocabCsv || cfg.terms || cfg.proper?.length);
+    if (cfg.rewrite) rewriteRules = { replacements: cfg.rewrite.replacements ?? [], viewpoint: cfg.rewrite.viewpoint ?? 'keep', viewpointName: cfg.rewrite.viewpointName ?? '', extra: cfg.rewrite.extra ?? '' };
+    return Boolean(cfg.vocabCsv || cfg.terms || cfg.proper?.length || cfg.rewrite);
   } catch {
     return false;
   }
@@ -1651,7 +1652,7 @@ async function exportDocx(): Promise<void> {
       new Paragraph({ text: s.fileName.replace(/\.(md|txt|markdown)$/i, ''), heading: HeadingLevel.HEADING_1 }),
     ];
     for (let i = 0; i < paras.length; i++) {
-      const text = sentsOf(paras[i], false).join(' ').replace(/\s+/g, ' ').trim();
+      const text = applyRewrite(sentsOf(paras[i], false).join(' ').replace(/\s+/g, ' ').trim());
       if (text) children.push(new Paragraph({ children: [new TextRun({ text, size: 24, font: 'Georgia' })], spacing: { after: 160 } }));
     }
     const rows = card.split('\n').filter((l) => l.trim().startsWith('|') && !/^\|[\s:-]+\|$/.test(l.trim()));
@@ -1686,11 +1687,11 @@ async function exportTts(): Promise<void> {
   const s = activeSession();
   if (!s) { setStatus('请先打开章节', 'err'); return; }
   try {
-    const text = extractParas(splitChapter(s.md).body)
+    const text = applyRewrite(extractParas(splitChapter(s.md).body)
       .map((p) => sentsOf(p, false).join(' '))
       .join('\n')
       .replace(/\[[P\d\s]*?\]/g, '')
-      .trim();
+      .trim());
     if (!text) throw new Error('正文为空');
     const base = s.sourcePath ? s.sourcePath.slice(0, s.sourcePath.lastIndexOf('/')) + '/' + s.fileName.replace(/\.(md|txt|markdown)$/i, '') : (await invoke<string>('reports_dir')) + '/示例朗读';
     const out = base + '.aiff';
@@ -1777,28 +1778,241 @@ function tourShow(i: number): void {
   $('tour-skip').addEventListener('click', () => tourShow(-1));
 }
 
-/* ---------- 首启动欢迎 ---------- */
+/* ---------- 书级改写规则：确定性替换（机器做，零遗漏） + 视角与全局规则（注入 AI） ---------- */
+
+interface RewriteRule { from: string; to: string; }
+let rewriteRules: { replacements: RewriteRule[]; viewpoint: 'keep' | 'first'; viewpointName: string; extra: string } = { replacements: [], viewpoint: 'keep', viewpointName: '', extra: '' };
+
+const rewritePop = $('rewrite-pop');
+
+function applyRewrite(text: string): string {
+  let t = text;
+  for (const r of rewriteRules.replacements) {
+    if (!r.from) continue;
+    const esc = r.from.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    t = t.replace(new RegExp(`\\b${esc}\\b`, 'g'), r.to);
+  }
+  return t;
+}
+
+/** 规则文本（注入每次 AI 请求） */
+function rewritePrompt(): string {
+  if (!rewriteRules.replacements.length && rewriteRules.viewpoint === 'keep' && !rewriteRules.extra) return '';
+  const lines = ['本书全局改写规则（最高优先级，每段都必须遵守）：'];
+  if (rewriteRules.replacements.length) {
+    lines.push('- 人名/词汇替换（必须严格执行，输出中不得出现原词）：');
+    for (const r of rewriteRules.replacements) lines.push(`  · "${r.from}" 一律写作 "${r.to}"`);
+  }
+  if (rewriteRules.viewpoint === 'first' && rewriteRules.viewpointName) {
+    lines.push(`- 叙事视角：全书以 ${rewriteRules.viewpointName} 的第一人称"I"叙述——凡指称 ${rewriteRules.viewpointName} 的第三人称（he/she/his/her 或其名）改为 I/my/me（注意动词搭配：he was→I was, he goes→I go）；其他人物对话中提及 ${rewriteRules.viewpointName} 时保留其名。`);
+  }
+  if (rewriteRules.extra) lines.push(`- ${rewriteRules.extra}`);
+  return '\n\n' + lines.join('\n');
+}
+
+/** 校验：替换残留与视角代词密度（机器核对，不靠 AI 自觉） */
+function rewriteCheck(): string {
+  const s = activeSession();
+  if (!s) return '先打开章节';
+  const out: string[] = [];
+  let body = '';
+  try { body = splitChapter(s.md).body; } catch { return '正文解析失败'; }
+  for (const r of rewriteRules.replacements) {
+    if (!r.from) continue;
+    const esc = r.from.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const left = (body.match(new RegExp(`\\b${esc}\\b`, 'g')) ?? []).length;
+    const used = (body.match(new RegExp(`\\b${r.to.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'g')) ?? []).length;
+    out.push(left === 0
+      ? `✓ "${r.from}" → "${r.to}"：无残留（新词出现 ${used} 次）`
+      : `✗ "${r.from}" 仍有 ${left} 处未替换（新词 "${r.to}" 出现 ${used} 次）——可点下方"对当前章节执行替换"由机器补齐`);
+  }
+  if (rewriteRules.viewpoint === 'first') {
+    const he = (body.match(/\b(he|his|him|she|her)\b/gi) ?? []).length;
+    const I = (body.match(/\b(I|my|me)\b/g) ?? []).length;
+    out.push(`视角（第一人称）：第三人称代词 ${he} 处 / 第一人称 ${I} 处${he > I * 2 ? ' ⚠ 第一人称占比偏低，建议用「分层初稿」按规则重写' : ''}`);
+  }
+  return out.length ? out.join('\n') : '尚未设置规则';
+}
+
+function saveRewriteToBook(): void {
+  void (async () => {
+    const s = activeSession();
+    if (!s?.sourcePath) { setStatus('规则随本书保存——先打开本书章节', 'err'); return; }
+    const dir = s.sourcePath.slice(0, s.sourcePath.lastIndexOf('/'));
+    try {
+      const raw = await invoke<string>('read_text_file', { path: `${dir}/${BOOK_CONFIG}` });
+      const cfg = JSON.parse(raw) as Record<string, unknown>;
+      cfg.rewrite = rewriteRules;
+      cfg.savedAt = new Date().toLocaleString('zh-CN');
+      await invoke('write_text_file', { path: `${dir}/${BOOK_CONFIG}`, content: JSON.stringify(cfg, null, 1) });
+      setStatus('书级改写规则已保存（随本书配置，每章自动生效）', 'saved');
+    } catch {
+      setStatus('保存失败：请先执行过「保存为本书配置」', 'err');
+    }
+  })();
+}
+
+function showRewritePop(): void {
+  rewritePop.innerHTML = `
+    <div class="pop-h">书级改写规则 —— 全书一致的大改动</div>
+    <p class="dim" style="margin:4px 0 8px">两类规则：<b>人名/词汇替换</b>由机器确定性执行（不会漏）；<b>叙事视角与全局要求</b>注入每次 AI 请求并自动校验。规则随本书保存，每章生效。</p>
+    <div id="rw-rows"></div>
+    <button id="rw-add" style="font-size:12px">＋ 添加替换（如 Napoleon → 大猪拿破仑 / Jim → I）</button>
+    <div class="fld" style="margin-top:10px"><label>叙事视角</label>
+      <select id="rw-view">
+        <option value="keep">保持原叙事（默认）</option>
+        <option value="first">全书改为第一人称"I"叙述</option>
+      </select>
+      <input id="rw-name" placeholder="主角名（第一人称时的叙述者，如 Napoleon）" style="margin-top:6px" /></div>
+    <div class="fld"><label>其他全局要求（注入每次 AI 请求）</label>
+      <textarea id="rw-extra" style="width:100%;height:48px;border:1px solid var(--line);border-radius:8px;padding:6px 10px;font-size:12px;font-family:inherit;resize:vertical;" placeholder="如：所有对话保留原话不改写；年代背景改为当代中国校园"></textarea></div>
+    <div class="row-btns">
+      <button id="rw-save" class="primary">保存规则（随本书）</button>
+      <button id="rw-check">检查当前章节</button>
+      <button id="rw-apply">对当前章节执行替换</button>
+      <button id="rw-close">关闭</button>
+    </div>
+    <pre id="rw-out" style="white-space:pre-wrap;font-size:12px;color:var(--muted);margin-top:8px;max-height:160px;overflow:auto"></pre>`;
+  rewritePop.classList.add('open');
+
+  const rows = () => rewritePop.querySelector('#rw-rows')!;
+  const addRow = (from = '', to = '') => {
+    const div = document.createElement('div');
+    div.className = 'rw-row';
+    div.innerHTML = `<input class="rw-from" value="${esc(from)}" placeholder="原文词" /> → <input class="rw-to" value="${esc(to)}" placeholder="替换为" /><button class="x">×</button>`;
+    div.querySelector('.x')!.addEventListener('click', () => div.remove());
+    rows().appendChild(div);
+  };
+  const collect = () => {
+    rewriteRules.replacements = [...rewritePop.querySelectorAll('.rw-row')].map((r) => ({
+      from: (r.querySelector('.rw-from') as HTMLInputElement).value.trim(),
+      to: (r.querySelector('.rw-to') as HTMLInputElement).value.trim(),
+    })).filter((r) => r.from);
+    rewriteRules.viewpoint = ($('rw-view') as HTMLSelectElement).value as 'keep' | 'first';
+    rewriteRules.viewpointName = ($('rw-name') as HTMLInputElement).value.trim();
+    rewriteRules.extra = ($('rw-extra') as HTMLTextAreaElement).value.trim();
+  };
+  for (const r of rewriteRules.replacements) addRow(r.from, r.to);
+  if (!rewriteRules.replacements.length) addRow();
+  ($('rw-view') as HTMLSelectElement).value = rewriteRules.viewpoint;
+  ($('rw-name') as HTMLInputElement).value = rewriteRules.viewpointName;
+  ($('rw-extra') as HTMLTextAreaElement).value = rewriteRules.extra;
+
+  $('rw-add').addEventListener('click', () => addRow());
+  $('rw-close').addEventListener('click', () => rewritePop.classList.remove('open'));
+  $('rw-save').addEventListener('click', () => { collect(); saveRewriteToBook(); });
+  $('rw-check').addEventListener('click', () => { collect(); $('rw-out').textContent = rewriteCheck(); });
+  $('rw-apply').addEventListener('click', () => {
+    collect();
+    const s = activeSession();
+    if (!s) return;
+    const before = s.md;
+    s.md = applyRewrite(s.md);
+    if (s.md === before) { $('rw-out').textContent = '无可替换内容（或原词已清零）'; return; }
+    void (async () => {
+      try {
+        await invoke('write_text_file', { path: s.sourcePath ? `${s.sourcePath.slice(0, s.sourcePath.lastIndexOf('/'))}/${s.fileName.replace(/\.(md|txt|markdown)$/i, '')}_工作稿.md` : (await invoke<string>('reports_dir')) + '/示例_工作稿.md', content: s.md });
+        renderReader(s);
+        attachInlineSuggestions();
+        renderSidebar(s, sidebarHandlers);
+        $('rw-out').textContent = rewriteCheck();
+        setStatus('替换已执行并写入工作稿（原稿未动）', 'saved');
+      } catch (e) {
+        setStatus('写入失败：' + e, 'err');
+      }
+    })();
+  });
+}
+document.addEventListener('mousedown', (e) => {
+  if (rewritePop.classList.contains('open') && !(e.target as HTMLElement).closest('#rewrite-pop')) rewritePop.classList.remove('open');
+});
+
+/* ---------- 首启动欢迎（三步式：欢迎 → 配 AI → 语言 → 导览） ---------- */
 
 function showWelcome(): void {
   const wp = $('welcome-pop');
-  wp.innerHTML = `
-    <div class="pop-h" style="font-size:17px">欢迎使用 LayerText 分层读 🎉</div>
-    <p style="margin:8px 0 4px;line-height:1.8">这是帮你把英文原著<strong>简化成不同难度的版本</strong>给学生读的工具。三步开始：</p>
-    <div class="w-steps">
-      <div class="w-step"><b>① 先试试</b>：点「载入示例」，看一个完整的例子长什么样</div>
-      <div class="w-step"><b>② 用自己的书</b>：「打开章节文件」选你的书稿（一本书一个文件夹最省心）</div>
-      <div class="w-step"><b>③ 让 AI 帮忙改</b>：菜单 LayerText → AI 设置，照提示 4 步配好（只需选服务商+贴 Key）</div>
-    </div>
-    <p class="dim" style="margin:6px 0 10px">不配 AI 也能用：质检、标记、报告都是本机功能。随时点菜单「帮助」。</p>
-    <div class="row-btns">
-      <button id="w-demo" class="primary">先看示例</button>
-      <button id="w-help">使用教程</button>
-      <button id="w-later">直接开始</button>
-    </div>`;
   wp.classList.add('open');
-  $('w-demo').addEventListener('click', () => { void closeWelcome(); $('btn-demo').click(); });
-  $('w-help').addEventListener('click', () => { void closeWelcome(); void invoke('open_help_window', { which: 'usage' }); });
-  $('w-later').addEventListener('click', () => void closeWelcome());
+  const stepWelcome = () => {
+    wp.innerHTML = `
+      <div class="pop-h" style="font-size:17px">欢迎使用 LayerText 分层读 🎉</div>
+      <p style="margin:8px 0 4px;line-height:1.8">这是帮你把英文原著<strong>简化成不同难度的版本</strong>给学生读的工具。先花一分钟完成初始设置：</p>
+      <div class="w-steps">
+        <div class="w-step"><b>① 连接 AI</b>（可跳过，不连也能用质检与标记）</div>
+        <div class="w-step"><b>② 确认语言</b>（界面语言与要简化的文本语言）</div>
+        <div class="w-step"><b>③ 开始使用</b>（打开课文后自动进入四步导览）</div>
+      </div>
+      <div class="row-btns">
+        <button id="w-next" class="primary">开始设置</button>
+        <button id="w-later">跳过，直接用</button>
+      </div>`;
+    $('w-next').addEventListener('click', stepAi);
+    $('w-later').addEventListener('click', () => void closeWelcome());
+  };
+
+  const stepAi = () => {
+    wp.innerHTML = `
+      <div class="pop-h">① 连接 AI（第 1/2 步）</div>
+      <p class="dim">AI 负责"帮改写"：分层初稿、逐句改写建议、对话助手。没 Key？点菜单 帮助 → 如何获取 AI 的 Key（教程 2 分钟）。也可以现在跳过，以后在菜单 LayerText → AI 设置 配。</p>
+      <div class="fld" style="margin-top:8px"><label style="display:block;color:var(--muted);font-size:12px;margin-bottom:4px">选择服务商</label>
+        <select id="w-provider">${AI_PROVIDERS.map((p, i) => `<option value="${i}">${p.name}</option>`).join('')}</select></div>
+      <div class="fld"><label style="display:block;color:var(--muted);font-size:12px;margin-bottom:4px">API Key（sk-…，只存本机）</label>
+        <input id="w-key" type="password" placeholder="粘贴你的 Key" style="width:100%" /></div>
+      <div class="row-btns">
+        <button id="w-save" class="primary">保存并下一步</button>
+        <button id="w-skip">暂不配置，跳过</button>
+      </div>
+      <div class="dim" id="w-out" style="margin-top:6px;min-height:16px"></div>`;
+    const applyProvider = (i: number) => {
+      const p = AI_PROVIDERS[i];
+      (wp.querySelector('#w-out') as HTMLElement).dataset.url = p.url;
+      (wp.querySelector('#w-out') as HTMLElement).dataset.tip = p.keyTip;
+    };
+    applyProvider(0);
+    $('w-provider').addEventListener('change', () => applyProvider(Number(($('w-provider') as HTMLSelectElement).value)));
+    $('w-skip').addEventListener('click', stepLang);
+    $('w-save').addEventListener('click', async () => {
+      const out = $('w-out') as HTMLElement;
+      const p = AI_PROVIDERS[Number(($('w-provider') as HTMLSelectElement).value)];
+      const key = ($('w-key') as HTMLInputElement).value.trim();
+      if (!key) { out.textContent = '还没填 Key——填了再保存，或点"跳过"'; return; }
+      out.textContent = '连接中…';
+      try {
+        const resp = await tauriFetch(`${p.url}/chat/completions`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+          body: JSON.stringify({ model: p.models[0] ?? 'gpt-4o-mini', max_tokens: 8, messages: [{ role: 'user', content: 'ping' }] }),
+        });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        appConfig.baseUrl = p.url;
+        appConfig.model = p.models[0] ?? 'gpt-4o-mini';
+        await saveConfig();
+        await invoke('save_api_key', { key });
+        out.textContent = '✓ 连接成功，已保存';
+        setTimeout(stepLang, 600);
+      } catch (e) {
+        out.textContent = '✗ ' + aiErrHuman(e) + '（可跳过稍后再配）';
+      }
+    });
+  };
+
+  const stepLang = () => {
+    wp.innerHTML = `
+      <div class="pop-h">② 语言确认（第 2/2 步）</div>
+      <div class="fld" style="margin-top:8px"><label style="display:block;color:var(--muted);font-size:12px;margin-bottom:4px">软件界面语言</label>
+        <select id="w-ui-lang"><option selected>中文</option><option disabled>English（即将支持）</option></select></div>
+      <div class="fld"><label style="display:block;color:var(--muted);font-size:12px;margin-bottom:4px">要简化的文本语言</label>
+        <select id="w-text-lang"><option selected>英语（当前版本支持）</option><option disabled>其他语言（即将支持）</option></select>
+        <div class="dim" style="margin-top:4px">词库与句法质检引擎基于中国课标英语词汇开发，当前针对英语文本。</div></div>
+      <div class="row-btns">
+        <button id="w-finish" class="primary">完成，开始使用</button>
+      </div>`;
+    $('w-finish').addEventListener('click', () => {
+      void closeWelcome();
+      setStatus('设置完成！点「载入示例」看演示，或「打开章节文件」开始你的书——首次载入后会有四步导览', 'saved');
+    });
+  };
+
+  stepWelcome();
 }
 async function closeWelcome(): Promise<void> {
   $('welcome-pop').classList.remove('open');

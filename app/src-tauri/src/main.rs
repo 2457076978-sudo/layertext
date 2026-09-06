@@ -247,6 +247,7 @@ fn main() {
                 .item(&mi_terms)
                 .item(&mi_proper)
                 .text("book-config", "保存为本书配置（词库/约定随文件夹）")
+                .text("rewrite-rules", "书级改写规则…（人名替换/叙事视角）")
                 .item(&sep2)
                 .item(&mi_exp)
                 .item(&mi_imp)
