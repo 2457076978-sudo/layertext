@@ -103,7 +103,25 @@
     .saved-path { color: var(--muted); font-size: 12px; margin: 0 0 16px; word-break: break-all; }
 
     /* ---------- 侧栏 ---------- */
-    #sidebar { width: 300px; background: var(--panel); border-left: 1px solid var(--line); overflow-y: auto; padding: 14px; flex-shrink: 0; }
+    #sidebar { width: 320px; background: var(--panel); border-left: 1px solid var(--line); overflow: hidden; padding: 10px 12px; flex-shrink: 0; display: flex; flex-direction: column; }
+    .side-tabs { display: flex; gap: 6px; margin-bottom: 10px; }
+    .side-tabs button { border-radius: 999px; padding: 5px 14px; font-size: 12px; color: var(--muted); }
+    .side-tabs button.active { color: #fff; background: var(--brand); border-color: var(--brand); }
+    #side-review { overflow-y: auto; flex: 1; }
+    #side-ai { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+    #chat-log { flex: 1; overflow-y: auto; padding-right: 4px; }
+    .chat-empty { color: var(--muted); font-size: 12px; line-height: 1.9; padding: 8px 2px; }
+    .chat-msg { margin-bottom: 10px; font-size: 13px; line-height: 1.7; }
+    .chat-msg.user { text-align: right; }
+    .chat-msg.user .bubble { background: #eef2ff; display: inline-block; border-radius: 10px 10px 2px 10px; padding: 6px 10px; max-width: 92%; text-align: left; white-space: pre-wrap; }
+    .chat-msg.assistant .bubble { background: #f8fafc; border: 1px solid var(--line); border-radius: 10px 10px 10px 2px; padding: 6px 10px; white-space: pre-wrap; }
+    .chat-tool { color: var(--muted); font-size: 11px; background: #f6f7f9; border-radius: 6px; padding: 3px 8px; margin: 4px 0; }
+    .chat-input-row { display: flex; gap: 6px; margin-top: 8px; align-items: flex-end; }
+    .chat-input-row textarea { flex: 1; height: 58px; border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; font-size: 12px; resize: none; font-family: inherit; }
+    .chat-input-row button { padding: 8px 12px; }
+    .chat-status { color: var(--muted); font-size: 11px; min-height: 16px; padding-top: 4px; }
+    .cursor-blink::after { content: '▌'; color: var(--brand); animation: blink 1s step-start infinite; }
+    @keyframes blink { 50% { opacity: 0; } }
     .side-sec { margin-bottom: 20px; }
     .side-h { font-weight: 600; font-size: 13px; margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
     .side-h .cnt { color: var(--muted); font-weight: 400; font-size: 12px; }
@@ -250,7 +268,21 @@
         <div class="empty">点「✨ AI 审核建议」：把你的标记清单交给 AI 逐条出修订候选，<br/>再由本地质检引擎复核，最后由你勾选定稿（AI 只出候选，教师握定稿权）。</div>
       </section>
     </div>
-    <aside id="sidebar"><div class="side-empty">打开文件后：要点配额 / 终审门禁 / 标记清单</div></aside>
+    <aside id="sidebar">
+      <div class="side-tabs">
+        <button id="side-tab-review" class="active">审校</button>
+        <button id="side-tab-ai">AI 助手</button>
+      </div>
+      <div id="side-review"><div class="side-empty">打开文件后：要点配额 / 终审门禁 / 标记清单</div></div>
+      <div id="side-ai" style="display:none">
+        <div id="chat-log"><div class="chat-empty">与 AI 实时交流——它能调用本地工具（跑质检/查句子/列标记/提修订候选），所有验证由本机 QC 引擎完成。</div></div>
+        <div class="chat-input-row">
+          <textarea id="chat-input" placeholder="例如：把第一章最长的那句改简单点／列出所有被动句／这个词学生学过吗？"></textarea>
+          <button id="chat-send" class="primary">发送</button>
+        </div>
+        <div id="chat-status" class="chat-status"></div>
+      </div>
+    </aside>
   </div>
 
   <div id="pop"></div>

@@ -144,7 +144,7 @@ export function renderSidebar(
     })
     .join('') || '<div class="side-empty">暂无标记——正文里点词、拖选句子即可标记</div>';
 
-  const side = document.getElementById('sidebar')!;
+  const side = document.getElementById('side-review')!;
   side.innerHTML = `
     <div class="side-sec">
       <div class="side-h">本章要点配额 <span class="cnt">${r.quota.filter((q) => q.done).length}/${r.quota.length}</span></div>

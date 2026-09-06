@@ -219,6 +219,9 @@ async function addSession(md: string, fileName: string, sourcePath: string | nul
   }
   sessions.push({ md, fileName, sourcePath, markPath, review, report: null, reportSavedPath: null, dirty: false });
   activeIdx = sessions.length - 1;
+  chatMsgs = [];       // 换章节清空对话（上下文以文件为准）
+  aiHistory = [];
+  suggestions = [];
   renderAll();
 }
 
@@ -236,7 +239,7 @@ function renderAll(): void {
   if (!s) {
     $('reader').innerHTML = '<div class="empty">尚未载入文本<br/>点击上方「载入示例」或「打开章节文件…」</div>';
     $('pane-report').innerHTML = '<div class="empty">尚未运行质检</div>';
-    $('sidebar').innerHTML = '<div class="side-empty">打开文件后：要点配额 / 终审门禁 / 标记清单</div>';
+    $('side-review').innerHTML = '<div class="side-empty">打开文件后：要点配额 / 终审门禁 / 标记清单</div>';
     hidePop();
     fileSummary();
     return;
@@ -770,6 +773,8 @@ void listen<string>('menu-action', (ev) => {
 /* ================= AI 审核建议（AI 只出候选，教师握定稿权） ================= */
 
 let suggestions: Suggestion[] = [];
+/** 当前 AI 会话历史（同章节内"按指令调整"时携带；应用修订或切换会话后清空） */
+let aiHistory: { role: 'user' | 'assistant'; content: string }[] = [];
 const aiPop = $('ai-pop');
 
 function showAiSettings(): void {
@@ -779,6 +784,8 @@ function showAiSettings(): void {
       <input id="ai-url" placeholder="https://api.openai.com/v1" /></div>
     <div class="fld"><label>模型名</label><input id="ai-model" placeholder="gpt-4o-mini" /></div>
     <div class="fld"><label>API Key（仅存本机钥匙串，不上传）</label><input id="ai-key" type="password" placeholder="sk-…" /></div>
+    <div class="fld"><label>长期审校约定（每次请求自动附带，优先级最高——如"人名保留原文；第 3 段的名句不许改"）</label>
+      <textarea id="ai-instructions" style="width:100%;height:56px;border:1px solid var(--line);border-radius:8px;padding:6px 10px;font-size:12px;font-family:inherit;resize:vertical;"></textarea></div>
     <div class="row-btns">
       <button id="ai-save" class="primary">保存</button>
       <button id="ai-test">测试连接</button>
@@ -793,6 +800,7 @@ function showAiSettings(): void {
       ($('ai-url') as HTMLInputElement).value = cfg.baseUrl ?? '';
       ($('ai-model') as HTMLInputElement).value = cfg.model ?? '';
       ($('ai-key') as HTMLInputElement).value = key ?? '';
+      ($('ai-instructions') as HTMLTextAreaElement).value = cfg.instructions ?? '';
     } catch { /* 留空 */ }
   })();
   $('ai-close').addEventListener('click', () => aiPop.classList.remove('open'));
@@ -800,6 +808,7 @@ function showAiSettings(): void {
     await invoke('save_api_config', {
       baseUrl: ($('ai-url') as HTMLInputElement).value.trim(),
       model: ($('ai-model') as HTMLInputElement).value.trim(),
+      instructions: ($('ai-instructions') as HTMLTextAreaElement).value.trim(),
     });
     const key = ($('ai-key') as HTMLInputElement).value.trim();
     if (key) await invoke('save_api_key', { key });
@@ -809,8 +818,10 @@ function showAiSettings(): void {
     const out = $('ai-test-out');
     out.textContent = '连接中…';
     try {
-      const r = await callChat('ping', 8);
-      out.textContent = '✓ 连接成功：' + r.slice(0, 60);
+      const { content, usage } = await callChat(
+        [{ role: 'system', content: '只回复两个字：正常' }, { role: 'user', content: 'ping' }], 8,
+      );
+      out.textContent = '✓ 连接成功：' + content.slice(0, 40) + ' ' + usage;
     } catch (e) {
       out.textContent = '✗ 连接失败：' + e;
     }
@@ -821,7 +832,7 @@ document.addEventListener('mousedown', (e) => {
   if (aiPop.classList.contains('open') && !(e.target as HTMLElement).closest('#ai-pop')) aiPop.classList.remove('open');
 });
 
-async function callChat(userMsg: string, maxTokens: number): Promise<string> {
+async function callChat(messages: { role: string; content: string }[], maxTokens: number): Promise<{ content: string; usage: string }> {
   const cfg = await invoke<Record<string, string>>('load_api_config');
   const key = await invoke<string>('load_api_key');
   if (!key) throw new Error('未配置 API Key（菜单 LayerText → AI 设置）');
@@ -833,23 +844,27 @@ async function callChat(userMsg: string, maxTokens: number): Promise<string> {
     const resp = await tauriFetch(`${base}/chat/completions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
-      body: JSON.stringify({
-        model,
-        temperature: 0.3,
-        max_tokens: maxTokens,
-        messages: [
-          { role: 'system', content: AI_SYSTEM_PROMPT },
-          { role: 'user', content: userMsg },
-        ],
-      }),
+      body: JSON.stringify({ model, temperature: 0.3, max_tokens: maxTokens, messages }),
       signal: ctrl.signal,
     });
     if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${(await resp.text()).slice(0, 200)}`);
-    const data = (await resp.json()) as { choices?: { message?: { content?: string } }[] };
-    return data.choices?.[0]?.message?.content ?? '';
+    const data = (await resp.json()) as {
+      choices?: { message?: { content?: string } }[];
+      usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
+    };
+    const u = data.usage;
+    const usage = u ? `（消耗 ${u.prompt_tokens ?? '?'} 入 + ${u.completion_tokens ?? '?'} 出 = ${u.total_tokens ?? '?'} tokens）` : '';
+    return { content: data.choices?.[0]?.message?.content ?? '', usage };
   } finally {
     clearTimeout(timer);
   }
+}
+
+/** 组装 system 提示词（含用户的长期审校约定） */
+async function buildSystemPrompt(): Promise<string> {
+  const cfg = await invoke<Record<string, string>>('load_api_config');
+  const custom = (cfg.instructions ?? '').trim();
+  return AI_SYSTEM_PROMPT + (custom ? `\n\n6. 教师的长期审校约定（优先级最高）：\n${custom}` : '');
 }
 
 /** 内置提示词模板：词库边界 + 句法黑名单 + 句长上限 + 方法论约束 */
@@ -880,10 +895,22 @@ ${r ? `本章质检摘要：覆盖率 ${(r.coverage * 100).toFixed(1)}%，平均
 ${marks || '（无标记）'}`;
 }
 
-async function aiSuggest(): Promise<void> {
+/** 估算 token（英文≈4字符/词符，中文≈1.6字） */
+function estTokens(s: string): number {
+  const cjk = (s.match(/[\u4e00-\u9fff]/g) ?? []).length;
+  const rest = s.length - cjk;
+  return Math.round(cjk * 1.6 + rest / 3.5);
+}
+
+/**
+ * 请求 AI 修订候选。
+ * instruction 传入 = 会话式追问（携带 aiHistory，AI 知道上一轮建议过什么、你否决了什么）；
+ * 不传 = 全新请求（上下文来自本地文件：标记清单+当前文本句子），并重建 aiHistory。
+ */
+async function aiSuggest(instruction?: string): Promise<void> {
   const s = activeSession();
   if (!s) { setStatus('请先载入文本', 'err'); return; }
-  if (s.review.marks.length === 0) { setStatus('还没有标记——先在正文里点词/拖选句子做标记，AI 才知道往哪改', 'err'); return; }
+  if (s.review.marks.length === 0 && !instruction) { setStatus('还没有标记——先在正文里点词/拖选句子做标记，AI 才知道往哪改', 'err'); return; }
   const key = await invoke<string>('load_api_key');
   if (!key) {
     setStatus('请先配置 AI（菜单 LayerText → AI 设置…）', 'err');
@@ -895,7 +922,20 @@ async function aiSuggest(): Promise<void> {
   btn.textContent = '⏳ AI 请求中…';
   btn.disabled = true;
   try {
-    const content = await callChat(buildAiUserPrompt(s, tier), 4000);
+    const system = await buildSystemPrompt();
+    let messages: { role: string; content: string }[];
+    if (instruction && aiHistory.length > 0) {
+      aiHistory.push({ role: 'user', content: instruction + '\n\n请基于我们之前的对话重新输出完整的 JSON 数组（含未改动条目，original 用当前正文原句）。' });
+      messages = [{ role: 'system', content: system }, ...aiHistory];
+    } else {
+      const userMsg = buildAiUserPrompt(s, tier);
+      aiHistory = [{ role: 'user', content: userMsg }];
+      messages = [{ role: 'system', content: system }, { role: 'user', content: userMsg }];
+    }
+    const estIn = messages.reduce((n, m) => n + estTokens(m.content), 0);
+    setStatus(`本次请求约 ${estIn} tokens 输入（只含标记相关句子，不发全章原文）…`);
+    const { content, usage } = await callChat(messages, 4000);
+    aiHistory.push({ role: 'assistant', content });
     const start = content.indexOf('[');
     const end = content.lastIndexOf(']');
     if (start < 0 || end <= start) throw new Error('AI 返回中未找到 JSON 数组');
@@ -917,7 +957,7 @@ async function aiSuggest(): Promise<void> {
       });
     renderSuggestions();
     switchView('suggest');
-    setStatus(`AI 返回 ${suggestions.length} 条修订候选（已勾选与否由你决定；引擎复核不通过的条目已标⚠）`, 'saved');
+    setStatus(`AI 返回 ${suggestions.length} 条修订候选 ${usage}——采纳与否由你勾选`, 'saved');
   } catch (e) {
     setStatus('AI 请求失败：' + e, 'err');
   } finally {
@@ -1015,6 +1055,7 @@ async function applySuggestions(): Promise<void> {
     // 移除已应用标记并落盘
     s.review.marks = s.review.marks.filter((m) => !appliedIds.includes(m.id));
     scheduleSave(s, () => undefined);
+    aiHistory = [];    // 文本已变，旧建议对话作废
     // 新版本作为新 tab 打开
     await addSession(newMd, base + `_AI修订_${date}.md`, newPath);
     suggestions = suggestions.filter((g) => !appliedIds.includes(g.markId));
@@ -1027,6 +1068,288 @@ async function applySuggestions(): Promise<void> {
 }
 
 $('btn-ai').addEventListener('click', () => void aiSuggest());
+
+/* ================= AI 助手（右侧对话 · 本应用即 harness：模型可调用本地 QC 工具） ================= */
+
+interface ChatMsg {
+  role: 'user' | 'assistant' | 'tool';
+  content: string;
+  tool_calls?: { id: string; type: 'function'; function: { name: string; arguments: string } }[];
+  tool_call_id?: string;
+}
+let chatMsgs: ChatMsg[] = [];
+let chatBusy = false;
+
+const AI_TOOLS = [
+  {
+    type: 'function',
+    function: {
+      name: 'list_marks',
+      description: '列出本章当前全部审校标记（词/句、类型、备注、段落句索引）',
+      parameters: { type: 'object', properties: {}, required: [] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_chapter_stats',
+      description: '对当前章节运行本地质检引擎，返回指标（覆盖率/生词率/句长/被动/定从/过去完成/超长句/OOV等）',
+      parameters: { type: 'object', properties: {}, required: [] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_sentence',
+      description: '按段落号与句子号取正文原句及其句法风险检测（pi 从 0 起，si 从 0 起）',
+      parameters: {
+        type: 'object',
+        properties: { pi: { type: 'integer' }, si: { type: 'integer' } },
+        required: ['pi', 'si'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'search_text',
+      description: '在当前章节正文中搜索包含指定英文词/短语的句子（按需查证，避免全文发送）',
+      parameters: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'propose_revision',
+      description: '把一条修订候选提交到「修订建议」页（教师仍需逐条勾选确认才会应用）。original 必须与正文原句一字不差',
+      parameters: {
+        type: 'object',
+        properties: {
+          original: { type: 'string' }, revised: { type: 'string' },
+          basis: { type: 'string' }, markId: { type: 'string' },
+        },
+        required: ['original', 'revised', 'basis'],
+      },
+    },
+  },
+];
+
+async function chatStream(
+  messages: { role: string; content: string; tool_calls?: unknown; tool_call_id?: string }[],
+  onDelta: (t: string) => void,
+): Promise<{ content: string; toolCalls: { id: string; name: string; arguments: string }[]; usage: string }> {
+  const cfg = await invoke<Record<string, string>>('load_api_config');
+  const key = await invoke<string>('load_api_key');
+  if (!key) throw new Error('未配置 API Key（菜单 LayerText → AI 设置…）');
+  const base = (cfg.baseUrl || 'https://api.openai.com/v1').replace(/\/+$/, '');
+  const model = cfg.model || 'gpt-4o-mini';
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 180000);
+  try {
+    const resp = await tauriFetch(`${base}/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+      body: JSON.stringify({
+        model, temperature: 0.3, max_tokens: 4000, messages, tools: AI_TOOLS,
+        stream: true, stream_options: { include_usage: true },
+      }),
+      signal: ctrl.signal,
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${(await resp.text()).slice(0, 200)}`);
+    const reader = resp.body!.getReader();
+    const dec = new TextDecoder();
+    let buf = '';
+    let content = '';
+    let usage = '';
+    const tc = new Map<number, { id: string; name: string; arguments: string }>();
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop() ?? '';
+      for (const line of lines) {
+        const s = line.trim();
+        if (!s.startsWith('data:')) continue;
+        const payload = s.slice(5).trim();
+        if (payload === '[DONE]') continue;
+        try {
+          const j = JSON.parse(payload) as {
+            choices?: { delta?: { content?: string; tool_calls?: { index?: number; id?: string; function?: { name?: string; arguments?: string } }[] } }[];
+            usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
+          };
+          const d = j.choices?.[0]?.delta;
+          if (d?.content) { content += d.content; onDelta(d.content); }
+          for (const c of d?.tool_calls ?? []) {
+            const i = c.index ?? 0;
+            const cur = tc.get(i) ?? { id: '', name: '', arguments: '' };
+            if (c.id) cur.id = c.id;
+            if (c.function?.name) cur.name += c.function.name;
+            if (c.function?.arguments) cur.arguments += c.function.arguments;
+            tc.set(i, cur);
+          }
+          if (j.usage) usage = `（本轮 ${j.usage.prompt_tokens ?? '?'} 入 + ${j.usage.completion_tokens ?? '?'} 出 tokens）`;
+        } catch { /* 忽略半行 */ }
+      }
+    }
+    return { content, toolCalls: [...tc.values()], usage };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function executeTool(name: string, argsJson: string): string {
+  const s = activeSession();
+  if (!s) return '错误：当前未打开任何章节';
+  let args: Record<string, unknown> = {};
+  try { args = JSON.parse(argsJson || '{}'); } catch { /* 空 */ }
+  try {
+    switch (name) {
+      case 'list_marks':
+        if (s.review.marks.length === 0) return '（无标记）';
+        return s.review.marks
+          .map((m) => `${m.id}｜${m.level === 'word' ? `词「${m.word}」` : `句`}｜${typeLabel(m.type)}｜P${m.pi + 1}-S${m.si + 1}${m.note ? '｜备注：' + m.note : ''}`)
+          .join('\n');
+      case 'get_chapter_stats': {
+        const tier = (s.report?.tier ?? ($('tier') as HTMLSelectElement).value) as Tier;
+        const r = runQc(s.md, buildLexiconNow(), { tier, fileName: s.fileName, chno: s.sourcePath ? chnoFromPath(s.sourcePath) : null });
+        s.report = r;
+        renderReportPane(s);
+        return JSON.stringify({
+          层级: r.tier, 段落数: r.paraCount, 句数: r.sentCount, 词符数: r.tokenCount,
+          覆盖率: (r.coverage * 100).toFixed(1) + '%', 生词率: (r.newWordRate * 100).toFixed(1) + '%',
+          平均句长: Number(r.avgLenNarrRaw.toFixed(1)), 最长句: r.maxLen, 超20词句数: r.over20,
+          被动: r.passive, 定语从句: r.relcl, 过去完成: r.pastperf,
+          待定词命中: r.pendingHits, OOV前20: [...new Set(r.oov)].slice(0, 20),
+        });
+      }
+      case 'get_sentence': {
+        const paras = extractParas(splitChapter(s.md).body);
+        const sent = sentsOf(paras[Number(args.pi)] ?? '', false)[Number(args.si)];
+        if (!sent) return `错误：P${Number(args.pi) + 1}-S${Number(args.si) + 1} 不存在`;
+        const risk = sentenceRisks(sent);
+        return JSON.stringify({ 句子: sent, 词数: sent.split(/\s+/).length, 被动: risk.passive, 定从: risk.relcl, 过去完成: risk.pastperf, 超长: risk.overlong });
+      }
+      case 'search_text': {
+        const q = String(args.query ?? '').toLowerCase();
+        if (!q) return '错误：query 为空';
+        const hits: string[] = [];
+        extractParas(splitChapter(s.md).body).forEach((p, pi) => {
+          sentsOf(p, false).forEach((sent, si) => {
+            if (sent.toLowerCase().includes(q) && hits.length < 8) {
+              hits.push(`P${pi + 1}-S${si + 1}｜${sent}`);
+            }
+          });
+        });
+        return hits.length ? hits.join('\n') : `（未找到含 "${q}" 的句子）`;
+      }
+      case 'propose_revision': {
+        const original = String(args.original ?? '');
+        const revised = String(args.revised ?? '');
+        if (!original || !revised) return '错误：original/revised 不能为空';
+        if (!s.md.includes(original)) return '错误：original 与正文不匹配（须与正文原句一字不差），请先用 get_sentence/search_text 取原句';
+        const tier = (s.report?.tier ?? ($('tier') as HTMLSelectElement).value) as Tier;
+        const risk = sentenceRisks(revised, TIER_MAX_LEN[tier] ?? 16);
+        suggestions.push({
+          markId: String(args.markId ?? 'chat-' + Date.now().toString(36)),
+          type: '对话建议', original, revised, basis: String(args.basis ?? ''),
+          check: { passive: risk.passive, relcl: risk.relcl, pastperf: risk.pastperf, overlong: risk.overlong },
+        });
+        renderSuggestions();
+        setStatus('AI 在对话中提交了 1 条修订候选（经引擎复核）——到「修订建议」页勾选确认', 'saved');
+        return `已提交到修订建议页（引擎复核：${risk.passive || risk.relcl || risk.pastperf || risk.overlong ? '仍命中黑名单/超长，已标⚠' : '通过'}）。提醒教师勾选确认。`;
+      }
+      default:
+        return `错误：未知工具 ${name}`;
+    }
+  } catch (e) {
+    return '工具执行出错：' + (e as Error).message;
+  }
+}
+
+function chatRender(): void {
+  const log = $('chat-log');
+  log.innerHTML =
+    chatMsgs.length === 0
+      ? '<div class="chat-empty">与 AI 实时交流——它能调用本地工具（跑质检/查句子/列标记/提修订候选），所有验证由本机 QC 引擎完成。</div>'
+      : chatMsgs
+          .map((m) => {
+            if (m.role === 'user') return `<div class="chat-msg user"><div class="bubble">${esc(m.content)}</div></div>`;
+            if (m.role === 'tool') return '';
+            const toolsHtml = (m.tool_calls ?? [])
+              .map((t) => `<div class="chat-tool">🔧 ${esc(t.function.name)}(${esc(t.function.arguments.slice(0, 60))}${t.function.arguments.length > 60 ? '…' : ''})</div>`)
+              .join('');
+            return `<div class="chat-msg assistant">${toolsHtml}<div class="bubble" ${m.content === '' ? 'id="chat-cur"' : ''}>${esc(m.content)}</div></div>`;
+          })
+          .join('');
+  log.scrollTop = log.scrollHeight;
+}
+
+async function sendChat(): Promise<void> {
+  if (chatBusy) return;
+  const s = activeSession();
+  if (!s) { setStatus('请先打开章节再与 AI 交流', 'err'); return; }
+  const input = $('chat-input') as HTMLTextAreaElement;
+  const text = input.value.trim();
+  if (!text) return;
+  input.value = '';
+  const key = await invoke<string>('load_api_key');
+  if (!key) { setStatus('请先配置 AI（菜单 LayerText → AI 设置…）', 'err'); showAiSettings(); return; }
+
+  chatBusy = true;
+  $('chat-send').disabled = true;
+  chatMsgs.push({ role: 'user', content: text });
+  chatRender();
+  const statusEl = $('chat-status');
+  let usageTotal = '';
+
+  try {
+    const system = (await buildSystemPrompt()) +
+      `\n\n7. 你在一个审校应用中工作，可调用工具查证与验证（list_marks / get_chapter_stats / get_sentence / search_text / propose_revision）。改写建议必须先用工具核对原句，再用 propose_revision 提交；不要凭空引用正文。当前章节：${s.fileName}，标记 ${s.review.marks.length} 条。`;
+    for (let round = 0; round < 8; round++) {
+      const messages = [{ role: 'system', content: system }, ...chatMsgs];
+      statusEl.textContent = round === 0 ? '思考中…' : `工具结果已回传，继续（第 ${round + 1} 轮）…`;
+      const { content, toolCalls, usage } = await chatStream(messages, (delta) => {
+        const cur = document.getElementById('chat-cur');
+        if (cur) cur.textContent += delta;
+        const log = $('chat-log');
+        log.scrollTop = log.scrollHeight;
+      });
+      usageTotal = usage;
+      chatMsgs.push({ role: 'assistant', content, tool_calls: toolCalls.length ? toolCalls.map((t) => ({ id: t.id, type: 'function' as const, function: { name: t.name, arguments: t.arguments } })) : undefined });
+      if (toolCalls.length === 0) {
+        chatRender();
+        break;
+      }
+      chatRender(); // 先展示工具调用条
+      for (const t of toolCalls) {
+        const result = executeTool(t.name, t.arguments);
+        chatMsgs.push({ role: 'tool', tool_call_id: t.id, content: result });
+      }
+    }
+    statusEl.textContent = '就绪 ' + usageTotal;
+  } catch (e) {
+    statusEl.textContent = '出错：' + e;
+  } finally {
+    chatBusy = false;
+    $('chat-send').disabled = false;
+  }
+}
+
+$('chat-send').addEventListener('click', () => void sendChat());
+$('chat-input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) void sendChat();
+});
+
+/* 侧栏双页切换 */
+function switchSide(name: 'review' | 'ai'): void {
+  $('side-tab-review').classList.toggle('active', name === 'review');
+  $('side-tab-ai').classList.toggle('active', name === 'ai');
+  ($('side-review') as HTMLElement).style.display = name === 'review' ? '' : 'none';
+  ($('side-ai') as HTMLElement).style.display = name === 'ai' ? 'flex' : 'none';
+}
+$('side-tab-review').addEventListener('click', () => switchSide('review'));
+$('side-tab-ai').addEventListener('click', () => switchSide('ai'));
 
 /* ---------- 门禁说明弹层 ---------- */
 

@@ -18,7 +18,7 @@ import { GATES, WORD_TYPES, SENT_TYPES, newMarkId, newReviewState, type Mark } f
 
 function buildReader(): void {
   win.document.body.innerHTML = `
-    <div id="sidebar"></div>
+    <div id="side-review"></div>
     <div id="reader">
       <div class="para"><span class="pid">P01</span>
         <span class="sent" data-pi="0" data-si="0"><span class="w" data-wi="0" data-tok="the">The</span>
@@ -112,7 +112,7 @@ test('侧栏：配额增删勾、门禁、清单分组渲染与回调', () => {
     },
   );
 
-  const side = win.document.getElementById('sidebar')!;
+  const side = win.document.getElementById('side-review')!;
   // 配额计数 1/2
   assert.ok(side.textContent!.includes('1/2'));
   // 勾选切换回调
@@ -147,7 +147,7 @@ test('侧栏：配额增删勾、门禁、清单分组渲染与回调', () => {
     onQuotaToggle: () => {}, onQuotaRemove: () => {}, onQuotaAdd: () => {},
     onGateToggle: () => {}, onGateHelp: () => {}, onMarkJump: () => {}, onMarkRemove: () => {},
   });
-  assert.ok(win.document.getElementById('sidebar')!.textContent!.includes('✅ 已通过'));
+  assert.ok(win.document.getElementById('side-review')!.textContent!.includes('✅ 已通过'));
 });
 
 test('标记类型集与门禁项定义完整（P0 要求的按钮组）', () => {
