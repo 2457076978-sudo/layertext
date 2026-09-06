@@ -51,6 +51,25 @@ export function applyRewriteTo(text: string, rules: { from: string; to: string }
   return t;
 }
 
+/** 网络类自动重试：可重试错误（断连/超时/5xx/429 限流）指数退避重试，其余立即抛出 */
+export async function withRetry<T>(fn: () => Promise<T>, onStatus?: (s: string) => void, maxAttempts = 3): Promise<T> {
+  let lastErr: unknown;
+  for (let i = 0; i < maxAttempts; i++) {
+    try {
+      return await fn();
+    } catch (e) {
+      lastErr = e;
+      const s = String(e);
+      const retriable = /Failed to fetch|NetworkError|timeout|Timeout|aborted|ECONNRESET|socket|HTTP 5\d{2}|HTTP 429/.test(s);
+      if (!retriable || i === maxAttempts - 1) throw e;
+      const wait = (i + 1) * 2000;
+      onStatus?.(`网络不稳，${wait / 1000} 秒后自动重试（第 ${i + 1}/${maxAttempts - 1} 次）…`);
+      await new Promise((r) => setTimeout(r, wait));
+    }
+  }
+  throw lastErr;
+}
+
 const CH_TITLE = /^(chapter\s+[\w-]+|第[一二三四五六七八九十百\d]+章)/i;
 
 export interface SplitChapterResult {

@@ -2,7 +2,38 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { applyRewriteTo, normalizeAndSplitChapters, parseAiJson } from '../app/src/pure.js';
+import { applyRewriteTo, normalizeAndSplitChapters, parseAiJson, withRetry } from '../app/src/pure.js';
+
+test('withRetry：网络错误自动重试后成功', async () => {
+  let calls = 0;
+  const r = await withRetry(async () => {
+    calls++;
+    if (calls < 3) throw new Error('Failed to fetch');
+    return 'ok';
+  });
+  assert.equal(r, 'ok');
+  assert.equal(calls, 3);
+});
+
+test('withRetry：不可重试错误（401）立即抛出', async () => {
+  let calls = 0;
+  await assert.rejects(
+    withRetry(async () => { calls++; throw new Error('HTTP 401: unauthorized'); }),
+    /401/,
+  );
+  assert.equal(calls, 1);
+});
+
+test('withRetry：429 限流可重试', async () => {
+  let calls = 0;
+  const r = await withRetry(async () => {
+    calls++;
+    if (calls === 1) throw new Error('HTTP 429: too many requests');
+    return 'done';
+  });
+  assert.equal(r, 'done');
+  assert.equal(calls, 2);
+});
 
 test('parseAiJson：标准数组', () => {
   const r = parseAiJson('[{"a":1}]') as { a: number }[];

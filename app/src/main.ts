@@ -11,6 +11,8 @@ import * as XLSX from 'xlsx';
 import { unzipSync, strFromU8 } from 'fflate';
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, WidthType } from 'docx';
 import { applyRewriteTo, normalizeAndSplitChapters, parseAiJson } from './pure.js';
+import { S, setStatus as uiSetStatus, esc } from './state.js';
+import { AI_PROVIDERS, AI_SYSTEM_PROMPT, aiErrHuman, buildSystemPrompt, callChat, chatStream, loadConfig, saveConfig, setAiUi, tierMaxLen, tierPlan } from './ai.js';
 import bundledWordlist from '../../assets/wordlists/curriculum_2022_level3_1600.txt?raw';
 import exampleMd from '../../examples/texts/aesop_tortoise_hare.md?raw';
 import exampleVocab from '../../examples/vocab/sample_teaching_vocab.csv?raw';
@@ -33,66 +35,20 @@ const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getEleme
 
 /* ---------- 全局状态 ---------- */
 
-let sessions: FileSession[] = [];
-let activeIdx = -1;
-let vocabCsvText: string | null = null;
-let vocabName = '';
-let termsText: string | null = null;
 /** 专名表原始行（保留大小写与空格短语：既并入已知词，也作 ⑧ 专名一致性检查名单） */
-let properRows: string[] = [];
 /** 本地示例目录的附加词表（如原型项目的中考1600按词性分类表） */
-let extraWordlistText: string | null = null;
 /** 当前会话的合并已知词表（含词句卡），供词面板显示原形 */
-let currentKnown: Set<string> = new Set();
 
 /* ---------- 全局配置（~/.layertext.json：AI 设置 + 分层方案 + 首启动标记） ---------- */
 
-interface AppConfig {
-  baseUrl?: string;
-  model?: string;
-  instructions?: string;
-  tiers?: Record<string, TierPlan>;
-  firstRunSeen?: boolean;
-}
-let appConfig: AppConfig = {};
-
-async function loadConfig(): Promise<AppConfig> {
-  try {
-    appConfig = JSON.parse(await invoke<string>('load_app_config')) as AppConfig;
-  } catch { appConfig = {}; }
-  return appConfig;
-}
-async function saveConfig(): Promise<void> {
-  await invoke('save_app_config', { config: JSON.stringify(appConfig) });
-}
-
-function tierPlan(tier: string): TierPlan {
-  return { ...DEFAULT_TIER_PLANS[tier] ?? DEFAULT_TIER_PLANS.M, ...(appConfig.tiers?.[tier] ?? {}) };
-}
-function tierMaxLen(tier: string): number {
-  return tierPlan(tier).maxLen;
-}
 
 /** 常见服务商预设（新手只需选服务商 + 贴 Key） */
-const AI_PROVIDERS: { name: string; url: string; models: string[]; keyTip: string }[] = [
-  { name: 'DeepSeek（深度求索）', url: 'https://api.deepseek.com/v1', models: ['deepseek-chat'], keyTip: 'platform.deepseek.com → 左侧「API Keys」→ 创建' },
-  { name: '智谱 AI', url: 'https://open.bigmodel.cn/api/paas/v4', models: ['glm-4.5', 'glm-4.5-flash', 'glm-4-flash'], keyTip: 'bigmodel.cn → 右上角控制台 → API Keys' },
-  { name: '月之暗面 Kimi', url: 'https://api.moonshot.cn/v1', models: ['kimi-latest'], keyTip: 'platform.moonshot.cn → API Key 管理' },
-  { name: '阿里通义', url: 'https://dashscope.aliyuncs.com/compatible-mode/v1', models: ['qwen-plus', 'qwen-turbo'], keyTip: 'bailian.aliyun.com → API-KEY 管理' },
-  { name: 'OpenAI', url: 'https://api.openai.com/v1', models: ['gpt-4o-mini'], keyTip: 'platform.openai.com → API keys' },
-  { name: '自定义 / 其他', url: '', models: [], keyTip: '填该服务的 OpenAI 兼容地址（一般以 /v1 结尾）' },
-];
-
-function activeSession(): FileSession | null {
-  return activeIdx >= 0 ? sessions[activeIdx] : null;
-}
-
 function buildLexiconNow(): Lexicon {
   return buildLexicon({
-    vocabCsvTexts: vocabCsvText ? [vocabCsvText] : [],
-    plainWordlistTexts: extraWordlistText ? [bundledWordlist, extraWordlistText] : [bundledWordlist],
-    terms: termsText ? termsText.split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#')) : [],
-    properNouns: properRows.map((r) => r.toLowerCase()),
+    vocabCsvTexts: S.vocabCsvText ? [S.vocabCsvText] : [],
+    plainWordlistTexts: S.extraWordlistText ? [bundledWordlist, S.extraWordlistText] : [bundledWordlist],
+    terms: S.termsText ? S.termsText.split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#')) : [],
+    properNouns: S.properRows.map((r) => r.toLowerCase()),
   });
 }
 
@@ -141,10 +97,10 @@ async function importVocabFile(): Promise<void> {
   });
   if (typeof path !== 'string') return;
   try {
-    vocabCsvText = await readVocabAsCsv(path);
-    vocabName = path.slice(path.lastIndexOf('/') + 1);
+    S.vocabCsvText = await readVocabAsCsv(path);
+    S.vocabName = path.slice(path.lastIndexOf('/') + 1);
     renderAll();
-    setStatus(`已导入词库：${vocabName}（${vocabCsvText.split('\n').filter(Boolean).length} 行）`, 'saved');
+    setStatus(`已导入词库：${S.vocabName}（${S.vocabCsvText.split('\n').filter(Boolean).length} 行）`, 'saved');
   } catch (e) {
     setStatus('词库读取失败：' + e, 'err');
   }
@@ -154,7 +110,7 @@ async function importTermsFile(): Promise<void> {
   const path = await openFileDialog({ multiple: false, filters: [{ name: '术语表 TXT（一行一词）', extensions: ['txt'] }] });
   if (typeof path !== 'string') return;
   try {
-    termsText = await invoke<string>('read_text_file', { path });
+    S.termsText = await invoke<string>('read_text_file', { path });
     renderAll();
     setStatus('已导入术语表：' + path.slice(path.lastIndexOf('/') + 1), 'saved');
   } catch (e) {
@@ -167,9 +123,9 @@ async function importProperFile(): Promise<void> {
   if (typeof path !== 'string') return;
   try {
     const text = await invoke<string>('read_text_file', { path });
-    properRows = text.split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
+    S.properRows = text.split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
     renderAll();
-    setStatus(`已导入专名表：${properRows.length} 个（⑧专名一致性检查同步启用）`, 'saved');
+    setStatus(`已导入专名表：${S.properRows.length} 个（⑧专名一致性检查同步启用）`, 'saved');
   } catch (e) {
     setStatus('读取失败：' + e, 'err');
   }
@@ -188,16 +144,16 @@ async function loadLocalExampleConfig(): Promise<void> {
     };
     const vocab = await readIf('_词库.csv');
     if (vocab) {
-      vocabCsvText = vocab;
-      vocabName = '_词库.csv（本地示例）';
+      S.vocabCsvText = vocab;
+      S.vocabName = '_词库.csv（本地示例）';
     }
     const extraWl = await readIf('_词表.txt');
-    if (extraWl) extraWordlistText = extraWl;
+    if (extraWl) S.extraWordlistText = extraWl;
     const terms = await readIf('_术语表.txt');
-    if (terms) termsText = terms;
+    if (terms) S.termsText = terms;
     const proper = await readIf('_专名表.txt');
     if (proper) {
-      properRows = proper.split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
+      S.properRows = proper.split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
     }
   } catch {
     /* 目录不可用则跳过 */
@@ -216,13 +172,17 @@ function setStatus(msg: string, cls = ''): void {
   $('status').innerHTML = msg ? `<span class="${cls}">${esc(msg)}</span>` : '';
 }
 
+function activeSession(): FileSession | null {
+  return S.activeIdx >= 0 ? S.sessions[S.activeIdx] : null;
+}
+
 function fileSummary(): void {
   const s = activeSession();
   const parts: string[] = [];
   parts.push(s ? `当前：${s.fileName}` : '未载入文本');
   parts.push('词库：课标1600（内置）');
-  if (vocabCsvText) parts.push(`+ ${vocabName}`);
-  if (termsText) parts.push('+ 术语表');
+  if (S.vocabCsvText) parts.push(`+ ${S.vocabName}`);
+  if (S.termsText) parts.push('+ 术语表');
   parts.push('标记自动保存：' + (s ? s.markPath : '打开文件后生效'));
   setStatus(parts.join(' ｜ '));
 }
@@ -240,9 +200,9 @@ async function markPathFor(sourcePath: string | null, fileName: string): Promise
 }
 
 async function addSession(md: string, fileName: string, sourcePath: string | null): Promise<void> {
-  const same = sessions.findIndex((s) => s.sourcePath === sourcePath && s.fileName === fileName);
+  const same = S.sessions.findIndex((s) => s.sourcePath === sourcePath && s.fileName === fileName);
   if (same >= 0) {
-    activeIdx = same;
+    S.activeIdx = same;
     renderAll();
     return;
   }
@@ -264,28 +224,28 @@ async function addSession(md: string, fileName: string, sourcePath: string | nul
   } catch {
     /* 无历史标记，正常 */
   }
-  sessions.push({ md, fileName, sourcePath, markPath, review, report: null, reportSavedPath: null, dirty: false });
-  activeIdx = sessions.length - 1;
+  S.sessions.push({ md, fileName, sourcePath, markPath, review, report: null, reportSavedPath: null, dirty: false });
+  S.activeIdx = S.sessions.length - 1;
   // 会话保持（学 harness）：切换文件不清空对话，注入上下文提示让 AI 知道当前章节
-  if (chatMsgs.length > 0) {
-    chatMsgs.push({ role: 'user', content: `（系统提示：教师已切换到「${fileName}」，后续操作与回答默认针对这一章）` });
+  if (S.chatMsgs.length > 0) {
+    S.chatMsgs.push({ role: 'user', content: `（系统提示：教师已切换到「${fileName}」，后续操作与回答默认针对这一章）` });
     chatRender();
   }
-  aiHistory = [];
-  suggestions = [];
+  S.aiHistory = [];
+  S.suggestions = [];
   renderAll();
   void pushRecent(fileName, sourcePath);
   // 换书提醒：本书文件夹无配套配置时提示（学生水平/词库可能需要切换）
-  if (sourcePath && sessions.filter((x) => x.sourcePath && x.sourcePath.slice(0, x.sourcePath.lastIndexOf('/')) === sourcePath.slice(0, sourcePath.lastIndexOf('/'))).length === 1) {
+  if (sourcePath && S.sessions.filter((x) => x.sourcePath && x.sourcePath.slice(0, x.sourcePath.lastIndexOf('/')) === sourcePath.slice(0, sourcePath.lastIndexOf('/'))).length === 1) {
     setStatus(`已打开「${fileName}」。注意：这本书还没有专属词库配置（学生水平诊断依据）——若当前词库是别的书的，请 文件 → 导入自定义词库 后「保存为本书配置」`, '');
   }
   // 首次载入文件 → 自动进入四步导览
-  if (!appConfig.tourSeen && sessions.length === 1) setTimeout(() => tourShow(0), 600);
+  if (!S.appConfig.tourSeen && S.sessions.length === 1) setTimeout(() => tourShow(0), 600);
 }
 
 function closeSession(i: number): void {
-  sessions.splice(i, 1);
-  activeIdx = Math.min(activeIdx, sessions.length - 1);
+  S.sessions.splice(i, 1);
+  S.activeIdx = Math.min(S.activeIdx, S.sessions.length - 1);
   renderAll();
 }
 
@@ -311,21 +271,21 @@ function renderAll(): void {
 
 function renderFileTabs(): void {
   const el = $('filetabs');
-  if (sessions.length === 0) {
+  if (S.sessions.length === 0) {
     el.innerHTML = '<span class="hint">可同时打开同一文本的多个难度版本（B/M/A 各一个文件）并排切换</span>';
     return;
   }
-  el.innerHTML = sessions
+  el.innerHTML = S.sessions
     .map(
       (s, i) =>
-        `<span class="ftab ${i === activeIdx ? 'active' : ''}" data-ftab="${i}">${esc(s.fileName)}<span class="x" data-ftab-close="${i}" title="关闭">×</span></span>`,
+        `<span class="ftab ${i === S.activeIdx ? 'active' : ''}" data-ftab="${i}">${esc(s.fileName)}<span class="x" data-ftab-close="${i}" title="关闭">×</span></span>`,
     )
     .join('');
   el.querySelectorAll('[data-ftab]').forEach((t) =>
     t.addEventListener('click', (e) => {
       const x = (e.target as HTMLElement).closest('[data-ftab-close]');
       if (x) return;
-      activeIdx = Number((t as HTMLElement).dataset.ftab);
+      S.activeIdx = Number((t as HTMLElement).dataset.ftab);
       renderAll();
     }),
   );
@@ -352,10 +312,10 @@ function renderReader(session: FileSession): void {
   }
   const lex = buildLexiconNow();
   const card = splitChapter(session.md).card;
-  currentKnown = new Set([...lex.known, ...IRR, ...cardGlossWords(card)]);
+  S.currentKnown = new Set([...lex.known, ...IRR, ...cardGlossWords(card)]);
   const terms = new Set<string>([
-    ...(termsText ?? '').split('\n').map((l) => l.trim().toLowerCase()).filter((l) => l && !l.startsWith('#')),
-    ...properRows.map((r) => r.toLowerCase()),
+    ...(S.termsText ?? '').split('\n').map((l) => l.trim().toLowerCase()).filter((l) => l && !l.startsWith('#')),
+    ...S.properRows.map((r) => r.toLowerCase()),
   ]);
 
   reader.replaceChildren();
@@ -389,7 +349,7 @@ function renderReader(session: FileSession): void {
         if (at > 0) s.appendChild(document.createTextNode(rest.slice(0, at)));
         const w = document.createElement('span');
         const tok = toks[i] ?? raw.toLowerCase();
-        const cls = terms.has(tok) ? 'term' : pendHit(tok, lex.pending) ? 'pending' : hit(tok, currentKnown) ? '' : 'oov';
+        const cls = terms.has(tok) ? 'term' : pendHit(tok, lex.pending) ? 'pending' : hit(tok, S.currentKnown) ? '' : 'oov';
         w.className = 'w' + (cls ? ' ' + cls : '');
         w.dataset.wi = String(i);
         w.dataset.tok = tok;
@@ -469,11 +429,10 @@ const sidebarHandlers = {
 /* ---------- 弹层面板 ---------- */
 
 const pop = $('pop');
-let popSession: FileSession | null = null;
 
 function hidePop(): void {
   pop.classList.remove('open');
-  popSession = null;
+  S.popSession = null;
 }
 
 function placePop(x: number, y: number): void {
@@ -504,9 +463,9 @@ function renderPopMarks(existing: Mark[]): void {
     : '<span style="color:var(--muted);font-size:12px">尚无标记</span>';
   box.querySelectorAll('[data-pop-rm]').forEach((btn) =>
     btn.addEventListener('click', () => {
-      const m = popSession?.review.marks.find((x) => x.id === (btn as HTMLElement).dataset.popRm);
-      if (m && popSession) {
-        removeMark(popSession, m);
+      const m = S.popSession?.review.marks.find((x) => x.id === (btn as HTMLElement).dataset.popRm);
+      if (m && S.popSession) {
+        removeMark(S.popSession, m);
         refreshPop('sent-or-word');
       }
     }),
@@ -514,27 +473,28 @@ function renderPopMarks(existing: Mark[]): void {
 }
 
 function refreshPop(_why: string): void {
-  if (!popSession) return;
+  if (!S.popSession) return;
   const ctx = pop.dataset;
   const pi = Number(ctx.pi), si = Number(ctx.si), wi = ctx.wi === undefined ? undefined : Number(ctx.wi);
   const level = ctx.level as 'word' | 'sent';
-  renderPopMarks(marksAt(popSession, level, pi, si, wi));
+  renderPopMarks(marksAt(S.popSession, level, pi, si, wi));
   // 类型按钮置灰已选项
   pop.querySelectorAll('[data-mk]').forEach((b) => {
     const t = (b as HTMLElement).dataset.mk!;
-    const has = marksAt(popSession!, level, pi, si, wi).some((m) => m.type === t);
+    const has = marksAt(S.popSession!, level, pi, si, wi).some((m) => m.type === t);
     (b as HTMLElement).style.opacity = has ? '.45' : '';
   });
 }
 
 function showWordPanel(session: FileSession, wEl: HTMLElement, x: number, y: number): void {
-  popSession = session;
-  const pi = Number(wEl.closest('.sent')!.dataset.pi);
-  const si = Number(wEl.closest('.sent')!.dataset.si);
+  S.popSession = session;
+  const sentHost = wEl.closest('.sent') as HTMLElement | null;
+  const pi = Number(sentHost?.dataset.pi);
+  const si = Number(sentHost?.dataset.si);
   const wi = Number(wEl.dataset.wi);
   const tok = wEl.dataset.tok!;
   const state = wEl.dataset.state;
-  const origin = hitOrigin(tok, currentKnown);
+  const origin = hitOrigin(tok, S.currentKnown);
   const stateLabel = state === 'oov' ? '<span class="warn">词表外（红）</span>'
     : state === 'pending' ? '<span class="warn">待定词（橙）—暂计已知，风险另计</span>'
     : state === 'term' ? '术语（蓝）' : '<span class="ok">词表内</span>';
@@ -555,9 +515,9 @@ function showWordPanel(session: FileSession, wEl: HTMLElement, x: number, y: num
 }
 
 function showSentPanel(session: FileSession, sentEl: HTMLElement, x: number, y: number, crossSentence: boolean): void {
-  popSession = session;
-  const pi = Number(sentEl.dataset.pi);
-  const si = Number(sentEl.dataset.si);
+  S.popSession = session;
+  const pi = Number((sentEl as HTMLElement).dataset.pi);
+  const si = Number((sentEl as HTMLElement).dataset.si);
   const text = sentsOf(extractParas(splitChapter(session.md).body)[pi], false)[si] ?? '';
   const wc = text.split(/\s+/).filter(Boolean).length;
   const risk = sentenceRisks(text);
@@ -583,8 +543,8 @@ function showSentPanel(session: FileSession, sentEl: HTMLElement, x: number, y: 
 function bindTypeButtons(session: FileSession, level: 'word' | 'sent', pi: number, si: number, wi?: number): void {
   pop.querySelectorAll('[data-mk]').forEach((b) =>
     b.addEventListener('click', () => {
-      const type = (b as HTMLElement).dataset.mk as MarkType;
-      if (type === '__rewrite') {
+      const type = (b as HTMLElement).dataset.mk as MarkType | '__rewrite';
+      if ((type as string) === '__rewrite') {
         const intent = marksAt(session, 'word', pi, si, wi).map((m) => typeLabel(m.type)).join('、') || '词汇简化';
         void aiRewriteSentence(pi, si, intent);
         return;
@@ -595,7 +555,7 @@ function bindTypeButtons(session: FileSession, level: 'word' | 'sent', pi: numbe
       addMark(session, {
         id: newMarkId(), level, pi, si, ...(level === 'word' ? { wi } : {}),
         ...(level === 'word' ? { word: pop.querySelector('.pop-h')?.textContent ?? '', text: sentText.slice(0, 40) } : { text: sentText.slice(0, 40) }),
-        type, note, ts: Date.now(),
+        type: type as MarkType, note, ts: Date.now(),
       });
       const ta = pop.querySelector('#pop-note') as HTMLTextAreaElement | null;
       if (ta) ta.value = '';
@@ -622,7 +582,7 @@ async function runQcCurrent(): Promise<void> {
       fileName: s.fileName,
       chno: s.sourcePath ? chnoFromPath(s.sourcePath) : null,
       tierGates: { passiveFromCh: tierPlan(tier).passiveFromCh, relclFromCh: tierPlan(tier).relclFromCh },
-      ...(properRows.length ? { propCheckList: properRows } : {}),
+      ...(S.properRows.length ? { propCheckList: S.properRows } : {}),
     });
   } catch (e) {
     setStatus('质检失败：' + (e as Error).message, 'err');
@@ -688,18 +648,18 @@ function switchView(name: 'text' | 'report' | 'suggest' | 'diff'): void {
 
 async function pushRecent(fileName: string, sourcePath: string | null): Promise<void> {
   if (!sourcePath) return;
-  const list: string[] = [sourcePath, ...(appConfig.recentFiles ?? []).filter((x) => x !== sourcePath)].slice(0, 10);
-  appConfig.recentFiles = list;
+  const list: string[] = [sourcePath, ...(S.appConfig.recentFiles ?? []).filter((x) => x !== sourcePath)].slice(0, 10);
+  S.appConfig.recentFiles = list;
   await saveConfig();
 }
 
 async function renderRecentInEmpty(): Promise<void> {
   const reader = $('reader');
-  if (!reader.querySelector('.empty') || !appConfig.recentFiles?.length) return;
+  if (!reader.querySelector('.empty') || !S.appConfig.recentFiles?.length) return;
   const div = document.createElement('div');
   div.style.cssText = 'margin-top:18px;text-align:center';
   div.innerHTML = `<div style="font-weight:600;margin-bottom:8px">最近编辑</div>` +
-    appConfig.recentFiles.map((p) =>
+    S.appConfig.recentFiles.map((p) =>
       `<div class="recent-item" data-path="${esc(p)}" style="cursor:pointer;padding:5px 10px;border-radius:8px;display:inline-block;margin:3px;background:#f8fafc;border:1px solid var(--line);font-size:12px">${esc(p.slice(p.lastIndexOf('/') + 1))}</div>`).join('');
   reader.appendChild(div);
   div.querySelectorAll('.recent-item').forEach((el) =>
@@ -723,7 +683,7 @@ function scheduleChatSave(): void {
   chatSaveTimer = setTimeout(() => void (async () => {
     try {
       const dir = await invoke<string>('reports_dir');
-      await invoke('write_text_file', { path: `${dir}/AI会话.json`, content: JSON.stringify(chatMsgs, null, 1) });
+      await invoke('write_text_file', { path: `${dir}/AI会话.json`, content: JSON.stringify(S.chatMsgs, null, 1) });
     } catch { /* 尽力保存 */ }
   })(), 800);
 }
@@ -732,7 +692,7 @@ async function restoreChat(): Promise<void> {
   try {
     const dir = await invoke<string>('reports_dir');
     const saved = JSON.parse(await invoke<string>('read_text_file', { path: `${dir}/AI会话.json` }));
-    if (Array.isArray(saved) && saved.length) { chatMsgs = saved; chatRender(); }
+    if (Array.isArray(saved) && saved.length) { S.chatMsgs = saved; chatRender(); }
   } catch { /* 无历史 */ }
 }
 
@@ -741,11 +701,10 @@ async function restoreChat(): Promise<void> {
 $('tab-text').addEventListener('click', () => switchView('text'));
 $('tab-report').addEventListener('click', () => switchView('report'));
 $('tab-suggest').addEventListener('click', () => switchView('suggest'));
-$('tab-diff').addEventListener('click', () => { renderDiff(0, Math.min(1, sessions.length - 1)); switchView('diff'); });
+$('tab-diff').addEventListener('click', () => { renderDiff(0, Math.min(1, S.sessions.length - 1)); switchView('diff'); });
 
 /* ---------- 示例菜单 ---------- */
 
-let demoMenuOpen = false;
 
 async function openDemoMenu(): Promise<void> {
   const menu = $('demo-menu');
@@ -769,7 +728,7 @@ async function openDemoMenu(): Promise<void> {
     ${locals.map((p) => `<div class="demo-item" data-demo-path="${esc(p)}">${esc(p.slice(p.lastIndexOf('/') + 1))}</div>`).join('')}
     <div class="demo-tip">把章节 md 与 _词库.csv / _术语表.txt / _专名表.txt 放入该文件夹即可出现在这里</div>`;
   menu.classList.add('open');
-  demoMenuOpen = true;
+  S.demoMenuOpen = true;
   menu.querySelectorAll('[data-demo]').forEach((el) =>
     el.addEventListener('click', () => {
       closeDemoMenu();
@@ -786,7 +745,7 @@ async function openDemoMenu(): Promise<void> {
         const name = path.slice(path.lastIndexOf('/') + 1);
         autoTierFromName(name);
         await addSession(md, name, path);
-        setStatus('已载入本地示例：' + name + (vocabCsvText ? '（词库已自动加载）' : ''));
+        setStatus('已载入本地示例：' + name + (S.vocabCsvText ? '（词库已自动加载）' : ''));
       } catch (e) {
         setStatus('载入失败：' + e, 'err');
       }
@@ -796,13 +755,13 @@ async function openDemoMenu(): Promise<void> {
 
 function closeDemoMenu(): void {
   $('demo-menu').classList.remove('open');
-  demoMenuOpen = false;
+  S.demoMenuOpen = false;
 }
 
 function loadBuiltinDemo(): void {
-  if (!vocabCsvText) {
-    vocabCsvText = exampleVocab;
-    vocabName = '示例词库 sample_teaching_vocab.csv';
+  if (!S.vocabCsvText) {
+    S.vocabCsvText = exampleVocab;
+    S.vocabName = '示例词库 sample_teaching_vocab.csv';
   }
   void addSession(exampleMd, 'aesop_tortoise_hare.md（示例）', null).then(() => {
     setStatus('已载入内置示例（含示例词库）。正文点词/拖选句子开始审校；「▶ 质检本章」看报告。');
@@ -810,11 +769,11 @@ function loadBuiltinDemo(): void {
 }
 
 $('btn-demo').addEventListener('click', () => {
-  if (demoMenuOpen) closeDemoMenu();
+  if (S.demoMenuOpen) closeDemoMenu();
   else void openDemoMenu();
 });
 document.addEventListener('mousedown', (e) => {
-  if (demoMenuOpen && !(e.target as HTMLElement).closest('#demo-menu') && !(e.target as HTMLElement).closest('#btn-demo')) {
+  if (S.demoMenuOpen && !(e.target as HTMLElement).closest('#demo-menu') && !(e.target as HTMLElement).closest('#btn-demo')) {
     closeDemoMenu();
   }
 });
@@ -907,7 +866,7 @@ $('btn-run').addEventListener('click', () => void runQcCurrent());
 void listen<string>('menu-action', (ev) => {
   switch (ev.payload) {
     case 'file-open': void openChapterFiles(); break;
-    case 'file-demo': demoMenuOpen ? closeDemoMenu() : void openDemoMenu(); break;
+    case 'file-demo': S.demoMenuOpen ? closeDemoMenu() : void openDemoMenu(); break;
     case 'conf-vocab': void importVocabFile(); break;
     case 'conf-terms': void importTermsFile(); break;
     case 'conf-proper': void importProperFile(); break;
@@ -926,7 +885,7 @@ void listen<string>('menu-action', (ev) => {
     case 'export-docx': void exportDocx(); break;
     case 'export-tts': void exportTts(); break;
     case 'view-diff':
-      if (sessions.length < 2) setStatus('版本对比需要先打开两个版本（如原文与分层初稿）', 'err');
+      if (S.sessions.length < 2) setStatus('版本对比需要先打开两个版本（如原文与分层初稿）', 'err');
       else { renderDiff(0, 1); switchView('diff'); }
       break;
   }
@@ -934,20 +893,8 @@ void listen<string>('menu-action', (ev) => {
 
 /* ================= AI 审核建议（AI 只出候选，教师握定稿权） ================= */
 
-let suggestions: Suggestion[] = [];
 /** 当前 AI 会话历史（同章节内"按指令调整"时携带；应用修订或切换会话后清空） */
-let aiHistory: { role: 'user' | 'assistant'; content: string }[] = [];
 const aiPop = $('ai-pop');
-
-function aiErrHuman(e: unknown): string {
-  const s = String(e);
-  if (s.includes('401')) return 'Key 不对或已过期——回到服务商网站重新复制一次';
-  if (s.includes('404')) return '地址或模型名不对——检查 API 地址末尾是否带 /v1、模型名拼写是否与服务商一致';
-  if (s.includes('429')) return '请求太频繁或额度不足——稍等再试，或去服务商网站看看余额';
-  if (s.includes('Failed to fetch') || s.includes('NetworkError')) return '连不上服务器——检查网络，或 API 地址是否填错';
-  if (s.includes('insufficient')) return '账户余额不足——到服务商网站充值';
-  return s;
-}
 
 function showAiSettings(): void {
   aiPop.innerHTML = `
@@ -983,7 +930,7 @@ function showAiSettings(): void {
     if (p.models.length) {
       modelSel.style.display = '';
       modelEl.style.display = 'none';
-      modelSel.innerHTML = p.models.map((m) => `<option ${m === appConfig.model ? 'selected' : ''}>${m}</option>`).join('');
+      modelSel.innerHTML = p.models.map((m) => `<option ${m === S.appConfig.model ? 'selected' : ''}>${m}</option>`).join('');
     } else {
       modelSel.style.display = 'none';
       modelEl.style.display = '';
@@ -995,13 +942,13 @@ function showAiSettings(): void {
   void (async () => {
     await loadConfig();
     const key = await invoke<string>('load_api_key');
-    const matched = AI_PROVIDERS.findIndex((p) => p.url && p.url === appConfig.baseUrl);
+    const matched = AI_PROVIDERS.findIndex((p) => p.url && p.url === S.appConfig.baseUrl);
     ($('ai-provider') as HTMLSelectElement).value = String(matched >= 0 ? matched : AI_PROVIDERS.length - 1);
-    urlEl.value = appConfig.baseUrl ?? '';
+    urlEl.value = S.appConfig.baseUrl ?? '';
     if (matched >= 0) applyProvider(matched);
-    else { modelSel.style.display = 'none'; modelEl.style.display = ''; modelEl.value = appConfig.model ?? ''; }
+    else { modelSel.style.display = 'none'; modelEl.style.display = ''; modelEl.value = S.appConfig.model ?? ''; }
     cur.value = key ?? '';
-    ($('ai-instructions') as HTMLTextAreaElement).value = appConfig.instructions ?? '';
+    ($('ai-instructions') as HTMLTextAreaElement).value = S.appConfig.instructions ?? '';
   })();
 
   const currentModel = () => (modelSel.style.display !== 'none' ? modelSel.value : modelEl.value.trim());
@@ -1010,9 +957,9 @@ function showAiSettings(): void {
   $('ai-save').addEventListener('click', async () => {
     const out = $('ai-test-out');
     try {
-      appConfig.baseUrl = urlEl.value.trim();
-      appConfig.model = currentModel();
-      appConfig.instructions = ($('ai-instructions') as HTMLTextAreaElement).value.trim();
+      S.appConfig.baseUrl = urlEl.value.trim();
+      S.appConfig.model = currentModel();
+      S.appConfig.instructions = ($('ai-instructions') as HTMLTextAreaElement).value.trim();
       await saveConfig();
       const k = cur.value.trim();
       if (k) await invoke('save_api_key', { key: k });
@@ -1048,60 +995,20 @@ document.addEventListener('mousedown', (e) => {
   if (aiPop.classList.contains('open') && !(e.target as HTMLElement).closest('#ai-pop')) aiPop.classList.remove('open');
 });
 
-async function callChat(
-  messages: { role: string; content: string }[],
-  maxTokens: number,
-  externalSignal?: AbortSignal,
-): Promise<{ content: string; usage: string }> {
-  const cfg = appConfig;
-  const key = await invoke<string>('load_api_key');
-  if (!key) throw new Error('未配置 API Key（菜单 LayerText → AI 设置）');
-  const base = (cfg.baseUrl || 'https://api.openai.com/v1').replace(/\/+$/, '');
-  const model = cfg.model || 'gpt-4o-mini';
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 180000);
-  const onAbort = () => ctrl.abort();
-  externalSignal?.addEventListener('abort', onAbort);
-  try {
-    const resp = await tauriFetch(`${base}/chat/completions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
-      body: JSON.stringify({ model, temperature: 0.3, max_tokens: maxTokens, messages }),
-      signal: ctrl.signal,
-    });
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${(await resp.text()).slice(0, 200)}`);
-    const data = (await resp.json()) as {
-      choices?: { message?: { content?: string; reasoning_content?: string } }[];
-      usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
-    };
-    const u = data.usage;
-    const usage = u ? `（消耗 ${u.prompt_tokens ?? '?'} 入 + ${u.completion_tokens ?? '?'} 出 = ${u.total_tokens ?? '?'} tokens）` : '';
-    // 思考型模型（reasoner 类）正文可能在 reasoning_content；合并保证可见
-    const msg = data.choices?.[0]?.message;
-    const content = [msg?.content ?? '', msg?.reasoning_content ?? ''].filter(Boolean).join('\n');
-    return { content, usage };
-  } finally {
-    clearTimeout(timer);
-    externalSignal?.removeEventListener('abort', onAbort);
-  }
-}
-
 /** 组装 system 提示词（含用户的长期审校约定 + 书级改写规则） */
-async function buildSystemPrompt(): Promise<string> {
-  const custom = (appConfig.instructions ?? '').trim();
-  return AI_SYSTEM_PROMPT + (custom ? `\n\n6. 教师的长期审校约定（优先级最高）：\n${custom}` : '') + rewritePrompt();
+/** 内置提示词模板：词库边界 + 句法黑名单 + 句长上限 + 方法论约束 */
+/** 估算 token（英文≈4字符/词符，中文≈1.6字） */
+function estTokens(s: string): number {
+  const cjk = (s.match(/[\u4e00-\u9fff]/g) ?? []).length;
+  const rest = s.length - cjk;
+  return Math.round(cjk * 1.6 + rest / 3.5);
 }
 
-/** 内置提示词模板：词库边界 + 句法黑名单 + 句长上限 + 方法论约束 */
-const AI_SYSTEM_PROMPT = `你是初中英语原著分层简化的审校助手，帮助教师按学生水平改写英文文本。严格遵守：
-1. 词汇边界：替换目标词时优先使用中国《义务教育英语课程标准》三级（初中毕业要求，约1600词）范围内的词；专有名词与既定术语表词汇保持不变。
-2. 句法黑名单（除直接引语内的原话）：被动语态→改主动；定语从句→拆成短句或用形容词前置；过去完成时→一般过去时并用 before/after 明示先后。
-3. 句长上限：改写后的句子不超过指定词数上限；宁可拆成两句。
-4. 保真：不改变情节、事实、人物与语气；好词保留/好句锚点类标记不要改写，直接返回 original 原文并在 basis 里说明建议保留。
-5. 你只出候选：输出修订建议供教师勾选，不是最终稿。
-输出格式：只输出一个 JSON 数组，不要任何其他文字。每个元素：
-{"id":"标记ID","type":"标记类型","original":"原句原文（一字不改）","revised":"建议改写后的完整句子","basis":"依据（中文，一句话）","alternative":"可选的备选改写（可省略）"}`;
-
+/**
+ * 请求 AI 修订候选。
+ * instruction 传入 = 会话式追问（携带 S.aiHistory，AI 知道上一轮建议过什么、你否决了什么）；
+ * 不传 = 全新请求（上下文来自本地文件：标记清单+当前文本句子），并重建 S.aiHistory。
+ */
 function buildAiUserPrompt(session: FileSession, tier: Tier): string {
   const body = splitChapter(session.md).body;
   const paras = extractParas(body);
@@ -1120,18 +1027,6 @@ ${r ? `本章质检摘要：覆盖率 ${(r.coverage * 100).toFixed(1)}%，平均
 ${marks || '（无标记）'}`;
 }
 
-/** 估算 token（英文≈4字符/词符，中文≈1.6字） */
-function estTokens(s: string): number {
-  const cjk = (s.match(/[\u4e00-\u9fff]/g) ?? []).length;
-  const rest = s.length - cjk;
-  return Math.round(cjk * 1.6 + rest / 3.5);
-}
-
-/**
- * 请求 AI 修订候选。
- * instruction 传入 = 会话式追问（携带 aiHistory，AI 知道上一轮建议过什么、你否决了什么）；
- * 不传 = 全新请求（上下文来自本地文件：标记清单+当前文本句子），并重建 aiHistory。
- */
 async function aiSuggest(instruction?: string): Promise<void> {
   const s = activeSession();
   if (!s) { setStatus('请先载入文本', 'err'); return; }
@@ -1143,27 +1038,27 @@ async function aiSuggest(instruction?: string): Promise<void> {
     return;
   }
   const tier = (s.report?.tier ?? ($('tier') as HTMLSelectElement).value) as Tier;
-  const btn = $('btn-ai');
+  const btn = $('btn-ai') as unknown as HTMLButtonElement;
   btn.textContent = '⏳ AI 请求中…';
   btn.disabled = true;
   try {
     const system = await buildSystemPrompt();
     let messages: { role: string; content: string }[];
-    if (instruction && aiHistory.length > 0) {
-      aiHistory.push({ role: 'user', content: instruction + '\n\n请基于我们之前的对话重新输出完整的 JSON 数组（含未改动条目，original 用当前正文原句）。' });
-      messages = [{ role: 'system', content: system }, ...aiHistory];
+    if (instruction && S.aiHistory.length > 0) {
+      S.aiHistory.push({ role: 'user', content: instruction + '\n\n请基于我们之前的对话重新输出完整的 JSON 数组（含未改动条目，original 用当前正文原句）。' });
+      messages = [{ role: 'system', content: system }, ...S.aiHistory];
     } else {
       const userMsg = buildAiUserPrompt(s, tier);
-      aiHistory = [{ role: 'user', content: userMsg }];
+      S.aiHistory = [{ role: 'user', content: userMsg }];
       messages = [{ role: 'system', content: system }, { role: 'user', content: userMsg }];
     }
     const estIn = messages.reduce((n, m) => n + estTokens(m.content), 0);
     setStatus(`本次请求约 ${estIn} tokens 输入（只含标记相关句子，不发全章原文）…`);
     const { content, usage } = await callChat(messages, 4000);
-    aiHistory.push({ role: 'assistant', content });
+    S.aiHistory.push({ role: 'assistant', content });
     const raw = parseAiJson(content) as { id: string; type?: string; original?: string; revised?: string; basis?: string; alternative?: string }[];
     const maxLen = tierMaxLen(tier);
-    suggestions = raw
+    S.suggestions = raw
       .filter((x) => x.revised)
       .map((x) => {
         const risk = sentenceRisks(String(x.revised), maxLen);
@@ -1180,7 +1075,7 @@ async function aiSuggest(instruction?: string): Promise<void> {
     renderSuggestions();
     attachInlineSuggestions();
     switchView('suggest');
-    setStatus(`AI 返回 ${suggestions.length} 条修订候选 ${usage}——建议已标到正文里，点 ✓ 采纳 / ✗ 放弃`, 'saved');
+    setStatus(`AI 返回 ${S.suggestions.length} 条修订候选 ${usage}——建议已标到正文里，点 ✓ 采纳 / ✗ 放弃`, 'saved');
   } catch (e) {
     setStatus('AI 请求失败：' + e, 'err');
   } finally {
@@ -1200,7 +1095,7 @@ function checkLabel(c: Suggestion['check']): string {
 
 function renderSuggestions(): void {
   const pane = $('pane-suggest');
-  if (suggestions.length === 0) {
+  if (S.suggestions.length === 0) {
     pane.innerHTML = '<div class="empty">暂无修订建议——点「✨ AI 审核建议」生成</div>';
     return;
   }
@@ -1212,7 +1107,7 @@ function renderSuggestions(): void {
     </div>
     <table class="sgtable">
       <tr><th></th><th>标记</th><th class="orig">原句</th><th class="rev">AI 建议</th><th>引擎复核</th><th>依据</th></tr>
-      ${suggestions.map((g, i) => `
+      ${S.suggestions.map((g, i) => `
         <tr>
           <td><input type="checkbox" data-sg="${i}" /></td>
           <td style="white-space:nowrap">${esc(g.type)}</td>
@@ -1225,7 +1120,7 @@ function renderSuggestions(): void {
   pane.querySelectorAll('[data-sg]').forEach((cb) =>
     cb.addEventListener('change', () => {
       const n = pane.querySelectorAll('[data-sg]:checked').length;
-      ($('sg-apply') as HTMLElement).textContent = `应用已勾选（${n}）→ 生成新版本 + 变更日志`;
+      ($('sg-apply') as HTMLElement as unknown as HTMLButtonElement).textContent = `应用已勾选（${n}）→ 生成新版本 + 变更日志`;
     }),
   );
   $('sg-refresh').addEventListener('click', () => void aiSuggest());
@@ -1248,7 +1143,7 @@ async function applySuggestions(): Promise<void> {
   const checked = [...document.querySelectorAll<HTMLInputElement>('#pane-suggest [data-sg]:checked')].map((cb) => Number(cb.dataset.sg));
   if (checked.length === 0) { setStatus('请先勾选要采用的修订（或在正文里直接点 ✓）', 'err'); return; }
   for (const i of checked.sort((a, b) => b - a)) {
-    const g = suggestions[i];
+    const g = S.suggestions[i];
     if (g && g.pi !== undefined) await acceptSuggestion(g);
   }
 }
@@ -1271,7 +1166,7 @@ function locateOriginal(session: FileSession, original: string): { pi: number; s
 function attachInlineSuggestions(): void {
   const s = activeSession();
   if (!s) return;
-  for (const g of suggestions) {
+  for (const g of S.suggestions) {
     if (g.status && g.status !== 'pending') continue;
     g.status = 'pending';
     if (g.pi === undefined) {
@@ -1304,7 +1199,7 @@ function renderInlineOne(session: FileSession, g: Suggestion): void {
     g.status = 'rejected';
     div.remove();
     sentEl.classList.remove('sug-pending');
-    suggestions = suggestions.filter((x) => x !== g);
+    S.suggestions = S.suggestions.filter((x) => x !== g);
     renderSuggestions();
   });
   sentEl.after(div);
@@ -1365,7 +1260,7 @@ async function acceptSuggestion(g: Suggestion): Promise<void> {
   s.review.marks = s.review.marks.filter((m) => m.id !== g.markId);
   remapMarks(s);
   g.status = 'accepted';
-  suggestions = suggestions.filter((x) => x !== g);
+  S.suggestions = S.suggestions.filter((x) => x !== g);
 
   const date = new Date().toLocaleDateString('sv-SE');
   const tier = (s.report?.tier ?? ($('tier') as HTMLSelectElement).value) as Tier;
@@ -1417,7 +1312,7 @@ async function aiRewriteSentence(pi: number, si: number, intent: string): Promis
   const tier = (s.report?.tier ?? ($('tier') as HTMLSelectElement).value) as Tier;
   const system = await buildSystemPrompt();
   const btn = pop.querySelector('[data-mk="__rewrite"]') as HTMLElement | null;
-  if (btn) { btn.textContent = '⏳ 改写中…'; btn.disabled = true; }
+  if (btn) { btn.textContent = '⏳ 改写中…'; (btn as HTMLButtonElement).disabled = true; }
   try {
     const { content, usage } = await callChat([
       { role: 'system', content: system },
@@ -1430,7 +1325,7 @@ async function aiRewriteSentence(pi: number, si: number, intent: string): Promis
     const one = arr[0];
     if (!one?.revised) throw new Error('AI 未返回改写');
     const risk = sentenceRisks(String(one.revised), tierMaxLen(tier));
-    suggestions.push({
+    S.suggestions.push({
       markId: 'rw-' + Date.now().toString(36), type: intent || '词改写',
       original: String(one.original ?? sent), revised: String(one.revised),
       basis: one.basis ?? '', alternative: one.alternative, status: 'pending',
@@ -1442,7 +1337,7 @@ async function aiRewriteSentence(pi: number, si: number, intent: string): Promis
   } catch (e) {
     setStatus('AI 改写失败：' + e, 'err');
   } finally {
-    if (btn) { btn.textContent = '✨ AI 改写本句'; btn.disabled = false; }
+    if (btn) { btn.textContent = '✨ AI 改写本句'; (btn as HTMLButtonElement).disabled = false; }
   }
 }
 
@@ -1451,7 +1346,6 @@ $('btn-ai').addEventListener('click', () => void aiSuggest());
 /* ================= 分层初稿：首次导入按方向整章大改（两阶段工作流的第一阶段） ================= */
 
 const draftPop = $('draft-pop');
-let draftAbort: AbortController | null = null;
 
 const TIER_DRAFT_RULES: Record<string, string> = {};
 function tierRule(tier: string): string {
@@ -1486,8 +1380,8 @@ function showDraftPop(): void {
   draftPop.classList.add('open');
   const t = ($('tier') as HTMLSelectElement).value as Tier;
   $('draft-tier').textContent = t + ' 层';
-  $('draft-close').addEventListener('click', () => { draftAbort?.abort(); draftPop.classList.remove('open'); });
-  $('draft-cancel').addEventListener('click', () => { draftAbort?.abort(); });
+  $('draft-close').addEventListener('click', () => { S.draftAbort?.abort(); draftPop.classList.remove('open'); });
+  $('draft-cancel').addEventListener('click', () => { S.draftAbort?.abort(); });
   $('draft-start').addEventListener('click', () => void generateDraft());
 }
 
@@ -1514,7 +1408,7 @@ async function generateDraft(): Promise<void> {
   const segs = body.match(/\[P\d+\][\s\S]*?(?=\[P\d+\]|$)/g) ?? [];
   if (segs.length === 0) { setStatus('未找到 [P##] 段落，无法生成初稿', 'err'); return; }
 
-  draftAbort = new AbortController();
+  S.draftAbort = new AbortController();
   const startBtn = $('draft-start') as HTMLButtonElement;
   startBtn.disabled = true;
   ($('draft-cancel') as HTMLElement).style.display = '';
@@ -1540,7 +1434,7 @@ ${instructions ? `\n教师方向指令（最高优先级）：${instructions}` :
           role: 'user',
           content: `前文（已简化，供语气与指代衔接参考）：\n…${prevTail}\n\n请简化以下段落：\n${segs[i].trim()}`,
         },
-      ], 2500, draftAbort!.signal);
+      ], 2500, S.draftAbort!.signal);
       tokens += Number(usage.match(/(\d+) 出/)?.[1] ?? 0);
       out.push(applyRewrite(cleanDraftSeg(content, segs[i].match(/\[P\d+\]/)![0])));
     }
@@ -1568,7 +1462,7 @@ ${instructions ? `\n教师方向指令（最高优先级）：${instructions}` :
   } finally {
     startBtn.disabled = false;
     ($('draft-cancel') as HTMLElement).style.display = 'none';
-    draftAbort = null;
+    S.draftAbort = null;
   }
 }
 
@@ -1576,9 +1470,11 @@ $('btn-draft').addEventListener('click', showDraftPop);
 $('tier-q').addEventListener('click', (e) => { e.stopPropagation(); showTierPlanPop(); });
 
 /* ---------- 启动序列：配置 → 首启动欢迎 ---------- */
+setAiUi({ onStatus: (s) => setStatus(s, 'dirty') });
+
 void (async () => {
   await loadConfig();
-  if (!appConfig.firstRunSeen) showWelcome();
+  if (!S.appConfig.firstRunSeen) showWelcome();
   await restoreChat();
   await renderRecentInEmpty();
 })();
@@ -1612,7 +1508,7 @@ function showTierPlanPop(): void {
     </div>`;
   tierPop.classList.add('open');
   $('tier-close').addEventListener('click', () => tierPop.classList.remove('open'));
-  $('tier-reset').addEventListener('click', async () => { appConfig.tiers = undefined; await saveConfig(); tierPop.classList.remove('open'); setStatus('分层方案已恢复默认', 'saved'); });
+  $('tier-reset').addEventListener('click', async () => { S.appConfig.tiers = undefined; await saveConfig(); tierPop.classList.remove('open'); setStatus('分层方案已恢复默认', 'saved'); });
   $('tier-save').addEventListener('click', async () => {
     const tiers: Record<string, TierPlan> = {};
     for (const row of tierPop.querySelectorAll('.tier-row')) {
@@ -1626,7 +1522,7 @@ function showTierPlanPop(): void {
         relclFromCh: Number((row.querySelector('[data-f="relclFromCh"]') as HTMLInputElement).value) || 0,
       };
     }
-    appConfig.tiers = tiers;
+    S.appConfig.tiers = tiers;
     for (const k of Object.keys(TIER_DRAFT_RULES)) delete TIER_DRAFT_RULES[k];
     await saveConfig();
     tierPop.classList.remove('open');
@@ -1649,12 +1545,12 @@ async function saveBookConfig(): Promise<void> {
   const dir = s.sourcePath.slice(0, s.sourcePath.lastIndexOf('/'));
   const cfg = {
     说明: 'LayerText 本书配置——放在书稿文件夹里，打开同文件夹任何章节自动生效',
-    vocabCsv: vocabCsvText ?? null,
-    vocabName,
-    terms: termsText ?? null,
-    proper: properRows.length ? properRows : null,
-    instructions: appConfig.instructions ?? null,
-    rewrite: rewriteRules.replacements.length || rewriteRules.viewpoint !== 'keep' || rewriteRules.extra ? rewriteRules : null,
+    vocabCsv: S.vocabCsvText ?? null,
+    vocabName: S.vocabName,
+    terms: S.termsText ?? null,
+    proper: S.properRows.length ? S.properRows : null,
+    instructions: S.appConfig.instructions ?? null,
+    rewrite: S.rewriteRules.replacements.length || S.rewriteRules.viewpoint !== 'keep' || S.rewriteRules.extra ? S.rewriteRules : null,
     savedAt: new Date().toLocaleString('zh-CN'),
   };
   try {
@@ -1669,12 +1565,12 @@ async function saveBookConfig(): Promise<void> {
 async function loadBookConfig(dir: string): Promise<boolean> {
   try {
     const raw = await invoke<string>('read_text_file', { path: `${dir}/${BOOK_CONFIG}` });
-    const cfg = JSON.parse(raw) as { vocabCsv?: string | null; vocabName?: string; terms?: string | null; proper?: string[] | null; instructions?: string | null; rewrite?: typeof rewriteRules };
-    if (cfg.vocabCsv) { vocabCsvText = cfg.vocabCsv; vocabName = cfg.vocabName ?? '本书词库'; }
-    if (cfg.terms) termsText = cfg.terms;
-    properRows = cfg.proper ?? [];
-    if (cfg.instructions) appConfig.instructions = cfg.instructions;
-    if (cfg.rewrite) rewriteRules = { replacements: cfg.rewrite.replacements ?? [], viewpoint: cfg.rewrite.viewpoint ?? 'keep', viewpointName: cfg.rewrite.viewpointName ?? '', extra: cfg.rewrite.extra ?? '' };
+    const cfg = JSON.parse(raw) as { vocabCsv?: string | null; vocabName?: string; terms?: string | null; proper?: string[] | null; instructions?: string | null; rewrite?: typeof S.rewriteRules };
+    if (cfg.vocabCsv) { S.vocabCsvText = cfg.vocabCsv; S.vocabName = cfg.vocabName ?? '本书词库'; }
+    if (cfg.terms) S.termsText = cfg.terms;
+    S.properRows = cfg.proper ?? [];
+    if (cfg.instructions) S.appConfig.instructions = cfg.instructions;
+    if (cfg.rewrite) S.rewriteRules = { replacements: cfg.rewrite.replacements ?? [], viewpoint: cfg.rewrite.viewpoint ?? 'keep', viewpointName: cfg.rewrite.viewpointName ?? '', extra: cfg.rewrite.extra ?? '' };
     return Boolean(cfg.vocabCsv || cfg.terms || cfg.proper?.length || cfg.rewrite);
   } catch {
     return false;
@@ -1723,7 +1619,7 @@ async function exportDocx(): Promise<void> {
     const out = s.sourcePath
       ? s.sourcePath.slice(0, s.sourcePath.lastIndexOf('/')) + '/' + s.fileName.replace(/\.(md|txt|markdown)$/i, '') + '.docx'
       : (await invoke<string>('reports_dir')) + '/示例导出.docx';
-    await invoke('write_file_base64', { path: out, b64: bufToB64(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength)) });
+    await invoke('write_file_base64', { path: out, b64: bufToB64((buf.buffer as ArrayBuffer).slice(buf.byteOffset, buf.byteOffset + buf.byteLength)) });
     setStatus('已导出 Word 版：' + out, 'saved');
     void invoke('reveal_path', { path: out });
   } catch (e) {
@@ -1758,8 +1654,8 @@ async function exportTts(): Promise<void> {
 
 function renderDiff(lIdx: number, rIdx: number): void {
   const pane = $('pane-diff');
-  const L = sessions[lIdx];
-  const R = sessions[rIdx];
+  const L = S.sessions[lIdx];
+  const R = S.sessions[rIdx];
   if (!L || !R) { pane.innerHTML = '<div class="empty">先打开两个版本文件（如原文与分层初稿）</div>'; return; }
   const lp = extractParas(splitChapter(L.md).body);
   const rp = extractParas(splitChapter(R.md).body);
@@ -1780,9 +1676,9 @@ function renderDiff(lIdx: number, rIdx: number): void {
   pane.innerHTML = `
     <div class="sg-actions">
       <b>版本对比</b>
-      <select id="diff-l">${sessions.map((x, i) => `<option value="${i}" ${i === lIdx ? 'selected' : ''}>${esc(x.fileName)}</option>`).join('')}</select>
+      <select id="diff-l">${S.sessions.map((x, i) => `<option value="${i}" ${i === lIdx ? 'selected' : ''}>${esc(x.fileName)}</option>`).join('')}</select>
       <span>↔</span>
-      <select id="diff-r">${sessions.map((x, i) => `<option value="${i}" ${i === rIdx ? 'selected' : ''}>${esc(x.fileName)}</option>`).join('')}</select>
+      <select id="diff-r">${S.sessions.map((x, i) => `<option value="${i}" ${i === rIdx ? 'selected' : ''}>${esc(x.fileName)}</option>`).join('')}</select>
       <span style="color:var(--muted);font-size:12px">段落一致 ${same}/${n}（红=仅左侧版本，绿=仅右侧版本/已修改）</span>
     </div>
     <table class="sgtable">
@@ -1801,15 +1697,14 @@ const TOUR = [
   { sel: '#reader', title: '③ 边读边标', text: '红色下划线是生词、淡红底是难句。点一个词、或拖选一句话，就能做标记。' },
   { sel: '#sidebar', title: '④ 收尾把关', text: '右侧是审校清单：要点配额、终审门禁、标记清单。四项门禁全勾，这一章就算审完。' },
 ];
-let tourIdx = -1;
 
 function tourShow(i: number): void {
-  tourIdx = i;
+  S.tourIdx = i;
   const tip = $('tour-pop');
   if (i < 0 || i >= TOUR.length) {
     tip.classList.remove('open');
     $('tour-hl').style.display = 'none';
-    void (async () => { appConfig.tourSeen = true; await saveConfig(); })();
+    void (async () => { S.appConfig.tourSeen = true; await saveConfig(); })();
     return;
   }
   const step = TOUR[i];
@@ -1831,29 +1726,14 @@ function tourShow(i: number): void {
 /* ---------- 书级改写规则：确定性替换（机器做，零遗漏） + 视角与全局规则（注入 AI） ---------- */
 
 interface RewriteRule { from: string; to: string; }
-let rewriteRules: { replacements: RewriteRule[]; viewpoint: 'keep' | 'first'; viewpointName: string; extra: string } = { replacements: [], viewpoint: 'keep', viewpointName: '', extra: '' };
 
 const rewritePop = $('rewrite-pop');
 
 function applyRewrite(text: string): string {
-  return applyRewriteTo(text, rewriteRules.replacements);
+  return applyRewriteTo(text, S.rewriteRules.replacements);
 }
 
 /** 规则文本（注入每次 AI 请求） */
-function rewritePrompt(): string {
-  if (!rewriteRules.replacements.length && rewriteRules.viewpoint === 'keep' && !rewriteRules.extra) return '';
-  const lines = ['本书全局改写规则（最高优先级，每段都必须遵守）：'];
-  if (rewriteRules.replacements.length) {
-    lines.push('- 人名/词汇替换（必须严格执行，输出中不得出现原词）：');
-    for (const r of rewriteRules.replacements) lines.push(`  · "${r.from}" 一律写作 "${r.to}"`);
-  }
-  if (rewriteRules.viewpoint === 'first' && rewriteRules.viewpointName) {
-    lines.push(`- 叙事视角：全书以 ${rewriteRules.viewpointName} 的第一人称"I"叙述——凡指称 ${rewriteRules.viewpointName} 的第三人称（he/she/his/her 或其名）改为 I/my/me（注意动词搭配：he was→I was, he goes→I go）；其他人物对话中提及 ${rewriteRules.viewpointName} 时保留其名。`);
-  }
-  if (rewriteRules.extra) lines.push(`- ${rewriteRules.extra}`);
-  return '\n\n' + lines.join('\n');
-}
-
 /** 校验：替换残留与视角代词密度（机器核对，不靠 AI 自觉） */
 function rewriteCheck(): string {
   const s = activeSession();
@@ -1861,7 +1741,7 @@ function rewriteCheck(): string {
   const out: string[] = [];
   let body = '';
   try { body = splitChapter(s.md).body; } catch { return '正文解析失败'; }
-  for (const r of rewriteRules.replacements) {
+  for (const r of S.rewriteRules.replacements) {
     if (!r.from) continue;
     const esc = r.from.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const left = (body.match(new RegExp(`\\b${esc}\\b`, 'g')) ?? []).length;
@@ -1870,7 +1750,7 @@ function rewriteCheck(): string {
       ? `✓ "${r.from}" → "${r.to}"：无残留（新词出现 ${used} 次）`
       : `✗ "${r.from}" 仍有 ${left} 处未替换（新词 "${r.to}" 出现 ${used} 次）——可点下方"对当前章节执行替换"由机器补齐`);
   }
-  if (rewriteRules.viewpoint === 'first') {
+  if (S.rewriteRules.viewpoint === 'first') {
     const he = (body.match(/\b(he|his|him|she|her)\b/gi) ?? []).length;
     const I = (body.match(/\b(I|my|me)\b/g) ?? []).length;
     out.push(`视角（第一人称）：第三人称代词 ${he} 处 / 第一人称 ${I} 处${he > I * 2 ? ' ⚠ 第一人称占比偏低，建议用「分层初稿」按规则重写' : ''}`);
@@ -1886,7 +1766,7 @@ function saveRewriteToBook(): void {
     try {
       const raw = await invoke<string>('read_text_file', { path: `${dir}/${BOOK_CONFIG}` });
       const cfg = JSON.parse(raw) as Record<string, unknown>;
-      cfg.rewrite = rewriteRules;
+      cfg.rewrite = S.rewriteRules;
       cfg.savedAt = new Date().toLocaleString('zh-CN');
       await invoke('write_text_file', { path: `${dir}/${BOOK_CONFIG}`, content: JSON.stringify(cfg, null, 1) });
       setStatus('书级改写规则已保存（随本书配置，每章自动生效）', 'saved');
@@ -1928,19 +1808,19 @@ function showRewritePop(): void {
     rows().appendChild(div);
   };
   const collect = () => {
-    rewriteRules.replacements = [...rewritePop.querySelectorAll('.rw-row')].map((r) => ({
+    S.rewriteRules.replacements = [...rewritePop.querySelectorAll('.rw-row')].map((r) => ({
       from: (r.querySelector('.rw-from') as HTMLInputElement).value.trim(),
       to: (r.querySelector('.rw-to') as HTMLInputElement).value.trim(),
     })).filter((r) => r.from);
-    rewriteRules.viewpoint = ($('rw-view') as HTMLSelectElement).value as 'keep' | 'first';
-    rewriteRules.viewpointName = ($('rw-name') as HTMLInputElement).value.trim();
-    rewriteRules.extra = ($('rw-extra') as HTMLTextAreaElement).value.trim();
+    S.rewriteRules.viewpoint = ($('rw-view') as HTMLSelectElement).value as 'keep' | 'first';
+    S.rewriteRules.viewpointName = ($('rw-name') as HTMLInputElement).value.trim();
+    S.rewriteRules.extra = ($('rw-extra') as HTMLTextAreaElement).value.trim();
   };
-  for (const r of rewriteRules.replacements) addRow(r.from, r.to);
-  if (!rewriteRules.replacements.length) addRow();
-  ($('rw-view') as HTMLSelectElement).value = rewriteRules.viewpoint;
-  ($('rw-name') as HTMLInputElement).value = rewriteRules.viewpointName;
-  ($('rw-extra') as HTMLTextAreaElement).value = rewriteRules.extra;
+  for (const r of S.rewriteRules.replacements) addRow(r.from, r.to);
+  if (!S.rewriteRules.replacements.length) addRow();
+  ($('rw-view') as HTMLSelectElement).value = S.rewriteRules.viewpoint;
+  ($('rw-name') as HTMLInputElement).value = S.rewriteRules.viewpointName;
+  ($('rw-extra') as HTMLTextAreaElement).value = S.rewriteRules.extra;
 
   $('rw-add').addEventListener('click', () => addRow());
   $('rw-close').addEventListener('click', () => rewritePop.classList.remove('open'));
@@ -2027,8 +1907,8 @@ function showWelcome(): void {
           body: JSON.stringify({ model: p.models[0] ?? 'gpt-4o-mini', max_tokens: 8, messages: [{ role: 'user', content: 'ping' }] }),
         });
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-        appConfig.baseUrl = p.url;
-        appConfig.model = p.models[0] ?? 'gpt-4o-mini';
+        S.appConfig.baseUrl = p.url;
+        S.appConfig.model = p.models[0] ?? 'gpt-4o-mini';
         await saveConfig();
         await invoke('save_api_key', { key });
         out.textContent = '✓ 连接成功，已保存';
@@ -2060,7 +1940,7 @@ function showWelcome(): void {
 }
 async function closeWelcome(): Promise<void> {
   $('welcome-pop').classList.remove('open');
-  appConfig.firstRunSeen = true;
+  S.appConfig.firstRunSeen = true;
   await saveConfig();
 }
 
@@ -2074,8 +1954,6 @@ interface ChatMsg {
   tool_calls?: { id: string; type: 'function'; function: { name: string; arguments: string } }[];
   tool_call_id?: string;
 }
-let chatMsgs: ChatMsg[] = [];
-let chatBusy = false;
 
 const AI_TOOLS = [
   {
@@ -2131,72 +2009,6 @@ const AI_TOOLS = [
   },
 ];
 
-async function chatStream(
-  messages: { role: string; content: string; tool_calls?: unknown; tool_call_id?: string }[],
-  onDelta: (t: string) => void,
-): Promise<{ content: string; toolCalls: { id: string; name: string; arguments: string }[]; usage: string }> {
-  const cfg = appConfig;
-  const key = await invoke<string>('load_api_key');
-  if (!key) throw new Error('未配置 API Key（菜单 LayerText → AI 设置…）');
-  const base = (cfg.baseUrl || 'https://api.openai.com/v1').replace(/\/+$/, '');
-  const model = cfg.model || 'gpt-4o-mini';
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 180000);
-  try {
-    const resp = await tauriFetch(`${base}/chat/completions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
-      body: JSON.stringify({
-        model, temperature: 0.3, max_tokens: 4000, messages, tools: AI_TOOLS,
-        stream: true, stream_options: { include_usage: true },
-      }),
-      signal: ctrl.signal,
-    });
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${(await resp.text()).slice(0, 200)}`);
-    const reader = resp.body!.getReader();
-    const dec = new TextDecoder();
-    let buf = '';
-    let content = '';
-    let reasoning = '';
-    let usage = '';
-    const tc = new Map<number, { id: string; name: string; arguments: string }>();
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buf += dec.decode(value, { stream: true });
-      const lines = buf.split('\n');
-      buf = lines.pop() ?? '';
-      for (const line of lines) {
-        const s = line.trim();
-        if (!s.startsWith('data:')) continue;
-        const payload = s.slice(5).trim();
-        if (payload === '[DONE]') continue;
-        try {
-          const j = JSON.parse(payload) as {
-            choices?: { delta?: { content?: string; tool_calls?: { index?: number; id?: string; function?: { name?: string; arguments?: string } }[] } }[];
-            usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
-          };
-          const d = j.choices?.[0]?.delta as { content?: string; reasoning_content?: string; tool_calls?: { index?: number; id?: string; function?: { name?: string; arguments?: string } }[] } | undefined;
-          if (d?.content) { content += d.content; onDelta(d.content); }
-          if (d?.reasoning_content) reasoning += d.reasoning_content;
-          for (const c of d?.tool_calls ?? []) {
-            const i = c.index ?? 0;
-            const cur = tc.get(i) ?? { id: '', name: '', arguments: '' };
-            if (c.id) cur.id = c.id;
-            if (c.function?.name) cur.name += c.function.name;
-            if (c.function?.arguments) cur.arguments += c.function.arguments;
-            tc.set(i, cur);
-          }
-          if (j.usage) usage = `（本轮 ${j.usage.prompt_tokens ?? '?'} 入 + ${j.usage.completion_tokens ?? '?'} 出 tokens）`;
-        } catch { /* 忽略半行 */ }
-      }
-    }
-    return { content: content || reasoning, toolCalls: [...tc.values()], usage };
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
 function executeTool(name: string, argsJson: string): string {
   const s = activeSession();
   if (!s) return '错误：当前未打开任何章节';
@@ -2249,7 +2061,7 @@ function executeTool(name: string, argsJson: string): string {
         if (!s.md.includes(original)) return '错误：original 与正文不匹配（须与正文原句一字不差），请先用 get_sentence/search_text 取原句';
         const tier = (s.report?.tier ?? ($('tier') as HTMLSelectElement).value) as Tier;
         const risk = sentenceRisks(revised, tierMaxLen(tier));
-        suggestions.push({
+        S.suggestions.push({
           markId: String(args.markId ?? 'chat-' + Date.now().toString(36)),
           type: '对话建议', original, revised, basis: String(args.basis ?? ''),
           check: { passive: risk.passive, relcl: risk.relcl, pastperf: risk.pastperf, overlong: risk.overlong },
@@ -2270,13 +2082,13 @@ function executeTool(name: string, argsJson: string): string {
 function chatRender(): void {
   const log = $('chat-log');
   log.innerHTML =
-    chatMsgs.length === 0
+    S.chatMsgs.length === 0
       ? '<div class="chat-empty">与 AI 实时交流——它能调用本地工具（跑质检/查句子/列标记/提修订候选），所有验证由本机 QC 引擎完成。</div>'
-      : chatMsgs
+      : S.chatMsgs
           .map((m) => {
             if (m.role === 'user') return `<div class="chat-msg user"><div class="bubble">${esc(m.content)}</div></div>`;
             if (m.role === 'tool') return '';
-            const toolsHtml = (m.tool_calls ?? [])
+            const toolsHtml = ((m.tool_calls as { function: { name: string; arguments: string } }[] | undefined) ?? [])
               .map((t) => `<div class="chat-tool">🔧 ${esc(t.function.name)}(${esc(t.function.arguments.slice(0, 60))}${t.function.arguments.length > 60 ? '…' : ''})</div>`)
               .join('');
             return `<div class="chat-msg assistant">${toolsHtml}<div class="bubble" ${m.content === '' ? 'id="chat-cur"' : ''}>${esc(m.content)}</div></div>`;
@@ -2286,7 +2098,7 @@ function chatRender(): void {
 }
 
 async function sendChat(): Promise<void> {
-  if (chatBusy) return;
+  if (S.chatBusy) return;
   const s = activeSession();
   if (!s) { setStatus('请先打开章节再与 AI 交流', 'err'); return; }
   const input = $('chat-input') as HTMLTextAreaElement;
@@ -2296,9 +2108,9 @@ async function sendChat(): Promise<void> {
   const key = await invoke<string>('load_api_key');
   if (!key) { setStatus('请先配置 AI（菜单 LayerText → AI 设置…）', 'err'); showAiSettings(); return; }
 
-  chatBusy = true;
-  $('chat-send').disabled = true;
-  chatMsgs.push({ role: 'user', content: text });
+  S.chatBusy = true;
+  ($('chat-send') as unknown as HTMLButtonElement).disabled = true;
+  S.chatMsgs.push({ role: 'user', content: text });
   chatRender();
   const statusEl = $('chat-status');
   let usageTotal = '';
@@ -2307,16 +2119,16 @@ async function sendChat(): Promise<void> {
     const system = (await buildSystemPrompt()) +
       `\n\n7. 你在一个审校应用中工作，可调用工具查证与验证（list_marks / get_chapter_stats / get_sentence / search_text / propose_revision）。改写建议必须先用工具核对原句，再用 propose_revision 提交；不要凭空引用正文。当前章节：${s.fileName}，标记 ${s.review.marks.length} 条。`;
     for (let round = 0; round < 8; round++) {
-      const messages = [{ role: 'system', content: system }, ...chatMsgs];
+      const messages = [{ role: 'system', content: system }, ...S.chatMsgs];
       statusEl.textContent = round === 0 ? '思考中…' : `工具结果已回传，继续（第 ${round + 1} 轮）…`;
-      const { content, toolCalls, usage } = await chatStream(messages, (delta) => {
+      const { content, toolCalls, usage } = await chatStream(messages, AI_TOOLS, (delta) => {
         const cur = document.getElementById('chat-cur');
         if (cur) cur.textContent += delta;
         const log = $('chat-log');
         log.scrollTop = log.scrollHeight;
       });
       usageTotal = usage;
-      chatMsgs.push({ role: 'assistant', content, tool_calls: toolCalls.length ? toolCalls.map((t) => ({ id: t.id, type: 'function' as const, function: { name: t.name, arguments: t.arguments } })) : undefined });
+      S.chatMsgs.push({ role: 'assistant', content, tool_calls: toolCalls.length ? toolCalls.map((t) => ({ id: t.id, type: 'function' as const, function: { name: t.name, arguments: t.arguments } })) : undefined });
       if (toolCalls.length === 0) {
         chatRender();
         break;
@@ -2324,21 +2136,21 @@ async function sendChat(): Promise<void> {
       chatRender(); // 先展示工具调用条
       for (const t of toolCalls) {
         const result = executeTool(t.name, t.arguments);
-        chatMsgs.push({ role: 'tool', tool_call_id: t.id, content: result });
+        S.chatMsgs.push({ role: 'tool', tool_call_id: t.id, content: result });
       }
     }
-    statusEl.textContent = `就绪 ${usageTotal} · 对话 ${chatMsgs.filter((m) => m.role === 'user').length} 轮（已自动保存）`;
+    statusEl.textContent = `就绪 ${usageTotal} · 对话 ${S.chatMsgs.filter((m) => m.role === 'user').length} 轮（已自动保存）`;
     scheduleChatSave();
   } catch (e) {
     statusEl.textContent = '出错：' + e;
   } finally {
-    chatBusy = false;
-    $('chat-send').disabled = false;
+    S.chatBusy = false;
+    ($('chat-send') as unknown as HTMLButtonElement).disabled = false;
   }
 }
 
 $('chat-send').addEventListener('click', () => void sendChat());
-$('chat-clear').addEventListener('click', () => { chatMsgs = []; chatRender(); scheduleChatSave(); setStatus('AI 对话已清空', ''); });
+$('chat-clear').addEventListener('click', () => { S.chatMsgs = []; chatRender(); scheduleChatSave(); setStatus('AI 对话已清空', ''); });
 $('chat-input').addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) void sendChat();
 });
@@ -2439,6 +2251,3 @@ document.addEventListener('mousedown', (e) => {
   if (pop.classList.contains('open')) hidePop();
 });
 
-function esc(s: string): string {
-  return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
-}
