@@ -18,6 +18,8 @@ export interface AppConfig {
   autoRewriteOnMark?: boolean;
   /** 直接修改原稿文件（首次修改前自动备份原始版）；关闭写工作稿 */
   inPlaceEdit?: boolean;
+  /** 限制思考：请求带 reasoning_effort=low（服务商不识自动去除）；默认开 */
+  lowThinking?: boolean;
   recentFiles?: string[];
 }
 

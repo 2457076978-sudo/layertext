@@ -313,6 +313,21 @@ function flashApplied(revised: string): void {
   el.classList.add('just-applied');
 }
 
+/** 请求直到解析出 JSON：若模型把整轮输出耗在思考上（无 [ 字符），自动追发"直接输出 JSON"再试一次 */
+async function chatUntilJson(messages: { role: string; content: string }[], maxTokens: number): Promise<{ raw: unknown[]; usage: string }> {
+  const msgs = [...messages];
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const { content, usage } = await callChat(msgs, maxTokens);
+    try {
+      return { raw: parseAiJson(content), usage };
+    } catch (e) {
+      if (attempt === 1 || content.includes('[')) throw e;
+      msgs.push({ role: 'user', content: '你刚才的整段回答都是思考过程，还没有输出结果。请现在直接输出完整的 JSON 数组：第一个字符必须是 [，不要再写任何思考、解释或代码块。' });
+    }
+  }
+  throw new Error('unreachable');
+}
+
 function badge(text: string): HTMLElement {
   const b = document.createElement('sup');
   b.className = 'badge';
@@ -939,6 +954,7 @@ function showAiSettings(): void {
     <div class="fld"><label style="display:flex;align-items:flex-start;gap:6px"><input type="checkbox" id="ai-auto" style="width:auto;margin-top:3px" /> <span><b>AI 改写直接生效</b>（全局）：点标记、批量「✨AI审核建议」、逐句改写的全部结果<b>自动应用</b>，无需再点 ✓，改写的句子会绿色高亮一闪变成新句。关闭则改为候选模式（正文行内 ✓/✗）</span></label></div>
     <div class="fld"><label style="display:flex;align-items:flex-start;gap:6px"><input type="checkbox" id="ai-trust" style="width:auto;margin-top:3px" /> <span><b>信任模式</b>：允许 AI 助手在对话中直接修改正文（你说"直接改"即生效）</span></label></div>
     <div class="fld"><label style="display:flex;align-items:flex-start;gap:6px"><input type="checkbox" id="ai-inplace" style="width:auto;margin-top:3px" checked /> <span><b>直接修改原稿文件</b>（推荐）：改动直接写进书稿本身，不另存工作稿——<b>首次修改前自动备份</b>原始版（xxx_原始备份.md），随时可整体还原。关闭则另存工作稿、原稿不动</span></label></div>
+    <div class="fld"><label style="display:flex;align-items:flex-start;gap:6px"><input type="checkbox" id="ai-lowthink" style="width:auto;margin-top:3px" checked /> <span><b>关闭思考</b>（推荐）：直接关闭模型的深度思考（thinking=disabled）——改写任务不需要，关了更快更省更稳</span></label></div>
     <div class="row-btns">
       <button id="ai-save" class="primary">保存</button>
       <button id="ai-test">测试连接（填完 ①-④ 就点这个）</button>
@@ -981,6 +997,7 @@ function showAiSettings(): void {
     ($('ai-auto') as HTMLInputElement).checked = S.appConfig.autoRewriteOnMark ?? false;
     ($('ai-trust') as HTMLInputElement).checked = S.appConfig.trustEdit ?? false;
     ($('ai-inplace') as HTMLInputElement).checked = S.appConfig.inPlaceEdit ?? true;
+    ($('ai-lowthink') as HTMLInputElement).checked = S.appConfig.lowThinking !== false;
   })();
 
   const currentModel = () => (modelSel.style.display !== 'none' ? modelSel.value : modelEl.value.trim());
@@ -995,6 +1012,7 @@ function showAiSettings(): void {
       S.appConfig.autoRewriteOnMark = ($('ai-auto') as HTMLInputElement).checked;
       S.appConfig.trustEdit = ($('ai-trust') as HTMLInputElement).checked;
       S.appConfig.inPlaceEdit = ($('ai-inplace') as HTMLInputElement).checked;
+      S.appConfig.lowThinking = ($('ai-lowthink') as HTMLInputElement).checked;
       await saveConfig();
       const k = cur.value.trim();
       if (k) await invoke('save_api_key', { key: k });
@@ -1089,9 +1107,9 @@ async function aiSuggest(instruction?: string): Promise<void> {
     }
     const estIn = messages.reduce((n, m) => n + estTokens(m.content), 0);
     setStatus(`本次请求约 ${estIn} tokens 输入（只含标记相关句子，不发全章原文）…`);
-    const { content, usage } = await callChat(messages, 4000);
-    S.aiHistory.push({ role: 'assistant', content });
-    const raw = parseAiJson(content) as { id: string; type?: string; original?: string; revised?: string; basis?: string; alternative?: string }[];
+    const { raw: rawUnknown, usage } = await chatUntilJson(messages, 6000);
+    const raw = rawUnknown as { id: string; type?: string; original?: string; revised?: string; basis?: string; alternative?: string }[];
+    S.aiHistory.push({ role: 'assistant', content: JSON.stringify(raw) });
     const maxLen = tierMaxLen(tier);
     S.suggestions = raw
       .filter((x) => x.revised)
@@ -1375,14 +1393,14 @@ async function aiRewriteSentence(pi: number, si: number, intent: string, autoMar
   const btn = pop.querySelector('[data-mk="__rewrite"]') as HTMLElement | null;
   if (btn) { btn.textContent = '⏳ 改写中…'; (btn as HTMLButtonElement).disabled = true; }
   try {
-    const { content, usage } = await callChat([
+    const { raw: arrRaw } = await chatUntilJson([
       { role: 'system', content: system },
       {
         role: 'user',
         content: `层级：${tier}（句长上限 ${tierMaxLen(tier)} 词）\n教师意图：${intent}\n请改写下面这句。输出要求：回答的第一个字符必须是 [，只输出一个 JSON 数组（形如 [{"original":"…","revised":"…","basis":"…"}]），不要思考过程、不要解释、不要代码块。original 必须与原句一字不差：\n${sent}`,
       },
     ], 4000);
-    const arr = parseAiJson(content) as { original?: string; revised?: string; basis?: string; alternative?: string }[];
+    const arr = arrRaw as { original?: string; revised?: string; basis?: string; alternative?: string }[];
     const one = arr[0];
     if (!one?.revised) throw new Error('AI 未返回改写');
     const risk = checkRev(String(one.revised), tier);
@@ -2021,6 +2039,7 @@ $('btn-ai').addEventListener('click', () => void aiSuggest());
 interface ChatMsg {
   role: 'user' | 'assistant' | 'tool';
   content: string;
+  reasoning_content?: string;  // DeepSeek 工具循环硬性要求回传
   tool_calls?: { id: string; type: 'function'; function: { name: string; arguments: string } }[];
   tool_call_id?: string;
 }
@@ -2234,14 +2253,14 @@ async function sendChat(): Promise<void> {
     for (let round = 0; round < 8; round++) {
       const messages = [{ role: 'system', content: system }, ...S.chatMsgs];
       statusEl.textContent = round === 0 ? '思考中…' : `工具结果已回传，继续（第 ${round + 1} 轮）…`;
-      const { content, toolCalls, usage } = await chatStream(messages, AI_TOOLS, (delta) => {
+      const { content, reasoning, toolCalls, usage } = await chatStream(messages, AI_TOOLS, (delta) => {
         const cur = document.getElementById('chat-cur');
         if (cur) cur.textContent += delta;
         const log = $('chat-log');
         log.scrollTop = log.scrollHeight;
       });
       usageTotal = usage;
-      S.chatMsgs.push({ role: 'assistant', content, tool_calls: toolCalls.length ? toolCalls.map((t) => ({ id: t.id, type: 'function' as const, function: { name: t.name, arguments: t.arguments } })) : undefined });
+      S.chatMsgs.push({ role: 'assistant', content, ...(reasoning ? { reasoning_content: reasoning } : {}), tool_calls: toolCalls.length ? toolCalls.map((t) => ({ id: t.id, type: 'function' as const, function: { name: t.name, arguments: t.arguments } })) : undefined });
       if (toolCalls.length === 0) {
         chatRender();
         break;

@@ -67,12 +67,26 @@ export async function callChat(
   const onAbort = () => ctrl.abort();
   externalSignal?.addEventListener('abort', onAbort);
   try {
-    const resp = await withRetry(() => tauriFetch(`${base}/chat/completions`, {
+    const mkBody = (withEffort: boolean) => JSON.stringify({
+      model, temperature: 0.3, max_tokens: maxTokens, messages,
+      ...(withEffort && (S.appConfig.lowThinking !== false)
+        ? { reasoning_effort: 'low', thinking: { type: 'disabled' } }  // DeepSeek：关思考（改写任务无需深度思考）
+        : {}),
+    });
+    let resp = await withRetry(() => tauriFetch(`${base}/chat/completions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
-      body: JSON.stringify({ model, temperature: 0.3, max_tokens: maxTokens, messages }),
+      body: mkBody(true),
       signal: ctrl.signal,
     }), (s) => ui?.onStatus?.(s));
+    if (!resp.ok && /reasoning_effort|thinking|unknown (field|parameter|argument)/i.test(await resp.text())) {
+      resp = await withRetry(() => tauriFetch(`${base}/chat/completions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+        body: mkBody(false),
+        signal: ctrl.signal,
+      }), (s) => ui?.onStatus?.(s));
+    }
     if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${(await resp.text()).slice(0, 200)}`);
     const data = (await resp.json()) as {
       choices?: { message?: { content?: string; reasoning_content?: string } }[];
@@ -123,7 +137,7 @@ export async function chatStream(
   messages: { role: string; content: string; tool_calls?: unknown; tool_call_id?: string }[],
   tools: unknown[],
   onDelta: (t: string) => void,
-): Promise<{ content: string; toolCalls: { id: string; name: string; arguments: string }[]; usage: string }> {
+): Promise<{ content: string; reasoning: string; toolCalls: { id: string; name: string; arguments: string }[]; usage: string }> {
   const cfg = S.appConfig;
   const key = await invoke<string>('load_api_key');
   if (!key) throw new Error('未配置 API Key（菜单 LayerText → AI 设置…）');
@@ -132,15 +146,27 @@ export async function chatStream(
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 180000);
   try {
-    const resp = await withRetry(() => tauriFetch(`${base}/chat/completions`, {
+    const mkBody = (withEffort: boolean) => JSON.stringify({
+      model, temperature: 0.3, max_tokens: 4000, messages, tools,
+      stream: true, stream_options: { include_usage: true },
+      ...(withEffort && (S.appConfig.lowThinking !== false)
+        ? { reasoning_effort: 'low', thinking: { type: 'disabled' } }
+        : {}),
+    });
+    let resp = await withRetry(() => tauriFetch(`${base}/chat/completions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
-      body: JSON.stringify({
-        model, temperature: 0.3, max_tokens: 4000, messages, tools,
-        stream: true, stream_options: { include_usage: true },
-      }),
+      body: mkBody(true),
       signal: ctrl.signal,
     }), (s) => ui?.onStatus?.(s));
+    if (!resp.ok && /reasoning_effort|thinking|unknown (field|parameter|argument)/i.test(await resp.text())) {
+      resp = await withRetry(() => tauriFetch(`${base}/chat/completions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+        body: mkBody(false),
+        signal: ctrl.signal,
+      }), (s) => ui?.onStatus?.(s));
+    }
     if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${(await resp.text()).slice(0, 200)}`);
     const reader = resp.body!.getReader();
     const dec = new TextDecoder();
@@ -180,7 +206,7 @@ export async function chatStream(
         } catch { /* 忽略半行 */ }
       }
     }
-    return { content: content || reasoning, toolCalls: [...tc.values()], usage };
+    return { content: content || reasoning, reasoning, toolCalls: [...tc.values()], usage };
   } finally {
     clearTimeout(timer);
   }
