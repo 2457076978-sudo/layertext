@@ -132,3 +132,40 @@ export function checkRevisedText(
   }
   return out;
 }
+
+/** 诊断包配置摘要（W5）：只保留域名/模型名/开关/数量，不含任何书稿与学生文本、不含 Key 与约定内容 */
+export interface DiagConfigInput {
+  baseUrl?: string;
+  model?: string;
+  failover?: unknown[];
+  autoRewriteOnMark?: boolean;
+  trustEdit?: boolean;
+  inPlaceEdit?: boolean;
+  lowThinking?: boolean;
+  tiers?: unknown;
+  recentFiles?: string[];
+  instructions?: string;
+}
+
+export function buildDiagSummary(cfg: DiagConfigInput, appVersion: string, userAgent: string): Record<string, unknown> {
+  let host = cfg.baseUrl ?? '';
+  try { host = new URL(host).host; } catch { if (host) host = '(自定义地址)'; }
+  return {
+    应用版本: appVersion,
+    系统: userAgent,
+    导出时间: new Date().toISOString(),
+    配置摘要: {
+      AI服务商域名: host || '(未配置)',
+      模型: cfg.model || '(未配置)',
+      备用供应商数: cfg.failover?.length ?? 0,
+      全局AI直改: cfg.autoRewriteOnMark ?? false,
+      信任模式: cfg.trustEdit ?? false,
+      原地编辑原稿: cfg.inPlaceEdit ?? true,
+      关闭思考: cfg.lowThinking !== false,
+      分层方案自定义: Boolean(cfg.tiers),
+      长期审校约定字数: (cfg.instructions ?? '').length,
+      最近文件数: cfg.recentFiles?.length ?? 0,
+    },
+    隐私说明: '本诊断包不含任何书稿、学生文本或 API Key；仅含配置摘要、错误日志与成本统计。',
+  };
+}

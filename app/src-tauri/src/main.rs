@@ -166,6 +166,60 @@ fn prompts_dir() -> Result<String, String> {
     Ok(dir)
 }
 
+/* ---------- 本地错误日志（W5：轮转保留 5 份；零遥测——只写本机，绝不上报） ---------- */
+
+fn logs_dir() -> Result<String, String> {
+    reports_dir() // 复用报告目录：~/Documents/LayerText质检报告
+}
+
+fn log_path() -> Result<String, String> {
+    Ok(format!("{}/错误日志.log", logs_dir()?))
+}
+
+const LOG_MAX_BYTES: u64 = 512 * 1024;
+const LOG_KEEP: u32 = 5;
+
+/// 追加错误日志（超 512KB 轮转：错误日志.log → .1.log → … → .5.log，最老删除）
+fn append_log_impl(content: &str) -> Result<(), String> {
+    let path = log_path()?;
+    if let Ok(meta) = std::fs::metadata(&path) {
+        if meta.len() > LOG_MAX_BYTES {
+            for i in (1..LOG_KEEP).rev() {
+                let from = format!("{}/错误日志.{}.log", logs_dir()?, i);
+                let to = format!("{}/错误日志.{}.log", logs_dir()?, i + 1);
+                let _ = std::fs::rename(&from, &to);
+            }
+            let _ = std::fs::rename(&path, format!("{}/错误日志.1.log", logs_dir()?));
+        }
+    }
+    use std::io::Write;
+    let mut f = std::fs::OpenOptions::new().create(true).append(true).open(&path).map_err(|e| e.to_string())?;
+    f.write_all(content.as_bytes()).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn append_log(lines: String) -> Result<(), String> {
+    append_log_impl(&format!("[{}] {}", chrono_like_now(), lines.trim_end()))
+}
+
+#[tauri::command]
+fn read_error_log() -> Result<String, String> {
+    let path = log_path()?;
+    match std::fs::read_to_string(&path) {
+        Ok(s) => Ok(s),
+        Err(_) => Ok(String::new()), // 尚无日志属正常
+    }
+}
+
+/// 无 chrono 依赖的本地时间戳（诊断用途，格式对齐 sv-SE 即可）
+fn chrono_like_now() -> String {
+    let out = std::process::Command::new("date").arg("+%Y-%m-%d %H:%M:%S").output();
+    match out {
+        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).trim().to_string(),
+        _ => String::from("unknown-time"),
+    }
+}
+
 /// account=None → 主 Key（layertext.apikey）；Some("fb0") → 第一备用的 Key（layertext.apikey.fb0）
 fn key_service(account: &Option<String>) -> String {
     match account {
@@ -240,6 +294,11 @@ fn open_help_window(app: tauri::AppHandle, which: String) {
 }
 
 fn main() {
+    // W5：未捕获的 Rust panic 落本地错误日志（零遥测：只写本机，绝不上报）
+    std::panic::set_hook(Box::new(|info| {
+        let _ = append_log_impl(&format!("[panic] {}\n", info));
+    }));
+
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_http::init())
@@ -297,6 +356,9 @@ fn main() {
                 .text("help-usage", "使用说明")
                 .text("help-key", "如何获取 AI 的 Key（新手向）")
                 .text("help-qc", "QC 指标说明")
+                .separator()
+                .text("export-diag", "导出诊断包…（问题定位用，不含文本内容）")
+                .text("diag-test", "模拟一次错误（自检诊断包）")
                 .separator()
                 .text("help-example-dir", "打开本地示例文件夹")
                 .build()?;
@@ -372,7 +434,9 @@ fn main() {
             open_help_window,
             write_file_base64,
             export_tts,
-            prompts_dir
+            prompts_dir,
+            append_log,
+            read_error_log
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

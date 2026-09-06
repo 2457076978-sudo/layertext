@@ -5,12 +5,13 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { getVersion } from '@tauri-apps/api/app';
 import { open as openFileDialog, save as saveFileDialog } from '@tauri-apps/plugin-dialog';
 import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
 import * as XLSX from 'xlsx';
-import { unzipSync, strFromU8 } from 'fflate';
+import { unzipSync, zipSync, strFromU8, strToU8 } from 'fflate';
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, WidthType } from 'docx';
-import { applyRewriteTo, checkRevisedText, normalizeAndSplitChapters, parseAiJson } from './pure.js';
+import { applyRewriteTo, buildDiagSummary, checkRevisedText, normalizeAndSplitChapters, parseAiJson } from './pure.js';
 import { S, setStatus as uiSetStatus, esc } from './state.js';
 import { AI_PROVIDERS, aiErrHuman, buildAssistantPrompt, buildDraftSystemPrompt, buildRewriteSentencePrompt, buildSystemPrompt, callChat, chatStream, loadConfig, reloadPrompts, saveConfig, setAiUi, tierMaxLen, tierPlan } from './ai.js';
 import bundledWordlist from '../../assets/wordlists/curriculum_2022_level3_1600.txt?raw';
@@ -811,6 +812,58 @@ async function restoreChat(): Promise<void> {
   } catch { /* 无历史 */ }
 }
 
+/* ---------- 诊断包与本地错误日志（W5：零遥测——只写本机，导出自愿） ---------- */
+
+/** 前端未捕获错误 → 本地错误日志（轮转保留 5 份，见 main.rs append_log） */
+function reportError(kind: string, e: unknown): void {
+  const detail = e instanceof Error ? `${e.message}\n${e.stack ?? ''}` : String(e);
+  void invoke('append_log', { lines: `[${kind}] ${detail}\n` }).catch(() => undefined);
+}
+
+window.addEventListener('error', (ev) => reportError('window-error', ev.error ?? ev.message));
+window.addEventListener('unhandledrejection', (ev) => reportError('unhandled-rejection', (ev as PromiseRejectionEvent).reason));
+
+/** 导出诊断包 zip：配置摘要(不含文本) + 错误日志 + 成本台账（用户自愿发给别人定位问题用） */
+async function exportDiagnostics(): Promise<void> {
+  const date = new Date().toISOString().slice(0, 10);
+  const savePath = await saveFileDialog({
+    defaultPath: `LayerText诊断包_${date}.zip`,
+    filters: [{ name: '诊断包 ZIP', extensions: ['zip'] }],
+  });
+  if (typeof savePath !== 'string') return;
+  try {
+    const version = await getVersion().catch(() => '未知');
+    const summary = buildDiagSummary(S.appConfig, version, navigator.userAgent);
+    const files: Record<string, Uint8Array> = { '诊断信息.json': strToU8(JSON.stringify(summary, null, 1)) };
+    try {
+      const log = await invoke<string>('read_error_log');
+      if (log.trim()) files['错误日志.log'] = strToU8(log.slice(-128 * 1024)); // 最多带最近 128KB
+    } catch { /* 无日志 */ }
+    try {
+      const dir = await invoke<string>('reports_dir');
+      const cost = await invoke<string>('read_text_file', { path: `${dir}/AI成本台账.csv` });
+      if (cost.trim()) files['AI成本台账.csv'] = strToU8(cost.slice(-64 * 1024));
+    } catch { /* 无台账 */ }
+    const zipped = zipSync(files, { level: 6 });
+    const zbuf = zipped.buffer.slice(zipped.byteOffset, zipped.byteOffset + zipped.byteLength) as ArrayBuffer;
+    await invoke('write_file_base64', { path: savePath, b64: bufToB64(zbuf) });
+    setStatus(`诊断包已导出（${Object.keys(files).length} 个文件，不含任何书稿与学生文本）：${savePath}`, 'saved');
+    void invoke('reveal_path', { path: savePath });
+  } catch (e) {
+    setStatus('诊断包导出失败：' + e, 'err');
+  }
+}
+
+/** 自检：人为制造一条错误写入日志，验证"崩溃 → 诊断包还原现场"链路 */
+function simulateError(): void {
+  try {
+    throw new Error('自检错误（人为制造，用于验证诊断包含错误日志）：如果诊断包里的 错误日志.log 看到这条，链路正常');
+  } catch (e) {
+    reportError('self-test', e);
+  }
+  setStatus('已写入一条测试错误——点「帮助 → 导出诊断包…」，打开 zip 里的 错误日志.log 应能看到这条记录', 'saved');
+}
+
 /* ---------- 事件绑定 ---------- */
 
 $('tab-text').addEventListener('click', () => switchView('text'));
@@ -999,6 +1052,8 @@ void listen<string>('menu-action', (ev) => {
     case 'book-config': void saveBookConfig(); break;
     case 'rewrite-rules': showRewritePop(); break;
     case 'help-key': void invoke('open_help_window', { which: 'key' }); break;
+    case 'export-diag': void exportDiagnostics(); break;
+    case 'diag-test': simulateError(); break;
     case 'export-docx': void exportDocx(); break;
     case 'export-tts': void exportTts(); break;
     case 'view-diff':
