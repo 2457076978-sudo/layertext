@@ -10,6 +10,7 @@ import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
 import * as XLSX from 'xlsx';
 import { unzipSync, strFromU8 } from 'fflate';
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, WidthType } from 'docx';
+import { applyRewriteTo, normalizeAndSplitChapters, parseAiJson } from './pure.js';
 import bundledWordlist from '../../assets/wordlists/curriculum_2022_level3_1600.txt?raw';
 import exampleMd from '../../examples/texts/aesop_tortoise_hare.md?raw';
 import exampleVocab from '../../examples/vocab/sample_teaching_vocab.csv?raw';
@@ -265,10 +266,19 @@ async function addSession(md: string, fileName: string, sourcePath: string | nul
   }
   sessions.push({ md, fileName, sourcePath, markPath, review, report: null, reportSavedPath: null, dirty: false });
   activeIdx = sessions.length - 1;
-  chatMsgs = [];       // 换章节清空对话（上下文以文件为准）
+  // 会话保持（学 harness）：切换文件不清空对话，注入上下文提示让 AI 知道当前章节
+  if (chatMsgs.length > 0) {
+    chatMsgs.push({ role: 'user', content: `（系统提示：教师已切换到「${fileName}」，后续操作与回答默认针对这一章）` });
+    chatRender();
+  }
   aiHistory = [];
   suggestions = [];
   renderAll();
+  void pushRecent(fileName, sourcePath);
+  // 换书提醒：本书文件夹无配套配置时提示（学生水平/词库可能需要切换）
+  if (sourcePath && sessions.filter((x) => x.sourcePath && x.sourcePath.slice(0, x.sourcePath.lastIndexOf('/')) === sourcePath.slice(0, sourcePath.lastIndexOf('/'))).length === 1) {
+    setStatus(`已打开「${fileName}」。注意：这本书还没有专属词库配置（学生水平诊断依据）——若当前词库是别的书的，请 文件 → 导入自定义词库 后「保存为本书配置」`, '');
+  }
   // 首次载入文件 → 自动进入四步导览
   if (!appConfig.tourSeen && sessions.length === 1) setTimeout(() => tourShow(0), 600);
 }
@@ -674,6 +684,58 @@ function switchView(name: 'text' | 'report' | 'suggest' | 'diff'): void {
   }
 }
 
+/* ---------- 最近编辑 ---------- */
+
+async function pushRecent(fileName: string, sourcePath: string | null): Promise<void> {
+  if (!sourcePath) return;
+  const list: string[] = [sourcePath, ...(appConfig.recentFiles ?? []).filter((x) => x !== sourcePath)].slice(0, 10);
+  appConfig.recentFiles = list;
+  await saveConfig();
+}
+
+async function renderRecentInEmpty(): Promise<void> {
+  const reader = $('reader');
+  if (!reader.querySelector('.empty') || !appConfig.recentFiles?.length) return;
+  const div = document.createElement('div');
+  div.style.cssText = 'margin-top:18px;text-align:center';
+  div.innerHTML = `<div style="font-weight:600;margin-bottom:8px">最近编辑</div>` +
+    appConfig.recentFiles.map((p) =>
+      `<div class="recent-item" data-path="${esc(p)}" style="cursor:pointer;padding:5px 10px;border-radius:8px;display:inline-block;margin:3px;background:#f8fafc;border:1px solid var(--line);font-size:12px">${esc(p.slice(p.lastIndexOf('/') + 1))}</div>`).join('');
+  reader.appendChild(div);
+  div.querySelectorAll('.recent-item').forEach((el) =>
+    el.addEventListener('click', async () => {
+      const path = (el as HTMLElement).dataset.path!;
+      try {
+        const raw = path.toLowerCase().endsWith('.docx')
+          ? docxToText(await invoke<string>('read_file_base64', { path }))
+          : await invoke<string>('read_text_file', { path });
+        const { chapters } = normalizeAndSplitChapters(raw, path.slice(path.lastIndexOf('/') + 1));
+        for (const ch of chapters) await addSession(ch.md, chapters.length > 1 ? ch.title : path.slice(path.lastIndexOf('/') + 1), path);
+      } catch (e) { setStatus('打开失败：' + e, 'err'); }
+    }));
+}
+
+/* ---------- AI 会话持久化（防抖落盘，重启可恢复） ---------- */
+
+let chatSaveTimer: ReturnType<typeof setTimeout> | undefined;
+function scheduleChatSave(): void {
+  clearTimeout(chatSaveTimer);
+  chatSaveTimer = setTimeout(() => void (async () => {
+    try {
+      const dir = await invoke<string>('reports_dir');
+      await invoke('write_text_file', { path: `${dir}/AI会话.json`, content: JSON.stringify(chatMsgs, null, 1) });
+    } catch { /* 尽力保存 */ }
+  })(), 800);
+}
+
+async function restoreChat(): Promise<void> {
+  try {
+    const dir = await invoke<string>('reports_dir');
+    const saved = JSON.parse(await invoke<string>('read_text_file', { path: `${dir}/AI会话.json` }));
+    if (Array.isArray(saved) && saved.length) { chatMsgs = saved; chatRender(); }
+  } catch { /* 无历史 */ }
+}
+
 /* ---------- 事件绑定 ---------- */
 
 $('tab-text').addEventListener('click', () => switchView('text'));
@@ -791,25 +853,14 @@ async function openChapterFiles(): Promise<void> {
   const list = Array.isArray(paths) ? paths : paths ? [paths] : [];
   for (const p of list) {
     try {
-      let md: string;
-      let loadPath = p;
-      let name = p.slice(p.lastIndexOf('/') + 1);
-      if (p.toLowerCase().endsWith('.docx')) {
-        const b64 = await invoke<string>('read_file_base64', { path: p });
-        md = normalizeToChapter(docxToText(b64), name);
-        loadPath = `${p.slice(0, p.lastIndexOf('/'))}/${name.replace(/\.docx$/i, '')}_转换.md`;
-        await invoke('write_text_file', { path: loadPath, content: md });
-        name = name.replace(/\.docx$/i, '') + '_转换.md';
-      } else {
-        md = await invoke<string>('read_text_file', { path: p });
-        if (!md.includes('## Chapter')) {
-          md = normalizeToChapter(md, name);
-          loadPath = `${p.slice(0, p.lastIndexOf('/'))}/${name.replace(/\.(md|txt|markdown)$/i, '')}_转换.md`;
-          await invoke('write_text_file', { path: loadPath, content: md });
-          name = name.replace(/\.(md|txt|markdown)$/i, '') + '_转换.md';
-        }
-      }
-      await addSession(md, name, loadPath);
+      const name = p.slice(p.lastIndexOf('/') + 1);
+      const raw = p.toLowerCase().endsWith('.docx')
+        ? docxToText(await invoke<string>('read_file_base64', { path: p }))
+        : await invoke<string>('read_text_file', { path: p });
+      // 智能归一化：已合规直接用；多章标题拆多 tab；无章节结构的文本内存包装直接显示（原文件不动）
+      const { chapters } = normalizeAndSplitChapters(raw, name);
+      for (const ch of chapters) await addSession(ch.md, chapters.length > 1 ? ch.title : name, p);
+      if (chapters.length > 1) setStatus(`识别到 ${chapters.length} 个章节，已分标签页打开`, 'saved');
     } catch (e) {
       setStatus('读取失败：' + e, 'err');
     }
@@ -1033,29 +1084,6 @@ async function callChat(
     clearTimeout(timer);
     externalSignal?.removeEventListener('abort', onAbort);
   }
-}
-
-/** 从 AI 返回文本中尽力解析出 JSON 数组（容错：代码围栏/单对象/截断修复/前后解释文字） */
-function parseAiJson(raw: string): unknown[] {
-  let t = (raw ?? '').trim();
-  const fence = t.match(/```(?:json)?\s*([\s\S]*?)```/);
-  if (fence) t = fence[1].trim();
-  const s1 = t.indexOf('[');
-  const e1 = t.lastIndexOf(']');
-  if (s1 >= 0 && e1 > s1) {
-    const cut = t.slice(s1, e1 + 1);
-    try { return JSON.parse(cut) as unknown[]; } catch { /* 截断则尝试修复 */ }
-    const lastObj = cut.lastIndexOf('}');
-    if (lastObj > 0) {
-      try { return JSON.parse(cut.slice(0, lastObj + 1) + ']') as unknown[]; } catch { /* fall */ }
-    }
-  }
-  const s2 = t.indexOf('{');
-  const e2 = t.lastIndexOf('}');
-  if (s2 >= 0 && e2 > s2) {
-    try { return [JSON.parse(t.slice(s2, e2 + 1))]; } catch { /* fall */ }
-  }
-  throw new Error('AI 返回中未找到 JSON（AI 原话前 200 字：' + (raw ?? '').slice(0, 200).replace(/\s+/g, ' ') + '）');
 }
 
 /** 组装 system 提示词（含用户的长期审校约定 + 书级改写规则） */
@@ -1551,6 +1579,8 @@ $('tier-q').addEventListener('click', (e) => { e.stopPropagation(); showTierPlan
 void (async () => {
   await loadConfig();
   if (!appConfig.firstRunSeen) showWelcome();
+  await restoreChat();
+  await renderRecentInEmpty();
 })();
 
 /* ================= 分层方案（B/M/A 标准可调） · 本书配置 · 首启动欢迎 ================= */
@@ -1806,13 +1836,7 @@ let rewriteRules: { replacements: RewriteRule[]; viewpoint: 'keep' | 'first'; vi
 const rewritePop = $('rewrite-pop');
 
 function applyRewrite(text: string): string {
-  let t = text;
-  for (const r of rewriteRules.replacements) {
-    if (!r.from) continue;
-    const esc = r.from.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    t = t.replace(new RegExp(`\\b${esc}\\b`, 'g'), r.to);
-  }
-  return t;
+  return applyRewriteTo(text, rewriteRules.replacements);
 }
 
 /** 规则文本（注入每次 AI 请求） */
@@ -2303,7 +2327,8 @@ async function sendChat(): Promise<void> {
         chatMsgs.push({ role: 'tool', tool_call_id: t.id, content: result });
       }
     }
-    statusEl.textContent = '就绪 ' + usageTotal;
+    statusEl.textContent = `就绪 ${usageTotal} · 对话 ${chatMsgs.filter((m) => m.role === 'user').length} 轮（已自动保存）`;
+    scheduleChatSave();
   } catch (e) {
     statusEl.textContent = '出错：' + e;
   } finally {
@@ -2313,6 +2338,7 @@ async function sendChat(): Promise<void> {
 }
 
 $('chat-send').addEventListener('click', () => void sendChat());
+$('chat-clear').addEventListener('click', () => { chatMsgs = []; chatRender(); scheduleChatSave(); setStatus('AI 对话已清空', ''); });
 $('chat-input').addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) void sendChat();
 });
