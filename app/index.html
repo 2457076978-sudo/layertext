@@ -188,6 +188,19 @@
     .sgtable .warn-badge { color: #b45309; white-space: nowrap; }
     .sg-actions { display: flex; gap: 10px; align-items: center; margin: 12px 0; }
 
+    /* 行内修订对照（左栏所见即所得） */
+    .sent.sug-pending { background: #fefce8; outline: 1px dashed #d4a72c; }
+    .inline-sug {
+      display: block; margin: 4px 0 6px; padding: 8px 10px; border-radius: 8px;
+      background: #f0fdf4; border: 1px solid #bbf7d0; font-size: 15px; line-height: 1.9;
+    }
+    .inline-sug .rev-text { color: #14532d; }
+    .inline-sug .sug-basis { display: block; color: var(--muted); font-size: 11px; margin-top: 2px; }
+    .inline-sug button { font-size: 12px; padding: 3px 10px; margin: 4px 8px 0 0; }
+    .inline-sug .btn-ok { background: #16a34a; border-color: #16a34a; color: #fff; }
+    .inline-sug .btn-ok:hover { opacity: .88; }
+    .inline-sug .sug-warn { color: #b45309; font-size: 11px; margin-left: 6px; }
+
     /* ---------- 弹层面板 ---------- */
     #pop {
       position: fixed; z-index: 50; display: none; width: 300px; max-width: 90vw;

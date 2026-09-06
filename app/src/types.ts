@@ -104,6 +104,10 @@ export interface Suggestion {
   basis: string;
   alternative?: string;
   check: { passive: boolean; relcl: boolean; pastperf: boolean; overlong: boolean };
+  /** 行内定位（正文唯一匹配到 original 时填，用于左栏直接对照） */
+  pi?: number;
+  si?: number;
+  status?: 'pending' | 'accepted' | 'rejected';
 }
 
 /** 变更日志 CSV 表头（与原型审计 schema 一致） */

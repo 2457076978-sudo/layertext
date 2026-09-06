@@ -245,6 +245,7 @@ function renderAll(): void {
     return;
   }
   renderReader(s);
+  attachInlineSuggestions();
   renderReportPane(s);
   renderSidebar(s, sidebarHandlers);
   fileSummary();
@@ -487,9 +488,9 @@ function showWordPanel(session: FileSession, wEl: HTMLElement, x: number, y: num
     <div class="pop-h">${esc(wEl.textContent ?? '')}</div>
     <div class="pop-info">词表状态：${stateLabel}${origin && origin !== tok ? `<br/>词形还原原形：${esc(origin)}` : ''}</div>
     <div class="pop-marks"></div>
-    <div class="pop-btns">${WORD_TYPES.map((t) => `<button data-mk="${t.key}">${t.label}</button>`).join('')}</div>
+    <div class="pop-btns"><button data-mk="__rewrite" class="primary" title="让 AI 按当前标记意图改写这一句，改写结果直接显示在正文里">✨ AI 改写本句</button>${WORD_TYPES.map((t) => `<button data-mk="${t.key}">${t.label}</button>`).join('')}</div>
     <textarea id="pop-note" placeholder="备注（可选，随下一条标记保存）"></textarea>
-    <div class="pop-tip">可连续标记多个类型；点击空白处关闭</div>`;
+    <div class="pop-tip">先标记意图再点「AI 改写本句」，改写会直接出现在正文中供采纳</div>`;
   bindTypeButtons(session, 'word', pi, si, wi);
   refreshPop('open');
   placePop(x, y);
@@ -525,11 +526,17 @@ function bindTypeButtons(session: FileSession, level: 'word' | 'sent', pi: numbe
   pop.querySelectorAll('[data-mk]').forEach((b) =>
     b.addEventListener('click', () => {
       const type = (b as HTMLElement).dataset.mk as MarkType;
+      if (type === '__rewrite') {
+        const intent = marksAt(session, 'word', pi, si, wi).map((m) => typeLabel(m.type)).join('、') || '词汇简化';
+        void aiRewriteSentence(pi, si, intent);
+        return;
+      }
       const note = (pop.querySelector('#pop-note') as HTMLTextAreaElement | null)?.value.trim() || undefined;
       if (marksAt(session, level, pi, si, wi).some((m) => m.type === type)) return; // 已有同类型标记
+      const sentText = sentsOf(extractParas(splitChapter(session.md).body)[pi], false)[si] ?? '';
       addMark(session, {
         id: newMarkId(), level, pi, si, ...(level === 'word' ? { wi } : {}),
-        ...(level === 'word' ? { word: pop.querySelector('.pop-h')?.textContent ?? '' } : { text: sentsOf(extractParas(splitChapter(session.md).body)[pi], false)[si]?.slice(0, 40) ?? '' }),
+        ...(level === 'word' ? { word: pop.querySelector('.pop-h')?.textContent ?? '', text: sentText.slice(0, 40) } : { text: sentText.slice(0, 40) }),
         type, note, ts: Date.now(),
       });
       const ta = pop.querySelector('#pop-note') as HTMLTextAreaElement | null;
@@ -970,8 +977,9 @@ async function aiSuggest(instruction?: string): Promise<void> {
         };
       });
     renderSuggestions();
+    attachInlineSuggestions();
     switchView('suggest');
-    setStatus(`AI 返回 ${suggestions.length} 条修订候选 ${usage}——采纳与否由你勾选`, 'saved');
+    setStatus(`AI 返回 ${suggestions.length} 条修订候选 ${usage}——建议已标到正文里，点 ✓ 采纳 / ✗ 放弃`, 'saved');
   } catch (e) {
     setStatus('AI 请求失败：' + e, 'err');
   } finally {
@@ -1032,52 +1040,211 @@ function csvCell(v: string): string {
   return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
 }
 
+/** 批量应用（修订建议页）：统一走 acceptSuggestion（工作稿+变更日志），不再另生成 AI修订 文件 */
 async function applySuggestions(): Promise<void> {
   const s = activeSession();
   if (!s) return;
   const checked = [...document.querySelectorAll<HTMLInputElement>('#pane-suggest [data-sg]:checked')].map((cb) => Number(cb.dataset.sg));
-  if (checked.length === 0) { setStatus('请先勾选要采用的修订', 'err'); return; }
-  let newMd = s.md;
-  const appliedIds: string[] = [];
-  const logRows: string[][] = [];
+  if (checked.length === 0) { setStatus('请先勾选要采用的修订（或在正文里直接点 ✓）', 'err'); return; }
+  for (const i of checked.sort((a, b) => b - a)) {
+    const g = suggestions[i];
+    if (g && g.pi !== undefined) await acceptSuggestion(g);
+  }
+}
+
+/* ---------- 行内修订对照（左栏所见即所得） ---------- */
+
+/** 在正文中唯一定位原句；多处或未找到返回 null */
+function locateOriginal(session: FileSession, original: string): { pi: number; si: number } | null {
+  const paras = extractParas(splitChapter(session.md).body);
+  const hits: { pi: number; si: number }[] = [];
+  paras.forEach((p, pi) =>
+    sentsOf(p, false).forEach((sent, si) => {
+      if (sent === original) hits.push({ pi, si });
+    }),
+  );
+  return hits.length === 1 ? hits[0] : null;
+}
+
+/** 为 pending 建议挂行内（不唯一匹配的只进修订建议表） */
+function attachInlineSuggestions(): void {
+  const s = activeSession();
+  if (!s) return;
+  for (const g of suggestions) {
+    if (g.status && g.status !== 'pending') continue;
+    g.status = 'pending';
+    if (g.pi === undefined) {
+      const loc = locateOriginal(s, g.original);
+      if (!loc) continue;
+      g.pi = loc.pi;
+      g.si = loc.si;
+    }
+    renderInlineOne(s, g);
+  }
+}
+
+function renderInlineOne(session: FileSession, g: Suggestion): void {
+  if (g.pi === undefined || g.si === undefined) return;
+  const sentEl = document.querySelector(`.sent[data-pi="${g.pi}"][data-si="${g.si}"]`);
+  if (!sentEl || sentEl.nextElementSibling?.classList.contains('inline-sug')) return;
+  sentEl.classList.add('sug-pending');
+  const bad = g.check.passive || g.check.relcl || g.check.pastperf || g.check.overlong;
+  const div = document.createElement('span');
+  div.className = 'inline-sug';
+  div.dataset.markId = g.markId;
+  div.innerHTML = `
+    <span class="rev-text">${esc(g.revised)}</span>
+    ${bad ? `<span class="sug-warn">⚠ 引擎复核：仍含${[g.check.passive ? '被动' : '', g.check.relcl ? '定从' : '', g.check.pastperf ? '过去完成' : '', g.check.overlong ? '超长' : ''].filter(Boolean).join('/')}</span>` : ''}
+    <span class="sug-basis">${esc(g.basis)}${g.alternative ? '｜备选：' + esc(g.alternative) : ''}</span>
+    <button class="btn-ok">✓ 采纳（正文立即更新，改动记入工作稿）</button>
+    <button class="btn-no">✗ 放弃</button>`;
+  div.querySelector('.btn-ok')!.addEventListener('click', () => void acceptSuggestion(g));
+  div.querySelector('.btn-no')!.addEventListener('click', () => {
+    g.status = 'rejected';
+    div.remove();
+    sentEl.classList.remove('sug-pending');
+    suggestions = suggestions.filter((x) => x !== g);
+    renderSuggestions();
+  });
+  sentEl.after(div);
+}
+
+function workPath(s: FileSession): string {
+  if (s.sourcePath) {
+    const dir = s.sourcePath.slice(0, s.sourcePath.lastIndexOf('/'));
+    return `${dir}/${s.fileName.replace(/\.(md|txt|markdown)$/i, '')}_工作稿.md`;
+  }
+  return ''; // 示例模式由调用方处理
+}
+
+/** 文本变化后，按句子前缀把现有标记重新对齐（防替换/拆句后错位） */
+function remapMarks(session: FileSession): void {
+  const paras = extractParas(splitChapter(session.md).body);
+  const sents = paras.map((p) => sentsOf(p, false));
+  for (const m of session.review.marks) {
+    const prefix = (m.text ?? '').slice(0, 12);
+    if (!prefix) continue; // 旧数据无句前缀，保留原索引
+    const cur = sents[m.pi]?.[m.si];
+    let ok = cur && cur.startsWith(prefix);
+    if (!ok) {
+      const hits: [number, number][] = [];
+      sents.forEach((ss, pi) => ss.forEach((sent, si) => { if (sent.startsWith(prefix)) hits.push([pi, si]); }));
+      if (hits.length === 1) {
+        m.pi = hits[0][0];
+        m.si = hits[0][1];
+        ok = true;
+      }
+    }
+    if (ok && m.level === 'word' && m.word) {
+      const sent = sents[m.pi]?.[m.si] ?? '';
+      const toks = tokenizeTxt(sent);
+      const raws = sent.match(/[A-Za-z][A-Za-z'\-]*/g) ?? [];
+      const wi = raws.findIndex((w, i) => (toks[i] ?? w.toLowerCase()) === m.word!.toLowerCase());
+      if (wi >= 0) m.wi = wi;
+    }
+  }
+}
+
+async function acceptSuggestion(g: Suggestion): Promise<void> {
+  const s = activeSession();
+  if (!s || g.pi === undefined || g.si === undefined) return;
+  const paras = extractParas(splitChapter(s.md).body);
+  const cur = sentsOf(paras[g.pi] ?? '', false)[g.si];
+  if (cur !== g.original) {
+    const loc = locateOriginal(s, g.original);
+    if (!loc) { setStatus('原句已变化且无法唯一定位，请重新请求建议', 'err'); return; }
+    g.pi = loc.pi; g.si = loc.si;
+  }
+  const at = s.md.indexOf(g.original);
+  if (at < 0) { setStatus('正文中找不到该原句', 'err'); return; }
+  s.md = s.md.slice(0, at) + g.revised + s.md.slice(at + g.original.length);
+
+  // 标记对齐 + 对应标记清除 + 落盘
+  const removed = s.review.marks.filter((m) => m.id === g.markId);
+  s.review.marks = s.review.marks.filter((m) => m.id !== g.markId);
+  remapMarks(s);
+  g.status = 'accepted';
+  suggestions = suggestions.filter((x) => x !== g);
+
   const date = new Date().toLocaleDateString('sv-SE');
   const tier = (s.report?.tier ?? ($('tier') as HTMLSelectElement).value) as Tier;
-  for (const i of checked) {
-    const g = suggestions[i];
-    const mark = s.review.marks.find((m) => m.id === g.markId);
-    if (!mark) continue;
-    const at = newMd.indexOf(g.original);
-    if (at < 0) { logRows.push([`R?`, date, tier, `P${String(mark.pi + 1).padStart(2, '0')}`, `P${mark.pi + 1}-S${mark.si + 1}`, g.original, '(原句定位失败，未应用)', RULE_BY_TYPE[mark.type] ?? 'R00', g.basis, 'AI候选']); continue; }
-    newMd = newMd.slice(0, at) + g.revised + newMd.slice(at + g.original.length);
-    appliedIds.push(mark.id);
-    logRows.push(['R1', date, tier, `P${String(mark.pi + 1).padStart(2, '0')}`, `P${mark.pi + 1}-S${mark.si + 1}`, g.original, g.revised, RULE_BY_TYPE[mark.type] ?? 'R00', g.basis, 'AI候选']);
+  let outDir: string, logPath: string, workFile: string;
+  if (s.sourcePath) {
+    outDir = s.sourcePath.slice(0, s.sourcePath.lastIndexOf('/'));
+    workFile = workPath(s);
+    logPath = `${outDir}/变更日志_AI审核.csv`;
+  } else {
+    outDir = await invoke<string>('reports_dir');
+    workFile = `${outDir}/示例_工作稿.md`;
+    logPath = `${outDir}/变更日志_AI审核.csv`;
   }
-  if (!s.sourcePath) { setStatus('示例模式不支持应用修订——请打开真实章节文件', 'err'); return; }
-  const dir = s.sourcePath.slice(0, s.sourcePath.lastIndexOf('/'));
-  const base = s.fileName.replace(/\.(md|txt|markdown)$/i, '');
-  const newPath = `${dir}/${base}_AI修订_${date}.md`;
-  const logPath = `${dir}/变更日志_AI审核.csv`;
   try {
-    await invoke('write_text_file', { path: newPath, content: newMd });
+    await invoke('write_text_file', { path: workFile, content: s.md });
     let csv = '';
-    try {
-      csv = await invoke<string>('read_text_file', { path: logPath });
-    } catch { csv = ''; }
+    try { csv = await invoke<string>('read_text_file', { path: logPath }); } catch { /* 新建 */ }
     if (!csv.trim()) csv = CHANGELOG_HEADER.join(',') + '\n';
-    csv += logRows.map((r) => r.map(csvCell).join(',')).join('\n') + '\n';
+    csv += [
+      'R1', date, tier,
+      `P${String((g.pi ?? 0) + 1).padStart(2, '0')}`,
+      `P${(g.pi ?? 0) + 1}-S${(g.si ?? 0) + 1}`,
+      g.original, g.revised,
+      RULE_BY_TYPE[removed[0]?.type ?? ''] ?? 'R00',
+      g.basis, 'AI候选-行内采纳',
+    ].map(csvCell).join(',') + '\n';
     await invoke('write_text_file', { path: logPath, content: csv });
-    // 移除已应用标记并落盘
-    s.review.marks = s.review.marks.filter((m) => !appliedIds.includes(m.id));
     scheduleSave(s, () => undefined);
-    aiHistory = [];    // 文本已变，旧建议对话作废
-    // 新版本作为新 tab 打开
-    await addSession(newMd, base + `_AI修订_${date}.md`, newPath);
-    suggestions = suggestions.filter((g) => !appliedIds.includes(g.markId));
+    renderReader(s);
+    attachInlineSuggestions();
+    renderSidebar(s, sidebarHandlers);
     renderSuggestions();
-    setStatus(`已应用 ${appliedIds.length} 条修订：新版本 ${newPath}；变更日志 ${logPath}；对应标记已清除`, 'saved');
-    void invoke('reveal_path', { path: newPath });
+    setStatus(`✓ 已采纳：正文已更新。工作稿 ${workFile}（原稿未动）；变更已记入日志`, 'saved');
   } catch (e) {
-    setStatus('应用失败：' + e, 'err');
+    setStatus('落盘失败：' + e, 'err');
+  }
+}
+
+/* ---------- 词面板：AI 改写本句 ---------- */
+
+async function aiRewriteSentence(pi: number, si: number, intent: string): Promise<void> {
+  const s = activeSession();
+  if (!s) return;
+  const key = await invoke<string>('load_api_key');
+  if (!key) { showAiSettings(); return; }
+  const paras = extractParas(splitChapter(s.md).body);
+  const sent = sentsOf(paras[pi] ?? '', false)[si];
+  if (!sent) return;
+  const tier = (s.report?.tier ?? ($('tier') as HTMLSelectElement).value) as Tier;
+  const system = await buildSystemPrompt();
+  const btn = pop.querySelector('[data-mk="__rewrite"]') as HTMLElement | null;
+  if (btn) { btn.textContent = '⏳ 改写中…'; btn.disabled = true; }
+  try {
+    const { content } = await callChat([
+      { role: 'system', content: system },
+      {
+        role: 'user',
+        content: `层级：${tier}（句长上限 ${TIER_MAX_LEN[tier] ?? 16} 词）\n教师意图：${intent}\n请改写下面这句（只输出一个元素的 JSON 数组，original 必须与原句一字不差）：\n${sent}`,
+      },
+    ], 800);
+    const start = content.indexOf('[');
+    const end = content.lastIndexOf(']');
+    if (start < 0) throw new Error('AI 返回中未找到 JSON');
+    const arr = JSON.parse(content.slice(start, end + 1)) as { original?: string; revised?: string; basis?: string; alternative?: string }[];
+    const one = arr[0];
+    if (!one?.revised) throw new Error('AI 未返回改写');
+    const risk = sentenceRisks(String(one.revised), TIER_MAX_LEN[tier] ?? 16);
+    suggestions.push({
+      markId: 'rw-' + Date.now().toString(36), type: intent || '词改写',
+      original: String(one.original ?? sent), revised: String(one.revised),
+      basis: one.basis ?? '', alternative: one.alternative, status: 'pending',
+      check: { passive: risk.passive, relcl: risk.relcl, pastperf: risk.pastperf, overlong: risk.overlong },
+    });
+    hidePop();
+    attachInlineSuggestions();
+    setStatus('AI 已给出本句改写——正文黄色区域内点 ✓ 采纳或 ✗ 放弃', 'saved');
+  } catch (e) {
+    setStatus('AI 改写失败：' + e, 'err');
+  } finally {
+    if (btn) { btn.textContent = '✨ AI 改写本句'; btn.disabled = false; }
   }
 }
 
@@ -1270,7 +1437,8 @@ function executeTool(name: string, argsJson: string): string {
           check: { passive: risk.passive, relcl: risk.relcl, pastperf: risk.pastperf, overlong: risk.overlong },
         });
         renderSuggestions();
-        setStatus('AI 在对话中提交了 1 条修订候选（经引擎复核）——到「修订建议」页勾选确认', 'saved');
+        attachInlineSuggestions();
+        setStatus('AI 在对话中提交了 1 条修订候选（经引擎复核）——正文黄色区域点 ✓ 采纳', 'saved');
         return `已提交到修订建议页（引擎复核：${risk.passive || risk.relcl || risk.pastperf || risk.overlong ? '仍命中黑名单/超长，已标⚠' : '通过'}）。提醒教师勾选确认。`;
       }
       default:
