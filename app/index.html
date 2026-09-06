@@ -201,6 +201,24 @@
     .inline-sug .btn-ok:hover { opacity: .88; }
     .inline-sug .sug-warn { color: #b45309; font-size: 11px; margin-left: 6px; }
 
+    /* 分层初稿弹层 */
+    #draft-pop {
+      position: fixed; z-index: 57; display: none; width: 440px; max-width: 92vw;
+      background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+      box-shadow: 0 8px 30px rgba(15, 23, 42, .14); padding: 16px; font-size: 13px;
+      left: 50%; top: 14%; transform: translateX(-50%);
+    }
+    #draft-pop.open { display: block; }
+    #draft-pop .fld { margin-bottom: 10px; }
+    #draft-pop .fld label { display: block; color: var(--muted); font-size: 12px; margin-bottom: 4px; }
+    #draft-pop textarea {
+      width: 100%; height: 64px; border: 1px solid var(--line); border-radius: 8px;
+      padding: 6px 10px; font-size: 12px; font-family: inherit; resize: vertical;
+    }
+    #draft-progress { margin-top: 8px; font-size: 12px; }
+    #draft-progress .bar { height: 6px; background: #eef2ff; border-radius: 999px; margin-top: 6px; overflow: hidden; }
+    #draft-progress .bar i { display: block; height: 100%; background: var(--brand); width: 0; transition: width .3s; }
+
     /* ---------- 弹层面板 ---------- */
     #pop {
       position: fixed; z-index: 50; display: none; width: 300px; max-width: 90vw;
@@ -250,6 +268,7 @@
       </select>
     </label>
     <button id="btn-run" class="primary">▶ 质检本章</button>
+    <button id="btn-draft">⚙ 分层初稿…</button>
     <button id="btn-ai">✨ AI 审核建议</button>
     <div id="status">打开章节文件后自动进入审校。词库/术语/标记等更多操作见顶部菜单栏（文件 · 质检 · 帮助）。</div>
   </header>
@@ -301,6 +320,7 @@
   <div id="pop"></div>
   <div id="gate-pop"></div>
   <div id="ai-pop"></div>
+  <div id="draft-pop"></div>
   <div id="demo-menu"></div>
 
   <script type="module" src="/src/main.ts"></script>

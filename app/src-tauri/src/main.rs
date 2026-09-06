@@ -194,7 +194,8 @@ fn main() {
                 .accelerator("CmdOrCtrl+R")
                 .build(app)?;
             let mi_ai = MenuItemBuilder::with_id("ai-suggest", "AI 审核建议…").build(app)?;
-            let qc_menu = SubmenuBuilder::new(app, "质检").item(&mi_run).separator().item(&mi_ai).build()?;
+            let mi_draft = MenuItemBuilder::with_id("draft", "生成分层初稿…").build(app)?;
+            let qc_menu = SubmenuBuilder::new(app, "质检").item(&mi_run).item(&mi_draft).separator().item(&mi_ai).build()?;
 
             let mi_vt = MenuItemBuilder::with_id("view-text", "正文审校").build(app)?;
             let mi_vr = MenuItemBuilder::with_id("view-report", "质检报告").build(app)?;

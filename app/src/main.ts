@@ -774,6 +774,7 @@ void listen<string>('menu-action', (ev) => {
     case 'view-report': switchView('report'); break;
     case 'ai-settings': showAiSettings(); break;
     case 'ai-suggest': void aiSuggest(); break;
+    case 'draft': showDraftPop(); break;
   }
 });
 
@@ -853,14 +854,20 @@ document.addEventListener('mousedown', (e) => {
   if (aiPop.classList.contains('open') && !(e.target as HTMLElement).closest('#ai-pop')) aiPop.classList.remove('open');
 });
 
-async function callChat(messages: { role: string; content: string }[], maxTokens: number): Promise<{ content: string; usage: string }> {
+async function callChat(
+  messages: { role: string; content: string }[],
+  maxTokens: number,
+  externalSignal?: AbortSignal,
+): Promise<{ content: string; usage: string }> {
   const cfg = await invoke<Record<string, string>>('load_api_config');
   const key = await invoke<string>('load_api_key');
   if (!key) throw new Error('未配置 API Key（菜单 LayerText → AI 设置）');
   const base = (cfg.baseUrl || 'https://api.openai.com/v1').replace(/\/+$/, '');
   const model = cfg.model || 'gpt-4o-mini';
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 120000);
+  const timer = setTimeout(() => ctrl.abort(), 180000);
+  const onAbort = () => ctrl.abort();
+  externalSignal?.addEventListener('abort', onAbort);
   try {
     const resp = await tauriFetch(`${base}/chat/completions`, {
       method: 'POST',
@@ -878,6 +885,7 @@ async function callChat(messages: { role: string; content: string }[], maxTokens
     return { content: data.choices?.[0]?.message?.content ?? '', usage };
   } finally {
     clearTimeout(timer);
+    externalSignal?.removeEventListener('abort', onAbort);
   }
 }
 
@@ -1247,6 +1255,130 @@ async function aiRewriteSentence(pi: number, si: number, intent: string): Promis
     if (btn) { btn.textContent = '✨ AI 改写本句'; btn.disabled = false; }
   }
 }
+
+$('btn-ai').addEventListener('click', () => void aiSuggest());
+
+/* ================= 分层初稿：首次导入按方向整章大改（两阶段工作流的第一阶段） ================= */
+
+const draftPop = $('draft-pop');
+let draftAbort: AbortController | null = null;
+
+const TIER_DRAFT_RULES: Record<string, string> = {
+  B: 'B（支架）层：平均句长 ≤14 词；只用课标 1600 词与术语表词汇；被动/定从/过去完成全部禁用；可合并短句、增补衔接，让最弱的学生也能读懂。',
+  M: 'M（中梯）层：平均句长 ≤16 词；只用课标 1600 词与术语表词汇；被动/定从/过去完成禁用；逐段对应原文，一段进一段出，信息不合并删减。',
+  A: 'A（挑战）层：平均句长 ≤20 词；允许适度文学性用词（仍在初中可及范围）；被动/定语从句按解禁规则（章号≥5 被动解禁、≥8 定从解禁），过去完成仍改写为一般过去时或 before/after 明示。',
+};
+
+function showDraftPop(): void {
+  const s = activeSession();
+  if (!s) { setStatus('请先打开要简化的章节原文', 'err'); return; }
+  draftPop.innerHTML = `
+    <div class="pop-h">分层初稿 · 整章按方向大改</div>
+    <p style="color:var(--muted);font-size:12px;line-height:1.7;margin:6px 0 10px">
+      对「${esc(s.fileName)}」按所选层级逐段生成简化初稿（保留段落结构与全部情节），完成后自动质检、开新 tab——原稿不动，之后进入标记精修流程。</p>
+    <div class="fld"><label>层级（取当前工具栏选择，可在上方切换）</label><div id="draft-tier" style="font-weight:600"></div></div>
+    <div class="fld"><label>方向指令（写你的整体要求，AI 全程遵守）</label>
+      <textarea id="draft-instructions" placeholder="例如：面向九年级；歌篇原样保留不改写；人名保留原文；第 3 段 Major 的演讲要压缩到一半"></textarea></div>
+    <div class="row-btns">
+      <button id="draft-start" class="primary">开始生成</button>
+      <button id="draft-cancel" style="display:none">取消</button>
+      <button id="draft-close">关闭</button>
+    </div>
+    <div id="draft-progress" style="display:none">
+      <div id="draft-step"></div>
+      <div class="bar"><i id="draft-bar"></i></div>
+    </div>`;
+  draftPop.classList.add('open');
+  const t = ($('tier') as HTMLSelectElement).value as Tier;
+  $('draft-tier').textContent = t + ' 层';
+  $('draft-close').addEventListener('click', () => { draftAbort?.abort(); draftPop.classList.remove('open'); });
+  $('draft-cancel').addEventListener('click', () => { draftAbort?.abort(); });
+  $('draft-start').addEventListener('click', () => void generateDraft());
+}
+
+function cleanDraftSeg(text: string, fallbackMarker: string): string {
+  let t = text.trim();
+  t = t.replace(/^```[a-z]*\s*/i, '').replace(/```\s*$/, '');
+  if (!t.includes('[P')) t = fallbackMarker + ' ' + t; // AI 丢了段标记则补回
+  return t.trim();
+}
+
+async function generateDraft(): Promise<void> {
+  const s = activeSession();
+  if (!s) return;
+  const key = await invoke<string>('load_api_key');
+  if (!key) { showAiSettings(); return; }
+  const tier = (s.report?.tier ?? ($('tier') as HTMLSelectElement).value) as Tier;
+  const instructions = ($('draft-instructions') as HTMLTextAreaElement).value.trim();
+  const chno = s.sourcePath ? chnoFromPath(s.sourcePath) : null;
+
+  const md = s.md;
+  const chLine = md.match(/^## Chapter \w+.*$/m)?.[0] ?? '## Chapter One';
+  const header = md.slice(0, md.indexOf(chLine)) || '';
+  const body = splitChapter(md).body;
+  const segs = body.match(/\[P\d+\][\s\S]*?(?=\[P\d+\]|$)/g) ?? [];
+  if (segs.length === 0) { setStatus('未找到 [P##] 段落，无法生成初稿', 'err'); return; }
+
+  draftAbort = new AbortController();
+  const startBtn = $('draft-start') as HTMLButtonElement;
+  startBtn.disabled = true;
+  ($('draft-cancel') as HTMLElement).style.display = '';
+  $('draft-progress').style.display = '';
+  let tokens = 0;
+  try {
+    const system = `${await buildSystemPrompt()}
+
+你的任务：把英文原著章节逐段改写成分层简化版。规则：
+- ${TIER_DRAFT_RULES[tier] ?? TIER_DRAFT_RULES.M}${chno ? `（本章章号 ${chno}）` : ''}
+- 直接引语只降词不降句式：人物原话的句法结构保留，只把超纲词换成词表内近义词（用引号原样保留引语）。
+- 情节零丢失：每个情节点、人物动作、因果、伏笔都必须保留；这是底线。
+- 输出：保持输入段落的 [P##] 标记原样开头，直接输出该段简化文本，不要任何解释、标题或代码块。
+${instructions ? `\n教师方向指令（最高优先级）：${instructions}` : ''}`;
+
+    const out: string[] = [];
+    for (let i = 0; i < segs.length; i++) {
+      $('draft-step').textContent = `正在简化第 ${i + 1}/${segs.length} 段（${segs[i].slice(0, 8).trim()}…）`;
+      ($('draft-bar') as HTMLElement).style.width = `${(i / segs.length) * 100}%`;
+      const prevTail = out.length ? out[out.length - 1].slice(-500) : '（本章开头）';
+      const { content, usage } = await callChat([
+        { role: 'system', content: system },
+        {
+          role: 'user',
+          content: `前文（已简化，供语气与指代衔接参考）：\n…${prevTail}\n\n请简化以下段落：\n${segs[i].trim()}`,
+        },
+      ], 2500, draftAbort!.signal);
+      tokens += Number(usage.match(/(\d+) 出/)?.[1] ?? 0);
+      out.push(cleanDraftSeg(content, segs[i].match(/\[P\d+\]/)![0]));
+    }
+    ($('draft-bar') as HTMLElement).style.width = '100%';
+    $('draft-step').textContent = '生成完毕，正在保存并质检…';
+
+    const date = new Date().toLocaleDateString('sv-SE');
+    const newMd = `${header}${chLine}\n\n${out.join('\n\n')}\n`;
+    let outPath: string;
+    if (s.sourcePath) {
+      const dir = s.sourcePath.slice(0, s.sourcePath.lastIndexOf('/'));
+      outPath = `${dir}/${s.fileName.replace(/\.(md|txt|markdown)$/i, '')}_分层初稿_${tier}_${date}.md`;
+    } else {
+      const dir = await invoke<string>('reports_dir');
+      outPath = `${dir}/示例_分层初稿_${tier}_${date}.md`;
+    }
+    await invoke('write_text_file', { path: outPath, content: newMd });
+    draftPop.classList.remove('open');
+    await addSession(newMd, outPath.slice(outPath.lastIndexOf('/') + 1), outPath);
+    await runQcCurrent();
+    setStatus(`分层初稿已生成（${tier} 层，${segs.length} 段，约 ${tokens} 出tokens）：${outPath}。质检指标见报告页——继续用标记精修`, 'saved');
+    void invoke('reveal_path', { path: outPath });
+  } catch (e) {
+    $('draft-step').textContent = '✗ 中断：' + e;
+  } finally {
+    startBtn.disabled = false;
+    ($('draft-cancel') as HTMLElement).style.display = 'none';
+    draftAbort = null;
+  }
+}
+
+$('btn-draft').addEventListener('click', showDraftPop);
 
 $('btn-ai').addEventListener('click', () => void aiSuggest());
 
