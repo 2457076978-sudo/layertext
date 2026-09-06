@@ -3,25 +3,39 @@
  * AI 返回解析容错 · 书级替换 · 章节识别与导入归一化
  */
 
-/** 从 AI 返回文本中尽力解析出 JSON 数组（代码围栏/单对象/截断修复/前后解释文字） */
+/** 从 AI 返回文本中尽力解析出 JSON 数组（代码围栏/单对象/多对象无括号/截断修复/前后解释文字） */
 export function parseAiJson(raw: string): unknown[] {
   let t = (raw ?? '').trim();
   const fence = t.match(/```(?:json)?\s*([\s\S]*?)```/);
   if (fence) t = fence[1].trim();
+  const tryArr = (s: string): unknown[] | null => {
+    try {
+      const v = JSON.parse(s) as unknown;
+      return Array.isArray(v) ? v : [v];
+    } catch {
+      return null;
+    }
+  };
   const s1 = t.indexOf('[');
-  const e1 = t.lastIndexOf(']');
-  if (s1 >= 0 && e1 > s1) {
-    const cut = t.slice(s1, e1 + 1);
-    try { return JSON.parse(cut) as unknown[]; } catch { /* 截断则尝试修复 */ }
-    const lastObj = cut.lastIndexOf('}');
-    if (lastObj > 0) {
-      try { return JSON.parse(cut.slice(0, lastObj + 1) + ']') as unknown[]; } catch { /* fall */ }
+  if (s1 >= 0) {
+    const e1 = t.lastIndexOf(']');
+    if (e1 > s1) {
+      const r = tryArr(t.slice(s1, e1 + 1));
+      if (r) return r;
+    }
+    // 截断修复：在最后一个完整对象后补 ]
+    const lastObj = t.lastIndexOf('}');
+    if (lastObj > s1) {
+      const r = tryArr(t.slice(s1, lastObj + 1) + ']');
+      if (r) return r;
     }
   }
   const s2 = t.indexOf('{');
   const e2 = t.lastIndexOf('}');
   if (s2 >= 0 && e2 > s2) {
-    try { return [JSON.parse(t.slice(s2, e2 + 1))]; } catch { /* fall */ }
+    const slice = t.slice(s2, e2 + 1);
+    const r = tryArr(slice) ?? tryArr('[' + slice + ']'); // 单对象 / 无括号多对象
+    if (r) return r;
   }
   throw new Error('AI 返回中未找到 JSON（AI 原话前 200 字：' + (raw ?? '').slice(0, 200).replace(/\s+/g, ' ') + '）');
 }
@@ -37,7 +51,7 @@ export function applyRewriteTo(text: string, rules: { from: string; to: string }
   return t;
 }
 
-const CH_TITLE = /^(chapter\s+([ivxlcdm]+|\d+)|第[一二三四五六七八九十百\d]+章).*/i;
+const CH_TITLE = /^(chapter\s+[\w-]+|第[一二三四五六七八九十百\d]+章)/i;
 
 export interface SplitChapterResult {
   /** 拆分后的章节（单章或无章节时长度为 1） */
