@@ -1,6 +1,7 @@
 /**
  * AI 网络与配置层（无界面依赖）
  * 依赖注入：main 启动时 setAiUi({ onStatus }) 传入状态出口；本层可独立测试。
+ * W3：提示词按名加载（prompts/ 内置 ∪ 教师自定义覆盖）· 供应商 failover · 成本台账。
  */
 
 import { invoke } from '@tauri-apps/api/core';
@@ -8,11 +9,55 @@ import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
 import { S, type AppConfig } from './state.js';
 import { withRetry } from './pure.js';
 import { DEFAULT_TIER_PLANS, type TierPlan } from './types.js';
+import {
+  buildTargets, composePrompt, COST_HEADER, parseManifest, providerNameOf, shouldFailover, toCostLine,
+  type ProviderTarget, type PromptManifest,
+} from '../../src/core/aiops.js';
+import manifestText from '../../prompts/manifest.json?raw';
+import promptSimplify from '../../prompts/system_simplify.md?raw';
+import promptDraft from '../../prompts/system_draft.md?raw';
+import promptAssistant from '../../prompts/system_assistant.md?raw';
+import promptRewriteSentence from '../../prompts/rewrite_sentence.md?raw';
 
 let ui: { onStatus?: (s: string) => void } | null = null;
 export function setAiUi(u: { onStatus?: (s: string) => void }): void { ui = u; }
 
+export const MANIFEST: PromptManifest = parseManifest(manifestText);
+const BUNDLED_PROMPTS: Record<string, string> = {
+  system_simplify: promptSimplify,
+  system_draft: promptDraft,
+  system_assistant: promptAssistant,
+  rewrite_sentence: promptRewriteSentence,
+};
 
+/* ---------- 提示词按名加载（改提示词不改代码） ---------- */
+
+const promptCache = new Map<string, { version: string; body: string; custom: boolean }>();
+
+/** 教师自定义目录（~/Documents/LayerText配置/prompts/）优先；否则用随应用打包的 prompts/。
+ *  版本号来自 manifest；自定义生效时记 v{N}*。 */
+export async function loadPrompt(name: string): Promise<{ version: string; body: string; custom: boolean }> {
+  const hit = promptCache.get(name);
+  if (hit) return hit;
+  let out = { version: MANIFEST.prompts[name]?.version ?? '?', body: BUNDLED_PROMPTS[name] ?? '', custom: false };
+  try {
+    const dir = await invoke<string>('prompts_dir');
+    const custom = (await invoke<string>('read_text_file', { path: `${dir}/${name}.md` })).trim();
+    if (custom) out = { version: out.version + '*', body: custom, custom: true };
+  } catch { /* 无自定义则用内置 */ }
+  promptCache.set(name, out);
+  return out;
+}
+
+/** AI 设置保存后调用：清缓存让下一次请求重新读自定义目录 */
+export function reloadPrompts(): void { promptCache.clear(); }
+
+/** 当前整套提示词版本（写入台账；任一提示词被自定义覆盖则加 *） */
+export async function promptSetVersion(): Promise<string> {
+  let custom = false;
+  for (const name of Object.keys(MANIFEST.prompts)) if ((await loadPrompt(name)).custom) custom = true;
+  return custom ? MANIFEST.setVersion + '*' : MANIFEST.setVersion;
+}
 
 export async function loadConfig(): Promise<AppConfig> {
   try {
@@ -52,37 +97,84 @@ export function aiErrHuman(e: unknown): string {
   return s;
 }
 
-export async function callChat(
-  messages: { role: string; content: string }[],
-  maxTokens: number,
-  externalSignal?: AbortSignal,
-): Promise<{ content: string; usage: string }> {
-  const cfg = S.appConfig;
+/* ---------- 供应商序列（failover） ---------- */
+
+async function activeTargets(): Promise<ProviderTarget[]> {
   const key = await invoke<string>('load_api_key');
   if (!key) throw new Error('未配置 API Key（菜单 LayerText → AI 设置）');
-  const base = (cfg.baseUrl || 'https://api.openai.com/v1').replace(/\/+$/, '');
-  const model = cfg.model || 'gpt-4o-mini';
+  const cfg = S.appConfig;
+  const fallbackKeys: Record<number, string> = {};
+  for (let i = 0; i < (cfg.failover ?? []).length; i++) {
+    try { fallbackKeys[i] = await invoke<string>('load_api_key', { account: 'fb' + i }); } catch { fallbackKeys[i] = ''; }
+  }
+  return buildTargets(
+    { baseUrl: (cfg.baseUrl || 'https://api.openai.com/v1').replace(/\/+$/, ''), model: cfg.model || 'gpt-4o-mini', key },
+    cfg.failover,
+    fallbackKeys,
+  );
+}
+
+/* ---------- 成本台账（每次 AI 调用一行，全落 reports_dir） ---------- */
+
+async function logCost(
+  scene: string, t: ProviderTarget, elapsedMs: number, ok: boolean,
+  usage?: { promptTokens?: number; completionTokens?: number }, note?: string,
+): Promise<void> {
+  try {
+    const s = S.sessions[S.activeIdx];
+    const dir = s?.sourcePath ? s.sourcePath.slice(0, s.sourcePath.lastIndexOf('/')) : '';
+    const book = dir ? dir.slice(dir.lastIndexOf('/') + 1) : '';
+    const dirRep = await invoke<string>('reports_dir');
+    let csv = '';
+    const path = `${dirRep}/AI成本台账.csv`;
+    try { csv = await invoke<string>('read_text_file', { path }); } catch { /* 新建 */ }
+    if (!csv.trim()) csv = COST_HEADER.join(',') + '\n';
+    csv += toCostLine({
+      ts: new Date().toLocaleString('sv-SE'), scene, book, chapter: s?.fileName ?? '',
+      provider: t.name, model: t.model, promptVer: await promptSetVersion(),
+      promptTokens: usage?.promptTokens, completionTokens: usage?.completionTokens,
+      elapsedMs, failover: t.index > 0, ok, note,
+    });
+    await invoke('write_text_file', { path, content: csv });
+  } catch { /* 成本台账尽力而为 */ }
+}
+
+/* ---------- 单次请求（含思考模式兼容与自动重试） ---------- */
+
+interface UsageNums { promptTokens?: number; completionTokens?: number }
+type UsageText = string;
+
+function usageText(u?: UsageNums): UsageText {
+  return u ? `（消耗 ${u.promptTokens ?? '?'} 入 + ${u.completionTokens ?? '?'} 出 tokens）` : '';
+}
+
+async function chatOnce(
+  t: ProviderTarget,
+  messages: { role: string; content: string }[],
+  maxTokens: number,
+  externalSignal: AbortSignal | undefined,
+): Promise<{ content: string; usage: UsageNums }> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 180000);
   const onAbort = () => ctrl.abort();
   externalSignal?.addEventListener('abort', onAbort);
   try {
     const mkBody = (withEffort: boolean) => JSON.stringify({
-      model, temperature: 0.3, max_tokens: maxTokens, messages,
+      model: t.model, temperature: 0.3, max_tokens: maxTokens, messages,
       ...(withEffort && (S.appConfig.lowThinking !== false)
         ? { reasoning_effort: 'low', thinking: { type: 'disabled' } }  // DeepSeek：关思考（改写任务无需深度思考）
         : {}),
     });
-    let resp = await withRetry(() => tauriFetch(`${base}/chat/completions`, {
+    let resp = await withRetry(() => tauriFetch(`${t.baseUrl}/chat/completions`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${t.key}` },
       body: mkBody(true),
       signal: ctrl.signal,
     }), (s) => ui?.onStatus?.(s));
     if (!resp.ok && /reasoning_effort|thinking|unknown (field|parameter|argument)/i.test(await resp.text())) {
-      resp = await withRetry(() => tauriFetch(`${base}/chat/completions`, {
+      resp = await withRetry(() => tauriFetch(`${t.baseUrl}/chat/completions`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${t.key}` },
         body: mkBody(false),
         signal: ctrl.signal,
       }), (s) => ui?.onStatus?.(s));
@@ -93,7 +185,7 @@ export async function callChat(
       usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
     };
     const u = data.usage;
-    const usage = u ? `（消耗 ${u.prompt_tokens ?? '?'} 入 + ${u.completion_tokens ?? '?'} 出 = ${u.total_tokens ?? '?'} tokens）` : '';
+    const usage: UsageNums = { promptTokens: u?.prompt_tokens, completionTokens: u?.completion_tokens };
     // 思考型模型（reasoner 类）正文可能在 reasoning_content；合并保证可见
     const msg = data.choices?.[0]?.message;
     const content = [msg?.content ?? '', msg?.reasoning_content ?? ''].filter(Boolean).join('\n');
@@ -104,20 +196,50 @@ export async function callChat(
   }
 }
 
-export async function buildSystemPrompt(): Promise<string> {
-  const custom = (S.appConfig.instructions ?? '').trim();
-  return AI_SYSTEM_PROMPT + (custom ? `\n\n6. 教师的长期审校约定（优先级最高）：\n${custom}` : '') + rewritePrompt();
+/** 按序列尝试：主供应商失败（网络/超时/限流/5xx/4xx）→ 逐个备用；每次实际用哪家落成本台账 */
+async function callWithFailover<T>(
+  scene: string,
+  attempt: (t: ProviderTarget) => Promise<{ result: T; usage: UsageNums }>,
+): Promise<{ result: T; usage: UsageNums; provider: string; model: string; failoverUsed: boolean }> {
+  const targets = await activeTargets();
+  let lastErr: unknown = new Error('无可用供应商');
+  for (const t of targets) {
+    const start = Date.now();
+    try {
+      const { result, usage } = await attempt(t);
+      await logCost(scene, t, Date.now() - start, true, usage);
+      if (t.index > 0) ui?.onStatus?.(`主供应商不可用，已自动切换到备用「${t.name}」（本次请求已正常完成）`);
+      return { result, usage, provider: t.name, model: t.model, failoverUsed: t.index > 0 };
+    } catch (e) {
+      lastErr = e;
+      await logCost(scene, t, Date.now() - start, false, undefined, String(e).slice(0, 80));
+      if (t.index === targets.length - 1 || !shouldFailover(e)) throw e;
+      ui?.onStatus?.(`「${t.name}」请求失败，尝试备用供应商…`);
+    }
+  }
+  throw lastErr;
 }
 
-export const AI_SYSTEM_PROMPT = `你是初中英语原著分层简化的审校助手，帮助教师按学生水平改写英文文本。严格遵守：
-1. 词汇边界：替换目标词时优先使用中国《义务教育英语课程标准》三级（初中毕业要求，约1600词）范围内的词；专有名词与既定术语表词汇保持不变。
-2. 句法黑名单（除直接引语内的原话）：被动语态→改主动；定语从句→拆成短句或用形容词前置；过去完成时→一般过去时并用 before/after 明示先后。
-3. 句长上限：改写后的句子不超过指定词数上限；宁可拆成两句。
-4. 保真：不改变情节、事实、人物与语气；好词保留/好句锚点类标记不要改写，直接返回 original 原文并在 basis 里说明建议保留。
-5. 你只出候选：输出修订建议供教师勾选，不是最终稿。
-输出格式：只输出一个 JSON 数组，不要任何其他文字。每个元素：
-{"id":"标记ID","type":"标记类型","original":"原句原文（一字不改）","revised":"建议改写后的完整句子","basis":"依据（中文，一句话）","alternative":"可选的备选改写（可省略）"}`;
+export async function callChat(
+  messages: { role: string; content: string }[],
+  maxTokens: number,
+  externalSignal?: AbortSignal,
+  scene = 'AI 请求',
+): Promise<{ content: string; usage: string }> {
+  const { result, usage } = await callWithFailover(scene, async (t) => {
+    const { content, usage: nums } = await chatOnce(t, messages, maxTokens, externalSignal);
+    return { result: content, usage: nums };
+  });
+  return { content: result, usage: usageText(usage) };
+}
 
+/* ---------- 提示词组装（内置模板 + 动态注入） ---------- */
+
+export async function buildSystemPrompt(): Promise<string> {
+  const custom = (S.appConfig.instructions ?? '').trim();
+  const base = (await loadPrompt('system_simplify')).body;
+  return base + (custom ? `\n\n6. 教师的长期审校约定（优先级最高）：\n${custom}` : '') + rewritePrompt();
+}
 
 export function rewritePrompt(): string {
   if (!S.rewriteRules.replacements.length && S.rewriteRules.viewpoint === 'keep' && !S.rewriteRules.extra) return '';
@@ -133,81 +255,100 @@ export function rewritePrompt(): string {
   return '\n\n' + lines.join('\n');
 }
 
+/** 分层初稿 system（system_simplify 规则 + system_draft 任务模板） */
+export async function buildDraftSystemPrompt(vars: { tierRule: string; chnoNote: string; instructions: string }): Promise<string> {
+  const tpl = (await loadPrompt('system_draft')).body;
+  return `${await buildSystemPrompt()}\n\n${composePrompt(tpl, vars)}`;
+}
+
+/** 逐句改写 user 消息（模板占位符填充） */
+export async function buildRewriteSentencePrompt(vars: { tier: string; maxLen: number | string; intent: string; sent: string }): Promise<string> {
+  const tpl = (await loadPrompt('rewrite_sentence')).body;
+  return composePrompt(tpl, vars);
+}
+
+/** AI 助手身份块（模板占位符填充） */
+export async function buildAssistantPrompt(vars: { submitRule: string; fileName: string; markCount: number | string }): Promise<string> {
+  const tpl = (await loadPrompt('system_assistant')).body;
+  return '\n\n' + composePrompt(tpl, vars);
+}
+
+/* ---------- 流式对话（助手侧栏；同样走 failover 与成本台账） ---------- */
+
 export async function chatStream(
   messages: { role: string; content: string; tool_calls?: unknown; tool_call_id?: string }[],
   tools: unknown[],
   onDelta: (t: string) => void,
+  scene = 'AI 助手',
 ): Promise<{ content: string; reasoning: string; toolCalls: { id: string; name: string; arguments: string }[]; usage: string }> {
-  const cfg = S.appConfig;
-  const key = await invoke<string>('load_api_key');
-  if (!key) throw new Error('未配置 API Key（菜单 LayerText → AI 设置…）');
-  const base = (cfg.baseUrl || 'https://api.openai.com/v1').replace(/\/+$/, '');
-  const model = cfg.model || 'gpt-4o-mini';
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 180000);
-  try {
-    const mkBody = (withEffort: boolean) => JSON.stringify({
-      model, temperature: 0.3, max_tokens: 4000, messages, tools,
-      stream: true, stream_options: { include_usage: true },
-      ...(withEffort && (S.appConfig.lowThinking !== false)
-        ? { reasoning_effort: 'low', thinking: { type: 'disabled' } }
-        : {}),
-    });
-    let resp = await withRetry(() => tauriFetch(`${base}/chat/completions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
-      body: mkBody(true),
-      signal: ctrl.signal,
-    }), (s) => ui?.onStatus?.(s));
-    if (!resp.ok && /reasoning_effort|thinking|unknown (field|parameter|argument)/i.test(await resp.text())) {
-      resp = await withRetry(() => tauriFetch(`${base}/chat/completions`, {
+  const { result, usage } = await callWithFailover(scene, async (t) => {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 180000);
+    try {
+      const mkBody = (withEffort: boolean) => JSON.stringify({
+        model: t.model, temperature: 0.3, max_tokens: 4000, messages, tools,
+        stream: true, stream_options: { include_usage: true },
+        ...(withEffort && (S.appConfig.lowThinking !== false)
+          ? { reasoning_effort: 'low', thinking: { type: 'disabled' } }
+          : {}),
+      });
+      let resp = await withRetry(() => tauriFetch(`${t.baseUrl}/chat/completions`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
-        body: mkBody(false),
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${t.key}` },
+        body: mkBody(true),
         signal: ctrl.signal,
       }), (s) => ui?.onStatus?.(s));
-    }
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${(await resp.text()).slice(0, 200)}`);
-    const reader = resp.body!.getReader();
-    const dec = new TextDecoder();
-    let buf = '';
-    let content = '';
-    let reasoning = '';
-    let usage = '';
-    const tc = new Map<number, { id: string; name: string; arguments: string }>();
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buf += dec.decode(value, { stream: true });
-      const lines = buf.split('\n');
-      buf = lines.pop() ?? '';
-      for (const line of lines) {
-        const s = line.trim();
-        if (!s.startsWith('data:')) continue;
-        const payload = s.slice(5).trim();
-        if (payload === '[DONE]') continue;
-        try {
-          const j = JSON.parse(payload) as {
-            choices?: { delta?: { content?: string; tool_calls?: { index?: number; id?: string; function?: { name?: string; arguments?: string } }[] } }[];
-            usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
-          };
-          const d = j.choices?.[0]?.delta as { content?: string; reasoning_content?: string; tool_calls?: { index?: number; id?: string; function?: { name?: string; arguments?: string } }[] } | undefined;
-          if (d?.content) { content += d.content; onDelta(d.content); }
-          if (d?.reasoning_content) reasoning += d.reasoning_content;
-          for (const c of d?.tool_calls ?? []) {
-            const i = c.index ?? 0;
-            const cur = tc.get(i) ?? { id: '', name: '', arguments: '' };
-            if (c.id) cur.id = c.id;
-            if (c.function?.name) cur.name += c.function.name;
-            if (c.function?.arguments) cur.arguments += c.function.arguments;
-            tc.set(i, cur);
-          }
-          if (j.usage) usage = `（本轮 ${j.usage.prompt_tokens ?? '?'} 入 + ${j.usage.completion_tokens ?? '?'} 出 tokens）`;
-        } catch { /* 忽略半行 */ }
+      if (!resp.ok && /reasoning_effort|thinking|unknown (field|parameter|argument)/i.test(await resp.text())) {
+        resp = await withRetry(() => tauriFetch(`${t.baseUrl}/chat/completions`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${t.key}` },
+          body: mkBody(false),
+          signal: ctrl.signal,
+        }), (s) => ui?.onStatus?.(s));
       }
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${(await resp.text()).slice(0, 200)}`);
+      const reader = resp.body!.getReader();
+      const dec = new TextDecoder();
+      let buf = '';
+      let content = '';
+      let reasoning = '';
+      const tc = new Map<number, { id: string; name: string; arguments: string }>();
+      const nums: UsageNums = {};
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        const lines = buf.split('\n');
+        buf = lines.pop() ?? '';
+        for (const line of lines) {
+          const s = line.trim();
+          if (!s.startsWith('data:')) continue;
+          const payload = s.slice(5).trim();
+          if (payload === '[DONE]') continue;
+          try {
+            const j = JSON.parse(payload) as {
+              choices?: { delta?: { content?: string; tool_calls?: { index?: number; id?: string; function?: { name?: string; arguments?: string } }[] } }[];
+              usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
+            };
+            const d = j.choices?.[0]?.delta as { content?: string; reasoning_content?: string; tool_calls?: { index?: number; id?: string; function?: { name?: string; arguments?: string } }[] } | undefined;
+            if (d?.content) { content += d.content; onDelta(d.content); }
+            if (d?.reasoning_content) reasoning += d.reasoning_content;
+            for (const c of d?.tool_calls ?? []) {
+              const i = c.index ?? 0;
+              const cur = tc.get(i) ?? { id: '', name: '', arguments: '' };
+              if (c.id) cur.id = c.id;
+              if (c.function?.name) cur.name += c.function.name;
+              if (c.function?.arguments) cur.arguments += c.function.arguments;
+              tc.set(i, cur);
+            }
+            if (j.usage) { nums.promptTokens = j.usage.prompt_tokens; nums.completionTokens = j.usage.completion_tokens; }
+          } catch { /* 忽略半行 */ }
+        }
+      }
+      return { result: { content: content || reasoning, reasoning, toolCalls: [...tc.values()] }, usage: nums };
+    } finally {
+      clearTimeout(timer);
     }
-    return { content: content || reasoning, reasoning, toolCalls: [...tc.values()], usage };
-  } finally {
-    clearTimeout(timer);
-  }
+  });
+  return { ...result, usage: usageText(usage) };
 }

@@ -12,7 +12,7 @@ import { unzipSync, strFromU8 } from 'fflate';
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, WidthType } from 'docx';
 import { applyRewriteTo, checkRevisedText, normalizeAndSplitChapters, parseAiJson } from './pure.js';
 import { S, setStatus as uiSetStatus, esc } from './state.js';
-import { AI_PROVIDERS, AI_SYSTEM_PROMPT, aiErrHuman, buildSystemPrompt, callChat, chatStream, loadConfig, saveConfig, setAiUi, tierMaxLen, tierPlan } from './ai.js';
+import { AI_PROVIDERS, aiErrHuman, buildAssistantPrompt, buildDraftSystemPrompt, buildRewriteSentencePrompt, buildSystemPrompt, callChat, chatStream, loadConfig, reloadPrompts, saveConfig, setAiUi, tierMaxLen, tierPlan } from './ai.js';
 import bundledWordlist from '../../assets/wordlists/curriculum_2022_level3_1600.txt?raw';
 import bundledAmendment from '../../assets/wordlists/curriculum_2022_amendment.txt?raw';
 import exampleMd from '../../examples/texts/aesop_tortoise_hare.md?raw';
@@ -22,6 +22,7 @@ import { buildLexicon, type Lexicon } from '../../src/core/lexicon.js';
 import { IRR } from '../../src/core/irregular.js';
 import { runQc, toLegacyReport, type QcResult, type Tier } from '../../src/core/qc.js';
 import { aggregate, diagnose, LEDGER_HEADER, parseLedger, toLedgerLine, type LedgerRow } from '../../src/core/adoption.js';
+import { summarizeCost } from '../../src/core/aiops.js';
 import {
   extractParas, hitOrigin, hit, pendHit, sentsOf, splitChapter, tokenizeTxt, cardGlossWords,
 } from '../../src/core/textpipe.js';
@@ -318,10 +319,10 @@ function flashApplied(revised: string): void {
 }
 
 /** 请求直到解析出 JSON：若模型把整轮输出耗在思考上（无 [ 字符），自动追发"直接输出 JSON"再试一次 */
-async function chatUntilJson(messages: { role: string; content: string }[], maxTokens: number): Promise<{ raw: unknown[]; usage: string }> {
+async function chatUntilJson(messages: { role: string; content: string }[], maxTokens: number, scene: string): Promise<{ raw: unknown[]; usage: string }> {
   const msgs = [...messages];
   for (let attempt = 0; attempt < 2; attempt++) {
-    const { content, usage } = await callChat(msgs, maxTokens);
+    const { content, usage } = await callChat(msgs, maxTokens, undefined, scene);
     try {
       return { raw: parseAiJson(content), usage };
     } catch (e) {
@@ -714,6 +715,18 @@ async function renderRetroPane(): Promise<void> {
   const o = a.overall;
   const card = (label: string, value: string, hint: string) =>
     `<div class="retro-card"><div class="retro-num">${value}</div><div class="retro-label">${label}</div><div class="retro-hint">${hint}</div></div>`;
+  // 成本台账（W3）：全书累计在 reports_dir，按书名过滤出本书
+  let costHtml = '';
+  try {
+    const repDir = await invoke<string>('reports_dir');
+    const costCsv = await invoke<string>('read_text_file', { path: `${repDir}/AI成本台账.csv` });
+    const dir = s?.sourcePath ? s.sourcePath.slice(0, s.sourcePath.lastIndexOf('/')) : '';
+    const bookName = dir ? dir.slice(dir.lastIndexOf('/') + 1) : '';
+    const cs = summarizeCost(costCsv, bookName || undefined);
+    if (cs.calls > 0) {
+      costHtml = card('本书 AI 成本', `${cs.promptTokens + cs.completionTokens} tokens`, `${cs.calls} 次调用（入 ${cs.promptTokens} + 出 ${cs.completionTokens}）${cs.failoverCount ? `，备用切换 ${cs.failoverCount} 次` : ''}${cs.errCount ? `，失败 ${cs.errCount} 次` : ''}`);
+    }
+  } catch { /* 无成本台账则不显示卡片 */ }
   const groupRows = (list: typeof a.byMark) => list.map((g) => `<tr>
       <td>${esc(g.key)}</td><td>${g.total}</td><td>${g.accepted}</td><td>${g.rejected}</td><td>${g.autoApplied}</td>
       <td>${pct(g.explicitRate)}</td><td>${pct(g.checkWarnRatio)}</td></tr>`).join('');
@@ -729,6 +742,7 @@ async function renderRetroPane(): Promise<void> {
       ${card('明确采纳率', pct(o.explicitRate), `教师过目部分（采纳 ${o.accepted}/拒绝 ${o.rejected}）`)}
       ${card('总接受率', pct(o.overallRate), `含直改 ${o.autoApplied} 条（你开启的自动模式）`)}
       ${card('复核⚠被拒率', pct(cc.warnTotal ? cc.warnRejected / cc.warnTotal : null), `复核⚠ ${cc.warnTotal} 条中 ${cc.warnRejected} 条被拒；复核通过的为 ${pct(cc.okTotal ? cc.okRejected / cc.okTotal : null)}`)}
+      ${costHtml}
     </div>
     <table class="sgtable">
       <tr><th>标记类型</th><th>建议数</th><th>采纳</th><th>拒绝</th><th>直改</th><th>明确采纳率</th><th>复核⚠比</th></tr>
@@ -1017,13 +1031,16 @@ function showAiSettings(): void {
     <div class="fld"><label style="display:flex;align-items:flex-start;gap:6px"><input type="checkbox" id="ai-trust" style="width:auto;margin-top:3px" /> <span><b>信任模式</b>：允许 AI 助手在对话中直接修改正文（你说"直接改"即生效）</span></label></div>
     <div class="fld"><label style="display:flex;align-items:flex-start;gap:6px"><input type="checkbox" id="ai-inplace" style="width:auto;margin-top:3px" checked /> <span><b>直接修改原稿文件</b>（推荐）：改动直接写进书稿本身，不另存工作稿——<b>首次修改前自动备份</b>原始版（xxx_原始备份.md），随时可整体还原。关闭则另存工作稿、原稿不动</span></label></div>
     <div class="fld"><label style="display:flex;align-items:flex-start;gap:6px"><input type="checkbox" id="ai-lowthink" style="width:auto;margin-top:3px" checked /> <span><b>关闭思考</b>（推荐）：直接关闭模型的深度思考（thinking=disabled）——改写任务不需要，关了更快更省更稳</span></label></div>
+    <div class="fld"><label>备用供应商（可选）：主服务商连不上/报错时按顺序自动切换。Key 留空 = 复用上面第 ④ 步的主 Key（适合同服务商多模型）</label>
+      <div id="ai-fb-rows"></div>
+      <button id="ai-fb-add" style="font-size:12px">＋ 添加备用</button></div>
     <div class="row-btns">
       <button id="ai-save" class="primary">保存</button>
       <button id="ai-test">测试连接（填完 ①-④ 就点这个）</button>
       <button id="ai-close">关闭</button>
     </div>
     <div class="test-out" id="ai-test-out"></div>
-    <div class="hint-txt">这是什么？AI 功能（改写建议 / 分层初稿 / AI 助手对话）需要连接一个 AI 服务。上面四步配好后，AI 只负责"给建议"，每条建议都会先经本机质检引擎复核，最后由你点头才生效。不知道 Key 从哪来？点菜单 帮助 → 如何获取 AI 的 Key。</div>`;
+    <div class="hint-txt">这是什么？AI 功能（改写建议 / 分层初稿 / AI 助手对话）需要连接一个 AI 服务。上面四步配好后，AI 只负责"给建议"，每条建议都会先经本机质检引擎复核，最后由你点头才生效。不知道 Key 从哪来？点菜单 帮助 → 如何获取 AI 的 Key。<br/>每次 AI 调用（用了哪家/花了多少 tokens）自动记入成本台账，复盘页可查。</div>`;
   aiPop.classList.add('open');
 
   const urlEl = $('ai-url') as HTMLInputElement;
@@ -1045,6 +1062,28 @@ function showAiSettings(): void {
   };
   $('ai-provider').addEventListener('change', () => applyProvider(Number(($('ai-provider') as HTMLSelectElement).value)));
   const cur = $('ai-key') as HTMLInputElement;
+
+  /* 备用供应商行（failover）：名称/地址/模型/Key(空=复用主Key) */
+  const fbRows = $('ai-fb-rows')!;
+  const addFbRow = (name = '', url = '', model = '', key = '') => {
+    const div = document.createElement('div');
+    div.className = 'rw-row';
+    div.innerHTML = `<input class="fb-name" value="${esc(name)}" placeholder="名称(如 智谱备用)" style="max-width:90px" />
+      <input class="fb-url" value="${esc(url)}" placeholder="API 地址 /v1" />
+      <input class="fb-model" value="${esc(model)}" placeholder="模型名" style="max-width:110px" />
+      <input class="fb-key" type="password" value="${esc(key)}" placeholder="Key(空=用主Key)" style="max-width:110px" />
+      <button class="x">×</button>`;
+    div.querySelector('.x')!.addEventListener('click', () => div.remove());
+    fbRows.appendChild(div);
+  };
+  const collectFb = () => [...fbRows.querySelectorAll('.rw-row')].map((r) => ({
+    name: (r.querySelector('.fb-name') as HTMLInputElement).value.trim(),
+    baseUrl: (r.querySelector('.fb-url') as HTMLInputElement).value.trim().replace(/\/+$/, ''),
+    model: (r.querySelector('.fb-model') as HTMLInputElement).value.trim(),
+    key: (r.querySelector('.fb-key') as HTMLInputElement).value.trim(),
+  })).filter((r) => r.baseUrl && r.model);
+  $('ai-fb-add').addEventListener('click', () => addFbRow());
+  for (const f of S.appConfig.failover ?? []) addFbRow(f.name ?? '', f.baseUrl ?? '', f.model ?? '');
 
   void (async () => {
     await loadConfig();
@@ -1075,10 +1114,16 @@ function showAiSettings(): void {
       S.appConfig.trustEdit = ($('ai-trust') as HTMLInputElement).checked;
       S.appConfig.inPlaceEdit = ($('ai-inplace') as HTMLInputElement).checked;
       S.appConfig.lowThinking = ($('ai-lowthink') as HTMLInputElement).checked;
+      const fbs = collectFb();
+      S.appConfig.failover = fbs.length ? fbs.map((f) => ({ name: f.name, baseUrl: f.baseUrl, model: f.model })) : undefined;
       await saveConfig();
       const k = cur.value.trim();
       if (k) await invoke('save_api_key', { key: k });
-      out.textContent = '✓ 已保存（Key 存入本机钥匙串）';
+      for (let i = 0; i < fbs.length; i++) {
+        if (fbs[i].key) await invoke('save_api_key', { key: fbs[i].key, account: 'fb' + i });
+      }
+      reloadPrompts();
+      out.textContent = fbs.length ? `✓ 已保存（Key 存入本机钥匙串；备用供应商 ${fbs.length} 个，主服务商失败时按序自动切换）` : '✓ 已保存（Key 存入本机钥匙串）';
     } catch (e) {
       out.textContent = '✗ 保存失败：' + e;
     }
@@ -1169,7 +1214,7 @@ async function aiSuggest(instruction?: string): Promise<void> {
     }
     const estIn = messages.reduce((n, m) => n + estTokens(m.content), 0);
     setStatus(`本次请求约 ${estIn} tokens 输入（只含标记相关句子，不发全章原文）…`);
-    const { raw: rawUnknown, usage } = await chatUntilJson(messages, 6000);
+    const { raw: rawUnknown, usage } = await chatUntilJson(messages, 6000, '审核建议');
     const raw = rawUnknown as { id: string; type?: string; original?: string; revised?: string; basis?: string; alternative?: string }[];
     S.aiHistory.push({ role: 'assistant', content: JSON.stringify(raw) });
     const maxLen = tierMaxLen(tier);
@@ -1501,9 +1546,9 @@ async function aiRewriteSentence(pi: number, si: number, intent: string, autoMar
       { role: 'system', content: system },
       {
         role: 'user',
-        content: `层级：${tier}（句长上限 ${tierMaxLen(tier)} 词）\n教师意图：${intent}\n请改写下面这句。输出要求：回答的第一个字符必须是 [，只输出一个 JSON 数组（形如 [{"original":"…","revised":"…","basis":"…"}]），不要思考过程、不要解释、不要代码块。original 必须与原句一字不差：\n${sent}`,
+        content: await buildRewriteSentencePrompt({ tier, maxLen: tierMaxLen(tier), intent, sent }),
       },
-    ], 4000);
+    ], 4000, '逐句改写');
     const arr = arrRaw as { original?: string; revised?: string; basis?: string; alternative?: string }[];
     const one = arr[0];
     if (!one?.revised) throw new Error('AI 未返回改写');
@@ -1607,14 +1652,11 @@ async function generateDraft(): Promise<void> {
   $('draft-progress').style.display = '';
   let tokens = 0;
   try {
-    const system = `${await buildSystemPrompt()}
-
-你的任务：把英文原著章节逐段改写成分层简化版。规则：
-- ${TIER_DRAFT_RULES[tier] ?? TIER_DRAFT_RULES.M}${chno ? `（本章章号 ${chno}）` : ''}
-- 直接引语只降词不降句式：人物原话的句法结构保留，只把超纲词换成词表内近义词（用引号原样保留引语）。
-- 情节零丢失：每个情节点、人物动作、因果、伏笔都必须保留；这是底线。
-- 输出：保持输入段落的 [P##] 标记原样开头，直接输出该段简化文本，不要任何解释、标题或代码块。
-${instructions ? `\n教师方向指令（最高优先级）：${instructions}` : ''}`;
+    const system = await buildDraftSystemPrompt({
+      tierRule: TIER_DRAFT_RULES[tier] ?? TIER_DRAFT_RULES.M,
+      chnoNote: chno ? `（本章章号 ${chno}）` : '',
+      instructions: instructions ? `- 教师方向指令（最高优先级）：${instructions}` : '',
+    });
     const out: string[] = [];
     for (let i = 0; i < segs.length; i++) {
       $('draft-step').textContent = `正在简化第 ${i + 1}/${segs.length} 段（${segs[i].slice(0, 8).trim()}…）`;
@@ -1626,7 +1668,7 @@ ${instructions ? `\n教师方向指令（最高优先级）：${instructions}` :
           role: 'user',
           content: `前文（已简化，供语气与指代衔接参考）：\n…${prevTail}\n\n请简化以下段落：\n${segs[i].trim()}`,
         },
-      ], 2500, S.draftAbort!.signal);
+      ], 2500, S.draftAbort!.signal, '分层初稿');
       tokens += Number(usage.match(/(\d+) 出/)?.[1] ?? 0);
       out.push(applyRewrite(cleanDraftSeg(content, segs[i].match(/\[P\d+\]/)![0])));
     }
@@ -2346,14 +2388,13 @@ async function sendChat(): Promise<void> {
   let usageTotal = '';
 
   try {
-    const system = (await buildSystemPrompt()) +
-      `\n\n7. 你的身份与固定工作方式（不要每次重新发明流程）：
-- 你是分层简化审校引擎，不是聊天机器人：动作优先、回答简短，禁止长篇解释。
-- 编号规则：get_sentence 的 pi/si 从 0 起（pi=段号-1，si=句号-1）；search_text 每行结果自带现成的 get_sentence 参数，直接复制使用，禁止自行换算。
-- 修订类请求的标准流程（≤4 次工具调用完成）：search_text 定位 → get_sentence 取原句（original 必须逐字复制其"原句"字段）→ 按层级与书级规则改写 → 提交。
-- 提交方式：${S.appConfig.trustEdit ? '信任模式已开启——教师说"直接改/改吧"时用 apply_edit 直接应用（自动落工作稿与变更日志，原稿不动）；教师说"给建议/看看"时仍用 propose_revision' : '教师未开启信任模式，一律用 propose_revision 提交候选，由教师在界面点 ✓ 采纳'}。
-- 不要重复调用已知信息的工具；不要在一轮里既 apply 又 propose。
-当前章节：${s.fileName}，标记 ${s.review.marks.length} 条。`;
+    const system = (await buildSystemPrompt()) + (await buildAssistantPrompt({
+      submitRule: S.appConfig.trustEdit
+        ? '信任模式已开启——教师说"直接改/改吧"时用 apply_edit 直接应用（自动落工作稿与变更日志，原稿不动）；教师说"给建议/看看"时仍用 propose_revision'
+        : '教师未开启信任模式，一律用 propose_revision 提交候选，由教师在界面点 ✓ 采纳',
+      fileName: s.fileName,
+      markCount: s.review.marks.length,
+    }));
     for (let round = 0; round < 8; round++) {
       const messages = [{ role: 'system', content: system }, ...S.chatMsgs];
       statusEl.textContent = round === 0 ? '思考中…' : `工具结果已回传，继续（第 ${round + 1} 轮）…`;

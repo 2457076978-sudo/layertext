@@ -21,6 +21,8 @@ export interface AppConfig {
   /** 限制思考：请求带 reasoning_effort=low（服务商不识自动去除）；默认开 */
   lowThinking?: boolean;
   recentFiles?: string[];
+  /** 备用供应商序列（W3 failover）：主供应商失败时按序降级；key 留空则复用主 Key */
+  failover?: { name?: string; baseUrl?: string; model?: string; key?: string }[];
 }
 
 export interface RewriteRules {

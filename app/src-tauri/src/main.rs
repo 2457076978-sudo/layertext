@@ -157,11 +157,29 @@ fn config_path() -> Result<String, String> {
     Ok(format!("{}/.layertext.json", home))
 }
 
+/// 教师自定义提示词目录：~/Documents/LayerText配置/prompts（存在同名 .md 则覆盖内置提示词）
 #[tauri::command]
-fn save_api_key(key: String) -> Result<(), String> {
+fn prompts_dir() -> Result<String, String> {
+    let home = std::env::var("HOME").map_err(|e| e.to_string())?;
+    let dir = format!("{}/Documents/LayerText配置/prompts", home);
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir)
+}
+
+/// account=None → 主 Key（layertext.apikey）；Some("fb0") → 第一备用的 Key（layertext.apikey.fb0）
+fn key_service(account: &Option<String>) -> String {
+    match account {
+        Some(a) if !a.is_empty() => format!("layertext.apikey.{}", a),
+        _ => "layertext.apikey".to_string(),
+    }
+}
+
+#[tauri::command]
+fn save_api_key(key: String, account: Option<String>) -> Result<(), String> {
+    let service = key_service(&account);
     // -A：条目允许本机应用读取，避免每次读写都弹钥匙串授权框（个人电脑上的 API Key 场景可接受）
     let st = std::process::Command::new("security")
-        .args(["add-generic-password", "-U", "-A", "-a", "layertext", "-s", "layertext.apikey", "-w", &key])
+        .args(["add-generic-password", "-U", "-A", "-a", "layertext", "-s", &service, "-w", &key])
         .output()
         .map_err(|e| e.to_string())?;
     if st.status.success() {
@@ -172,9 +190,10 @@ fn save_api_key(key: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn load_api_key() -> Result<String, String> {
+fn load_api_key(account: Option<String>) -> Result<String, String> {
+    let service = key_service(&account);
     let out = std::process::Command::new("security")
-        .args(["find-generic-password", "-a", "layertext", "-s", "layertext.apikey", "-w"])
+        .args(["find-generic-password", "-a", "layertext", "-s", &service, "-w"])
         .output()
         .map_err(|e| e.to_string())?;
     if out.status.success() {
@@ -352,7 +371,8 @@ fn main() {
             load_app_config,
             open_help_window,
             write_file_base64,
-            export_tts
+            export_tts,
+            prompts_dir
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -21,9 +21,10 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildLexicon } from './core/lexicon.js';
 import { runQc, type Tier } from './core/qc.js';
-import { extractParas, sentsOf, splitChapter, cardGlossWords } from './core/textpipe.js';
+import { extractParas, sentsOf, splitChapter } from './core/textpipe.js';
 import { sentenceRisks } from './core/risks.js';
 import { IRR } from './core/irregular.js';
+import { composePrompt, parseManifest } from './core/aiops.js';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const EVALS_DIR = join(ROOT, 'examples', 'evals');
@@ -31,6 +32,14 @@ const REPORTS_DIR = join(ROOT, 'eval-reports');
 const BASELINE_PATH = join(EVALS_DIR, 'baseline.json');
 const BUNDLED_WORDLIST = join(ROOT, 'assets', 'wordlists', 'curriculum_2022_level3_1600.txt');
 const AMENDMENT_WORDLIST = join(ROOT, 'assets', 'wordlists', 'curriculum_2022_amendment.txt');
+const PROMPTS_DIR = join(ROOT, 'prompts');
+
+/** 提示词与生产同源（W3）：prompts/ 目录，manifest 管版本 */
+const PROMPT_MANIFEST = parseManifest(readFileSync(join(PROMPTS_DIR, 'manifest.json'), 'utf-8'));
+const PROMPT_BODIES: Record<string, string> = {
+  system_simplify: readFileSync(join(PROMPTS_DIR, 'system_simplify.md'), 'utf-8'),
+  system_draft: readFileSync(join(PROMPTS_DIR, 'system_draft.md'), 'utf-8'),
+};
 
 /** 内置课标词表 + 补录（数词/星期/月份等存档缺失块，见 amendment 文件头注释） */
 function bundledWordlistTexts(): string[] {
@@ -159,20 +168,22 @@ function evalEngineText(c: EvalCase): TextStat {
   };
 }
 
-/* ---------- AI 初稿评测（可选，需 key） ---------- */
-
-const AI_SYSTEM_BASE = `你是初中英语原著分层简化的审校引擎。严格遵守：
-1. 词汇边界：优先使用中国《义务教育英语课程标准》三级（约1600词）范围内的词；专有名词与既定术语保持不变。
-2. 句法黑名单（除直接引语内的原话）：被动语态→改主动；定语从句→拆成短句或用形容词前置；过去完成时→一般过去时并用 before/after 明示先后。
-3. 句长上限：改写后的句子不超过指定词数上限；宁可拆成两句。
-4. 保真：不改变情节、事实、人物与语气；情节零丢失。
-输出：保持输入段落的 [P##] 标记原样开头，直接输出该段简化文本，不要任何解释、标题或代码块。`;
+/* ---------- AI 初稿评测（可选，需 key）---------- */
 
 function tierRuleLine(tier: Tier, chno: number): string {
   const p = TIERS[tier];
   const passiveOk = tier === 'A' && chno >= p.passiveFromCh;
   const relclOk = tier === 'A' && chno >= p.relclFromCh;
   return `${p.name} 层：平均句长 ≤${p.maxLen} 词；被动语态${passiveOk ? `第 ${p.passiveFromCh} 章起已解禁（本章章号 ${chno}，可少量使用）` : '禁用'}；定语从句${relclOk ? `第 ${p.relclFromCh} 章起已解禁（本章章号 ${chno}，可少量使用）` : '禁用'}；过去完成时一律改写。`;
+}
+
+/** 与桌面应用 buildDraftSystemPrompt 同构：system_simplify 规则 + system_draft 任务模板（提示词集 v 见 prompts/manifest.json） */
+function buildDraftSystem(tier: Tier, chno: number): string {
+  return PROMPT_BODIES.system_simplify.trim() + '\n\n' + composePrompt(PROMPT_BODIES.system_draft, {
+    tierRule: tierRuleLine(tier, chno),
+    chnoNote: `（本章章号 ${chno}）`,
+    instructions: '',
+  });
 }
 
 interface AiCall { post: (body: unknown) => Promise<{ content: string; promptTokens?: number; completionTokens?: number }> }
@@ -213,7 +224,7 @@ interface AiTextResult {
 async function evalAiText(c: EvalCase, tier: Tier, ai: AiCall): Promise<AiTextResult> {
   const proper = loadWordFile(join(c.dir, 'proper.txt'));
   const chno = c.golden.chno ?? 1;
-  const system = `${AI_SYSTEM_BASE}\n\n- ${tierRuleLine(tier, chno)}`;
+  const system = buildDraftSystem(tier, chno);
   const body = splitChapter(c.md).body;
   const segs = body.match(/\[P\d+\][\s\S]*?(?=\[P\d+\]|$)/g) ?? [];
   const out: string[] = [];
