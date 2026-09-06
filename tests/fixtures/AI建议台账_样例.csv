@@ -1,0 +1,13 @@
+时间,书,章,层级,场景,标记类型,规则号,结果,引擎复核,供应商,模型,提示词版本,原句,建议句,依据,拒绝原因
+2026-09-05 09:12:03,动物农场,第一章_M.md,M,行内,词汇简化,R02,采纳,通过,api.deepseek.com,deepseek-chat,内置v1,"The old man sang a song about the good old days.","The old man sang an old song.","sang→sang an old song 更简",
+2026-09-05 09:15:44,动物农场,第一章_M.md,M,行内,词汇简化,R02,拒绝,⚠,api.deepseek.com,deepseek-chat,内置v1,"The horse that pulled the cart was old.","The old horse pulled the cart.","被动残留",（点✗放弃，未填原因）
+2026-09-05 09:20:10,动物农场,第一章_M.md,M,批量,句太长,R07,采纳,通过,api.deepseek.com,deepseek-chat,内置v1,"The fire went out in the cold night air and the children walked home.","The fire went out. The children walked home in the cold night air.","拆句",
+2026-09-05 09:31:27,动物农场,第一章_M.md,M,行内,词汇简化,R02,拒绝,⚠,api.deepseek.com,deepseek-chat,内置v1,"The walls are painted every year.","Someone paints the walls every year.","改为主动",
+2026-09-05 14:02:19,动物农场,第一章_M.md,M,标记即改写,表达生硬,R08,直改,通过,api.deepseek.com,deepseek-chat,内置v1,"He was very tired and he slept.","He was tired. He slept.","拆句",（点✗放弃，未填原因）
+2026-09-06 08:44:51,动物农场,第二章_M.md,M,行内,语法太难,R03-R06,采纳,通过,api.deepseek.com,deepseek-chat,内置v1,"Hardly had she spoken when the bell rang.","She spoke. Then the bell rang.","去倒装",
+2026-09-06 08:47:03,动物农场,第二章_M.md,M,行内,词汇简化,R02,拒绝,⚠,api.deepseek.com,deepseek-chat,内置v1,"The geese and the sheep were driven across the road.","Someone drove the geese and sheep across the road.","改主动",
+2026-09-06 08:52:40,动物农场,第二章_M.md,M,助手直改,词汇简化,R02,直改,⚠,api.deepseek.com,deepseek-chat,内置v1,"A story which he told us was funny.","He told us a funny story.","定从拆解",
+2026-09-06 09:01:15,动物农场,第二章_M.md,M,行内,好句锚点,R11,拒绝,通过,api.deepseek.com,deepseek-chat,内置v1,"Never had I seen such a tall windmill.","I had never seen such a tall windmill.","教师认为保留原句",（点✗放弃，未填原因）
+2026-09-06 09:10:48,动物农场,第二章_M.md,M,批量,句太长,R07,采纳,通过,api.deepseek.com,deepseek-chat,内置v1,"The wind turned the great slow arms of the mill above the quiet green meadow full of flowers.","The wind turned the arms of the mill. The meadow was quiet and green.","超长拆分",
+2026-09-06 09:22:31,动物农场,第二章_M.md,M,行内,词汇简化,R02,拒绝,通过,api.deepseek.com,deepseek-chat,内置v1,"His feet stopped hurting after the medicine.","His feet felt better after the medicine.","口语化",
+2026-09-06 10:05:09,动物农场,第二章_M.md,M,行内,事实用词存疑,R00,采纳,通过,api.deepseek.com,deepseek-chat,内置v1,"Mr Jones fed the horse.","Mr Jones gave food to the horse.","事实核对后采纳",

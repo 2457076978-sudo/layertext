@@ -21,6 +21,7 @@ import { parseCsv } from '../../src/core/lexicon.js';
 import { buildLexicon, type Lexicon } from '../../src/core/lexicon.js';
 import { IRR } from '../../src/core/irregular.js';
 import { runQc, toLegacyReport, type QcResult, type Tier } from '../../src/core/qc.js';
+import { aggregate, diagnose, LEDGER_HEADER, parseLedger, toLedgerLine, type LedgerRow } from '../../src/core/adoption.js';
 import {
   extractParas, hitOrigin, hit, pendHit, sentsOf, splitChapter, tokenizeTxt, cardGlossWords,
 } from '../../src/core/textpipe.js';
@@ -680,12 +681,68 @@ function renderReportPane(s: FileSession): void {
 
 /* ---------- 视图切换 ---------- */
 
-function switchView(name: 'text' | 'report' | 'suggest' | 'diff'): void {
-  const map = [['tab-text', 'pane-text'], ['tab-report', 'pane-report'], ['tab-suggest', 'pane-suggest'], ['tab-diff', 'pane-diff']] as const;
+function switchView(name: 'text' | 'report' | 'suggest' | 'diff' | 'retro'): void {
+  const map = [['tab-text', 'pane-text'], ['tab-report', 'pane-report'], ['tab-suggest', 'pane-suggest'], ['tab-diff', 'pane-diff'], ['tab-retro', 'pane-retro']] as const;
   for (const [id, pane] of map) {
     $(id).classList.toggle('active', id === `tab-${name}`);
     $(pane).classList.toggle('active', pane === `pane-${name}`);
   }
+}
+
+/* ---------- 复盘（W2 数据闭环）：读 AI建议台账 → 采纳率聚合 ---------- */
+
+const pct = (x: number | null): string => (x === null ? '—' : (x * 100).toFixed(0) + '%');
+
+async function renderRetroPane(): Promise<void> {
+  const pane = $('pane-retro');
+  const s = activeSession();
+  pane.innerHTML = '<div class="empty">读取台账…</div>';
+  let csv = '';
+  try {
+    const outDir = s?.sourcePath ? s.sourcePath.slice(0, s.sourcePath.lastIndexOf('/')) : await invoke<string>('reports_dir');
+    csv = await invoke<string>('read_text_file', { path: `${outDir}/AI建议台账.csv` });
+  } catch {
+    pane.innerHTML = `<div class="empty">还没有台账数据。<br/>你在正文里点 ✓ 采纳或 ✗ 放弃 AI 建议时，这里会自动积累记录（与变更日志同一文件夹）。<br/><span style="font-size:12px">想看跨书全量分析：菜单 帮助 → 打开本地示例文件夹 旁的《AI建议台账.csv》可用命令行工具聚合（见 docs/W2 交付报告）</span></div>`;
+    return;
+  }
+  const rows = parseLedger(csv);
+  if (rows.length === 0) {
+    pane.innerHTML = '<div class="empty">台账还没有数据行——采纳/拒绝 AI 建议后自动积累。</div>';
+    return;
+  }
+  const a = aggregate(rows);
+  const o = a.overall;
+  const card = (label: string, value: string, hint: string) =>
+    `<div class="retro-card"><div class="retro-num">${value}</div><div class="retro-label">${label}</div><div class="retro-hint">${hint}</div></div>`;
+  const groupRows = (list: typeof a.byMark) => list.map((g) => `<tr>
+      <td>${esc(g.key)}</td><td>${g.total}</td><td>${g.accepted}</td><td>${g.rejected}</td><td>${g.autoApplied}</td>
+      <td>${pct(g.explicitRate)}</td><td>${pct(g.checkWarnRatio)}</td></tr>`).join('');
+  const cc = a.crossCheck;
+  pane.innerHTML = `
+    <div class="sg-actions">
+      <b>复盘 · 本书 AI 建议采纳情况</b>
+      <span style="color:var(--muted);font-size:12px">${rows.length} 条记录（${s?.sourcePath ? '本书文件夹' : '示例模式'}的 AI建议台账.csv）</span>
+      <button id="retro-refresh">刷新</button>
+    </div>
+    <div class="retro-cards">
+      ${card('累计建议', String(o.total), '台账自动记录每次 采纳/拒绝/直改')}
+      ${card('明确采纳率', pct(o.explicitRate), `教师过目部分（采纳 ${o.accepted}/拒绝 ${o.rejected}）`)}
+      ${card('总接受率', pct(o.overallRate), `含直改 ${o.autoApplied} 条（你开启的自动模式）`)}
+      ${card('复核⚠被拒率', pct(cc.warnTotal ? cc.warnRejected / cc.warnTotal : null), `复核⚠ ${cc.warnTotal} 条中 ${cc.warnRejected} 条被拒；复核通过的为 ${pct(cc.okTotal ? cc.okRejected / cc.okTotal : null)}`)}
+    </div>
+    <table class="sgtable">
+      <tr><th>标记类型</th><th>建议数</th><th>采纳</th><th>拒绝</th><th>直改</th><th>明确采纳率</th><th>复核⚠比</th></tr>
+      ${groupRows(a.byMark)}
+    </table>
+    ${a.topRejected.length ? `<table class="sgtable"><tr><th>最常被拒 Top${a.topRejected.length}</th><th>被拒次数</th><th>采纳</th><th>复核⚠比</th></tr>
+      ${a.topRejected.map((g) => `<tr><td>${esc(g.key)}</td><td>${g.rejected}</td><td>${g.accepted}</td><td>${pct(g.checkWarnRatio)}</td></tr>`).join('')}</table>` : ''}
+    ${a.byDate.length > 1 ? `<table class="sgtable"><tr><th>日期</th><th>建议数</th><th>接受</th><th>拒绝</th><th>明确采纳率</th></tr>
+      ${a.byDate.map((d) => `<tr><td>${esc(d.date)}</td><td>${d.total}</td><td>${d.accepted + d.autoApplied}</td><td>${d.rejected}</td><td>${pct(d.rate)}</td></tr>`).join('')}</table>` : ''}
+    <div class="retro-verdict">
+      <div style="font-weight:600;margin-bottom:6px">判读（自动生成）</div>
+      ${diagnose(a).map((d) => `<div>· ${esc(d)}</div>`).join('')}
+    </div>`;
+  $('retro-refresh').addEventListener('click', () => void renderRetroPane());
 }
 
 /* ---------- 最近编辑 ---------- */
@@ -746,6 +803,7 @@ $('tab-text').addEventListener('click', () => switchView('text'));
 $('tab-report').addEventListener('click', () => switchView('report'));
 $('tab-suggest').addEventListener('click', () => switchView('suggest'));
 $('tab-diff').addEventListener('click', () => { renderDiff(0, Math.min(1, S.sessions.length - 1)); switchView('diff'); });
+$('tab-retro').addEventListener('click', () => { void renderRetroPane(); switchView('retro'); });
 
 /* ---------- 示例菜单 ---------- */
 
@@ -919,6 +977,7 @@ void listen<string>('menu-action', (ev) => {
     case 'qc-run': void runQcCurrent(); break;
     case 'view-text': switchView('text'); break;
     case 'view-report': switchView('report'); break;
+    case 'view-retro': void renderRetroPane(); switchView('retro'); break;
     case 'ai-settings': showAiSettings(); break;
     case 'ai-suggest': void aiSuggest(); break;
     case 'draft': showDraftPop(); break;
@@ -1134,7 +1193,7 @@ async function aiSuggest(instruction?: string): Promise<void> {
       let applied = 0;
       for (const g of [...S.suggestions]) {
         if (g.check.passive || g.check.relcl || g.check.pastperf || g.check.overlong) warned++;
-        if (g.pi !== undefined) { await acceptSuggestion(g); applied++; }
+        if (g.pi !== undefined) { await acceptSuggestion(g, { scene: '自动直改', outcome: '直改' }); applied++; }
       }
       setStatus(`AI 直改完成：自动应用 ${applied} 条${warned ? `，其中 ${warned} 条引擎复核⚠（黑名单/超长残留），已留痕变更日志，建议复查` : ''} ${usage}`, 'saved');
       return;
@@ -1206,6 +1265,43 @@ function csvCell(v: string): string {
   return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
 }
 
+/** 读旧追加一行 CSV（无文件则连表头新建；台账与变更日志共用） */
+async function appendCsvLine(path: string, header: readonly string[], line: string): Promise<void> {
+  let csv = '';
+  try { csv = await invoke<string>('read_text_file', { path }); } catch { /* 新建 */ }
+  if (!csv.trim()) csv = header.join(',') + '\n';
+  await invoke('write_text_file', { path, content: csv + line });
+}
+
+/** AI 建议台账（W2 数据闭环）：每次建议被 采纳/拒绝/直改 落一行，复盘页与分析脚本据此聚合 */
+async function logSuggestion(
+  s: FileSession, g: Suggestion,
+  outcome: '采纳' | '拒绝' | '直改', scene: string, mark?: Mark,
+): Promise<void> {
+  try {
+    const outDir = s.sourcePath ? s.sourcePath.slice(0, s.sourcePath.lastIndexOf('/')) : await invoke<string>('reports_dir');
+    const tier = (s.report?.tier ?? ($('tier') as HTMLSelectElement).value) as Tier;
+    const bad = g.check.passive || g.check.relcl || g.check.pastperf || g.check.overlong;
+    let host = S.appConfig.baseUrl ?? '';
+    try { host = new URL(host).host; } catch { if (host) host = '自定义'; }
+    const dir = s.sourcePath ? s.sourcePath.slice(0, s.sourcePath.lastIndexOf('/')) : '';
+    const row: LedgerRow = {
+      ts: new Date().toLocaleString('sv-SE'),
+      book: dir ? dir.slice(dir.lastIndexOf('/') + 1) : s.fileName,
+      chapter: s.fileName, tier, scene,
+      markType: g.type || (mark ? typeLabel(mark.type) : ''),
+      rule: mark ? (RULE_BY_TYPE[mark.type] ?? 'R00') : 'R00',
+      outcome,
+      check: bad ? '⚠' : '通过',
+      provider: host, model: S.appConfig.model ?? '',
+      promptVer: '内置v1', // W3 提示词外置后替换为实际版本号
+      original: g.original, revised: g.revised, basis: g.basis,
+      rejectReason: outcome === '拒绝' ? '（点✗放弃，未填原因）' : '',
+    };
+    await appendCsvLine(`${outDir}/AI建议台账.csv`, LEDGER_HEADER, toLedgerLine(row));
+  } catch { /* 台账尽力而为，不影响主流程 */ }
+}
+
 /** 批量应用（修订建议页）：统一走 acceptSuggestion（工作稿+变更日志），不再另生成 AI修订 文件 */
 async function applySuggestions(): Promise<void> {
   const s = activeSession();
@@ -1214,7 +1310,7 @@ async function applySuggestions(): Promise<void> {
   if (checked.length === 0) { setStatus('请先勾选要采用的修订（或在正文里直接点 ✓）', 'err'); return; }
   for (const i of checked.sort((a, b) => b - a)) {
     const g = S.suggestions[i];
-    if (g && g.pi !== undefined) await acceptSuggestion(g);
+    if (g && g.pi !== undefined) await acceptSuggestion(g, { scene: '批量' });
   }
 }
 
@@ -1270,6 +1366,8 @@ function renderInlineOne(session: FileSession, g: Suggestion): void {
     div.remove();
     sentEl.classList.remove('sug-pending');
     S.suggestions = S.suggestions.filter((x) => x !== g);
+    const s = activeSession();
+    if (s) void logSuggestion(s, g, '拒绝', '行内');
     renderSuggestions();
   });
   sentEl.after(div);
@@ -1330,7 +1428,9 @@ function remapMarks(session: FileSession): void {
   }
 }
 
-async function acceptSuggestion(g: Suggestion): Promise<void> {
+async function acceptSuggestion(g: Suggestion, opts: { scene?: string; outcome?: '采纳' | '直改' } = {}): Promise<void> {
+  const scene = opts.scene ?? '行内';
+  const outcome = opts.outcome ?? '采纳';
   const s = activeSession();
   if (!s || g.pi === undefined || g.si === undefined) return;
   const paras = extractParas(splitChapter(s.md).body);
@@ -1369,6 +1469,7 @@ async function acceptSuggestion(g: Suggestion): Promise<void> {
       g.basis, 'AI候选-行内采纳',
     ].map(csvCell).join(',') + '\n';
     await invoke('write_text_file', { path: logPath, content: csv });
+    await logSuggestion(s, g, outcome, scene, removed[0]);
     scheduleSave(s, () => undefined);
     renderReader(s);
     attachInlineSuggestions();
@@ -1415,7 +1516,7 @@ async function aiRewriteSentence(pi: number, si: number, intent: string, autoMar
     };
     if (autoMarkId) {
       hidePop();
-      await acceptSuggestion(g);
+      await acceptSuggestion(g, { scene: '标记即改写', outcome: '直改' });
       return;
     }
     S.suggestions.push(g);
@@ -2180,7 +2281,7 @@ async function executeTool(name: string, argsJson: string): Promise<string> {
         };
         S.suggestions.push(g);
         renderSuggestions();
-        await acceptSuggestion(g);
+        await acceptSuggestion(g, { scene: '助手直改', outcome: '直改' });
         return `已直接应用并写入工作稿（引擎复核：${risk.passive || risk.relcl || risk.pastperf || risk.overlong ? '仍命中黑名单/超长，建议教师复核' : '通过'}）。正文已实时更新。`;
       }
       case 'propose_revision': {

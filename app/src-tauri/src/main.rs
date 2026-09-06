@@ -268,6 +268,7 @@ fn main() {
             let view_menu = SubmenuBuilder::new(app, "显示")
                 .item(&mi_vt)
                 .item(&mi_vr)
+                .text("view-retro", "复盘（AI 建议采纳率）…")
                 .text("view-diff", "版本对比…")
                 .item(&sep3)
                 .fullscreen()
