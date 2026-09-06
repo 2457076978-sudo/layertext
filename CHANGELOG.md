@@ -4,6 +4,13 @@
 1.0.0 之前的版本号为开发期里程碑（当时 `package.json` 未同步递增，本文件按里程碑整理，2026-09-06 校准）。
 面向教师的通俗版功能说明见 [README](README.md) 与 [docs/PRD.md](docs/PRD.md)。
 
+## [未发布] 工程化 W4 · 发布工程
+
+- GitHub Actions CI：push/PR 自动跑 类型检查+全量测试 → `npm run eval`（低于基线即失败）→ 双引擎对照 → 应用类型检查；不过绿不合并。
+- Release 工作流：打 `v*` tag 自动 测试门禁 → 构建 universal dmg → 提取 CHANGELOG 段落为正文（缺段落即失败）→ Release 挂 dmg。
+- 新增 `docs/发布流程.md`（semver 口径、版本三处一致、**不做签名公证的决定与理由**）与 `docs/release-checklist.md`（含新手首开路径换位清单）。
+- 测试 56→58 项全绿（CHANGELOG 段落提取工具）。
+
 ## [未发布] 工程化 W3 · 提示词与供应商治理
 
 - 提示词外置 `prompts/`（4 份 + manifest 版本清单 + 变更记录），教师自定义目录可覆盖内置（`~/Documents/LayerText配置/prompts/`）——改提示词不改代码；评测 CLI 与桌面应用同源加载。

@@ -1,0 +1,60 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: 测试门禁 → 构建 universal dmg → 发布
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - name: 发布门禁：全量测试 + 评测不低于基线
+        run: |
+          npm ci
+          npm test
+          npm run eval
+
+      - name: 安装应用依赖
+        run: npm ci
+        working-directory: app
+
+      - name: 构建 Universal dmg（不签名公证）
+        run: npm run tauri build -- --target universal-apple-darwin
+        working-directory: app
+
+      - name: 提取 CHANGELOG 对应段落
+        id: notes
+        run: |
+          VER="${GITHUB_REF_NAME#v}"
+          NOTES=$(node tools/extract_changelog.mjs "$VER")
+          if [ -z "$NOTES" ]; then
+            echo "CHANGELOG.md 中未找到版本 $VER 的段落（需要 '## [$VER]' 标题）" >&2
+            exit 1
+          fi
+          {
+            echo "body<<CHANGELOG_EOF"
+            echo "$NOTES"
+            echo "CHANGELOG_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: 创建 Release 并挂 dmg
+        uses: softprops/action-gh-release@v2
+        with:
+          body: ${{ steps.notes.outputs.body }}
+          files: |
+            app/src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg

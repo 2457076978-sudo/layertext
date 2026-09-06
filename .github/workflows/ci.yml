@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+jobs:
+  test:
+    name: 类型检查 + 全量测试 + 评测 + 双引擎对照
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: 安装依赖（根）
+        run: npm ci
+
+      - name: 构建 + 类型检查 + 全量测试
+        run: npm test
+
+      - name: 金标准评测（不低于质量基线，低于则失败）
+        run: npm run eval
+
+      - name: 双引擎对照（TS vs Python 参照版）
+        run: node dist/tools/compare.js
+
+      - name: 桌面应用类型检查
+        run: |
+          cd app
+          npm ci
+          npx tsc --noEmit -p tsconfig.json
