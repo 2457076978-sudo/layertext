@@ -1,0 +1,110 @@
+#!/usr/bin/env node
+/**
+ * LayerText MCP Server（stdio）——把质检引擎接进任何 MCP 客户端
+ * （Claude Desktop / ZCode / Cursor 等）
+ *
+ * 启动：
+ *   node dist/src/mcp-server.js [--vocab 教材词库.csv]... [--wordlist 词表.txt]... [--terms 术语.txt] [--proper 专名.txt]
+ *
+ * 工具（4 个，全部本地计算、零遥测、不落盘）：
+ *   layer_qc              全文体检：生词率/覆盖率/句长/被动/定从/过去完成/OOV清单
+ *   layer_word_status     单词词表状态与原形（词库=难度锚点）
+ *   layer_sentence_risks  句法黑名单逐句检测（被动/定从/过去完成/超长）
+ *   layer_check_revision  改写句复核：AI 改写后自查黑名单与超长残留
+ *
+ * 配置示例见 docs/MCP.md。
+ */
+
+import { readFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { z } from 'zod';
+import {
+  buildMcpLexicon, toolCheckRevision, toolQcText, toolSentenceRisks, toolWordStatus,
+  type McqLexiconOptions,
+} from './core/mcpTools.js';
+
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
+
+function dirname(p: string): string {
+  const i = p.lastIndexOf('/');
+  return i < 0 ? '.' : p.slice(0, i);
+}
+
+function readWordFile(p: string): string[] {
+  return readFileSync(p, 'utf-8').split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
+}
+
+/** 内置词表（课标1600 + 补录）——词库三源之一 */
+function bundledWordlists(): string[] {
+  const files = [
+    join(ROOT, 'assets', 'wordlists', 'curriculum_2022_level3_1600.txt'),
+    join(ROOT, 'assets', 'wordlists', 'curriculum_2022_amendment.txt'),
+  ];
+  return files.map((f) => readFileSync(f, 'utf-8'));
+}
+
+function parseArgs(argv: string[]): McqLexiconOptions {
+  const opts: McqLexiconOptions = {};
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    const next = () => argv[++i];
+    if (a === '--vocab') (opts.vocabCsvTexts ??= []).push(readFileSync(next(), 'utf-8'));
+    else if (a === '--wordlist') (opts.plainWordlistTexts ??= []).push(readFileSync(next(), 'utf-8'));
+    else if (a === '--terms') opts.terms = readWordFile(next());
+    else if (a === '--proper') opts.properNouns = readWordFile(next());
+    else if (a === '-h' || a === '--help') {
+      console.error('用法: node dist/src/mcp-server.js [--vocab x.csv]... [--wordlist x.txt]... [--terms x.txt] [--proper x.txt]');
+      process.exit(0);
+    }
+  }
+  return opts;
+}
+
+async function main(): Promise<void> {
+  const opts = parseArgs(process.argv.slice(2));
+  const lex = buildMcpLexicon(opts, bundledWordlists());
+
+  const server = new McpServer(
+    { name: 'layertext-qc', version: '1.0.0' },
+    {
+      instructions: 'LayerText 分层读质检引擎：面向初中英语教师的文本简化质检。词库=难度锚点（词表内=学生已学）；被动/定语从句/过去完成按初中教学进度一律禁用；直接引语内豁免。改写英文后务必用 layer_check_revision 自查残留。',
+    },
+  );
+
+  server.registerTool('layer_qc', {
+    title: 'LayerText 全文体检',
+    description: '对一段英文文本做全面质检：词表覆盖率/生词率/句长/被动/定语从句/过去完成/OOV 生词清单。适合教师在简化前评估原文难度、简化后验收。',
+    inputSchema: z.object({ text: z.string().describe('英文文本（任意格式；按空行分段自动处理）') }),
+  }, async ({ text }) => ({ content: [{ type: 'text', text: JSON.stringify(toolQcText(text, lex), null, 1) }] }));
+
+  server.registerTool('layer_word_status', {
+    title: 'LayerText 单词词表状态',
+    description: '查一个英文单词是否在词库内（学生已学）/待定/词表外（生词），并给出词形还原原形。',
+    inputSchema: z.object({ word: z.string().describe('英文单词（自动小写、还原词形）') }),
+  }, async ({ word }) => ({ content: [{ type: 'text', text: JSON.stringify(toolWordStatus(word, lex), null, 1) }] }));
+
+  server.registerTool('layer_sentence_risks', {
+    title: 'LayerText 句法黑名单检测',
+    description: '逐句检测句法黑名单：被动语态/定语从句/过去完成时/超长句。初中生未学这些结构，简化版中不应出现（直接引语内豁免）。',
+    inputSchema: z.object({
+      text: z.string().describe('一个或多个英文句子'),
+      max_len: z.number().int().min(8).max(40).default(16).describe('句长上限（词/句），默认 16'),
+    }),
+  }, async ({ text, max_len }) => ({ content: [{ type: 'text', text: JSON.stringify(toolSentenceRisks(text, max_len), null, 1) }] }));
+
+  server.registerTool('layer_check_revision', {
+    title: 'LayerText 改写句复核',
+    description: '改写英文句子后自查：是否残留被动/定从/过去完成/超长（按句拆分逐句检测，超长=最长一句超限）。AI 改写英文后应调用本工具复核再交付。',
+    inputSchema: z.object({
+      revised: z.string().describe('改写后的英文（可多句）'),
+      max_len: z.number().int().min(8).max(40).default(16).describe('句长上限（词/句），默认 16'),
+    }),
+  }, async ({ revised, max_len }) => ({ content: [{ type: 'text', text: JSON.stringify(toolCheckRevision(revised, max_len), null, 1) }] }));
+
+  await server.connect(new StdioServerTransport());
+}
+
+void main();

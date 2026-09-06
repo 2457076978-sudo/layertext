@@ -42,9 +42,12 @@ export const IRR_NOUN: Record<string, string> = {
 export const FAKE = String.raw`(?!red\b|bed\b|shed\b|naked\b|need\b|indeed\b|feed\b|seed\b|wed\b|mixed\b|exhausted\b|interested\b)`;
 
 /** was/were + 不规则过去分词（第二被动模式词表）。
- *  built：W1 评测集 eval03 发现漏检（was built by …），2026-09-06 补入（TS 与 Python 参照版同步）。 */
+ *  built：W1 评测集 eval03 发现漏检（was built by …），2026-09-06 补入（TS 与 Python 参照版同步）。
+ *  sung 等 22 词：MCP 冒烟测试发现同类漏检（was sung 未检出），2026-09-06 批量补入常用被动分词
+ *  （sung|drawn|known|grown|thrown|shown|shaken|worn|won|torn|frozen|blown|bitten|hidden|spoken|
+ *   drunk|struck|laid|lit|spun|lent|swept——均为初中常见动词，双引擎同步）。 */
 export const PASSIVE_IRR =
-  'driven|made|given|beaten|broken|taken|chosen|elected|seen|heard|told|taught|caught|fed|sent|set|put|cut|hit|built';
+  'driven|made|given|beaten|broken|taken|chosen|elected|seen|heard|told|taught|caught|fed|sent|set|put|cut|hit|built|sung|drawn|known|grown|thrown|shown|shaken|worn|won|torn|frozen|blown|bitten|hidden|spoken|drunk|struck|laid|lit|spun|lent|swept';
 
 /** 过去完成时不规则分词全表（had + 以下任一词） */
 export const PART_LIST =

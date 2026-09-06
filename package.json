@@ -1,15 +1,17 @@
 {
   "name": "layertext",
   "version": "1.0.0",
-  "description": "LayerText 分层读 — 分层英语文本简化与审校工作台 / Tiered English text simplification & review workbench",
+  "description": "LayerText 分层读 — 英语文本简化与审校工作台（含 MCP 质检服务）/ English text simplification & review workbench with MCP QC server",
   "type": "module",
   "private": true,
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "tsc -p tsconfig.json && node --test dist/tests/*.test.js",
     "eval": "tsc -p tsconfig.json && node dist/src/eval.js",
+    "mcp": "node dist/src/mcp-server.js",
     "qc": "node dist/src/cli.js"
   },
+  "description": "LayerText 分层读 — 英语文本简化与审校工作台（含 MCP 质检服务）/ English text simplification & review workbench with MCP QC server",
   "engines": {
     "node": ">=20"
   },
@@ -19,5 +21,9 @@
     "happy-dom": "^20.14.0",
     "typescript": "^5.6.0"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "zod": "^4.5.4"
+  }
 }

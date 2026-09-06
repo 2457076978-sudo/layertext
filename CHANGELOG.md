@@ -4,6 +4,13 @@
 1.0.0 之前的版本号为开发期里程碑（当时 `package.json` 未同步递增，本文件按里程碑整理，2026-09-06 校准）。
 面向教师的通俗版功能说明见 [README](README.md) 与 [docs/PRD.md](docs/PRD.md)。
 
+## [未发布] 新功能 · MCP 服务（把质检引擎接进任何 AI 客户端）
+
+- 新增 `npm run mcp`（src/mcp-server.ts，stdio）：4 个本地工具——`layer_qc`（全文体检）、`layer_word_status`（词表状态/原形）、`layer_sentence_risks`（句法黑名单逐句）、`layer_check_revision`（改写句自查残留）；口径与桌面应用同一套引擎，零遥测不落盘。
+- 支持叠加教师词库（`--vocab/--wordlist/--terms/--proper`），Claude Desktop/ZCode 配置示例见 [docs/MCP.md](docs/MCP.md)。
+- MCP 冒烟测试抓到并修复引擎漏检：PASSIVE_IRR 补入 sung 等 22 个常用被动分词（TS 与 Python 参照版同步；金标准评测与双引擎对照全绿）。
+- 测试 62→67 项全绿（MCP 工具层 5 项）。
+
 ## [未发布] 产品转向 · 去预设难度（用户拍板：单文本一次简化）
 
 - **去掉 B/M/A 难度层预设**：难度由教师词库锚定（学生学过什么词就简化到词库内），唯一硬标准=句长上限（默认 16 词，ⓘ 可调）；黑名单句法一律禁用（原 A 层"第 N 章解禁"逻辑随层级一并移除）。

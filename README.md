@@ -74,7 +74,7 @@ npm run tauri build --target universal-apple-darwin
 git clone https://github.com/<your-org>/layertext.git
 cd layertext
 npm install
-npm test        # 43 项回归测试（防坑规则 + 审校 DOM + 应用逻辑）
+npm test        # 67 项回归测试（防坑规则 + 审校 DOM + 应用逻辑 + MCP 工具层）
 npm run eval    # 金标准评测：黑名单命中率/OOV 对齐 vs 质量基线（低于基线退出码 1）
 
 # 对示例文本跑一次质检（报告自动落盘到文本同目录）
@@ -84,6 +84,13 @@ node dist/src/cli.js qc examples/texts/aesop_tortoise_hare.md --tier M
 node dist/src/cli.js qc examples/texts/school_story_club.md \
   --vocab examples/vocab/sample_teaching_vocab.csv
 ```
+
+## MCP 服务（把质检引擎接进任何 AI 客户端）
+
+`npm run mcp` 启动一个 stdio MCP 服务器（Claude Desktop / ZCode / Cursor 可直接挂），
+暴露 4 个本地工具：`layer_qc`（全文体检）、`layer_word_status`（这个词学生学过吗）、
+`layer_sentence_risks`（句法黑名单逐句检测）、`layer_check_revision`（AI 改完英文自查被动/定从/
+超长残留）。口径与桌面应用同一套引擎，零遥测、不落盘。配置示例见 [docs/MCP.md](docs/MCP.md)。
 
 ## QC 指标：为什么这些句法是"黑名单"
 
