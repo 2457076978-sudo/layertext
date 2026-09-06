@@ -102,3 +102,23 @@ test('章节识别：已含 ## Chapter 标记直接使用', () => {
   assert.equal(r.alreadyFormatted, true);
   assert.equal(r.chapters[0].md, md);
 });
+
+test('checkRevisedText：多句改写逐句复核（拆句后不再误报超长）', async () => {
+  const { checkRevisedText } = await import('../app/src/pure.js');
+  const fakeRisk = (sent: string, maxLen: number) => ({
+    passive: / was driven/.test(sent),
+    relcl: / who /.test(sent),
+    pastperf: / had /.test(sent),
+    overlong: sent.split(/\s+/).length > maxLen,
+  });
+  // 41 词长句拆成三短句后：每句 ≤12 词 → 不再超长
+  const revised = 'The song was new to them. Yet every animal knew the tune. It made them happier than anything else.';
+  const r = checkRevisedText(revised, 20, fakeRisk);
+  assert.equal(r.overlong, false);
+  assert.equal(r.passive, false);
+  // 整串 22 词若不拆会被误判——对照：单句模式（旧逻辑）确实超长
+  assert.equal(fakeRisk(revised, 20).overlong, true);
+  // 任一句含被动则整体标被动
+  const r2 = checkRevisedText('He ran. The car was driven away.', 20, fakeRisk);
+  assert.equal(r2.passive, true);
+});

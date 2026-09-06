@@ -111,3 +111,24 @@ export function normalizeAndSplitChapters(raw: string, fileName: string): SplitC
   }
   return { chapters: [{ title: fileName, md: wrap(text, fileName, 1) }], alreadyFormatted: false };
 }
+
+/**
+ * 复核改写文本（可能含多句）：按句拆分逐句检测，overlong = 最长一句超限。
+ * riskOne：单句检测函数（由 UI 层注入 sentenceRisks 的单句版，避免本模块依赖引擎）。
+ */
+export function checkRevisedText(
+  revised: string,
+  maxLen: number,
+  riskOne: (sent: string, maxLen: number) => { passive: boolean; relcl: boolean; pastperf: boolean; overlong: boolean },
+): { passive: boolean; relcl: boolean; pastperf: boolean; overlong: boolean } {
+  const sents = revised.split(/(?<=[.!?])\s+/).filter((s) => /[A-Za-z]/.test(s));
+  const out = { passive: false, relcl: false, pastperf: false, overlong: false };
+  for (const s of sents) {
+    const r = riskOne(s, maxLen);
+    out.passive ||= r.passive;
+    out.relcl ||= r.relcl;
+    out.pastperf ||= r.pastperf;
+    out.overlong ||= r.overlong;
+  }
+  return out;
+}

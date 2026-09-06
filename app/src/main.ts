@@ -10,7 +10,7 @@ import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
 import * as XLSX from 'xlsx';
 import { unzipSync, strFromU8 } from 'fflate';
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, WidthType } from 'docx';
-import { applyRewriteTo, normalizeAndSplitChapters, parseAiJson } from './pure.js';
+import { applyRewriteTo, checkRevisedText, normalizeAndSplitChapters, parseAiJson } from './pure.js';
 import { S, setStatus as uiSetStatus, esc } from './state.js';
 import { AI_PROVIDERS, AI_SYSTEM_PROMPT, aiErrHuman, buildSystemPrompt, callChat, chatStream, loadConfig, saveConfig, setAiUi, tierMaxLen, tierPlan } from './ai.js';
 import bundledWordlist from '../../assets/wordlists/curriculum_2022_level3_1600.txt?raw';
@@ -292,6 +292,14 @@ function renderFileTabs(): void {
   el.querySelectorAll('[data-ftab-close]').forEach((x) =>
     x.addEventListener('click', () => closeSession(Number((x as HTMLElement).dataset.ftabClose))),
   );
+}
+
+/** 改写文本复核（多句拆分逐句检测，超长=最长一句超限） */
+function checkRev(revised: string, tier: string): Suggestion['check'] {
+  return checkRevisedText(revised, tierMaxLen(tier), (sent, m) => {
+    const r = sentenceRisks(sent, m);
+    return { passive: r.passive, relcl: r.relcl, pastperf: r.pastperf, overlong: r.overlong };
+  });
 }
 
 function badge(text: string): HTMLElement {
@@ -917,7 +925,7 @@ function showAiSettings(): void {
       <div class="key-tip" id="ai-key-tip" style="color:var(--muted);font-size:11px;margin-top:3px"></div></div>
     <div class="fld"><label>长期审校约定（可选；写上你每次都要 AI 遵守的要求，如"人名保留原文"）</label>
       <textarea id="ai-instructions" style="width:100%;height:50px;border:1px solid var(--line);border-radius:8px;padding:6px 10px;font-size:12px;font-family:inherit;resize:vertical;"></textarea></div>
-    <div class="fld"><label style="display:flex;align-items:flex-start;gap:6px"><input type="checkbox" id="ai-auto" style="width:auto;margin-top:3px" /> <span><b>标记即改写</b>：点词/句标记（如"超纲""语法太难"）后，AI 立即自动改写该句并<b>直接生效</b>——全程无需再点任何按钮。改动自动写工作稿+变更日志，原稿永不覆盖</span></label></div>
+    <div class="fld"><label style="display:flex;align-items:flex-start;gap:6px"><input type="checkbox" id="ai-auto" style="width:auto;margin-top:3px" /> <span><b>AI 改写直接生效</b>（全局）：点标记、批量「✨AI审核建议」、逐句改写的全部结果<b>自动应用</b>，无需再点 ✓——改动一律写工作稿+变更日志，原稿永不覆盖。关闭则改为候选模式（正文行内 ✓/✗）</span></label></div>
     <div class="fld"><label style="display:flex;align-items:flex-start;gap:6px"><input type="checkbox" id="ai-trust" style="width:auto;margin-top:3px" /> <span><b>信任模式</b>：允许 AI 助手在对话中直接修改正文（你说"直接改"即生效），同样只写工作稿</span></label></div>
     <div class="row-btns">
       <button id="ai-save" class="primary">保存</button>
@@ -1074,7 +1082,7 @@ async function aiSuggest(instruction?: string): Promise<void> {
     S.suggestions = raw
       .filter((x) => x.revised)
       .map((x) => {
-        const risk = sentenceRisks(String(x.revised), maxLen);
+        const risk = checkRev(String(x.revised), tier);
         return {
           markId: String(x.id),
           type: x.type ?? '',
@@ -1085,6 +1093,17 @@ async function aiSuggest(instruction?: string): Promise<void> {
           check: { passive: risk.passive, relcl: risk.relcl, pastperf: risk.pastperf, overlong: risk.overlong },
         };
       });
+    if (S.appConfig.autoRewriteOnMark && S.suggestions.length > 0) {
+      // 全局直改：所有建议自动生效（写工作稿+日志；⚠ 复核项计数提醒复查）
+      let warned = 0;
+      let applied = 0;
+      for (const g of [...S.suggestions]) {
+        if (g.check.passive || g.check.relcl || g.check.pastperf || g.check.overlong) warned++;
+        if (g.pi !== undefined) { await acceptSuggestion(g); applied++; }
+      }
+      setStatus(`AI 直改完成：自动应用 ${applied} 条${warned ? `，其中 ${warned} 条引擎复核⚠（黑名单/超长残留），已留痕变更日志，建议复查` : ''} ${usage}`, 'saved');
+      return;
+    }
     renderSuggestions();
     attachInlineSuggestions();
     switchView('suggest');
@@ -1340,7 +1359,7 @@ async function aiRewriteSentence(pi: number, si: number, intent: string, autoMar
     const arr = parseAiJson(content) as { original?: string; revised?: string; basis?: string; alternative?: string }[];
     const one = arr[0];
     if (!one?.revised) throw new Error('AI 未返回改写');
-    const risk = sentenceRisks(String(one.revised), tierMaxLen(tier));
+    const risk = checkRev(String(one.revised), tier);
     const g: Suggestion = {
       markId: autoMarkId ?? 'rw-' + Date.now().toString(36), type: intent || '词改写',
       original: String(one.original ?? sent), revised: String(one.revised),
@@ -2103,7 +2122,7 @@ async function executeTool(name: string, argsJson: string): Promise<string> {
         if (!original || !revised) return '错误：original/revised 不能为空';
         if (!s.md.includes(original)) return '错误：original 与正文不匹配——先用 search_text / get_sentence 取原句逐字复制';
         const tier = (s.report?.tier ?? ($('tier') as HTMLSelectElement).value) as Tier;
-        const risk = sentenceRisks(revised, tierMaxLen(tier));
+        const risk = checkRev(revised, tier);
         const loc = locateOriginal(s, original);
         const g: Suggestion = {
           markId: String(args.markId ?? 'edit-' + Date.now().toString(36)), type: '直接编辑',
@@ -2122,7 +2141,7 @@ async function executeTool(name: string, argsJson: string): Promise<string> {
         if (!original || !revised) return '错误：original/revised 不能为空';
         if (!s.md.includes(original)) return '错误：original 与正文不匹配（须与正文原句一字不差），请先用 get_sentence/search_text 取原句';
         const tier = (s.report?.tier ?? ($('tier') as HTMLSelectElement).value) as Tier;
-        const risk = sentenceRisks(revised, tierMaxLen(tier));
+        const risk = checkRev(revised, tier);
         S.suggestions.push({
           markId: String(args.markId ?? 'chat-' + Date.now().toString(36)),
           type: '对话建议', original, revised, basis: String(args.basis ?? ''),
