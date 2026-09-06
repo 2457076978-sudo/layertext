@@ -18,6 +18,8 @@ export interface QcOptions {
   tier: Tier;
   /** 章号（用于 A 层被动/定从解禁判定；null = 未知 → 不禁） */
   chno?: number | null;
+  /** 分层方案覆盖（教师可调；缺省用原型设定：被动第5章起、定从第8章起解禁） */
+  tierGates?: { passiveFromCh: number; relclFromCh: number };
   /** 原文级锚点豁免短语（整短语替换后计数） */
   anchors?: string[];
   /** 歌篇标记（含该短语的段落按歌词口径单独统计；默认沿用原型标记） */
@@ -163,8 +165,8 @@ export function runQc(md: string, lex: Lexicon, opts: QcOptions): QcResult {
     pendingHits,
     oov,
     gates: {
-      passiveOk: opts.tier !== 'A' || chno === null || chno >= 5,
-      relclOk: opts.tier !== 'A' || chno === null || chno >= 8,
+      passiveOk: opts.tier !== 'A' || chno === null || chno >= (opts.tierGates?.passiveFromCh ?? 5),
+      relclOk: opts.tier !== 'A' || chno === null || chno >= (opts.tierGates?.relclFromCh ?? 8),
     },
   };
 }

@@ -21,8 +21,9 @@ import {
 import { sentenceRisks } from '../../src/core/risks.js';
 import { jumpTo, refreshMarkDom, removeMarkDom, renderSidebar, restoreAllMarkDom, scheduleSave } from './review.js';
 import {
-  CHANGELOG_HEADER, GATES, GATE_HELP, SENT_TYPES, TIER_MAX_LEN, WORD_TYPES, newMarkId, newReviewState, typeLabel,
-  type FileSession, type Mark, type MarkType, type Suggestion,
+  CHANGELOG_HEADER, DEFAULT_TIER_PLANS, GATES, GATE_HELP, SENT_TYPES, WORD_TYPES,
+  newMarkId, newReviewState, typeLabel,
+  type FileSession, type Mark, type MarkType, type Suggestion, type TierPlan,
 } from './types.js';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -40,6 +41,44 @@ let properRows: string[] = [];
 let extraWordlistText: string | null = null;
 /** 当前会话的合并已知词表（含词句卡），供词面板显示原形 */
 let currentKnown: Set<string> = new Set();
+
+/* ---------- 全局配置（~/.layertext.json：AI 设置 + 分层方案 + 首启动标记） ---------- */
+
+interface AppConfig {
+  baseUrl?: string;
+  model?: string;
+  instructions?: string;
+  tiers?: Record<string, TierPlan>;
+  firstRunSeen?: boolean;
+}
+let appConfig: AppConfig = {};
+
+async function loadConfig(): Promise<AppConfig> {
+  try {
+    appConfig = JSON.parse(await invoke<string>('load_app_config')) as AppConfig;
+  } catch { appConfig = {}; }
+  return appConfig;
+}
+async function saveConfig(): Promise<void> {
+  await invoke('save_app_config', { config: JSON.stringify(appConfig) });
+}
+
+function tierPlan(tier: string): TierPlan {
+  return { ...DEFAULT_TIER_PLANS[tier] ?? DEFAULT_TIER_PLANS.M, ...(appConfig.tiers?.[tier] ?? {}) };
+}
+function tierMaxLen(tier: string): number {
+  return tierPlan(tier).maxLen;
+}
+
+/** 常见服务商预设（新手只需选服务商 + 贴 Key） */
+const AI_PROVIDERS: { name: string; url: string; models: string[]; keyTip: string }[] = [
+  { name: 'DeepSeek（深度求索）', url: 'https://api.deepseek.com/v1', models: ['deepseek-chat'], keyTip: 'platform.deepseek.com → 左侧「API Keys」→ 创建' },
+  { name: '智谱 AI', url: 'https://open.bigmodel.cn/api/paas/v4', models: ['glm-4.5', 'glm-4.5-flash', 'glm-4-flash'], keyTip: 'bigmodel.cn → 右上角控制台 → API Keys' },
+  { name: '月之暗面 Kimi', url: 'https://api.moonshot.cn/v1', models: ['kimi-latest'], keyTip: 'platform.moonshot.cn → API Key 管理' },
+  { name: '阿里通义', url: 'https://dashscope.aliyuncs.com/compatible-mode/v1', models: ['qwen-plus', 'qwen-turbo'], keyTip: 'bailian.aliyun.com → API-KEY 管理' },
+  { name: 'OpenAI', url: 'https://api.openai.com/v1', models: ['gpt-4o-mini'], keyTip: 'platform.openai.com → API keys' },
+  { name: '自定义 / 其他', url: '', models: [], keyTip: '填该服务的 OpenAI 兼容地址（一般以 /v1 结尾）' },
+];
 
 function activeSession(): FileSession | null {
   return activeIdx >= 0 ? sessions[activeIdx] : null;
@@ -204,6 +243,11 @@ async function addSession(md: string, fileName: string, sourcePath: string | nul
     renderAll();
     return;
   }
+  // 本书配置：同文件夹的 _LayerText项目.json 自动生效（新用户第一次配好，之后每章自动带）
+  if (sourcePath) {
+    const dir = sourcePath.slice(0, sourcePath.lastIndexOf('/'));
+    if (await loadBookConfig(dir)) setStatus('已自动加载本书配置（词库/术语/约定）', 'saved');
+  }
   const markPath = await markPathFor(sourcePath, fileName);
   const review = newReviewState(fileName);
   try {
@@ -237,9 +281,9 @@ function renderAll(): void {
   renderFileTabs();
   const s = activeSession();
   if (!s) {
-    $('reader').innerHTML = '<div class="empty">尚未载入文本<br/>点击上方「载入示例」或「打开章节文件…」</div>';
-    $('pane-report').innerHTML = '<div class="empty">尚未运行质检</div>';
-    $('side-review').innerHTML = '<div class="side-empty">打开文件后：要点配额 / 终审门禁 / 标记清单</div>';
+    $('reader').innerHTML = '<div class="empty"><b>第一步：打开一篇课文</b><br/>点上方「载入示例」先看演示，或「打开章节文件…」选你的书稿</div>';
+    $('pane-report').innerHTML = '<div class="empty"><b>第二步：点上方「▶ 质检本章」</b><br/>软件会自动数出这篇课文的生词率、句长、难句</div>';
+    $('side-review').innerHTML = '<div class="side-empty">这里是你的审校 checklist：<br/>· 要点配额：本章必须保留的情节点，自己添加打勾<br/>· 终审门禁：四项全勾才算审完（点 ? 看每项查什么）<br/>· 标记清单：正文里做的标记都在这，点击跳回原文</div>';
     hidePop();
     fileSummary();
     return;
@@ -289,7 +333,7 @@ function renderReader(session: FileSession): void {
   try {
     body = splitChapter(session.md).body;
   } catch (e) {
-    reader.innerHTML = `<div class="empty">文件格式不符：${esc((e as Error).message)}<br/>需要包含 "## Chapter One" 章节标记与 [P01] 段落标记</div>`;
+    reader.innerHTML = `<div class="empty">文件格式不符：${esc((e as Error).message)}<br/>需要包含 "## Chapter One" 章节标记与 [P01] 段落标记。<br/><span style="font-size:12px">不知道怎么弄？把书稿发我（开发者）帮你转格式</span></div>`;
     return;
   }
   const lex = buildLexiconNow();
@@ -563,6 +607,7 @@ async function runQcCurrent(): Promise<void> {
       tier,
       fileName: s.fileName,
       chno: s.sourcePath ? chnoFromPath(s.sourcePath) : null,
+      tierGates: { passiveFromCh: tierPlan(tier).passiveFromCh, relclFromCh: tierPlan(tier).relclFromCh },
       ...(properRows.length ? { propCheckList: properRows } : {}),
     });
   } catch (e) {
@@ -775,6 +820,9 @@ void listen<string>('menu-action', (ev) => {
     case 'ai-settings': showAiSettings(); break;
     case 'ai-suggest': void aiSuggest(); break;
     case 'draft': showDraftPop(); break;
+    case 'tier-plan': showTierPlanPop(); break;
+    case 'book-config': void saveBookConfig(); break;
+    case 'help-key': void invoke('open_help_window', { which: 'key' }); break;
   }
 });
 
@@ -785,55 +833,95 @@ let suggestions: Suggestion[] = [];
 let aiHistory: { role: 'user' | 'assistant'; content: string }[] = [];
 const aiPop = $('ai-pop');
 
+function aiErrHuman(e: unknown): string {
+  const s = String(e);
+  if (s.includes('401')) return 'Key 不对或已过期——回到服务商网站重新复制一次';
+  if (s.includes('404')) return '地址或模型名不对——检查 API 地址末尾是否带 /v1、模型名拼写是否与服务商一致';
+  if (s.includes('429')) return '请求太频繁或额度不足——稍等再试，或去服务商网站看看余额';
+  if (s.includes('Failed to fetch') || s.includes('NetworkError')) return '连不上服务器——检查网络，或 API 地址是否填错';
+  if (s.includes('insufficient')) return '账户余额不足——到服务商网站充值';
+  return s;
+}
+
 function showAiSettings(): void {
   aiPop.innerHTML = `
-    <div class="pop-h">AI 设置（OpenAI 兼容接口）</div>
-    <div class="fld"><label>API 地址（兼容 DeepSeek / 智谱 / Kimi / 通义等，填到 /v1）</label>
-      <input id="ai-url" placeholder="https://api.openai.com/v1" /></div>
-    <div class="fld"><label>模型名</label><input id="ai-model" placeholder="gpt-4o-mini" /></div>
-    <div class="fld"><label>API Key（仅存本机钥匙串，不上传）</label><input id="ai-key" type="password" placeholder="sk-…" /></div>
-    <div class="fld"><label>长期审校约定（每次请求自动附带，优先级最高——如"人名保留原文；第 3 段的名句不许改"）</label>
-      <textarea id="ai-instructions" style="width:100%;height:56px;border:1px solid var(--line);border-radius:8px;padding:6px 10px;font-size:12px;font-family:inherit;resize:vertical;"></textarea></div>
+    <div class="pop-h">AI 设置（第一次配置，照着做即可）</div>
+    <div class="fld"><label>① 选择 AI 服务商（选一个你有账号的）</label>
+      <select id="ai-provider">${AI_PROVIDERS.map((p, i) => `<option value="${i}">${p.name}</option>`).join('')}</select></div>
+    <div class="fld"><label>② API 地址（选服务商后自动填好，一般不用改）</label>
+      <input id="ai-url" placeholder="https://api.deepseek.com/v1" /></div>
+    <div class="fld"><label>③ 模型（选服务商后自动推荐）</label>
+      <select id="ai-model-sel"></select><input id="ai-model" placeholder="模型名" style="display:none" /></div>
+    <div class="fld"><label>④ API Key（一串密钥，形如 sk-…；只存这台电脑，不会发给别人）</label>
+      <input id="ai-key" type="password" placeholder="粘贴你的 Key" />
+      <div class="key-tip" id="ai-key-tip" style="color:var(--muted);font-size:11px;margin-top:3px"></div></div>
+    <div class="fld"><label>长期审校约定（可选；写上你每次都要 AI 遵守的要求，如"人名保留原文"）</label>
+      <textarea id="ai-instructions" style="width:100%;height:50px;border:1px solid var(--line);border-radius:8px;padding:6px 10px;font-size:12px;font-family:inherit;resize:vertical;"></textarea></div>
     <div class="row-btns">
       <button id="ai-save" class="primary">保存</button>
-      <button id="ai-test">测试连接</button>
+      <button id="ai-test">测试连接（填完 ①-④ 就点这个）</button>
       <button id="ai-close">关闭</button>
     </div>
     <div class="test-out" id="ai-test-out"></div>
-    <div class="hint-txt">说明：AI 只负责给出修订候选；每条候选都会经本地质检引擎复核（改写后是否仍命中句法黑名单/超长），最终是否采用由你在「修订建议」页勾选。全文数据不出本机，仅把标记相关句子发送给你配置的 API。</div>`;
+    <div class="hint-txt">这是什么？AI 功能（改写建议 / 分层初稿 / AI 助手对话）需要连接一个 AI 服务。上面四步配好后，AI 只负责"给建议"，每条建议都会先经本机质检引擎复核，最后由你点头才生效。不知道 Key 从哪来？点菜单 帮助 → 如何获取 AI 的 Key。</div>`;
   aiPop.classList.add('open');
+
+  const urlEl = $('ai-url') as HTMLInputElement;
+  const modelSel = $('ai-model-sel') as HTMLSelectElement;
+  const modelEl = $('ai-model') as HTMLInputElement;
+
+  const applyProvider = (i: number) => {
+    const p = AI_PROVIDERS[i];
+    if (p.url) urlEl.value = p.url;
+    $('ai-key-tip').textContent = 'Key 从哪来：' + p.keyTip;
+    if (p.models.length) {
+      modelSel.style.display = '';
+      modelEl.style.display = 'none';
+      modelSel.innerHTML = p.models.map((m) => `<option ${m === appConfig.model ? 'selected' : ''}>${m}</option>`).join('');
+    } else {
+      modelSel.style.display = 'none';
+      modelEl.style.display = '';
+    }
+  };
+  $('ai-provider').addEventListener('change', () => applyProvider(Number(($('ai-provider') as HTMLSelectElement).value)));
+  const cur = $('ai-key') as HTMLInputElement;
+
   void (async () => {
-    try {
-      const [cfg, key] = await Promise.all([invoke<Record<string, string>>('load_api_config'), invoke<string>('load_api_key')]);
-      ($('ai-url') as HTMLInputElement).value = cfg.baseUrl ?? '';
-      ($('ai-model') as HTMLInputElement).value = cfg.model ?? '';
-      ($('ai-key') as HTMLInputElement).value = key ?? '';
-      ($('ai-instructions') as HTMLTextAreaElement).value = cfg.instructions ?? '';
-    } catch { /* 留空 */ }
+    await loadConfig();
+    const key = await invoke<string>('load_api_key');
+    const matched = AI_PROVIDERS.findIndex((p) => p.url && p.url === appConfig.baseUrl);
+    ($('ai-provider') as HTMLSelectElement).value = String(matched >= 0 ? matched : AI_PROVIDERS.length - 1);
+    urlEl.value = appConfig.baseUrl ?? '';
+    if (matched >= 0) applyProvider(matched);
+    else { modelSel.style.display = 'none'; modelEl.style.display = ''; modelEl.value = appConfig.model ?? ''; }
+    cur.value = key ?? '';
+    ($('ai-instructions') as HTMLTextAreaElement).value = appConfig.instructions ?? '';
   })();
+
+  const currentModel = () => (modelSel.style.display !== 'none' ? modelSel.value : modelEl.value.trim());
+
   $('ai-close').addEventListener('click', () => aiPop.classList.remove('open'));
   $('ai-save').addEventListener('click', async () => {
     const out = $('ai-test-out');
     try {
-      await invoke('save_api_config', {
-        baseUrl: ($('ai-url') as HTMLInputElement).value.trim(),
-        model: ($('ai-model') as HTMLInputElement).value.trim(),
-        instructions: ($('ai-instructions') as HTMLTextAreaElement).value.trim(),
-      });
-      const key = ($('ai-key') as HTMLInputElement).value.trim();
-      if (key) await invoke('save_api_key', { key });
+      appConfig.baseUrl = urlEl.value.trim();
+      appConfig.model = currentModel();
+      appConfig.instructions = ($('ai-instructions') as HTMLTextAreaElement).value.trim();
+      await saveConfig();
+      const k = cur.value.trim();
+      if (k) await invoke('save_api_key', { key: k });
       out.textContent = '✓ 已保存（Key 存入本机钥匙串）';
     } catch (e) {
       out.textContent = '✗ 保存失败：' + e;
     }
   });
   $('ai-test').addEventListener('click', async () => {
-    // 直接用表单当前值测试（不依赖已保存的钥匙串），填完即可点
     const out = $('ai-test-out');
-    const url = (($('ai-url') as HTMLInputElement).value.trim() || 'https://api.openai.com/v1').replace(/\/+$/, '');
-    const model = ($('ai-model') as HTMLInputElement).value.trim() || 'gpt-4o-mini';
-    const key = ($('ai-key') as HTMLInputElement).value.trim();
-    if (!key) { out.textContent = '请先填入 API Key'; return; }
+    const url = (urlEl.value.trim() || '').replace(/\/+$/, '');
+    const model = currentModel();
+    const key = cur.value.trim();
+    if (!key) { out.textContent = '第 ④ 步还没填 Key（一串 sk- 开头的字符）'; return; }
+    if (!url || !model) { out.textContent = '第 ① 步先选服务商，地址和模型会自动填好'; return; }
     out.textContent = '连接中…';
     try {
       const resp = await tauriFetch(`${url}/chat/completions`, {
@@ -841,11 +929,11 @@ function showAiSettings(): void {
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
         body: JSON.stringify({ model, max_tokens: 8, messages: [{ role: 'user', content: '只回复两个字：正常' }] }),
       });
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${(await resp.text()).slice(0, 160)}`);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${(await resp.text()).slice(0, 120)}`);
       const data = (await resp.json()) as { choices?: { message?: { content?: string } }[] };
-      out.textContent = '✓ 连接成功：' + (data.choices?.[0]?.message?.content ?? '').slice(0, 30);
+      out.textContent = '✓ 连接成功——点「保存」就配好了';
     } catch (e) {
-      out.textContent = '✗ 连接失败：' + e;
+      out.textContent = '✗ ' + aiErrHuman(e);
     }
   });
 }
@@ -859,7 +947,7 @@ async function callChat(
   maxTokens: number,
   externalSignal?: AbortSignal,
 ): Promise<{ content: string; usage: string }> {
-  const cfg = await invoke<Record<string, string>>('load_api_config');
+  const cfg = appConfig;
   const key = await invoke<string>('load_api_key');
   if (!key) throw new Error('未配置 API Key（菜单 LayerText → AI 设置）');
   const base = (cfg.baseUrl || 'https://api.openai.com/v1').replace(/\/+$/, '');
@@ -891,7 +979,7 @@ async function callChat(
 
 /** 组装 system 提示词（含用户的长期审校约定） */
 async function buildSystemPrompt(): Promise<string> {
-  const cfg = await invoke<Record<string, string>>('load_api_config');
+  const cfg = appConfig;
   const custom = (cfg.instructions ?? '').trim();
   return AI_SYSTEM_PROMPT + (custom ? `\n\n6. 教师的长期审校约定（优先级最高）：\n${custom}` : '');
 }
@@ -909,7 +997,7 @@ const AI_SYSTEM_PROMPT = `你是初中英语原著分层简化的审校助手，
 function buildAiUserPrompt(session: FileSession, tier: Tier): string {
   const body = splitChapter(session.md).body;
   const paras = extractParas(body);
-  const maxLen = TIER_MAX_LEN[tier] ?? 16;
+  const maxLen = tierMaxLen(tier);
   const r = session.report;
   const gates = r?.gates ?? { passiveOk: tier !== 'A', relclOk: tier !== 'A' };
   const marks = session.review.marks.map((m) => {
@@ -969,7 +1057,7 @@ async function aiSuggest(instruction?: string): Promise<void> {
     const end = content.lastIndexOf(']');
     if (start < 0 || end <= start) throw new Error('AI 返回中未找到 JSON 数组');
     const raw = JSON.parse(content.slice(start, end + 1)) as { id: string; type?: string; original?: string; revised?: string; basis?: string; alternative?: string }[];
-    const maxLen = TIER_MAX_LEN[tier] ?? 16;
+    const maxLen = tierMaxLen(tier);
     suggestions = raw
       .filter((x) => x.revised)
       .map((x) => {
@@ -1230,7 +1318,7 @@ async function aiRewriteSentence(pi: number, si: number, intent: string): Promis
       { role: 'system', content: system },
       {
         role: 'user',
-        content: `层级：${tier}（句长上限 ${TIER_MAX_LEN[tier] ?? 16} 词）\n教师意图：${intent}\n请改写下面这句（只输出一个元素的 JSON 数组，original 必须与原句一字不差）：\n${sent}`,
+        content: `层级：${tier}（句长上限 ${tierMaxLen(tier)} 词）\n教师意图：${intent}\n请改写下面这句（只输出一个元素的 JSON 数组，original 必须与原句一字不差）：\n${sent}`,
       },
     ], 800);
     const start = content.indexOf('[');
@@ -1239,7 +1327,7 @@ async function aiRewriteSentence(pi: number, si: number, intent: string): Promis
     const arr = JSON.parse(content.slice(start, end + 1)) as { original?: string; revised?: string; basis?: string; alternative?: string }[];
     const one = arr[0];
     if (!one?.revised) throw new Error('AI 未返回改写');
-    const risk = sentenceRisks(String(one.revised), TIER_MAX_LEN[tier] ?? 16);
+    const risk = sentenceRisks(String(one.revised), tierMaxLen(tier));
     suggestions.push({
       markId: 'rw-' + Date.now().toString(36), type: intent || '词改写',
       original: String(one.original ?? sent), revised: String(one.revised),
@@ -1263,11 +1351,16 @@ $('btn-ai').addEventListener('click', () => void aiSuggest());
 const draftPop = $('draft-pop');
 let draftAbort: AbortController | null = null;
 
-const TIER_DRAFT_RULES: Record<string, string> = {
-  B: 'B（支架）层：平均句长 ≤14 词；只用课标 1600 词与术语表词汇；被动/定从/过去完成全部禁用；可合并短句、增补衔接，让最弱的学生也能读懂。',
-  M: 'M（中梯）层：平均句长 ≤16 词；只用课标 1600 词与术语表词汇；被动/定从/过去完成禁用；逐段对应原文，一段进一段出，信息不合并删减。',
-  A: 'A（挑战）层：平均句长 ≤20 词；允许适度文学性用词（仍在初中可及范围）；被动/定语从句按解禁规则（章号≥5 被动解禁、≥8 定从解禁），过去完成仍改写为一般过去时或 before/after 明示。',
-};
+const TIER_DRAFT_RULES: Record<string, string> = {};
+function tierRule(tier: string): string {
+  if (!TIER_DRAFT_RULES[tier]) {
+    const p = tierPlan(tier);
+    TIER_DRAFT_RULES[tier] = `${p.name} 层：平均句长 ≤${p.maxLen} 词；${p.desc}；${
+      p.passiveFromCh ? `被动语态第 ${p.passiveFromCh} 章起解禁（之前禁用）` : '被动语态禁用'
+    }；${p.relclFromCh ? `定语从句第 ${p.relclFromCh} 章起解禁（之前禁用）` : '定语从句禁用'}；过去完成时一律改写为一般过去时或 before/after 明示。`;
+  }
+  return TIER_DRAFT_RULES[tier];
+}
 
 function showDraftPop(): void {
   const s = activeSession();
@@ -1379,6 +1472,138 @@ ${instructions ? `\n教师方向指令（最高优先级）：${instructions}` :
 }
 
 $('btn-draft').addEventListener('click', showDraftPop);
+$('tier-q').addEventListener('click', (e) => { e.stopPropagation(); showTierPlanPop(); });
+
+/* ---------- 启动序列：配置 → 首启动欢迎 ---------- */
+void (async () => {
+  await loadConfig();
+  if (!appConfig.firstRunSeen) showWelcome();
+})();
+
+/* ================= 分层方案（B/M/A 标准可调） · 本书配置 · 首启动欢迎 ================= */
+
+const tierPop = $('tier-pop');
+
+function showTierPlanPop(): void {
+  const rows = (['B', 'M', 'A'] as const).map((t) => {
+    const p = tierPlan(t);
+    return `
+    <div class="tier-row" data-tier="${t}">
+      <div class="tier-name">${p.name}<span class="dim">${t}</span></div>
+      <div class="tier-fields">
+        <label>句长上限 <input type="number" data-f="maxLen" value="${p.maxLen}" min="8" max="30" style="width:56px" /> 词</label>
+        <label>被动解禁 <input type="number" data-f="passiveFromCh" value="${p.passiveFromCh}" min="0" max="30" style="width:56px" /> 章起（0=全书禁用）</label>
+        <label>定从解禁 <input type="number" data-f="relclFromCh" value="${p.relclFromCh}" min="0" max="30" style="width:56px" /> 章起（0=全书禁用）</label>
+        <input type="text" data-f="desc" value="${esc(p.desc)}" style="flex:1" />
+      </div>
+    </div>`;
+  }).join('');
+  tierPop.innerHTML = `
+    <div class="pop-h">分层方案 —— 三个难度层的标准</div>
+    <p class="dim" style="margin:4px 0 10px">B=支架（最易）/ M=中梯 / A=挑战（最难）。默认值来自教学进度的通用设定；你的学生你最了解，改成适合他们的标准。改动影响：质检参考值、AI 改写规则、分层初稿。</p>
+    ${rows}
+    <div class="row-btns">
+      <button id="tier-save" class="primary">保存</button>
+      <button id="tier-reset">恢复默认</button>
+      <button id="tier-close">关闭</button>
+    </div>`;
+  tierPop.classList.add('open');
+  $('tier-close').addEventListener('click', () => tierPop.classList.remove('open'));
+  $('tier-reset').addEventListener('click', async () => { appConfig.tiers = undefined; await saveConfig(); tierPop.classList.remove('open'); setStatus('分层方案已恢复默认', 'saved'); });
+  $('tier-save').addEventListener('click', async () => {
+    const tiers: Record<string, TierPlan> = {};
+    for (const row of tierPop.querySelectorAll('.tier-row')) {
+      const t = (row as HTMLElement).dataset.tier!;
+      const base = DEFAULT_TIER_PLANS[t];
+      tiers[t] = {
+        name: base.name,
+        desc: (row.querySelector('[data-f="desc"]') as HTMLInputElement).value.trim() || base.desc,
+        maxLen: Number((row.querySelector('[data-f="maxLen"]') as HTMLInputElement).value) || base.maxLen,
+        passiveFromCh: Number((row.querySelector('[data-f="passiveFromCh"]') as HTMLInputElement).value) || 0,
+        relclFromCh: Number((row.querySelector('[data-f="relclFromCh"]') as HTMLInputElement).value) || 0,
+      };
+    }
+    appConfig.tiers = tiers;
+    for (const k of Object.keys(TIER_DRAFT_RULES)) delete TIER_DRAFT_RULES[k];
+    await saveConfig();
+    tierPop.classList.remove('open');
+    const s = activeSession();
+    if (s) renderAll();
+    setStatus('分层方案已保存', 'saved');
+  });
+}
+document.addEventListener('mousedown', (e) => {
+  if (tierPop.classList.contains('open') && !(e.target as HTMLElement).closest('#tier-pop') && !(e.target as HTMLElement).closest('#tier-q')) tierPop.classList.remove('open');
+});
+
+/* ---------- 本书配置：词库/术语/专名/约定 随书稿文件夹保存与自动加载 ---------- */
+
+const BOOK_CONFIG = '_LayerText项目.json';
+
+async function saveBookConfig(): Promise<void> {
+  const s = activeSession();
+  if (!s?.sourcePath) { setStatus('先打开本书的一个章节文件，配置会保存在它旁边', 'err'); return; }
+  const dir = s.sourcePath.slice(0, s.sourcePath.lastIndexOf('/'));
+  const cfg = {
+    说明: 'LayerText 本书配置——放在书稿文件夹里，打开同文件夹任何章节自动生效',
+    vocabCsv: vocabCsvText ?? null,
+    vocabName,
+    terms: termsText ?? null,
+    proper: properRows.length ? properRows : null,
+    instructions: appConfig.instructions ?? null,
+    savedAt: new Date().toLocaleString('zh-CN'),
+  };
+  try {
+    await invoke('write_text_file', { path: `${dir}/${BOOK_CONFIG}`, content: JSON.stringify(cfg, null, 1) });
+    setStatus(`已保存为本书配置：${dir}/${BOOK_CONFIG}——这本书后续章节打开即自动带上词库与约定`, 'saved');
+    void invoke('reveal_path', { path: `${dir}/${BOOK_CONFIG}` });
+  } catch (e) {
+    setStatus('保存失败：' + e, 'err');
+  }
+}
+
+async function loadBookConfig(dir: string): Promise<boolean> {
+  try {
+    const raw = await invoke<string>('read_text_file', { path: `${dir}/${BOOK_CONFIG}` });
+    const cfg = JSON.parse(raw) as { vocabCsv?: string | null; vocabName?: string; terms?: string | null; proper?: string[] | null; instructions?: string | null };
+    if (cfg.vocabCsv) { vocabCsvText = cfg.vocabCsv; vocabName = cfg.vocabName ?? '本书词库'; }
+    if (cfg.terms) termsText = cfg.terms;
+    properRows = cfg.proper ?? [];
+    if (cfg.instructions) appConfig.instructions = cfg.instructions;
+    return Boolean(cfg.vocabCsv || cfg.terms || cfg.proper?.length);
+  } catch {
+    return false;
+  }
+}
+
+/* ---------- 首启动欢迎 ---------- */
+
+function showWelcome(): void {
+  const wp = $('welcome-pop');
+  wp.innerHTML = `
+    <div class="pop-h" style="font-size:17px">欢迎使用 LayerText 分层读 🎉</div>
+    <p style="margin:8px 0 4px;line-height:1.8">这是帮你把英文原著<strong>简化成不同难度的版本</strong>给学生读的工具。三步开始：</p>
+    <div class="w-steps">
+      <div class="w-step"><b>① 先试试</b>：点「载入示例」，看一个完整的例子长什么样</div>
+      <div class="w-step"><b>② 用自己的书</b>：「打开章节文件」选你的书稿（一本书一个文件夹最省心）</div>
+      <div class="w-step"><b>③ 让 AI 帮忙改</b>：菜单 LayerText → AI 设置，照提示 4 步配好（只需选服务商+贴 Key）</div>
+    </div>
+    <p class="dim" style="margin:6px 0 10px">不配 AI 也能用：质检、标记、报告都是本机功能。随时点菜单「帮助」。</p>
+    <div class="row-btns">
+      <button id="w-demo" class="primary">先看示例</button>
+      <button id="w-help">使用教程</button>
+      <button id="w-later">直接开始</button>
+    </div>`;
+  wp.classList.add('open');
+  $('w-demo').addEventListener('click', () => { void closeWelcome(); $('btn-demo').click(); });
+  $('w-help').addEventListener('click', () => { void closeWelcome(); void invoke('open_help_window', { which: 'usage' }); });
+  $('w-later').addEventListener('click', () => void closeWelcome());
+}
+async function closeWelcome(): Promise<void> {
+  $('welcome-pop').classList.remove('open');
+  appConfig.firstRunSeen = true;
+  await saveConfig();
+}
 
 $('btn-ai').addEventListener('click', () => void aiSuggest());
 
@@ -1451,7 +1676,7 @@ async function chatStream(
   messages: { role: string; content: string; tool_calls?: unknown; tool_call_id?: string }[],
   onDelta: (t: string) => void,
 ): Promise<{ content: string; toolCalls: { id: string; name: string; arguments: string }[]; usage: string }> {
-  const cfg = await invoke<Record<string, string>>('load_api_config');
+  const cfg = appConfig;
   const key = await invoke<string>('load_api_key');
   if (!key) throw new Error('未配置 API Key（菜单 LayerText → AI 设置…）');
   const base = (cfg.baseUrl || 'https://api.openai.com/v1').replace(/\/+$/, '');
@@ -1562,7 +1787,7 @@ function executeTool(name: string, argsJson: string): string {
         if (!original || !revised) return '错误：original/revised 不能为空';
         if (!s.md.includes(original)) return '错误：original 与正文不匹配（须与正文原句一字不差），请先用 get_sentence/search_text 取原句';
         const tier = (s.report?.tier ?? ($('tier') as HTMLSelectElement).value) as Tier;
-        const risk = sentenceRisks(revised, TIER_MAX_LEN[tier] ?? 16);
+        const risk = sentenceRisks(revised, tierMaxLen(tier));
         suggestions.push({
           markId: String(args.markId ?? 'chat-' + Date.now().toString(36)),
           type: '对话建议', original, revised, basis: String(args.basis ?? ''),
@@ -1680,7 +1905,7 @@ function showGateHelp(gate: string, anchor: HTMLElement): void {
   const s = activeSession();
   if (isQc) {
     const tier = (s?.report?.tier ?? ($('tier') as HTMLSelectElement).value) as Tier;
-    const maxLen = TIER_MAX_LEN[tier] ?? 16;
+    const maxLen = tierMaxLen(tier);
     if (s?.report) {
       const r = s.report;
       const gates2 = r.gates;
@@ -1694,8 +1919,8 @@ function showGateHelp(gate: string, anchor: HTMLElement): void {
           ${row('平均句长', r.avgLenNarrRaw.toFixed(1) + ' 词', `≤ ${maxLen} 词（${tier} 层）`, r.avgLenNarrRaw > maxLen)}
           ${row('单句最长', r.maxLen + ' 词', '≤ 20 词', r.maxLen > 20)}
           ${row('超 20 词句数', String(r.over20), '0（个别文学长句可人工放行）', r.over20 > 0)}
-          ${row('被动式', String(r.passive), gates2.passiveOk ? '已解禁（第5章起）·建议人工复核' : '0', !gates2.passiveOk && r.passive > 0)}
-          ${row('定语从句', String(r.relcl), gates2.relclOk ? '已解禁（第8章起）·建议人工复核' : '0', !gates2.relclOk && r.relcl > 0)}
+          ${row('被动式', String(r.passive), gates2.passiveOk ? `已解禁（第${tierPlan('A').passiveFromCh}章起）·建议人工复核` : '0', !gates2.passiveOk && r.passive > 0)}
+          ${row('定语从句', String(r.relcl), gates2.relclOk ? `已解禁（第${tierPlan('A').relclFromCh}章起）·建议人工复核` : '0', !gates2.relclOk && r.relcl > 0)}
           ${row('过去完成', String(r.pastperf), '0', r.pastperf > 0)}
           ${row('待定词命中', String(r.pendingHits), '逐个复核后定去留', r.pendingHits > 0)}
         </table>`;

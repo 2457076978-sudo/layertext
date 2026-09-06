@@ -134,17 +134,13 @@ fn load_api_key() -> Result<String, String> {
 }
 
 #[tauri::command]
-fn save_api_config(base_url: String, model: String, instructions: String) -> Result<(), String> {
-    let cfg = serde_json::json!({ "baseUrl": base_url, "model": model, "instructions": instructions });
-    std::fs::write(config_path()?, cfg.to_string()).map_err(|e| e.to_string())
+fn save_app_config(config: String) -> Result<(), String> {
+    std::fs::write(config_path()?, config).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn load_api_config() -> Result<serde_json::Value, String> {
-    match std::fs::read_to_string(config_path()?) {
-        Ok(s) => Ok(serde_json::from_str(&s).unwrap_or(serde_json::json!({}))),
-        Err(_) => Ok(serde_json::json!({})),
-    }
+fn load_app_config() -> Result<String, String> {
+    Ok(std::fs::read_to_string(config_path()?).unwrap_or_else(|_| "{}".into()))
 }
 
 fn open_help(app: &tauri::AppHandle, label: &str, title: &str, url: &str, w: f64, h: f64) {
@@ -157,6 +153,15 @@ fn open_help(app: &tauri::AppHandle, label: &str, title: &str, url: &str, w: f64
         .title(title)
         .inner_size(w, h)
         .build();
+}
+
+#[tauri::command]
+fn open_help_window(app: tauri::AppHandle, which: String) {
+    match which.as_str() {
+        "usage" => open_help(&app, "help-usage", "LayerText 使用说明", "/help.html", 760.0, 780.0),
+        "qc" => open_help(&app, "help-qc", "LayerText · QC 指标说明", "/help-qc.html", 760.0, 860.0),
+        _ => open_help(&app, "help-key", "如何获取 AI 的 Key（新手向）", "/help-key.html", 760.0, 720.0),
+    }
 }
 
 fn main() {
@@ -185,6 +190,7 @@ fn main() {
                 .item(&mi_vocab)
                 .item(&mi_terms)
                 .item(&mi_proper)
+                .text("book-config", "保存为本书配置（词库/约定随文件夹）")
                 .item(&sep2)
                 .item(&mi_exp)
                 .item(&mi_imp)
@@ -208,6 +214,7 @@ fn main() {
 
             let help_menu = SubmenuBuilder::new(app, "帮助")
                 .text("help-usage", "使用说明")
+                .text("help-key", "如何获取 AI 的 Key（新手向）")
                 .text("help-qc", "QC 指标说明")
                 .separator()
                 .text("help-example-dir", "打开本地示例文件夹")
@@ -216,6 +223,7 @@ fn main() {
             let app_menu = SubmenuBuilder::new(app, "LayerText")
                 .about(None)
                 .text("ai-settings", "AI 设置…")
+                .text("tier-plan", "分层方案…（B/M/A 标准可调）")
                 .separator()
                 .services()
                 .separator()
@@ -273,8 +281,9 @@ fn main() {
             reveal_path,
             save_api_key,
             load_api_key,
-            save_api_config,
-            load_api_config
+            save_app_config,
+            load_app_config,
+            open_help_window
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
