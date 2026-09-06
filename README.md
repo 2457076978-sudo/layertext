@@ -97,14 +97,15 @@ node dist/src/cli.js qc examples/texts/school_story_club.md \
 ## 仓库结构
 
 ```
-src/core/    QC 引擎（纯 TypeScript，无框架依赖：irregular / lexicon / textpipe / qc / risks）
-src/cli.ts   命令行入口
+src/core/    QC 引擎（纯 TypeScript，无框架依赖：irregular / lexicon / textpipe / qc / risks / adoption / aiops）
+src/cli.ts   命令行入口　　src/eval.ts   评测入口（npm run eval）
 app/         macOS 桌面应用（Tauri 2：前端 Vite + 主进程 Rust，复用 src/core）
-tests/       防坑规则回归测试（node:test）
-tools/       qc_chapter_ref.py（Python 参照版）、convert_wordlist.py、compare.ts（对照测试）
-docs/        PRD、QC 指标说明、M1 对照报告、工程化提示词、交付报告（docs/reports/）
-assets/      内置词表
-examples/    示例文本与示例词库（全部自写，CC0）
+tests/       回归测试（node:test，60 项）
+tools/       qc_chapter_ref.py（Python 参照版）、compare.ts（对照测试）、adoption.ts（采纳率分析）、extract_changelog.mjs（发布）
+prompts/     版本化 AI 提示词（manifest 管版本，教师可自定义覆盖）
+docs/        PRD、QC 指标说明、质量基线、发布流程、M1 对照报告、工程化提示词、交付报告（docs/reports/）
+assets/      内置词表（课标1600 + amendment 补录）
+examples/    示例文本与词库（自写 CC0）+ evals/ 金标准评测集
 ```
 
 ## 方法论
@@ -128,14 +129,14 @@ examples/    示例文本与示例词库（全部自写，CC0）
 - 书级改写规则（v1.0.0）：人名替换/叙事视角随书稿文件夹生效
 - AI 直改体系（v1.0.0）：标记即改写、信任模式、原地编辑原稿（首改自动备份）
 
-**进行中 🚧**（工程化 W0–W5，见 [docs/工程化开发提示词_v1.0.md](docs/工程化开发提示词_v1.0.md) 与 [CHANGELOG](CHANGELOG.md)）
+**工程化 ✅ 已完成**（W0–W5，2026-09-06，详见 [docs/reports/](docs/reports/) 各交付报告与 [CHANGELOG](CHANGELOG.md)）
 
-- W0 文档校准与版本对齐 ✅
-- W1 金标准评测集 + `npm run eval` + 质量基线 ✅
-- W2 采纳率数据闭环（分析脚本 + 应用内复盘页）✅
-- W3 提示词版本化 + 供应商 failover + 成本台账 ✅
-- W4 CI / Release 流水线 + 发布流程文档 ✅（首次推送 GitHub 后实跑验收）
-- W5 诊断包导出 + 本地错误日志 + 复盘模板 ✅
+- W0 文档校准与版本对齐（本 README 三栏路线图即其产物）
+- W1 金标准评测集（3 篇 CC0）+ `npm run eval` 基线门禁 + [质量基线](docs/质量基线.md)（命中率 100%）
+- W2 采纳率数据闭环：AI 建议台账 + CLI 分析（tools/adoption）+ 应用内「复盘」页
+- W3 [提示词版本化](prompts/README.md)（prompts/，教师可自定义覆盖）+ 供应商 failover + 成本台账
+- W4 [CI / Release 流水线](docs/发布流程.md) + [发布检查清单](docs/release-checklist.md)（首次推送 GitHub 后实跑验收）
+- W5 诊断包导出 + 本地错误日志（零遥测）+ [复盘模板](docs/复盘模板.md)
 - W3 提示词版本化 + 供应商 failover + 成本台账
 - W4 CI / Release 流水线 + 发布流程文档
 - W5 诊断包导出 + 本地错误日志 + 复盘模板
