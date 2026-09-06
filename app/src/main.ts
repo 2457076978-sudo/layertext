@@ -371,7 +371,7 @@ function renderReader(session: FileSession): void {
 
 /* ---------- 标记动作 ---------- */
 
-function addMark(session: FileSession, mark: Mark): void {
+function addMark(session: FileSession, mark: Mark): Mark {
   session.review.marks.push(mark);
   refreshMarkDom(mark);
   renderSidebar(session, sidebarHandlers);
@@ -380,6 +380,7 @@ function addMark(session: FileSession, mark: Mark): void {
     else if (st === 'saved') setStatus('✓ 标记已自动保存：' + detail, 'saved');
     else setStatus('标记保存失败：' + detail, 'err');
   });
+  return mark;
 }
 
 function removeMark(session: FileSession, m: Mark): void {
@@ -552,11 +553,17 @@ function bindTypeButtons(session: FileSession, level: 'word' | 'sent', pi: numbe
       const note = (pop.querySelector('#pop-note') as HTMLTextAreaElement | null)?.value.trim() || undefined;
       if (marksAt(session, level, pi, si, wi).some((m) => m.type === type)) return; // 已有同类型标记
       const sentText = sentsOf(extractParas(splitChapter(session.md).body)[pi], false)[si] ?? '';
-      addMark(session, {
+      const mark = addMark(session, {
         id: newMarkId(), level, pi, si, ...(level === 'word' ? { wi } : {}),
         ...(level === 'word' ? { word: pop.querySelector('.pop-h')?.textContent ?? '', text: sentText.slice(0, 40) } : { text: sentText.slice(0, 40) }),
         type: type as MarkType, note, ts: Date.now(),
       });
+      // 标记即改写：点完标记直接 AI 改写并生效，无需任何后续点击
+      if (S.appConfig.autoRewriteOnMark) {
+        hidePop();
+        void aiRewriteSentence(pi, si, typeLabel(mark.type), mark.id);
+        return;
+      }
       const ta = pop.querySelector('#pop-note') as HTMLTextAreaElement | null;
       if (ta) ta.value = '';
       refreshPop('marked');
@@ -910,6 +917,8 @@ function showAiSettings(): void {
       <div class="key-tip" id="ai-key-tip" style="color:var(--muted);font-size:11px;margin-top:3px"></div></div>
     <div class="fld"><label>长期审校约定（可选；写上你每次都要 AI 遵守的要求，如"人名保留原文"）</label>
       <textarea id="ai-instructions" style="width:100%;height:50px;border:1px solid var(--line);border-radius:8px;padding:6px 10px;font-size:12px;font-family:inherit;resize:vertical;"></textarea></div>
+    <div class="fld"><label style="display:flex;align-items:flex-start;gap:6px"><input type="checkbox" id="ai-auto" style="width:auto;margin-top:3px" /> <span><b>标记即改写</b>：点词/句标记（如"超纲""语法太难"）后，AI 立即自动改写该句并<b>直接生效</b>——全程无需再点任何按钮。改动自动写工作稿+变更日志，原稿永不覆盖</span></label></div>
+    <div class="fld"><label style="display:flex;align-items:flex-start;gap:6px"><input type="checkbox" id="ai-trust" style="width:auto;margin-top:3px" /> <span><b>信任模式</b>：允许 AI 助手在对话中直接修改正文（你说"直接改"即生效），同样只写工作稿</span></label></div>
     <div class="row-btns">
       <button id="ai-save" class="primary">保存</button>
       <button id="ai-test">测试连接（填完 ①-④ 就点这个）</button>
@@ -949,6 +958,8 @@ function showAiSettings(): void {
     else { modelSel.style.display = 'none'; modelEl.style.display = ''; modelEl.value = S.appConfig.model ?? ''; }
     cur.value = key ?? '';
     ($('ai-instructions') as HTMLTextAreaElement).value = S.appConfig.instructions ?? '';
+    ($('ai-auto') as HTMLInputElement).checked = S.appConfig.autoRewriteOnMark ?? false;
+    ($('ai-trust') as HTMLInputElement).checked = S.appConfig.trustEdit ?? false;
   })();
 
   const currentModel = () => (modelSel.style.display !== 'none' ? modelSel.value : modelEl.value.trim());
@@ -960,6 +971,8 @@ function showAiSettings(): void {
       S.appConfig.baseUrl = urlEl.value.trim();
       S.appConfig.model = currentModel();
       S.appConfig.instructions = ($('ai-instructions') as HTMLTextAreaElement).value.trim();
+      S.appConfig.autoRewriteOnMark = ($('ai-auto') as HTMLInputElement).checked;
+      S.appConfig.trustEdit = ($('ai-trust') as HTMLInputElement).checked;
       await saveConfig();
       const k = cur.value.trim();
       if (k) await invoke('save_api_key', { key: k });
@@ -1301,7 +1314,7 @@ async function acceptSuggestion(g: Suggestion): Promise<void> {
 
 /* ---------- 词面板：AI 改写本句 ---------- */
 
-async function aiRewriteSentence(pi: number, si: number, intent: string): Promise<void> {
+async function aiRewriteSentence(pi: number, si: number, intent: string, autoMarkId?: string): Promise<void> {
   const s = activeSession();
   if (!s) return;
   const key = await invoke<string>('load_api_key');
@@ -1325,12 +1338,18 @@ async function aiRewriteSentence(pi: number, si: number, intent: string): Promis
     const one = arr[0];
     if (!one?.revised) throw new Error('AI 未返回改写');
     const risk = sentenceRisks(String(one.revised), tierMaxLen(tier));
-    S.suggestions.push({
-      markId: 'rw-' + Date.now().toString(36), type: intent || '词改写',
+    const g: Suggestion = {
+      markId: autoMarkId ?? 'rw-' + Date.now().toString(36), type: intent || '词改写',
       original: String(one.original ?? sent), revised: String(one.revised),
       basis: one.basis ?? '', alternative: one.alternative, status: 'pending',
       check: { passive: risk.passive, relcl: risk.relcl, pastperf: risk.pastperf, overlong: risk.overlong },
-    });
+    };
+    if (autoMarkId) {
+      hidePop();
+      await acceptSuggestion(g);
+      return;
+    }
+    S.suggestions.push(g);
     hidePop();
     attachInlineSuggestions();
     setStatus('AI 已给出本句改写——正文黄色区域内点 ✓ 采纳或 ✗ 放弃', 'saved');
@@ -1976,7 +1995,7 @@ const AI_TOOLS = [
     type: 'function',
     function: {
       name: 'get_sentence',
-      description: '按段落号与句子号取正文原句及其句法风险检测（pi 从 0 起，si 从 0 起）',
+      description: '取正文原句及其句法风险（编号从 0 起：pi=第几段-1，si=第几句-1。search_text 结果每行自带可直接使用的 get_sentence 参数，请直接复制，不要自行换算）',
       parameters: {
         type: 'object',
         properties: { pi: { type: 'integer' }, si: { type: 'integer' } },
@@ -1988,8 +2007,23 @@ const AI_TOOLS = [
     type: 'function',
     function: {
       name: 'search_text',
-      description: '在当前章节正文中搜索包含指定英文词/短语的句子（按需查证，避免全文发送）',
+      description: '在正文中搜索含关键词的句子；每行结果自带 get_sentence 的现成参数（pi/si），直接复制使用，禁止自行换算编号',
       parameters: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'apply_edit',
+      description: '【直接编辑】仅当教师开启信任模式且明确要求"直接改"时使用：核对原句后直接替换正文（自动落工作稿与变更日志，原稿不动）。original 必须与正文一字不差',
+      parameters: {
+        type: 'object',
+        properties: {
+          original: { type: 'string' }, revised: { type: 'string' },
+          basis: { type: 'string' }, markId: { type: 'string' },
+        },
+        required: ['original', 'revised', 'basis'],
+      },
     },
   },
   {
@@ -2009,7 +2043,7 @@ const AI_TOOLS = [
   },
 ];
 
-function executeTool(name: string, argsJson: string): string {
+async function executeTool(name: string, argsJson: string): Promise<string> {
   const s = activeSession();
   if (!s) return '错误：当前未打开任何章节';
   let args: Record<string, unknown> = {};
@@ -2038,8 +2072,9 @@ function executeTool(name: string, argsJson: string): string {
         const paras = extractParas(splitChapter(s.md).body);
         const sent = sentsOf(paras[Number(args.pi)] ?? '', false)[Number(args.si)];
         if (!sent) return `错误：P${Number(args.pi) + 1}-S${Number(args.si) + 1} 不存在`;
-        const risk = sentenceRisks(sent);
-        return JSON.stringify({ 句子: sent, 词数: sent.split(/\s+/).length, 被动: risk.passive, 定从: risk.relcl, 过去完成: risk.pastperf, 超长: risk.overlong });
+        const risk = sentenceRisks(sent, tierMaxLen(($('tier') as HTMLSelectElement).value));
+        const oovWords = tokenizeTxt(sent).filter((t) => !hit(t, S.currentKnown) && t.length > 1);
+        return JSON.stringify({ 原句: sent, 词数: sent.split(/\s+/).length, 被动: risk.passive, 定从: risk.relcl, 过去完成: risk.pastperf, 超长: risk.overlong, 句内词表外词: [...new Set(oovWords)] });
       }
       case 'search_text': {
         const q = String(args.query ?? '').toLowerCase();
@@ -2048,11 +2083,32 @@ function executeTool(name: string, argsJson: string): string {
         extractParas(splitChapter(s.md).body).forEach((p, pi) => {
           sentsOf(p, false).forEach((sent, si) => {
             if (sent.toLowerCase().includes(q) && hits.length < 8) {
-              hits.push(`P${pi + 1}-S${si + 1}｜${sent}`);
+              hits.push(`get_sentence 参数 pi=${pi},si=${si}｜显示编号 P${pi + 1}-S${si + 1}｜${sent}`);
             }
           });
         });
         return hits.length ? hits.join('\n') : `（未找到含 "${q}" 的句子）`;
+      }
+      case 'apply_edit': {
+        if (!S.appConfig.trustEdit) return '错误：教师未开启信任模式（AI 设置 → 允许 AI 直接编辑）。请改用 propose_revision 提交候选。';
+        const original = String(args.original ?? '');
+        const revised = String(args.revised ?? '');
+        const basis = String(args.basis ?? '');
+        if (!original || !revised) return '错误：original/revised 不能为空';
+        if (!s.md.includes(original)) return '错误：original 与正文不匹配——先用 search_text / get_sentence 取原句逐字复制';
+        const tier = (s.report?.tier ?? ($('tier') as HTMLSelectElement).value) as Tier;
+        const risk = sentenceRisks(revised, tierMaxLen(tier));
+        const loc = locateOriginal(s, original);
+        const g: Suggestion = {
+          markId: String(args.markId ?? 'edit-' + Date.now().toString(36)), type: '直接编辑',
+          original, revised, basis, status: 'pending',
+          check: { passive: risk.passive, relcl: risk.relcl, pastperf: risk.pastperf, overlong: risk.overlong },
+          ...(loc ? { pi: loc.pi, si: loc.si } : {}),
+        };
+        S.suggestions.push(g);
+        renderSuggestions();
+        await acceptSuggestion(g);
+        return `已直接应用并写入工作稿（引擎复核：${risk.passive || risk.relcl || risk.pastperf || risk.overlong ? '仍命中黑名单/超长，建议教师复核' : '通过'}）。正文已实时更新。`;
       }
       case 'propose_revision': {
         const original = String(args.original ?? '');
@@ -2117,7 +2173,13 @@ async function sendChat(): Promise<void> {
 
   try {
     const system = (await buildSystemPrompt()) +
-      `\n\n7. 你在一个审校应用中工作，可调用工具查证与验证（list_marks / get_chapter_stats / get_sentence / search_text / propose_revision）。改写建议必须先用工具核对原句，再用 propose_revision 提交；不要凭空引用正文。当前章节：${s.fileName}，标记 ${s.review.marks.length} 条。`;
+      `\n\n7. 你的身份与固定工作方式（不要每次重新发明流程）：
+- 你是分层简化审校引擎，不是聊天机器人：动作优先、回答简短，禁止长篇解释。
+- 编号规则：get_sentence 的 pi/si 从 0 起（pi=段号-1，si=句号-1）；search_text 每行结果自带现成的 get_sentence 参数，直接复制使用，禁止自行换算。
+- 修订类请求的标准流程（≤4 次工具调用完成）：search_text 定位 → get_sentence 取原句（original 必须逐字复制其"原句"字段）→ 按层级与书级规则改写 → 提交。
+- 提交方式：${S.appConfig.trustEdit ? '信任模式已开启——教师说"直接改/改吧"时用 apply_edit 直接应用（自动落工作稿与变更日志，原稿不动）；教师说"给建议/看看"时仍用 propose_revision' : '教师未开启信任模式，一律用 propose_revision 提交候选，由教师在界面点 ✓ 采纳'}。
+- 不要重复调用已知信息的工具；不要在一轮里既 apply 又 propose。
+当前章节：${s.fileName}，标记 ${s.review.marks.length} 条。`;
     for (let round = 0; round < 8; round++) {
       const messages = [{ role: 'system', content: system }, ...S.chatMsgs];
       statusEl.textContent = round === 0 ? '思考中…' : `工具结果已回传，继续（第 ${round + 1} 轮）…`;
@@ -2135,7 +2197,7 @@ async function sendChat(): Promise<void> {
       }
       chatRender(); // 先展示工具调用条
       for (const t of toolCalls) {
-        const result = executeTool(t.name, t.arguments);
+        const result = await executeTool(t.name, t.arguments);
         S.chatMsgs.push({ role: 'tool', tool_call_id: t.id, content: result });
       }
     }

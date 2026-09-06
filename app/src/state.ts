@@ -12,6 +12,10 @@ export interface AppConfig {
   tiers?: Record<string, TierPlan>;
   firstRunSeen?: boolean;
   tourSeen?: boolean;
+  /** 信任模式：AI 助手可直接编辑（工作稿+日志，原稿不动） */
+  trustEdit?: boolean;
+  /** 标记即改写：点标记后 AI 自动改写该句并直接生效 */
+  autoRewriteOnMark?: boolean;
   recentFiles?: string[];
 }
 
