@@ -11,9 +11,9 @@ import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
 import * as XLSX from 'xlsx';
 import { unzipSync, zipSync, strFromU8, strToU8 } from 'fflate';
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, WidthType } from 'docx';
-import { applyRewriteTo, buildDiagSummary, checkRevisedText, normalizeAndSplitChapters, parseAiJson } from './pure.js';
+import { applyRewriteTo, buildDiagSummary, checkRevisedText, mergeQuotaTexts, normalizeAndSplitChapters, parseAiJson, pickSentMarkType } from './pure.js';
 import { S, setStatus as uiSetStatus, esc } from './state.js';
-import { AI_PROVIDERS, aiErrHuman, buildAssistantPrompt, buildDraftSystemPrompt, buildRewriteSentencePrompt, buildSystemPrompt, callChat, chatStream, loadConfig, reloadPrompts, saveConfig, setAiUi, tierMaxLen, tierPlan } from './ai.js';
+import { AI_PROVIDERS, aiErrHuman, buildAssistantPrompt, buildDraftSystemPrompt, buildPlotPointsPrompt, buildRewriteSentencePrompt, buildSystemPrompt, callChat, chatStream, loadConfig, reloadPrompts, saveConfig, setAiUi, tierMaxLen, tierPlan } from './ai.js';
 import bundledWordlist from '../../assets/wordlists/curriculum_2022_level3_1600.txt?raw';
 import bundledAmendment from '../../assets/wordlists/curriculum_2022_amendment.txt?raw';
 import exampleMd from '../../examples/texts/aesop_tortoise_hare.md?raw';
@@ -205,7 +205,7 @@ async function markPathFor(sourcePath: string | null, fileName: string): Promise
   return `${dir}/示例_审校标记.json`;
 }
 
-async function addSession(md: string, fileName: string, sourcePath: string | null): Promise<void> {
+async function addSession(md: string, fileName: string, sourcePath: string | null, opts: { noAutoQc?: boolean } = {}): Promise<void> {
   const same = S.sessions.findIndex((s) => s.sourcePath === sourcePath && s.fileName === fileName);
   if (same >= 0) {
     S.activeIdx = same;
@@ -241,6 +241,8 @@ async function addSession(md: string, fileName: string, sourcePath: string | nul
   S.suggestions = [];
   renderAll();
   void pushRecent(fileName, sourcePath);
+  // 初步诊断第一步：打开课文即自动体检（本地引擎，无需 AI、无需点击）
+  if (!opts.noAutoQc) void runQcCurrent({ auto: true });
   // 换书提醒：本书文件夹无配套配置时提示（学生水平/词库可能需要切换）
   if (sourcePath && S.sessions.filter((x) => x.sourcePath && x.sourcePath.slice(0, x.sourcePath.lastIndexOf('/')) === sourcePath.slice(0, sourcePath.lastIndexOf('/'))).length === 1) {
     setStatus(`已打开「${fileName}」。注意：这本书还没有专属词库配置（学生水平诊断依据）——若当前词库是别的书的，请 文件 → 导入自定义词库 后「保存为本书配置」`, '');
@@ -262,7 +264,7 @@ function renderAll(): void {
   const s = activeSession();
   if (!s) {
     $('reader').innerHTML = '<div class="empty"><b>第一步：打开一篇课文</b><br/>点上方「载入示例」先看演示，或「打开章节文件…」选你的书稿</div>';
-    $('pane-report').innerHTML = '<div class="empty"><b>第二步：点上方「▶ 质检本章」</b><br/>软件会自动数出这篇课文的生词率、句长、难句</div>';
+    $('pane-report').innerHTML = '<div class="empty"><b>打开课文会自动体检</b><br/>生词率、句长、难句自动数好，报告页每条可勾选处理</div>';
     $('side-review').innerHTML = '<div class="side-empty">这里是你的审校 checklist：<br/>· 要点配额：本章必须保留的情节点，自己添加打勾<br/>· 终审门禁：四项全勾才算审完（点 ? 看每项查什么）<br/>· 标记清单：正文里做的标记都在这，点击跳回原文</div>';
     hidePop();
     fileSummary();
@@ -619,7 +621,7 @@ function tagFromPath(p: string): string {
   return 'v01';
 }
 
-async function runQcCurrent(): Promise<void> {
+async function runQcCurrent(opts: { auto?: boolean } = {}): Promise<void> {
   const s = activeSession();
   if (!s) { setStatus('请先载入文本', 'err'); return; }
   const tier = ($('tier') as HTMLSelectElement).value as Tier;
@@ -646,39 +648,205 @@ async function runQcCurrent(): Promise<void> {
   try {
     await invoke('write_text_file', { path: outPath, content: JSON.stringify(toLegacyReport(s.report), null, 1) });
     s.reportSavedPath = outPath;
-    setStatus('质检完成，报告已自动保存：' + outPath, 'saved');
+    if (opts.auto) {
+      const r = s.report;
+      setStatus(`✓ 已自动体检：生词率 ${(r.newWordRate * 100).toFixed(1)}%、难句 ${r.passive + r.relcl + r.pastperf + r.over20} 处——「质检报告」页可逐条勾选处理`, 'saved');
+    } else {
+      setStatus('质检完成，报告已自动保存：' + outPath, 'saved');
+    }
   } catch (e) {
     s.reportSavedPath = null;
     setStatus('质检完成，但报告落盘失败：' + e, 'err');
   }
   renderReportPane(s);
-  switchView('report');
+  if (!opts.auto) switchView('report');
+}
+
+/** 初步诊断：在正文里找某词（词形还原口径）第一次出现的位置 */
+function locateWordFirst(session: FileSession, tok: string): { pi: number; si: number; wi: number; raw: string } | null {
+  const paras = extractParas(splitChapter(session.md).body);
+  for (let pi = 0; pi < paras.length; pi++) {
+    const sents = sentsOf(paras[pi], false);
+    for (let si = 0; si < sents.length; si++) {
+      const sent = sents[si];
+      const toks = tokenizeTxt(sent);
+      const wi = toks.indexOf(tok);
+      if (wi >= 0) {
+        const raw = (sent.match(/[A-Za-z][A-Za-z'\-]*/g) ?? [])[wi] ?? tok;
+        return { pi, si, wi, raw };
+      }
+    }
+  }
+  return null;
+}
+
+interface RiskSentItem { sent: string; pi: number; si: number; badges: string[]; type: 'syntax' | 'long' }
+
+/** 初步诊断：本章全部黑名单难句（与正文着色同一套检测） */
+function riskSentenceList(s: FileSession): RiskSentItem[] {
+  const out: RiskSentItem[] = [];
+  extractParas(splitChapter(s.md).body).forEach((p, pi) =>
+    sentsOf(p, false).forEach((sent, si) => {
+      const risk = sentenceRisks(sent);
+      const badges = [
+        risk.passive ? '被' : '', risk.relcl ? '从' : '', risk.pastperf ? '完' : '', risk.overlong ? '长' : '',
+      ].filter(Boolean);
+      if (badges.length) out.push({ sent, pi, si, badges, type: pickSentMarkType(risk) });
+    }),
+  );
+  return out;
 }
 
 function renderReportPane(s: FileSession): void {
   const pane = $('pane-report');
   if (!s.report) {
-    pane.innerHTML = '<div class="empty">尚未运行质检（点上方「▶ 质检本章」）</div>';
+    pane.innerHTML = '<div class="empty">尚未体检（打开课文会自动体检；换词库或改完文后点上方「▶ 重新质检」）</div>';
     return;
   }
   const legacy = toLegacyReport(s.report) as Record<string, unknown>;
   const rows = Object.entries(legacy).filter(([k]) => k !== 'OOV词(去重)');
-  const oov = (legacy['OOV词(去重)'] as string[]) ?? [];
+  const oov = [...new Set(s.report.oov)];
   const gatesNote =
     s.report.tier === 'A'
       ? `A 层解禁：被动${s.report.gates.passiveOk ? '已解禁' : '未解禁（第5章起解禁）'} · 定从${s.report.gates.relclOk ? '已解禁' : '未解禁（第8章起解禁）'}`
       : 'B/M 层：三项句法黑名单全时段计数';
+  const risks = riskSentenceList(s);
+
+  /* 生词清单：每个词两个动作——标记简化（进标记清单走 AI）/ 计入已学词（不再标红） */
+  const oovRows = oov.slice(0, 80).map((w) => {
+    const marked = s.review.marks.some((m) => m.level === 'word' && (m.word ?? '').toLowerCase() === w);
+    const learned = S.currentKnown.has(w);
+    return `<tr>
+      <td style="font-weight:600">${esc(w)}</td>
+      <td>${marked ? '<span class="ok-badge">✓ 已标记简化</span>' : `<button data-oov-simpl="${esc(w)}">✓ 标记要简化</button>`}
+          ${learned ? '<span class="ok-badge">✓ 已学</span>' : `<button data-oov-learn="${esc(w)}">✓ 学生已学过</button>`}</td>
+    </tr>`;
+  }).join('');
+
+  /* 难句清单：每句一个动作——标记要改（进标记清单） */
+  const riskRows = risks.slice(0, 40).map((r) => {
+    const marked = s.review.marks.some((m) => m.level === 'sent' && m.pi === r.pi && m.si === r.si);
+    return `<tr>
+      <td><span class="chip warn-chip">${r.badges.join('')}</span> <span class="dim">P${String(r.pi + 1).padStart(2, '0')}-S${r.si + 1}</span></td>
+      <td title="${esc(r.sent)}">${esc(r.sent.slice(0, 70))}${r.sent.length > 70 ? '…' : ''}</td>
+      <td>${marked ? '<span class="ok-badge">✓ 已标记</span>' : `<button data-risk-pi="${r.pi}" data-risk-si="${r.si}">✓ 标记要改</button>`}</td>
+    </tr>`;
+  }).join('');
+
   pane.innerHTML = `
     ${s.reportSavedPath ? `<div class="saved-path">报告已自动保存：${esc(s.reportSavedPath)} <button id="btn-reveal">在访达中显示</button></div>` : ''}
     <table class="report">
       ${rows.map(([k, v]) => `<tr><th>${esc(k)}</th><td>${Array.isArray(v) ? v.length + ' 个' : esc(String(v))}</td></tr>`).join('')}
       <tr><th>解禁门（A层）</th><td>${gatesNote}</td></tr>
     </table>
-    <div style="font-weight:600;margin-bottom:8px">OOV 生词清单（去重 ${oov.length} 词）</div>
-    <div class="oov-chips">${oov.map((w) => `<span class="chip">${esc(w)}</span>`).join('')}</div>`;
+
+    <div class="diag-h">① 生词清单（去重 ${oov.length} 词）<span class="dim">——勾一个动一个：要简化的进标记清单，学生已学过的立即不再标红</span></div>
+    ${oov.length ? `<table class="sgtable"><tr><th style="width:90px">词</th><th>处理（你说了算）</th></tr>${oovRows}</table>
+    ${oov.length > 80 ? `<div class="dim" style="margin-bottom:10px">（只列前 80 词，处理或换词库后点「▶ 重新质检」看剩余）</div>` : ''}` : '<div class="dim" style="margin-bottom:10px">没有词表外生词 🎉</div>'}
+
+    <div class="diag-h">② 句法难句（${risks.length} 句：被=被动 从=定从 完=过去完成 长=超20词）<span class="dim">——勾"要改"的进标记清单，可批量交给 AI</span></div>
+    ${risks.length ? `<table class="sgtable"><tr><th style="width:110px">风险</th><th>句子</th><th style="width:110px">处理</th></tr>${riskRows}</table>
+    ${risks.length > 40 ? `<div class="dim" style="margin-bottom:10px">（只列前 40 句）</div>` : ''}` : '<div class="dim" style="margin-bottom:10px">没有命中黑名单的难句 🎉</div>'}
+
+    <div class="diag-h">③ 情节要点（AI 摘候选 → 你勾选 → 进右侧"要点配额"）</div>
+    <div style="margin-bottom:8px">
+      <button id="diag-plot-btn" class="primary">✨ AI 摘情节要点</button>
+      <span class="dim">让 AI 通读本章，摘出"简化时绝不能丢的情节点/伏笔"（5~8 条），你逐条勾选后进配额清单；没配 AI 也可以在右侧手动添加</span>
+    </div>
+    <div id="diag-plot-out"></div>`;
   document.getElementById('btn-reveal')?.addEventListener('click', () => {
     if (s.reportSavedPath) void invoke('reveal_path', { path: s.reportSavedPath });
   });
+
+  pane.querySelectorAll('[data-oov-simpl]').forEach((btn) =>
+    btn.addEventListener('click', () => {
+      const tok = (btn as HTMLElement).dataset.oovSimpl!;
+      const loc = locateWordFirst(s, tok);
+      if (!loc) { setStatus(`正文中没找到 "${tok}"（可能已修改，点「▶ 重新质检」）`, 'err'); return; }
+      const sent = sentsOf(extractParas(splitChapter(s.md).body)[loc.pi], false)[loc.si];
+      addMark(s, {
+        id: newMarkId(), level: 'word', pi: loc.pi, si: loc.si, wi: loc.wi,
+        word: loc.raw, text: sent.slice(0, 40), type: 'simpl', note: '初步诊断：生词', ts: Date.now(),
+      });
+      renderReportPane(s);
+      setStatus(`✓ 已标记简化「${loc.raw}」——处理完一批后点「✨AI 审核建议」批量改`, 'saved');
+    }),
+  );
+
+  pane.querySelectorAll('[data-oov-learn]').forEach((btn) =>
+    btn.addEventListener('click', () => {
+      const tok = (btn as HTMLElement).dataset.oovLearn!;
+      S.vocabCsvText = (S.vocabCsvText ? S.vocabCsvText.replace(/\n+$/, '') + '\n' : '') + `${tok},单词,,,,,,`;
+      S.currentKnown.add(tok);
+      renderAll();
+      setStatus(`✓「${tok}」已计入已学词，正文立即不再标红——文件 → 保存为本书配置 后全书每章生效`, 'saved');
+    }),
+  );
+
+  pane.querySelectorAll('[data-risk-pi]').forEach((btn) =>
+    btn.addEventListener('click', () => {
+      const pi = Number((btn as HTMLElement).dataset.riskPi);
+      const si = Number((btn as HTMLElement).dataset.riskSi);
+      const item = risks.find((r) => r.pi === pi && r.si === si);
+      if (!item) return;
+      addMark(s, {
+        id: newMarkId(), level: 'sent', pi, si, text: item.sent.slice(0, 40),
+        type: item.type, note: `初步诊断：${item.badges.join('/')}`, ts: Date.now(),
+      });
+      renderReportPane(s);
+      setStatus(`✓ 已标记要改（P${pi + 1}-S${si + 1}，${item.badges.join('/')}）——可批量点「✨AI 审核建议」`, 'saved');
+    }),
+  );
+
+  document.getElementById('diag-plot-btn')?.addEventListener('click', () => void aiPlotPoints(s));
+}
+
+/* ---------- 初步诊断③：AI 摘情节要点 → 教师勾选 → 预填要点配额 ---------- */
+
+async function aiPlotPoints(s: FileSession): Promise<void> {
+  const key = await invoke<string>('load_api_key');
+  if (!key) {
+    setStatus('摘情节要点需要先配置 AI（菜单 LayerText → AI 设置…）——没配 AI 也可在右侧"本章要点配额"手动添加', 'err');
+    showAiSettings();
+    return;
+  }
+  const out = $('diag-plot-out');
+  const btn = $('diag-plot-btn') as unknown as HTMLButtonElement;
+  btn.disabled = true;
+  btn.textContent = '⏳ AI 阅读本章中…';
+  try {
+    const chapter = splitChapter(s.md).body.slice(0, 12000);
+    const { raw } = await chatUntilJson([{ role: 'user', content: await buildPlotPointsPrompt(chapter) }], 1500, '情节要点');
+    const items = (raw as unknown[]).filter((x): x is string => typeof x === 'string' && x.trim().length > 1).map((x) => x.trim()).slice(0, 10);
+    if (items.length === 0) throw new Error('AI 未返回要点');
+    out.innerHTML = `
+      <div class="dim" style="margin:6px 0">AI 摘出 ${items.length} 条候选——<b>只把你勾的加入配额</b>，不勾的直接丢掉：</div>
+      ${items.map((t, i) => `<label class="plot-row"><input type="checkbox" data-plot-idx="${i}" /> ${esc(t)}</label>`).join('')}
+      <div class="row-btns" style="margin-top:8px"><button id="plot-accept" class="primary" disabled>先在上面勾选要保留的要点</button></div>`;
+    const acceptBtn = $('plot-accept') as unknown as HTMLButtonElement;
+    const refreshCnt = () => {
+      const n = out.querySelectorAll('[data-plot-idx]:checked').length;
+      acceptBtn.textContent = n ? `把勾选的 ${n} 条加入要点配额` : '先在上面勾选要保留的要点';
+      acceptBtn.disabled = n === 0;
+    };
+    refreshCnt();
+    out.querySelectorAll('[data-plot-idx]').forEach((cb) => cb.addEventListener('change', refreshCnt));
+    acceptBtn.addEventListener('click', () => {
+      const chosen = [...out.querySelectorAll('[data-plot-idx]:checked')].map((cb) => items[Number((cb as HTMLElement).dataset.plotIdx)]);
+      const fresh = mergeQuotaTexts(s.review.quota.map((q) => q.text), chosen);
+      for (const t of fresh) s.review.quota.push({ text: t, done: false });
+      scheduleSave(s, () => undefined);
+      renderSidebar(s, sidebarHandlers);
+      renderReportPane(s);
+      setStatus(`✓ 已加入 ${fresh.length} 条要点（右侧"本章要点配额"打勾核对）${chosen.length - fresh.length ? `，${chosen.length - fresh.length} 条与已有重复自动跳过` : ''}`, 'saved');
+    });
+  } catch (e) {
+    out.innerHTML = '';
+    setStatus('AI 摘要点失败：' + e, 'err');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '✨ AI 摘情节要点';
+  }
 }
 
 /* ---------- 视图切换 ---------- */
@@ -1742,7 +1910,7 @@ async function generateDraft(): Promise<void> {
     }
     await invoke('write_text_file', { path: outPath, content: newMd });
     draftPop.classList.remove('open');
-    await addSession(newMd, outPath.slice(outPath.lastIndexOf('/') + 1), outPath);
+    await addSession(newMd, outPath.slice(outPath.lastIndexOf('/') + 1), outPath, { noAutoQc: true });
     await runQcCurrent();
     setStatus(`分层初稿已生成（${tier} 层，${segs.length} 段，约 ${tokens} 出tokens）：${outPath}。质检指标见报告页——继续用标记精修`, 'saved');
     void invoke('reveal_path', { path: outPath });
@@ -1981,10 +2149,10 @@ function renderDiff(lIdx: number, rIdx: number): void {
 /* ---------- 新手导览（coach marks） ---------- */
 
 const TOUR = [
-  { sel: '#btn-demo', title: '① 打开课文', text: '点「载入示例」看演示，或「打开章节文件」选你自己的书（Word 文件也可以，会自动转换）。' },
-  { sel: '#btn-run', title: '② 一键体检', text: '点「▶ 质检本章」：软件自动数生词率、句长、难句，生成体检报告。' },
+  { sel: '#btn-demo', title: '① 打开课文', text: '点「载入示例」看演示，或「打开章节文件」选你自己的书（Word 文件也可以，会自动转换）。打开后会<b>自动体检</b>。' },
+  { sel: '#btn-run', title: '② 看体检结果', text: '体检报告里生词、难句一条条列着，<b>每条都能勾选处理</b>：生词勾"要简化/已学过"，难句勾"要改"。换了词库点这里重新算。' },
   { sel: '#reader', title: '③ 边读边标', text: '红色下划线是生词、淡红底是难句。点一个词、或拖选一句话，就能做标记。' },
-  { sel: '#sidebar', title: '④ 收尾把关', text: '右侧是审校清单：要点配额、终审门禁、标记清单。四项门禁全勾，这一章就算审完。' },
+  { sel: '#sidebar', title: '④ 收尾把关', text: '右侧是审校清单：要点配额（可让 AI 摘情节要点）、终审门禁、标记清单。四项门禁全勾，这一章就算审完。' },
 ];
 
 function tourShow(i: number): void {

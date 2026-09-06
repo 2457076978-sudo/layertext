@@ -334,7 +334,7 @@ fn main() {
                 .text("export-tts", "导出朗读音频（AIFF，系统语音）…")
                 .build()?;
 
-            let mi_run = MenuItemBuilder::with_id("qc-run", "质检本章")
+            let mi_run = MenuItemBuilder::with_id("qc-run", "重新质检本章")
                 .accelerator("CmdOrCtrl+R")
                 .build(app)?;
             let mi_ai = MenuItemBuilder::with_id("ai-suggest", "AI 审核建议…").build(app)?;

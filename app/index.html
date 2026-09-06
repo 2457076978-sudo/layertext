@@ -266,6 +266,15 @@
     .retro-label { font-size: 12px; font-weight: 600; margin-top: 2px; }
     .retro-hint { font-size: 11px; color: var(--muted); margin-top: 2px; line-height: 1.5; }
     .retro-verdict { background: #fefce8; border: 1px solid #fde68a; border-radius: 10px; padding: 10px 14px; font-size: 13px; line-height: 1.9; margin-top: 8px; }
+
+    /* 初步诊断台（质检报告页） */
+    .diag-h { font-weight: 600; margin: 18px 0 8px; }
+    .diag-h .dim { font-weight: 400; }
+    .plot-row { display: block; padding: 4px 6px; font-size: 13px; line-height: 1.7; border-bottom: 1px dashed var(--line); }
+    .plot-row:hover { background: #f8fafc; }
+    .plot-row input { margin-right: 6px; }
+    .warn-chip { background: #fef2f2; color: var(--oov); border-color: #fecaca; font-weight: 600; }
+    .row-btns { display: flex; gap: 8px; margin-top: 8px; }
     #tour-hl { display: none; position: fixed; z-index: 70; border: 3px solid var(--brand); border-radius: 10px; box-shadow: 0 0 0 4000px rgba(15, 23, 42, .45); pointer-events: none; }
     #tour-pop {
       position: fixed; z-index: 71; display: none; width: 340px; max-width: 90vw;
@@ -323,7 +332,7 @@
       </select>
     </label>
     <button id="tier-q" class="qmark" style="margin-left:-4px" title="B/M/A 是什么？标准可以改">?</button>
-    <button id="btn-run" class="primary">▶ 质检本章</button>
+    <button id="btn-run" class="primary" title="打开课文会自动体检；换了词库或改完正文后，点这里重新算一遍">▶ 重新质检</button>
     <button id="btn-draft" title="第一次拿到一章原文时点它：让 AI 按所选难度层把整章改写一遍（自动质检、原稿不动），得到'分层初稿'；之后再用标记逐句精修。一章只用一次">✍ 分层初稿…</button>
     <button id="btn-ai" title="把你在正文里做的标记批量交给 AI，逐条给出改写候选（默认你要点 ✓ 才生效；若在 AI 设置里开了'直接生效'则自动应用）">✨ AI 审核建议</button>
     <div id="status">打开章节文件后自动进入审校。词库/术语/标记等更多操作见顶部菜单栏（文件 · 质检 · 帮助）。</div>
@@ -352,7 +361,7 @@
         <div id="reader"><div class="empty"><b>第一步：打开一篇课文</b><br/>点上方「载入示例」先看演示，或「打开章节文件…」选你的书稿<br/><span style="font-size:12px">一本书建议放在同一个文件夹里（配一次词库，全书通用）</span></div></div>
       </section>
       <section id="pane-report" class="pane">
-        <div class="empty"><b>第二步：点上方「▶ 质检本章」</b><br/>软件会自动数出这篇课文的生词率、句长、难句——就像体检报告</div>
+        <div class="empty"><b>打开课文会自动体检</b><br/>生词率、句长、难句自动数好——报告页每一条都能勾选处理：生词（要简化/已学过）、难句（要改）、AI 摘情节要点</div>
       </section>
       <section id="pane-suggest" class="pane">
         <div class="empty">还没有修订建议。<br/>方式一：正文里点词 →「✨ AI 改写本句」；<br/>方式二：标记若干处后点「✨ AI 审核建议」批量出；<br/>方式三：右侧「AI 助手」对话里直接让它改。<br/><span style="font-size:12px">AI 只给建议（黄色框显示在正文里），你点 ✓ 才生效</span></div>

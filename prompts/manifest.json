@@ -1,12 +1,14 @@
 {
-  "setVersion": "v1.0",
+  "setVersion": "v1.1",
   "prompts": {
     "system_simplify": { "version": "v1.0", "file": "system_simplify.md", "desc": "修订候选 system：词库边界/句法黑名单/保真/输出 JSON 格式（教师长期约定与书级规则由代码追加）" },
     "system_draft": { "version": "v1.0", "file": "system_draft.md", "desc": "分层初稿 system：逐段改写规则（占位符 {{tierRule}}/{{chnoNote}}/{{instructions}}）" },
     "system_assistant": { "version": "v1.0", "file": "system_assistant.md", "desc": "AI 助手身份与固定工作方式（占位符 {{submitRule}}/{{fileName}}/{{markCount}}）" },
-    "rewrite_sentence": { "version": "v1.0", "file": "rewrite_sentence.md", "desc": "逐句改写 user 模板（占位符 {{tier}}/{{maxLen}}/{{intent}}/{{sent}}）" }
+    "rewrite_sentence": { "version": "v1.0", "file": "rewrite_sentence.md", "desc": "逐句改写 user 模板（占位符 {{tier}}/{{maxLen}}/{{intent}}/{{sent}}）" },
+    "plot_points": { "version": "v1.0", "file": "plot_points.md", "desc": "初步诊断·情节要点提取（占位符 {{chapter}}）：摘出简化不能丢的情节点/伏笔，教师勾选后进要点配额" }
   },
   "changelog": [
+    { "version": "v1.1", "date": "2026-09-06", "note": "新增 plot_points（用户点名：新文字初步诊断+AI 摘情节要点预填配额）" },
     { "version": "v1.0", "date": "2026-09-06", "note": "W3 外置：与 v1.0.0 内置提示词逐字一致，零行为变化。变更任何提示词后在此追加一行，并同步 bump 对应 version 与 setVersion。" }
   ]
 }

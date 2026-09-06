@@ -4,7 +4,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildDiagSummary } from '../app/src/pure.js';
+import { buildDiagSummary, mergeQuotaTexts, pickSentMarkType } from '../app/src/pure.js';
 
 const summaryOf = (cfg: Parameters<typeof buildDiagSummary>[0], v = '1.0.0') =>
   buildDiagSummary(cfg, v, 'ua')['配置摘要'] as Record<string, unknown>;
@@ -47,4 +47,20 @@ test('配置摘要：空配置与坏地址的兜底', () => {
   assert.equal(summaryOf({})['模型'], '(未配置)');
   assert.equal(summaryOf({})['备用供应商数'], 0);
   assert.equal(summaryOf({ baseUrl: '不是网址' })['AI服务商域名'], '(自定义地址)');
+});
+
+test('初步诊断：句法风险 → 句标记类型（被/从/完归语法太难，仅超长归句太长）', () => {
+  assert.equal(pickSentMarkType({ passive: true, relcl: false, pastperf: false, overlong: false }), 'syntax');
+  assert.equal(pickSentMarkType({ passive: false, relcl: true, pastperf: false, overlong: true }), 'syntax'); // 多风险并归语法
+  assert.equal(pickSentMarkType({ passive: false, relcl: false, pastperf: true, overlong: false }), 'syntax');
+  assert.equal(pickSentMarkType({ passive: false, relcl: false, pastperf: false, overlong: true }), 'long');
+});
+
+test('初步诊断：AI 情节要点并入配额——按文本去重、空串剔除、保持顺序', () => {
+  assert.deepEqual(
+    mergeQuotaTexts(['保留风车线索', '少校的梦'], [' 少校的梦 ', '雪球被赶走', '', '  ', '保留风车线索']),
+    ['雪球被赶走'],
+  );
+  assert.deepEqual(mergeQuotaTexts([], [' A ', 'B', 'A']), ['A', 'B']);
+  assert.deepEqual(mergeQuotaTexts(['X'], ['X', 'X']), []);
 });

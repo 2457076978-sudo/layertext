@@ -14,14 +14,15 @@ import {
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
-test('manifest 解析与四份提示词文件齐全（外置契约）', () => {
+test('manifest 解析与全部提示词文件齐全（外置契约）', () => {
   const m = parseManifest(readFileSync(join(ROOT, 'prompts', 'manifest.json'), 'utf-8'));
-  assert.equal(m.setVersion, 'v1.0');
-  for (const name of ['system_simplify', 'system_draft', 'system_assistant', 'rewrite_sentence']) {
+  assert.match(m.setVersion, /^v\d+\.\d+$/); // 版本随 manifest changelog 递增，不在此锁死
+  for (const name of Object.keys(m.prompts)) {
     assert.ok(m.prompts[name], `manifest 缺 ${name}`);
     const body = readFileSync(join(ROOT, 'prompts', m.prompts[name].file), 'utf-8');
     assert.ok(body.trim().length > 20, `${name} 内容为空`);
   }
+  assert.ok(m.prompts.plot_points, '初步诊断需要 plot_points 提示词');
 });
 
 test('fillTemplate：占位符替换；未知占位符保留', () => {

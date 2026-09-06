@@ -169,3 +169,14 @@ export function buildDiagSummary(cfg: DiagConfigInput, appVersion: string, userA
     隐私说明: '本诊断包不含任何书稿、学生文本或 API Key；仅含配置摘要、错误日志与成本统计。',
   };
 }
+
+/** 初步诊断：句法风险 → 对应的句标记类型（被/从/完归"语法太难"，超长归"句太长"） */
+export function pickSentMarkType(risk: { passive: boolean; relcl: boolean; pastperf: boolean; overlong: boolean }): 'syntax' | 'long' {
+  return risk.passive || risk.relcl || risk.pastperf ? 'syntax' : 'long';
+}
+
+/** 初步诊断：AI 情节要点并入要点配额——按文本精确去重，返回实际新增的条目 */
+export function mergeQuotaTexts(existing: string[], incoming: string[]): string[] {
+  const set = new Set(existing.map((t) => t.trim()));
+  return incoming.map((t) => t.trim()).filter((t) => t && !set.has(t) && (set.add(t), true));
+}

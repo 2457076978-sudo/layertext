@@ -18,6 +18,7 @@ import promptSimplify from '../../prompts/system_simplify.md?raw';
 import promptDraft from '../../prompts/system_draft.md?raw';
 import promptAssistant from '../../prompts/system_assistant.md?raw';
 import promptRewriteSentence from '../../prompts/rewrite_sentence.md?raw';
+import promptPlotPoints from '../../prompts/plot_points.md?raw';
 
 let ui: { onStatus?: (s: string) => void } | null = null;
 export function setAiUi(u: { onStatus?: (s: string) => void }): void { ui = u; }
@@ -28,6 +29,7 @@ const BUNDLED_PROMPTS: Record<string, string> = {
   system_draft: promptDraft,
   system_assistant: promptAssistant,
   rewrite_sentence: promptRewriteSentence,
+  plot_points: promptPlotPoints,
 };
 
 /* ---------- 提示词按名加载（改提示词不改代码） ---------- */
@@ -271,6 +273,12 @@ export async function buildRewriteSentencePrompt(vars: { tier: string; maxLen: n
 export async function buildAssistantPrompt(vars: { submitRule: string; fileName: string; markCount: number | string }): Promise<string> {
   const tpl = (await loadPrompt('system_assistant')).body;
   return '\n\n' + composePrompt(tpl, vars);
+}
+
+/** 初步诊断·情节要点提取 user 消息（AI 出候选，教师勾选后进要点配额） */
+export async function buildPlotPointsPrompt(chapter: string): Promise<string> {
+  const tpl = (await loadPrompt('plot_points')).body;
+  return composePrompt(tpl, { chapter });
 }
 
 /* ---------- 流式对话（助手侧栏；同样走 failover 与成本台账） ---------- */
