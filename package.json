@@ -7,6 +7,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "tsc -p tsconfig.json && node --test dist/tests/*.test.js",
+    "eval": "tsc -p tsconfig.json && node dist/src/eval.js",
     "qc": "node dist/src/cli.js"
   },
   "engines": {

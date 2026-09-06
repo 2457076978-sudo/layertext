@@ -69,6 +69,7 @@ git clone https://github.com/<your-org>/layertext.git
 cd layertext
 npm install
 npm test        # 43 项回归测试（防坑规则 + 审校 DOM + 应用逻辑）
+npm run eval    # 金标准评测：黑名单命中率/OOV 对齐 vs 质量基线（低于基线退出码 1）
 
 # 对示例文本跑一次质检（报告自动落盘到文本同目录）
 node dist/src/cli.js qc examples/texts/aesop_tortoise_hare.md --tier M
@@ -86,10 +87,11 @@ node dist/src/cli.js qc examples/texts/school_story_club.md \
 
 ## 示例数据与版权
 
-- `examples/texts/` 全部为本项目**自写文本（CC0）**，含一个刻意覆盖全部防坑规则的
-  [torture test](examples/texts/qc_torture_test.md)；
+- `examples/texts/` 与 `examples/evals/`（金标准评测集）全部为本项目**自写文本（CC0）**，
+  含一个刻意覆盖全部防坑规则的 [torture test](examples/texts/qc_torture_test.md)；
 - 内置词表来自《义务教育英语课程标准（2022年版）》三级词汇表存档
-  （`assets/wordlists/`，由 `tools/convert_wordlist.py` 展开为纯文本格式）；
+  （`assets/wordlists/`，由 `tools/convert_wordlist.py` 展开为纯文本格式；
+  存档缺失的数词/星期/月份等基础词由 `curriculum_2022_amendment.txt` 补录，见 W1 交付报告）；
 - 自定义词库 CSV 格式样例：`examples/vocab/sample_teaching_vocab.csv`。
 
 ## 仓库结构

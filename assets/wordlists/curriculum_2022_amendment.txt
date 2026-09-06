@@ -1,0 +1,96 @@
+# LayerText 词表补录（amendment）· 2026-09-06
+#
+# 缘起：W1 金标准评测（examples/evals/）发现内置课标词表存档系统性缺失整块基础词：
+#   数词（one~million）、序数词（first~twentieth）、星期（monday~sunday）、
+#   月份（january~december）、部分国名及其形容词（england/america/france…）、
+#   twice、rainy/snowy/foggy。这些词属于课标三级（初中毕业）必会词汇，
+#   缺失导致任何含这些词的文本被虚报为生词（如示例龟兔赛跑报告中的 one/two/first）。
+#
+# 格式：一行一词（与其他纯文本词表一致，加载器逐行取首词）。
+# 处置：不改动 convert_wordlist.py 生成的 curriculum_2022_level3_1600.txt（重生成安全），
+#   本文件作为常驻补录词表，由 CLI（src/cli.ts）、评测（src/eval.ts）、
+#   桌面应用（app/src/main.ts）三处与内置词表一并加载。
+# 若未来源存档修复（数词/星期/月份区块恢复），可删除本文件与三处加载点。
+one
+two
+three
+four
+five
+six
+seven
+eight
+nine
+ten
+eleven
+twelve
+thirteen
+fourteen
+fifteen
+sixteen
+seventeen
+eighteen
+nineteen
+twenty
+thirty
+forty
+fifty
+sixty
+seventy
+eighty
+ninety
+hundred
+thousand
+million
+first
+second
+third
+fourth
+fifth
+sixth
+seventh
+eighth
+ninth
+tenth
+eleventh
+twelfth
+twentieth
+monday
+tuesday
+wednesday
+thursday
+friday
+saturday
+sunday
+january
+february
+march
+april
+june
+july
+august
+september
+october
+november
+december
+england
+america
+france
+germany
+japan
+russia
+canada
+australia
+india
+italy
+american
+french
+german
+japanese
+russian
+canadian
+australian
+italian
+twice
+rainy
+snowy
+foggy

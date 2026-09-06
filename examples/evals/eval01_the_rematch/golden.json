@@ -1,0 +1,37 @@
+{
+  "name": "eval01_龟兔再赛",
+  "source": "source.md",
+  "license": "CC0（本项目自写评测文本）",
+  "chno": 1,
+  "desc": "寓言续写（易词）：被动/定从/过去完成/引语豁免/超长句；测词表边界（tortoise/hare 等真实超纲词）",
+  "annotations": {
+    "passive": [
+      "The new race was planned by Owl herself.",
+      "The start was fixed at the big stone.",
+      "The finish was set by the river.",
+      "The small bridge had been closed by the keeper of the wood.",
+      "Toby won the race, and the second place was taken by a very tired hare.",
+      "The lesson was remembered by every young animal in Maple Wood, and even the fastest runner now stopped to look at the world around him."
+    ],
+    "relcl": [
+      "The morning light, which was soft and gold, lay over the grass.",
+      "The path that led up the hill was steep and full of little stones.",
+      "The animals who lived near the river all came to watch."
+    ],
+    "pastperf": [
+      "Harry Hare had lost the great race a year before.",
+      "He had never forgotten it.",
+      "The small bridge had been closed by the keeper of the wood.",
+      "When Harry woke, Toby had passed the fallen tree."
+    ],
+    "overlong": [
+      "The lesson was remembered by every young animal in Maple Wood, and even the fastest runner now stopped to look at the world around him."
+    ]
+  },
+  "oovExpected": ["arrow", "halfway", "hare", "oak", "path", "runner", "running", "shadows", "sleepy", "steady", "steep", "tortoise"],
+  "targets": {
+    "B": { "avgLenMax": 12, "maxLenMax": 14, "newWordRateMax": 0.03, "blacklistZero": true, "mustKeep": ["Harry", "Toby"] },
+    "M": { "avgLenMax": 14, "maxLenMax": 16, "newWordRateMax": 0.02, "blacklistZero": true, "mustKeep": ["Harry", "Toby"] },
+    "A": { "avgLenMax": 18, "maxLenMax": 20, "newWordRateMax": 0.02, "blacklistZero": true, "mustKeep": ["Harry", "Toby"] }
+  }
+}

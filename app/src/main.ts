@@ -14,6 +14,7 @@ import { applyRewriteTo, checkRevisedText, normalizeAndSplitChapters, parseAiJso
 import { S, setStatus as uiSetStatus, esc } from './state.js';
 import { AI_PROVIDERS, AI_SYSTEM_PROMPT, aiErrHuman, buildSystemPrompt, callChat, chatStream, loadConfig, saveConfig, setAiUi, tierMaxLen, tierPlan } from './ai.js';
 import bundledWordlist from '../../assets/wordlists/curriculum_2022_level3_1600.txt?raw';
+import bundledAmendment from '../../assets/wordlists/curriculum_2022_amendment.txt?raw';
 import exampleMd from '../../examples/texts/aesop_tortoise_hare.md?raw';
 import exampleVocab from '../../examples/vocab/sample_teaching_vocab.csv?raw';
 import { parseCsv } from '../../src/core/lexicon.js';
@@ -46,7 +47,9 @@ const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getEleme
 function buildLexiconNow(): Lexicon {
   return buildLexicon({
     vocabCsvTexts: S.vocabCsvText ? [S.vocabCsvText] : [],
-    plainWordlistTexts: S.extraWordlistText ? [bundledWordlist, S.extraWordlistText] : [bundledWordlist],
+    plainWordlistTexts: S.extraWordlistText
+      ? [bundledWordlist, bundledAmendment, S.extraWordlistText]
+      : [bundledWordlist, bundledAmendment],
     terms: S.termsText ? S.termsText.split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#')) : [],
     properNouns: S.properRows.map((r) => r.toLowerCase()),
   });

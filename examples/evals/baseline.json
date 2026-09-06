@@ -1,0 +1,14 @@
+{
+ "generatedAt": "2026-09-06T07:14:49.459Z",
+ "engine": {
+  "blacklistAnnotated": 45,
+  "blacklistHits": 45,
+  "missCount": 0,
+  "falsePositiveCount": 0,
+  "hitRate": 1,
+  "oovMissCount": 0,
+  "oovExtraCount": 0,
+  "oovExactTexts": 3,
+  "textCount": 3
+ }
+}

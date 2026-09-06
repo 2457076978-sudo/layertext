@@ -1,0 +1,37 @@
+{
+  "name": "eval02_科学展",
+  "source": "source.md",
+  "license": "CC0（本项目自写评测文本）",
+  "chno": 1,
+  "desc": "校园故事（中词）：that/who 定从、被动密集（含引语内被动豁免控制句）、过去完成、THAT_EXEMPT 宾从控制句",
+  "annotations": {
+    "passive": [
+      "Every class was asked to bring one project, and the best one would win a new set of books.",
+      "Our robot was called Little Star, and it could find a black line on white paper.",
+      "The little motor was joined to the wheels with thin wire, and a small battery gave power to the whole system.",
+      "On the morning of the fair, the hall was filled with noisy students and bright posters.",
+      "In the end we were given a small prize for the most honest project."
+    ],
+    "relcl": [
+      "A light that flashed red and green sat on its head like a small hat.",
+      "Lin, who was better at drawing than me, painted a silver star on its back.",
+      "A robot that moved across the table by itself won the loudest cheers from all the younger students near the door."
+    ],
+    "pastperf": [
+      "My friend Lin and I had worked on a small robot for three whole weeks.",
+      "We had built it out of an old toy car and some cheap parts from a night market.",
+      "Before the fair I had never spoken to so many people in one day.",
+      "By noon the judges had finished half of the tables."
+    ],
+    "overlong": [
+      "The little motor was joined to the wheels with thin wire, and a small battery gave power to the whole system.",
+      "A robot that moved across the table by itself won the loudest cheers from all the younger students near the door."
+    ]
+  },
+  "oovExpected": ["approved", "battery", "flashed", "motor", "noisy", "perfectly", "posters", "system", "wire"],
+  "targets": {
+    "B": { "avgLenMax": 12, "maxLenMax": 14, "newWordRateMax": 0.03, "blacklistZero": true, "mustKeep": ["Lin", "Star"] },
+    "M": { "avgLenMax": 14, "maxLenMax": 16, "newWordRateMax": 0.02, "blacklistZero": true, "mustKeep": ["Lin", "Star"] },
+    "A": { "avgLenMax": 18, "maxLenMax": 20, "newWordRateMax": 0.02, "blacklistZero": true, "mustKeep": ["Lin", "Star"] }
+  }
+}

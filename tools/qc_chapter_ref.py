@@ -87,7 +87,8 @@ def main():
     def count_pat(pat, t):
         return len(re.findall(pat, t))
 
-    passive = count_pat(r'\b(was|were|is|are|be|been|being)\s+' + _FAKE + r'\w+ed\b', txt_narr) + count_pat(r'\b(was|were)\s+(driven|made|given|beaten|broken|taken|chosen|elected|seen|heard|told|taught|caught|fed|sent|set|put|cut|hit)\b', txt_narr)
+    # built：W1 评测集 eval03 发现漏检（was built by …），2026-09-06 补入（与 TS 版 PASSIVE_IRR 同步）
+    passive = count_pat(r'\b(was|were|is|are|be|been|being)\s+' + _FAKE + r'\w+ed\b', txt_narr) + count_pat(r'\b(was|were)\s+(driven|made|given|beaten|broken|taken|chosen|elected|seen|heard|told|taught|caught|fed|sent|set|put|cut|hit|built)\b', txt_narr)
     relcl = count_pat(r',?\s+(who|which)\s+\w+', txt_narr)
     # R12盲区修复：that+实义动词型定从（that fed/smelled/stayed类曾全部漏网）；宾从豁免=前词为认知动词
     _CO = r'(?<!said)(?<!agreed)(?<!knew)(?<!thought)(?<!believed)(?<!hoped)(?<!sure)(?<!afraid)(?<!explained)(?<!remembered)(?<!saw)(?<!heard)(?<!felt)(?<!found)(?<!meant)(?<!declared)(?<!announced)(?<!reported)(?<!cried)(?<!shouted)(?<!whispered)(?<!asked)(?<!wondered)(?<!learned)(?<!forgot)(?<!promised)(?<!noticed)(?<!watched)(?<!showed)(?<!proved)(?<!seemed)(?<!appeared)(?<!denied)(?<!doubted)(?<!knew)'

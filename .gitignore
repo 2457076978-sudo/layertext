@@ -14,3 +14,6 @@ app/src-tauri/gen/schemas/
 
 # 本地开发用的 Animal Farm 预设（仅本地对照测试，绝不入库）
 tools/_af_*
+
+# 评测报告（生成物，不入库；基线在 examples/evals/baseline.json）
+eval-reports/

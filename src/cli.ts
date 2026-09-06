@@ -25,6 +25,7 @@ import { buildLexicon } from './core/lexicon.js';
 import { runQc, toLegacyReport, type Tier } from './core/qc.js';
 
 const BUNDLED_WORDLIST = 'assets/wordlists/curriculum_2022_level3_1600.txt';
+const AMENDMENT_WORDLIST = 'assets/wordlists/curriculum_2022_amendment.txt';
 
 function repoRoot(): string {
   // dist/src/cli.js → 仓库根
@@ -33,6 +34,20 @@ function repoRoot(): string {
 
 function defaultWordlistPath(): string | null {
   const candidates = [join(process.cwd(), BUNDLED_WORDLIST), join(repoRoot(), BUNDLED_WORDLIST)];
+  for (const c of candidates) {
+    try {
+      readFileSync(c, 'utf-8');
+      return c;
+    } catch {
+      /* 尝试下一个 */
+    }
+  }
+  return null;
+}
+
+/** 内置词表 + 补录（数词/星期/月份等存档缺失块，见 amendment 文件头注释） */
+function amendmentWordlistPath(): string | null {
+  const candidates = [join(process.cwd(), AMENDMENT_WORDLIST), join(repoRoot(), AMENDMENT_WORDLIST)];
   for (const c of candidates) {
     try {
       readFileSync(c, 'utf-8');
@@ -87,7 +102,11 @@ function main(): void {
   let wordlistPaths = opts.wordlist ?? [];
   if (wordlistPaths.length === 0) {
     const d = defaultWordlistPath();
-    if (d) wordlistPaths = [d];
+    if (d) {
+      wordlistPaths = [d];
+      const a = amendmentWordlistPath();
+      if (a) wordlistPaths.push(a);
+    }
     else console.error('提示：未找到内置课标词表（assets/wordlists/），请先用 tools/convert_wordlist.py 生成或用 --wordlist 指定');
   }
   const terms = opts.terms ? opts.terms.flatMap(readWordFile) : [];

@@ -1,0 +1,40 @@
+{
+  "name": "eval03_灯塔",
+  "source": "source.md",
+  "license": "CC0（本项目自写评测文本）",
+  "chno": 1,
+  "desc": "文学叙事（含词句卡）：which/who/that 定从、倒装过去完成（Never had…）、had been 双计、词句卡并入已知（keeper/gull/tide/stair/lighthouse）、专名一致性⑧",
+  "annotations": {
+    "passive": [
+      "It was built by Ben's grandfather more than sixty years ago.",
+      "Its white walls had been washed by ten thousand storms.",
+      "The letter was given to the island school, and everybody clapped for the young keeper at the morning meeting."
+    ],
+    "relcl": [
+      "Ben's father, who kept the light before him, had gone to the town for the winter.",
+      "The boy lived there with a black cat and a radio that talked to him from across the sea.",
+      "Ben, who knew every step of the old stair, climbed up with a small lantern.",
+      "The lamp, which had never failed his family, was dry and cold.",
+      "A ship that carried tea and paper had passed the island safely at two in the morning.",
+      "Ben's grandfather, who loved this wild place more than any city, always said that a keeper's life was the best life in the world."
+    ],
+    "pastperf": [
+      "Its white walls had been washed by ten thousand storms.",
+      "Ben's father, who kept the light before him, had gone to the town for the winter.",
+      "Never had Ben seen such a dark sea.",
+      "The lamp, which had never failed his family, was dry and cold.",
+      "He found the trouble at once: sea water had run into the oil box during the storm.",
+      "A ship that carried tea and paper had passed the island safely at two in the morning."
+    ],
+    "overlong": [
+      "When the captain learned about the boy in the tower, he sent a long letter of thanks to the island school.",
+      "Ben's grandfather, who loved this wild place more than any city, always said that a keeper's life was the best life in the world."
+    ]
+  },
+  "oovExpected": ["captain", "clapped", "safely", "shell"],
+  "targets": {
+    "B": { "avgLenMax": 12, "maxLenMax": 14, "newWordRateMax": 0.03, "blacklistZero": true, "mustKeep": ["Ben"] },
+    "M": { "avgLenMax": 14, "maxLenMax": 16, "newWordRateMax": 0.02, "blacklistZero": true, "mustKeep": ["Ben"] },
+    "A": { "avgLenMax": 18, "maxLenMax": 20, "newWordRateMax": 0.02, "blacklistZero": true, "mustKeep": ["Ben"] }
+  }
+}

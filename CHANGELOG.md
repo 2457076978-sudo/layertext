@@ -4,6 +4,13 @@
 1.0.0 之前的版本号为开发期里程碑（当时 `package.json` 未同步递增，本文件按里程碑整理，2026-09-06 校准）。
 面向教师的通俗版功能说明见 [README](README.md) 与 [docs/PRD.md](docs/PRD.md)。
 
+## [未发布] 工程化 W1 · 评测集与质量基线
+
+- 新增金标准评测集 `examples/evals/`：3 篇自写 CC0 文本（68 句）+ 人工标注（45 处黑名单句、25 个核定 OOV 词型、B/M/A 三层目标特征）。
+- 新增 `npm run eval`：QC 金标准对照（命中率/漏报/误报/OOV 对齐），与基线对比低于即失败（CI 门禁）；`--calibrate` 标注核对、`--update-baseline` 刷新基线；配置 `LAYERTEXT_API_KEY` 加跑 AI 初稿评测。
+- 评测暴露并修复：①内置课标词表系统性缺失数词/星期/月份/部分国名（新增 `curriculum_2022_amendment.txt` 补录，CLI/eval/应用三处加载）；②`was built` 被动漏检（PASSIVE_IRR 补 `built`，TS 与 Python 参照版同步）。
+- 建立质量基线：命中率 100%（45/45）、漏报 0、误报 0、OOV 3/3 篇一致（`docs/质量基线.md`）。
+
 ## [1.0.0] - 2026-09-06
 
 商业化冲刺：从"能用"到"第一次打开的英语教师不看文档能走通"。
