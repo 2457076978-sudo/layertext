@@ -146,15 +146,26 @@
       padding: 6px 8px; font-size: 12px; resize: vertical; font-family: inherit;
     }
     #pop .pop-tip { color: var(--muted); font-size: 11px; margin-top: 6px; }
+
+    /* ---------- 示例菜单 ---------- */
+    #demo-menu {
+      position: fixed; z-index: 60; display: none; min-width: 300px; max-width: 420px;
+      background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+      box-shadow: 0 8px 30px rgba(15, 23, 42, .14); padding: 8px; font-size: 13px;
+      max-height: 50vh; overflow-y: auto;
+    }
+    #demo-menu.open { display: block; }
+    #demo-menu .demo-group { color: var(--muted); font-size: 11px; padding: 6px 8px 2px; }
+    #demo-menu .demo-item { padding: 7px 10px; border-radius: 8px; cursor: pointer; word-break: break-all; }
+    #demo-menu .demo-item:hover { background: #eef2ff; color: var(--brand); }
+    #demo-menu .demo-tip { color: var(--muted); font-size: 11px; padding: 6px 8px; border-top: 1px solid var(--line); margin-top: 6px; }
   </style>
 </head>
 <body>
   <header>
-    <span class="logo">LayerText 分层读<small>审校工作台 v0.2</small></span>
+    <span class="logo">LayerText 分层读<small>审校工作台 v0.3</small></span>
     <button id="btn-demo">载入示例</button>
     <button id="btn-open">打开章节文件…</button>
-    <button id="btn-vocab">自定义词库 CSV…（可选）</button>
-    <button id="btn-terms">术语表 TXT…（可选）</button>
     <label class="tier">层级
       <select id="tier">
         <option value="M" selected>M（中梯）</option>
@@ -163,9 +174,7 @@
       </select>
     </label>
     <button id="btn-run" class="primary">▶ 质检本章</button>
-    <button id="btn-export">导出标记…</button>
-    <button id="btn-import">导入标记…</button>
-    <div id="status">打开章节文件后自动进入审校。标记自动保存到章节同目录。内置课标 2022 三级 1600 词表已就绪。</div>
+    <div id="status">打开章节文件后自动进入审校。词库/术语/标记等更多操作见顶部菜单栏（文件 · 质检 · 帮助）。</div>
   </header>
 
   <div class="filetabs" id="filetabs"><span class="hint">可同时打开同一文本的多个难度版本（B/M/A 各一个文件）并排切换</span></div>
@@ -195,6 +204,7 @@
   </div>
 
   <div id="pop"></div>
+  <div id="demo-menu"></div>
 
   <script type="module" src="/src/main.ts"></script>
 </body>

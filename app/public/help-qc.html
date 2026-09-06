@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <title>LayerText · QC 指标说明</title>
+  <style>
+    body { font-family: -apple-system, "PingFang SC", sans-serif; max-width: 660px; margin: 24px auto; padding: 0 24px 40px; color: #1f2933; line-height: 1.9; font-size: 14px; }
+    h1 { font-size: 20px; } h2 { font-size: 16px; margin-top: 28px; border-left: 4px solid #2f6fed; padding-left: 10px; }
+    table { border-collapse: collapse; width: 100%; font-size: 13px; }
+    th, td { border: 1px solid #e5e7eb; padding: 6px 10px; text-align: left; }
+    th { background: #fafbfc; width: 34%; }
+    .tip { background: #eef6ff; border-radius: 8px; padding: 10px 14px; margin: 10px 0; }
+  </style>
+</head>
+<body>
+  <h1>QC 指标说明：为什么这样设计</h1>
+  <p>每条规则都源自真实项目（英文原著三难度层全书调适）的三轮迭代，对应一个真实踩过的坑。</p>
+
+  <h2>指标总表</h2>
+  <table>
+    <tr><th>① 词表覆盖率</th><td>已知词 / 总词数（注释后口径：章末词句卡词条并入已知）</td></tr>
+    <tr><th>② 生词率</th><td>词表外生词的词型占比（去重）</td></tr>
+    <tr><th>③ 平均句长</th><td>词/句；歌篇单独统计</td></tr>
+    <tr><th>④ 最长句 / 超20词句数</th><td>各难度层句长上限由版本设计决定，QC 只量测</td></tr>
+    <tr><th>⑤ 被动式计数</th><td>叙事区（不含歌篇与直接引语）</td></tr>
+    <tr><th>⑥ 定语从句计数</th><td>who/which 引导 + that+实义动词型</td></tr>
+    <tr><th>⑦ 过去完成计数</th><td>had+分词、had+副词+分词、倒装（Never had …）</td></tr>
+    <tr><th>⑧ 专名一致性</th><td>正文专名必须出现在词句卡（需导入专名表启用）</td></tr>
+    <tr><th>⑨ 待定词命中</th><td>待定词暂计已知，每个命中都是风险点，单独计量</td></tr>
+  </table>
+
+  <h2>句法黑名单的教学进度依据</h2>
+  <ul>
+    <li><b>被动语态</b>：A（挑战）层第 5 章起解禁（对应教材单元已学，配脚注）；</li>
+    <li><b>定语从句</b>：A 层第 8 章起解禁；</li>
+    <li><b>过去完成时</b>：各层从严，尽量改为一般过去时或用 before/after 明示先后。</li>
+  </ul>
+  <div class="tip"><b>引语只降词不降句式（R08）</b>：人物原话中的被动/定从是文学锚点，改写会失真——直接引号内文本不计句法黑名单，但词表覆盖照常计算。</div>
+
+  <h2>防坑规则（避免误报）</h2>
+  <ul>
+    <li><b>词形还原</b>：自动剥复数/过去式/-ing 后缀再查表（stopped→stop、carried→carry、fired→fire），配不规则动词/名词全表（went/sang/geese/teeth）；</li>
+    <li><b>假阳性豁免</b>：was red / was mixed / was exhausted / had mixed 等形容词与实义过去式不算被动/过去完成；</li>
+    <li><b>that 豁免</b>：that morning / said that he was 等时间名词、代词先行不算定语从句；</li>
+    <li><b>倒装检测</b>：Never/Hardly/Scarcely/Seldom/No sooner + had + 分词；</li>
+    <li><b>分词被动后置</b>：", lived by / watched by" 型没有 be 动词但语义被动；</li>
+    <li><b>锚点豁免</b>：个别不可改写的名句可设为锚点（CLI --anchor，界面版即将支持）。</li>
+  </ul>
+
+  <h2>三态词表</h2>
+  <p><b>已知</b>（课标 ∪ 教材词 ∪ 术语 ∪ 词句卡）/ <b>待定</b>（橙点，暂计已知、风险另计）/ <b>词表外</b>（红点，进 OOV 清单）。</p>
+</body>
+</html>

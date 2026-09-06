@@ -4,10 +4,13 @@
  */
 
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { open as openFileDialog, save as saveFileDialog } from '@tauri-apps/plugin-dialog';
+import * as XLSX from 'xlsx';
 import bundledWordlist from '../../assets/wordlists/curriculum_2022_level3_1600.txt?raw';
 import exampleMd from '../../examples/texts/aesop_tortoise_hare.md?raw';
 import exampleVocab from '../../examples/vocab/sample_teaching_vocab.csv?raw';
+import { parseCsv } from '../../src/core/lexicon.js';
 import { buildLexicon, type Lexicon } from '../../src/core/lexicon.js';
 import { IRR } from '../../src/core/irregular.js';
 import { runQc, toLegacyReport, type QcResult, type Tier } from '../../src/core/qc.js';
@@ -30,6 +33,10 @@ let activeIdx = -1;
 let vocabCsvText: string | null = null;
 let vocabName = '';
 let termsText: string | null = null;
+/** 专名表原始行（保留大小写与空格短语：既并入已知词，也作 ⑧ 专名一致性检查名单） */
+let properRows: string[] = [];
+/** 本地示例目录的附加词表（如原型项目的中考1600按词性分类表） */
+let extraWordlistText: string | null = null;
 /** 当前会话的合并已知词表（含词句卡），供词面板显示原形 */
 let currentKnown: Set<string> = new Set();
 
@@ -40,9 +47,126 @@ function activeSession(): FileSession | null {
 function buildLexiconNow(): Lexicon {
   return buildLexicon({
     vocabCsvTexts: vocabCsvText ? [vocabCsvText] : [],
-    plainWordlistTexts: [bundledWordlist],
+    plainWordlistTexts: extraWordlistText ? [bundledWordlist, extraWordlistText] : [bundledWordlist],
     terms: termsText ? termsText.split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#')) : [],
+    properNouns: properRows.map((r) => r.toLowerCase()),
   });
+}
+
+/** 章号：从路径识别（第一章→1），与 CLI/原型一致 */
+const CH_MAP: Record<string, number> = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10 };
+function chnoFromPath(p: string): number | null {
+  for (const [k, v] of Object.entries(CH_MAP)) if (p.includes(`第${k}章`)) return v;
+  return null;
+}
+
+/* ---------- 词表导入：宽容格式 ---------- */
+
+/** 把任意格式的词表文件读成标准词库 CSV 文本。
+ *  支持：①标准 CSV（表头含"词/word/单词"列）②无表头 CSV/TSV（每行首字段为词）
+ *       ③TXT 一行一词 ④Excel .xlsx/.xls（第一列）。
+ *  非标准来源的词一律按"单词"类型计入已知。 */
+async function readVocabAsCsv(path: string): Promise<string> {
+  const lower = path.toLowerCase();
+  if (lower.endsWith('.xlsx') || lower.endsWith('.xls')) {
+    const b64 = await invoke<string>('read_file_base64', { path });
+    const bin = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+    const wb = XLSX.read(bin, { type: 'array' });
+    const sheet = wb.Sheets[wb.SheetNames[0]];
+    const words = (XLSX.utils.sheet_to_json<string[]>(sheet, { header: 1, raw: false }) as unknown as string[][])
+      .map((row) => (row?.[0] ?? '').toString().trim())
+      .filter((w) => w && !w.startsWith('#'));
+    return words.map((w) => `${w},单词,,,,,,`).join('\n');
+  }
+  const text = await invoke<string>('read_text_file', { path });
+  const rows = parseCsv(text.replace(/^\uFEFF/, ''));
+  if (rows.length === 0) return '';
+  const header = rows[0].map((h) => h.trim().toLowerCase());
+  const hasWordCol = header.some((h) => h === '词' || h === 'word' || h === '单词' || h === '词汇');
+  if (hasWordCol) return text; // 标准格式，直接使用
+  // 无表头：每行取首字段（兼容 CSV/TSV/分号/纯文本），按"单词"类型导入
+  const words = rows
+    .map((r) => (r[0] ?? '').split(/[\t;；,，]/)[0].trim())
+    .filter((w) => /^[A-Za-z][A-Za-z'\- ]*[A-Za-z]$/.test(w));
+  return words.map((w) => `${w},单词,,,,,,`).join('\n');
+}
+
+async function importVocabFile(): Promise<void> {
+  const path = await openFileDialog({
+    multiple: false,
+    filters: [{ name: '词表（CSV / TXT / Excel）', extensions: ['csv', 'txt', 'tsv', 'xlsx', 'xls'] }],
+  });
+  if (typeof path !== 'string') return;
+  try {
+    vocabCsvText = await readVocabAsCsv(path);
+    vocabName = path.slice(path.lastIndexOf('/') + 1);
+    renderAll();
+    setStatus(`已导入词库：${vocabName}（${vocabCsvText.split('\n').filter(Boolean).length} 行）`, 'saved');
+  } catch (e) {
+    setStatus('词库读取失败：' + e, 'err');
+  }
+}
+
+async function importTermsFile(): Promise<void> {
+  const path = await openFileDialog({ multiple: false, filters: [{ name: '术语表 TXT（一行一词）', extensions: ['txt'] }] });
+  if (typeof path !== 'string') return;
+  try {
+    termsText = await invoke<string>('read_text_file', { path });
+    renderAll();
+    setStatus('已导入术语表：' + path.slice(path.lastIndexOf('/') + 1), 'saved');
+  } catch (e) {
+    setStatus('读取失败：' + e, 'err');
+  }
+}
+
+async function importProperFile(): Promise<void> {
+  const path = await openFileDialog({ multiple: false, filters: [{ name: '专名表 TXT（一行一名，可含空格短语）', extensions: ['txt'] }] });
+  if (typeof path !== 'string') return;
+  try {
+    const text = await invoke<string>('read_text_file', { path });
+    properRows = text.split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
+    renderAll();
+    setStatus(`已导入专名表：${properRows.length} 个（⑧专名一致性检查同步启用）`, 'saved');
+  } catch (e) {
+    setStatus('读取失败：' + e, 'err');
+  }
+}
+
+/** 从本地示例目录自动加载配套词库/术语表/专名表（_ 开头文件） */
+async function loadLocalExampleConfig(): Promise<void> {
+  try {
+    const dir = await invoke<string>('examples_dir');
+    const readIf = async (name: string): Promise<string | null> => {
+      try {
+        return await invoke<string>('read_text_file', { path: `${dir}/${name}` });
+      } catch {
+        return null;
+      }
+    };
+    const vocab = await readIf('_词库.csv');
+    if (vocab) {
+      vocabCsvText = vocab;
+      vocabName = '_词库.csv（本地示例）';
+    }
+    const extraWl = await readIf('_词表.txt');
+    if (extraWl) extraWordlistText = extraWl;
+    const terms = await readIf('_术语表.txt');
+    if (terms) termsText = terms;
+    const proper = await readIf('_专名表.txt');
+    if (proper) {
+      properRows = proper.split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
+    }
+  } catch {
+    /* 目录不可用则跳过 */
+  }
+}
+
+/** 按文件名联动层级（含 A层/A版 → A；B版 → B；默认 M） */
+function autoTierFromName(name: string): void {
+  const sel = $('tier') as HTMLSelectElement;
+  if (/A层|A版|A挑战/.test(name)) sel.value = 'A';
+  else if (/B版|B层/.test(name)) sel.value = 'B';
+  else sel.value = 'M';
 }
 
 function setStatus(msg: string, cls = ''): void {
@@ -166,9 +290,10 @@ function renderReader(session: FileSession): void {
   const lex = buildLexiconNow();
   const card = splitChapter(session.md).card;
   currentKnown = new Set([...lex.known, ...IRR, ...cardGlossWords(card)]);
-  const terms = new Set(
-    (termsText ?? '').split('\n').map((l) => l.trim().toLowerCase()).filter((l) => l && !l.startsWith('#')),
-  );
+  const terms = new Set<string>([
+    ...(termsText ?? '').split('\n').map((l) => l.trim().toLowerCase()).filter((l) => l && !l.startsWith('#')),
+    ...properRows.map((r) => r.toLowerCase()),
+  ]);
 
   reader.replaceChildren();
   extractParas(body).forEach((p, pi) => {
@@ -422,7 +547,12 @@ async function runQcCurrent(): Promise<void> {
   if (!s) { setStatus('请先载入文本', 'err'); return; }
   const tier = ($('tier') as HTMLSelectElement).value as Tier;
   try {
-    s.report = runQc(s.md, buildLexiconNow(), { tier, fileName: s.fileName });
+    s.report = runQc(s.md, buildLexiconNow(), {
+      tier,
+      fileName: s.fileName,
+      chno: s.sourcePath ? chnoFromPath(s.sourcePath) : null,
+      ...(properRows.length ? { propCheckList: properRows } : {}),
+    });
   } catch (e) {
     setStatus('质检失败：' + (e as Error).message, 'err');
     return;
@@ -487,7 +617,63 @@ function switchView(name: 'text' | 'report'): void {
 $('tab-text').addEventListener('click', () => switchView('text'));
 $('tab-report').addEventListener('click', () => switchView('report'));
 
-$('btn-demo').addEventListener('click', () => {
+/* ---------- 示例菜单 ---------- */
+
+let demoMenuOpen = false;
+
+async function openDemoMenu(): Promise<void> {
+  const menu = $('demo-menu');
+  let locals: string[] = [];
+  try {
+    locals = await invoke<string[]>('list_local_examples');
+  } catch {
+    /* 目录不可用 */
+  }
+  if (locals.length === 0) {
+    loadBuiltinDemo();
+    return;
+  }
+  const btn = $('btn-demo').getBoundingClientRect();
+  menu.style.left = btn.left + 'px';
+  menu.style.top = btn.bottom + 6 + 'px';
+  menu.innerHTML = `
+    <div class="demo-group">内置示例（随应用分发，CC0）</div>
+    <div class="demo-item" data-demo="builtin">龟兔赛跑（含示例词库）</div>
+    <div class="demo-group">本地示例（文稿/LayerText示例/，自动带词库与术语配置）</div>
+    ${locals.map((p) => `<div class="demo-item" data-demo-path="${esc(p)}">${esc(p.slice(p.lastIndexOf('/') + 1))}</div>`).join('')}
+    <div class="demo-tip">把章节 md 与 _词库.csv / _术语表.txt / _专名表.txt 放入该文件夹即可出现在这里</div>`;
+  menu.classList.add('open');
+  demoMenuOpen = true;
+  menu.querySelectorAll('[data-demo]').forEach((el) =>
+    el.addEventListener('click', () => {
+      closeDemoMenu();
+      loadBuiltinDemo();
+    }),
+  );
+  menu.querySelectorAll('[data-demo-path]').forEach((el) =>
+    el.addEventListener('click', async () => {
+      closeDemoMenu();
+      const path = (el as HTMLElement).dataset.demoPath!;
+      try {
+        await loadLocalExampleConfig();
+        const md = await invoke<string>('read_text_file', { path });
+        const name = path.slice(path.lastIndexOf('/') + 1);
+        autoTierFromName(name);
+        await addSession(md, name, path);
+        setStatus('已载入本地示例：' + name + (vocabCsvText ? '（词库已自动加载）' : ''));
+      } catch (e) {
+        setStatus('载入失败：' + e, 'err');
+      }
+    }),
+  );
+}
+
+function closeDemoMenu(): void {
+  $('demo-menu').classList.remove('open');
+  demoMenuOpen = false;
+}
+
+function loadBuiltinDemo(): void {
   if (!vocabCsvText) {
     vocabCsvText = exampleVocab;
     vocabName = '示例词库 sample_teaching_vocab.csv';
@@ -495,9 +681,19 @@ $('btn-demo').addEventListener('click', () => {
   void addSession(exampleMd, 'aesop_tortoise_hare.md（示例）', null).then(() => {
     setStatus('已载入内置示例（含示例词库）。正文点词/拖选句子开始审校；「▶ 质检本章」看报告。');
   });
+}
+
+$('btn-demo').addEventListener('click', () => {
+  if (demoMenuOpen) closeDemoMenu();
+  else void openDemoMenu();
+});
+document.addEventListener('mousedown', (e) => {
+  if (demoMenuOpen && !(e.target as HTMLElement).closest('#demo-menu') && !(e.target as HTMLElement).closest('#btn-demo')) {
+    closeDemoMenu();
+  }
 });
 
-$('btn-open').addEventListener('click', async () => {
+async function openChapterFiles(): Promise<void> {
   const paths = await openFileDialog({
     multiple: true,
     filters: [{ name: '章节 Markdown / 文本', extensions: ['md', 'txt', 'markdown'] }],
@@ -511,34 +707,9 @@ $('btn-open').addEventListener('click', async () => {
       setStatus('读取失败：' + e, 'err');
     }
   }
-});
+}
 
-$('btn-vocab').addEventListener('click', async () => {
-  const path = await openFileDialog({ multiple: false, filters: [{ name: '词库 CSV', extensions: ['csv'] }] });
-  if (typeof path !== 'string') return;
-  try {
-    vocabCsvText = await invoke<string>('read_text_file', { path });
-    vocabName = path.slice(path.lastIndexOf('/') + 1);
-    renderAll();
-  } catch (e) {
-    setStatus('读取失败：' + e, 'err');
-  }
-});
-
-$('btn-terms').addEventListener('click', async () => {
-  const path = await openFileDialog({ multiple: false, filters: [{ name: '术语表 TXT（一行一词）', extensions: ['txt'] }] });
-  if (typeof path !== 'string') return;
-  try {
-    termsText = await invoke<string>('read_text_file', { path });
-    renderAll();
-  } catch (e) {
-    setStatus('读取失败：' + e, 'err');
-  }
-});
-
-$('btn-run').addEventListener('click', () => void runQcCurrent());
-
-$('btn-export').addEventListener('click', async () => {
+async function exportMarks(): Promise<void> {
   const s = activeSession();
   if (!s) { setStatus('请先载入文本', 'err'); return; }
   const path = await saveFileDialog({
@@ -548,9 +719,9 @@ $('btn-export').addEventListener('click', async () => {
   if (typeof path !== 'string') return;
   await invoke('write_text_file', { path, content: JSON.stringify(s.review, null, 1) });
   setStatus('标记已导出：' + path, 'saved');
-});
+}
 
-$('btn-import').addEventListener('click', async () => {
+async function importMarks(): Promise<void> {
   const s = activeSession();
   if (!s) { setStatus('请先载入文本', 'err'); return; }
   const path = await openFileDialog({ multiple: false, filters: [{ name: '审校标记 JSON', extensions: ['json'] }] });
@@ -568,6 +739,25 @@ $('btn-import').addEventListener('click', async () => {
     setStatus(`已导入 ${added} 条标记（同 ID 去重合并）`, 'saved');
   } catch (e) {
     setStatus('导入失败：' + e, 'err');
+  }
+}
+
+$('btn-open').addEventListener('click', () => void openChapterFiles());
+$('btn-run').addEventListener('click', () => void runQcCurrent());
+
+/* 原生菜单事件分发 */
+void listen<string>('menu-action', (ev) => {
+  switch (ev.payload) {
+    case 'file-open': void openChapterFiles(); break;
+    case 'file-demo': demoMenuOpen ? closeDemoMenu() : void openDemoMenu(); break;
+    case 'conf-vocab': void importVocabFile(); break;
+    case 'conf-terms': void importTermsFile(); break;
+    case 'conf-proper': void importProperFile(); break;
+    case 'marks-export': void exportMarks(); break;
+    case 'marks-import': void importMarks(); break;
+    case 'qc-run': void runQcCurrent(); break;
+    case 'view-text': switchView('text'); break;
+    case 'view-report': switchView('report'); break;
   }
 });
 
