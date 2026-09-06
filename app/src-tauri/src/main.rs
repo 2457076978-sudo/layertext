@@ -103,8 +103,9 @@ fn config_path() -> Result<String, String> {
 
 #[tauri::command]
 fn save_api_key(key: String) -> Result<(), String> {
+    // -A：条目允许本机应用读取，避免每次读写都弹钥匙串授权框（个人电脑上的 API Key 场景可接受）
     let st = std::process::Command::new("security")
-        .args(["add-generic-password", "-U", "-a", "layertext", "-s", "layertext-api-key", "-w", &key])
+        .args(["add-generic-password", "-U", "-A", "-a", "layertext", "-s", "layertext.apikey", "-w", &key])
         .output()
         .map_err(|e| e.to_string())?;
     if st.status.success() {
@@ -117,19 +118,24 @@ fn save_api_key(key: String) -> Result<(), String> {
 #[tauri::command]
 fn load_api_key() -> Result<String, String> {
     let out = std::process::Command::new("security")
-        .args(["find-generic-password", "-a", "layertext", "-s", "layertext-api-key", "-w"])
+        .args(["find-generic-password", "-a", "layertext", "-s", "layertext.apikey", "-w"])
         .output()
         .map_err(|e| e.to_string())?;
     if out.status.success() {
         Ok(String::from_utf8_lossy(&out.stdout).trim().to_owned())
     } else {
-        Ok(String::new())
+        let err = String::from_utf8_lossy(&out.stderr).into_owned();
+        if err.contains("could not be found") {
+            Ok(String::new()) // 尚未保存过
+        } else {
+            Err(err) // 读取被拒/失败，如实上报
+        }
     }
 }
 
 #[tauri::command]
-fn save_api_config(base_url: String, model: String) -> Result<(), String> {
-    let cfg = serde_json::json!({ "baseUrl": base_url, "model": model });
+fn save_api_config(base_url: String, model: String, instructions: String) -> Result<(), String> {
+    let cfg = serde_json::json!({ "baseUrl": base_url, "model": model, "instructions": instructions });
     std::fs::write(config_path()?, cfg.to_string()).map_err(|e| e.to_string())
 }
 

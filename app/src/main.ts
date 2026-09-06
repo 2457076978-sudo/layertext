@@ -805,23 +805,37 @@ function showAiSettings(): void {
   })();
   $('ai-close').addEventListener('click', () => aiPop.classList.remove('open'));
   $('ai-save').addEventListener('click', async () => {
-    await invoke('save_api_config', {
-      baseUrl: ($('ai-url') as HTMLInputElement).value.trim(),
-      model: ($('ai-model') as HTMLInputElement).value.trim(),
-      instructions: ($('ai-instructions') as HTMLTextAreaElement).value.trim(),
-    });
-    const key = ($('ai-key') as HTMLInputElement).value.trim();
-    if (key) await invoke('save_api_key', { key });
-    $('ai-test-out').textContent = '✓ 已保存（Key 存入本机钥匙串）';
+    const out = $('ai-test-out');
+    try {
+      await invoke('save_api_config', {
+        baseUrl: ($('ai-url') as HTMLInputElement).value.trim(),
+        model: ($('ai-model') as HTMLInputElement).value.trim(),
+        instructions: ($('ai-instructions') as HTMLTextAreaElement).value.trim(),
+      });
+      const key = ($('ai-key') as HTMLInputElement).value.trim();
+      if (key) await invoke('save_api_key', { key });
+      out.textContent = '✓ 已保存（Key 存入本机钥匙串）';
+    } catch (e) {
+      out.textContent = '✗ 保存失败：' + e;
+    }
   });
   $('ai-test').addEventListener('click', async () => {
+    // 直接用表单当前值测试（不依赖已保存的钥匙串），填完即可点
     const out = $('ai-test-out');
+    const url = (($('ai-url') as HTMLInputElement).value.trim() || 'https://api.openai.com/v1').replace(/\/+$/, '');
+    const model = ($('ai-model') as HTMLInputElement).value.trim() || 'gpt-4o-mini';
+    const key = ($('ai-key') as HTMLInputElement).value.trim();
+    if (!key) { out.textContent = '请先填入 API Key'; return; }
     out.textContent = '连接中…';
     try {
-      const { content, usage } = await callChat(
-        [{ role: 'system', content: '只回复两个字：正常' }, { role: 'user', content: 'ping' }], 8,
-      );
-      out.textContent = '✓ 连接成功：' + content.slice(0, 40) + ' ' + usage;
+      const resp = await tauriFetch(`${url}/chat/completions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+        body: JSON.stringify({ model, max_tokens: 8, messages: [{ role: 'user', content: '只回复两个字：正常' }] }),
+      });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${(await resp.text()).slice(0, 160)}`);
+      const data = (await resp.json()) as { choices?: { message?: { content?: string } }[] };
+      out.textContent = '✓ 连接成功：' + (data.choices?.[0]?.message?.content ?? '').slice(0, 30);
     } catch (e) {
       out.textContent = '✗ 连接失败：' + e;
     }
