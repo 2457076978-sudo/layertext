@@ -1090,7 +1090,10 @@ async function aiSuggest(instruction?: string): Promise<void> {
     switchView('suggest');
     setStatus(`AI 返回 ${S.suggestions.length} 条修订候选 ${usage}——建议已标到正文里，点 ✓ 采纳 / ✗ 放弃`, 'saved');
   } catch (e) {
-    setStatus('AI 请求失败：' + e, 'err');
+    const hint = String(e).includes('未找到 JSON')
+      ? '（模型思考太长占满输出上限——建议 AI 设置里换非思考型模型，或减少一次标记的数量分批出）'
+      : '';
+    setStatus('AI 请求失败：' + e + hint, 'err');
   } finally {
     btn.textContent = '✨ AI 审核建议';
     btn.disabled = false;
@@ -1331,9 +1334,9 @@ async function aiRewriteSentence(pi: number, si: number, intent: string, autoMar
       { role: 'system', content: system },
       {
         role: 'user',
-        content: `层级：${tier}（句长上限 ${tierMaxLen(tier)} 词）\n教师意图：${intent}\n请改写下面这句。输出要求：只输出一个 JSON 数组（形如 [{"original":"…","revised":"…","basis":"…"}]），不要思考过程、不要解释、不要代码块。original 必须与原句一字不差：\n${sent}`,
+        content: `层级：${tier}（句长上限 ${tierMaxLen(tier)} 词）\n教师意图：${intent}\n请改写下面这句。输出要求：回答的第一个字符必须是 [，只输出一个 JSON 数组（形如 [{"original":"…","revised":"…","basis":"…"}]），不要思考过程、不要解释、不要代码块。original 必须与原句一字不差：\n${sent}`,
       },
-    ], 2000);
+    ], 4000);
     const arr = parseAiJson(content) as { original?: string; revised?: string; basis?: string; alternative?: string }[];
     const one = arr[0];
     if (!one?.revised) throw new Error('AI 未返回改写');
@@ -1354,7 +1357,10 @@ async function aiRewriteSentence(pi: number, si: number, intent: string, autoMar
     attachInlineSuggestions();
     setStatus('AI 已给出本句改写——正文黄色区域内点 ✓ 采纳或 ✗ 放弃', 'saved');
   } catch (e) {
-    setStatus('AI 改写失败：' + e, 'err');
+    const hint = String(e).includes('未找到 JSON')
+      ? '（原因：你的模型把"思考过程"写进了回答，占满了输出上限还没写到 JSON——AI 设置里换非思考型模型如 deepseek-chat 最省心）'
+      : '';
+    setStatus('AI 改写失败：' + e + hint, 'err');
   } finally {
     if (btn) { btn.textContent = '✨ AI 改写本句'; (btn as HTMLButtonElement).disabled = false; }
   }
