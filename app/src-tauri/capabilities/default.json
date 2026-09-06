@@ -1,6 +1,13 @@
 {
   "identifier": "default",
-  "description": "LayerText 默认权限：窗口基础能力与文件对话框（文件读写走自定义命令）",
-  "windows": ["main"],
-  "permissions": ["core:default", "dialog:default"]
+  "description": "LayerText 默认权限：窗口基础能力、文件对话框与 AI API 访问（文件读写走自定义命令）",
+  "windows": ["main", "help-usage", "help-qc", "ai-*"],
+  "permissions": [
+    "core:default",
+    "dialog:default",
+    {
+      "identifier": "http:default",
+      "allow": [{ "url": "https://**" }]
+    }
+  ]
 }

@@ -94,6 +94,53 @@ fn reveal_path(path: String) -> Result<(), String> {
     Ok(())
 }
 
+/* ---------- AI 配置（Key 存 macOS 钥匙串；地址/模型存本地配置文件） ---------- */
+
+fn config_path() -> Result<String, String> {
+    let home = std::env::var("HOME").map_err(|e| e.to_string())?;
+    Ok(format!("{}/.layertext.json", home))
+}
+
+#[tauri::command]
+fn save_api_key(key: String) -> Result<(), String> {
+    let st = std::process::Command::new("security")
+        .args(["add-generic-password", "-U", "-a", "layertext", "-s", "layertext-api-key", "-w", &key])
+        .output()
+        .map_err(|e| e.to_string())?;
+    if st.status.success() {
+        Ok(())
+    } else {
+        Err(String::from_utf8_lossy(&st.stderr).into_owned())
+    }
+}
+
+#[tauri::command]
+fn load_api_key() -> Result<String, String> {
+    let out = std::process::Command::new("security")
+        .args(["find-generic-password", "-a", "layertext", "-s", "layertext-api-key", "-w"])
+        .output()
+        .map_err(|e| e.to_string())?;
+    if out.status.success() {
+        Ok(String::from_utf8_lossy(&out.stdout).trim().to_owned())
+    } else {
+        Ok(String::new())
+    }
+}
+
+#[tauri::command]
+fn save_api_config(base_url: String, model: String) -> Result<(), String> {
+    let cfg = serde_json::json!({ "baseUrl": base_url, "model": model });
+    std::fs::write(config_path()?, cfg.to_string()).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn load_api_config() -> Result<serde_json::Value, String> {
+    match std::fs::read_to_string(config_path()?) {
+        Ok(s) => Ok(serde_json::from_str(&s).unwrap_or(serde_json::json!({}))),
+        Err(_) => Ok(serde_json::json!({})),
+    }
+}
+
 fn open_help(app: &tauri::AppHandle, label: &str, title: &str, url: &str, w: f64, h: f64) {
     if let Some(win) = app.get_webview_window(label) {
         let _ = win.show();
@@ -109,6 +156,7 @@ fn open_help(app: &tauri::AppHandle, label: &str, title: &str, url: &str, w: f64
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_http::init())
         .setup(|app| {
             // ---- 原生菜单栏 ----
             let mi_open = MenuItemBuilder::with_id("file-open", "打开章节文件…")
@@ -139,7 +187,8 @@ fn main() {
             let mi_run = MenuItemBuilder::with_id("qc-run", "质检本章")
                 .accelerator("CmdOrCtrl+R")
                 .build(app)?;
-            let qc_menu = SubmenuBuilder::new(app, "质检").item(&mi_run).build()?;
+            let mi_ai = MenuItemBuilder::with_id("ai-suggest", "AI 审核建议…").build(app)?;
+            let qc_menu = SubmenuBuilder::new(app, "质检").item(&mi_run).separator().item(&mi_ai).build()?;
 
             let mi_vt = MenuItemBuilder::with_id("view-text", "正文审校").build(app)?;
             let mi_vr = MenuItemBuilder::with_id("view-report", "质检报告").build(app)?;
@@ -159,6 +208,7 @@ fn main() {
 
             let app_menu = SubmenuBuilder::new(app, "LayerText")
                 .about(None)
+                .text("ai-settings", "AI 设置…")
                 .separator()
                 .services()
                 .separator()
@@ -213,7 +263,11 @@ fn main() {
             reports_dir,
             examples_dir,
             list_local_examples,
-            reveal_path
+            reveal_path,
+            save_api_key,
+            load_api_key,
+            save_api_config,
+            load_api_config
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

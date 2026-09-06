@@ -146,6 +146,30 @@
     #gate-pop .gtable th { background: #fafbfc; color: var(--muted); font-weight: 500; }
     #gate-pop .gtable .warnrow td { background: #fef9ec; color: #92400e; }
 
+    /* AI 设置弹层 & 修订建议 */
+    #ai-pop {
+      position: fixed; z-index: 56; display: none; width: 400px; max-width: 92vw;
+      background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+      box-shadow: 0 8px 30px rgba(15, 23, 42, .14); padding: 16px; font-size: 13px;
+      left: 50%; top: 16%; transform: translateX(-50%);
+    }
+    #ai-pop.open { display: block; }
+    #ai-pop .fld { margin-bottom: 10px; }
+    #ai-pop .fld label { display: block; color: var(--muted); font-size: 12px; margin-bottom: 4px; }
+    #ai-pop .fld input {
+      width: 100%; border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; font-size: 13px;
+    }
+    #ai-pop .row-btns { display: flex; gap: 8px; margin-top: 12px; }
+    #ai-pop .hint-txt { color: var(--muted); font-size: 11px; line-height: 1.7; margin-top: 10px; }
+    #ai-pop .test-out { margin-top: 8px; font-size: 12px; }
+    .sgtable { border-collapse: collapse; width: 100%; font-size: 13px; margin-bottom: 16px; }
+    .sgtable th, .sgtable td { border: 1px solid var(--line); padding: 7px 10px; text-align: left; vertical-align: top; }
+    .sgtable th { background: #fafbfc; color: var(--muted); font-weight: 500; white-space: nowrap; }
+    .sgtable .orig, .sgtable .rev { max-width: 300px; }
+    .sgtable .ok-badge { color: #16a34a; white-space: nowrap; }
+    .sgtable .warn-badge { color: #b45309; white-space: nowrap; }
+    .sg-actions { display: flex; gap: 10px; align-items: center; margin: 12px 0; }
+
     /* ---------- 弹层面板 ---------- */
     #pop {
       position: fixed; z-index: 50; display: none; width: 300px; max-width: 90vw;
@@ -195,6 +219,7 @@
       </select>
     </label>
     <button id="btn-run" class="primary">▶ 质检本章</button>
+    <button id="btn-ai">✨ AI 审核建议</button>
     <div id="status">打开章节文件后自动进入审校。词库/术语/标记等更多操作见顶部菜单栏（文件 · 质检 · 帮助）。</div>
   </header>
 
@@ -205,6 +230,7 @@
       <div class="viewtabs">
         <button id="tab-text" class="active">正文审校</button>
         <button id="tab-report">质检报告</button>
+        <button id="tab-suggest">修订建议</button>
       </div>
       <section id="pane-text" class="pane active">
         <div class="legend">
@@ -220,12 +246,16 @@
       <section id="pane-report" class="pane">
         <div class="empty">尚未运行质检</div>
       </section>
+      <section id="pane-suggest" class="pane">
+        <div class="empty">点「✨ AI 审核建议」：把你的标记清单交给 AI 逐条出修订候选，<br/>再由本地质检引擎复核，最后由你勾选定稿（AI 只出候选，教师握定稿权）。</div>
+      </section>
     </div>
     <aside id="sidebar"><div class="side-empty">打开文件后：要点配额 / 终审门禁 / 标记清单</div></aside>
   </div>
 
   <div id="pop"></div>
   <div id="gate-pop"></div>
+  <div id="ai-pop"></div>
   <div id="demo-menu"></div>
 
   <script type="module" src="/src/main.ts"></script>

@@ -6,6 +6,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { open as openFileDialog, save as saveFileDialog } from '@tauri-apps/plugin-dialog';
+import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
 import * as XLSX from 'xlsx';
 import bundledWordlist from '../../assets/wordlists/curriculum_2022_level3_1600.txt?raw';
 import exampleMd from '../../examples/texts/aesop_tortoise_hare.md?raw';
@@ -20,8 +21,8 @@ import {
 import { sentenceRisks } from '../../src/core/risks.js';
 import { jumpTo, refreshMarkDom, removeMarkDom, renderSidebar, restoreAllMarkDom, scheduleSave } from './review.js';
 import {
-  GATES, GATE_HELP, SENT_TYPES, TIER_MAX_LEN, WORD_TYPES, newMarkId, newReviewState, typeLabel,
-  type FileSession, type Mark, type MarkType,
+  CHANGELOG_HEADER, GATES, GATE_HELP, SENT_TYPES, TIER_MAX_LEN, WORD_TYPES, newMarkId, newReviewState, typeLabel,
+  type FileSession, type Mark, type MarkType, type Suggestion,
 } from './types.js';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -606,8 +607,9 @@ function renderReportPane(s: FileSession): void {
 
 /* ---------- 视图切换 ---------- */
 
-function switchView(name: 'text' | 'report'): void {
-  for (const [id, pane] of [['tab-text', 'pane-text'], ['tab-report', 'pane-report']] as const) {
+function switchView(name: 'text' | 'report' | 'suggest'): void {
+  const map = [['tab-text', 'pane-text'], ['tab-report', 'pane-report'], ['tab-suggest', 'pane-suggest']] as const;
+  for (const [id, pane] of map) {
     $(id).classList.toggle('active', id === `tab-${name}`);
     $(pane).classList.toggle('active', pane === `pane-${name}`);
   }
@@ -617,6 +619,7 @@ function switchView(name: 'text' | 'report'): void {
 
 $('tab-text').addEventListener('click', () => switchView('text'));
 $('tab-report').addEventListener('click', () => switchView('report'));
+$('tab-suggest').addEventListener('click', () => switchView('suggest'));
 
 /* ---------- 示例菜单 ---------- */
 
@@ -759,8 +762,271 @@ void listen<string>('menu-action', (ev) => {
     case 'qc-run': void runQcCurrent(); break;
     case 'view-text': switchView('text'); break;
     case 'view-report': switchView('report'); break;
+    case 'ai-settings': showAiSettings(); break;
+    case 'ai-suggest': void aiSuggest(); break;
   }
 });
+
+/* ================= AI 审核建议（AI 只出候选，教师握定稿权） ================= */
+
+let suggestions: Suggestion[] = [];
+const aiPop = $('ai-pop');
+
+function showAiSettings(): void {
+  aiPop.innerHTML = `
+    <div class="pop-h">AI 设置（OpenAI 兼容接口）</div>
+    <div class="fld"><label>API 地址（兼容 DeepSeek / 智谱 / Kimi / 通义等，填到 /v1）</label>
+      <input id="ai-url" placeholder="https://api.openai.com/v1" /></div>
+    <div class="fld"><label>模型名</label><input id="ai-model" placeholder="gpt-4o-mini" /></div>
+    <div class="fld"><label>API Key（仅存本机钥匙串，不上传）</label><input id="ai-key" type="password" placeholder="sk-…" /></div>
+    <div class="row-btns">
+      <button id="ai-save" class="primary">保存</button>
+      <button id="ai-test">测试连接</button>
+      <button id="ai-close">关闭</button>
+    </div>
+    <div class="test-out" id="ai-test-out"></div>
+    <div class="hint-txt">说明：AI 只负责给出修订候选；每条候选都会经本地质检引擎复核（改写后是否仍命中句法黑名单/超长），最终是否采用由你在「修订建议」页勾选。全文数据不出本机，仅把标记相关句子发送给你配置的 API。</div>`;
+  aiPop.classList.add('open');
+  void (async () => {
+    try {
+      const [cfg, key] = await Promise.all([invoke<Record<string, string>>('load_api_config'), invoke<string>('load_api_key')]);
+      ($('ai-url') as HTMLInputElement).value = cfg.baseUrl ?? '';
+      ($('ai-model') as HTMLInputElement).value = cfg.model ?? '';
+      ($('ai-key') as HTMLInputElement).value = key ?? '';
+    } catch { /* 留空 */ }
+  })();
+  $('ai-close').addEventListener('click', () => aiPop.classList.remove('open'));
+  $('ai-save').addEventListener('click', async () => {
+    await invoke('save_api_config', {
+      baseUrl: ($('ai-url') as HTMLInputElement).value.trim(),
+      model: ($('ai-model') as HTMLInputElement).value.trim(),
+    });
+    const key = ($('ai-key') as HTMLInputElement).value.trim();
+    if (key) await invoke('save_api_key', { key });
+    $('ai-test-out').textContent = '✓ 已保存（Key 存入本机钥匙串）';
+  });
+  $('ai-test').addEventListener('click', async () => {
+    const out = $('ai-test-out');
+    out.textContent = '连接中…';
+    try {
+      const r = await callChat('ping', 8);
+      out.textContent = '✓ 连接成功：' + r.slice(0, 60);
+    } catch (e) {
+      out.textContent = '✗ 连接失败：' + e;
+    }
+  });
+}
+
+document.addEventListener('mousedown', (e) => {
+  if (aiPop.classList.contains('open') && !(e.target as HTMLElement).closest('#ai-pop')) aiPop.classList.remove('open');
+});
+
+async function callChat(userMsg: string, maxTokens: number): Promise<string> {
+  const cfg = await invoke<Record<string, string>>('load_api_config');
+  const key = await invoke<string>('load_api_key');
+  if (!key) throw new Error('未配置 API Key（菜单 LayerText → AI 设置）');
+  const base = (cfg.baseUrl || 'https://api.openai.com/v1').replace(/\/+$/, '');
+  const model = cfg.model || 'gpt-4o-mini';
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 120000);
+  try {
+    const resp = await tauriFetch(`${base}/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+      body: JSON.stringify({
+        model,
+        temperature: 0.3,
+        max_tokens: maxTokens,
+        messages: [
+          { role: 'system', content: AI_SYSTEM_PROMPT },
+          { role: 'user', content: userMsg },
+        ],
+      }),
+      signal: ctrl.signal,
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${(await resp.text()).slice(0, 200)}`);
+    const data = (await resp.json()) as { choices?: { message?: { content?: string } }[] };
+    return data.choices?.[0]?.message?.content ?? '';
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** 内置提示词模板：词库边界 + 句法黑名单 + 句长上限 + 方法论约束 */
+const AI_SYSTEM_PROMPT = `你是初中英语原著分层简化的审校助手，帮助教师按学生水平改写英文文本。严格遵守：
+1. 词汇边界：替换目标词时优先使用中国《义务教育英语课程标准》三级（初中毕业要求，约1600词）范围内的词；专有名词与既定术语表词汇保持不变。
+2. 句法黑名单（除直接引语内的原话）：被动语态→改主动；定语从句→拆成短句或用形容词前置；过去完成时→一般过去时并用 before/after 明示先后。
+3. 句长上限：改写后的句子不超过指定词数上限；宁可拆成两句。
+4. 保真：不改变情节、事实、人物与语气；好词保留/好句锚点类标记不要改写，直接返回 original 原文并在 basis 里说明建议保留。
+5. 你只出候选：输出修订建议供教师勾选，不是最终稿。
+输出格式：只输出一个 JSON 数组，不要任何其他文字。每个元素：
+{"id":"标记ID","type":"标记类型","original":"原句原文（一字不改）","revised":"建议改写后的完整句子","basis":"依据（中文，一句话）","alternative":"可选的备选改写（可省略）"}`;
+
+function buildAiUserPrompt(session: FileSession, tier: Tier): string {
+  const body = splitChapter(session.md).body;
+  const paras = extractParas(body);
+  const maxLen = TIER_MAX_LEN[tier] ?? 16;
+  const r = session.report;
+  const gates = r?.gates ?? { passiveOk: tier !== 'A', relclOk: tier !== 'A' };
+  const marks = session.review.marks.map((m) => {
+    const sent = sentsOf(paras[m.pi] ?? '', false)[m.si] ?? '(未找到句子)';
+    const label = m.level === 'word' ? `词标记：${m.word ?? ''}（${typeLabel(m.type)}${m.note ? '，备注：' + m.note : ''}）` : `句标记（${typeLabel(m.type)}${m.note ? '，备注：' + m.note : ''}）`;
+    return `【${m.id}】${label}\n所在句：${sent}`;
+  }).join('\n\n');
+  return `层级：${tier}（句长上限 ${maxLen} 词/句；被动${gates.passiveOk ? '已解禁' : '禁用'}、定语从句${gates.relclOk ? '已解禁' : '禁用'}、过去完成一律改写）
+${r ? `本章质检摘要：覆盖率 ${(r.coverage * 100).toFixed(1)}%，平均句长 ${r.avgLenNarrRaw.toFixed(1)} 词，被动 ${r.passive}、定从 ${r.relcl}、过去完成 ${r.pastperf}，超20词句 ${r.over20}` : ''}
+
+教师标记清单（逐条给修订建议）：
+${marks || '（无标记）'}`;
+}
+
+async function aiSuggest(): Promise<void> {
+  const s = activeSession();
+  if (!s) { setStatus('请先载入文本', 'err'); return; }
+  if (s.review.marks.length === 0) { setStatus('还没有标记——先在正文里点词/拖选句子做标记，AI 才知道往哪改', 'err'); return; }
+  const key = await invoke<string>('load_api_key');
+  if (!key) {
+    setStatus('请先配置 AI（菜单 LayerText → AI 设置…）', 'err');
+    showAiSettings();
+    return;
+  }
+  const tier = (s.report?.tier ?? ($('tier') as HTMLSelectElement).value) as Tier;
+  const btn = $('btn-ai');
+  btn.textContent = '⏳ AI 请求中…';
+  btn.disabled = true;
+  try {
+    const content = await callChat(buildAiUserPrompt(s, tier), 4000);
+    const start = content.indexOf('[');
+    const end = content.lastIndexOf(']');
+    if (start < 0 || end <= start) throw new Error('AI 返回中未找到 JSON 数组');
+    const raw = JSON.parse(content.slice(start, end + 1)) as { id: string; type?: string; original?: string; revised?: string; basis?: string; alternative?: string }[];
+    const maxLen = TIER_MAX_LEN[tier] ?? 16;
+    suggestions = raw
+      .filter((x) => x.revised)
+      .map((x) => {
+        const risk = sentenceRisks(String(x.revised), maxLen);
+        return {
+          markId: String(x.id),
+          type: x.type ?? '',
+          original: String(x.original ?? ''),
+          revised: String(x.revised),
+          basis: x.basis ?? '',
+          alternative: x.alternative,
+          check: { passive: risk.passive, relcl: risk.relcl, pastperf: risk.pastperf, overlong: risk.overlong },
+        };
+      });
+    renderSuggestions();
+    switchView('suggest');
+    setStatus(`AI 返回 ${suggestions.length} 条修订候选（已勾选与否由你决定；引擎复核不通过的条目已标⚠）`, 'saved');
+  } catch (e) {
+    setStatus('AI 请求失败：' + e, 'err');
+  } finally {
+    btn.textContent = '✨ AI 审核建议';
+    btn.disabled = false;
+  }
+}
+
+function checkLabel(c: Suggestion['check']): string {
+  const bad: string[] = [];
+  if (c.passive) bad.push('被动');
+  if (c.relcl) bad.push('定从');
+  if (c.pastperf) bad.push('过去完成');
+  if (c.overlong) bad.push('超长');
+  return bad.length ? `<span class="warn-badge">⚠ 仍含${bad.join('/')}</span>` : '<span class="ok-badge">✓ 复核通过</span>';
+}
+
+function renderSuggestions(): void {
+  const pane = $('pane-suggest');
+  if (suggestions.length === 0) {
+    pane.innerHTML = '<div class="empty">暂无修订建议——点「✨ AI 审核建议」生成</div>';
+    return;
+  }
+  pane.innerHTML = `
+    <div class="sg-actions">
+      <button id="sg-apply" class="primary">应用已勾选（0）→ 生成新版本 + 变更日志</button>
+      <button id="sg-refresh">重新请求 AI</button>
+      <span style="color:var(--muted);font-size:12px">默认全不勾；引擎复核 ⚠ 的条目请人工确认后再勾</span>
+    </div>
+    <table class="sgtable">
+      <tr><th></th><th>标记</th><th class="orig">原句</th><th class="rev">AI 建议</th><th>引擎复核</th><th>依据</th></tr>
+      ${suggestions.map((g, i) => `
+        <tr>
+          <td><input type="checkbox" data-sg="${i}" /></td>
+          <td style="white-space:nowrap">${esc(g.type)}</td>
+          <td class="orig" title="${esc(g.original)}">${esc(g.original.slice(0, 90))}${g.original.length > 90 ? '…' : ''}</td>
+          <td class="rev" title="${esc(g.revised)}${g.alternative ? '&#10;备选：' + esc(g.alternative) : ''}">${esc(g.revised.slice(0, 90))}${g.revised.length > 90 ? '…' : ''}</td>
+          <td>${checkLabel(g.check)}</td>
+          <td>${esc(g.basis)}</td>
+        </tr>`).join('')}
+    </table>`;
+  pane.querySelectorAll('[data-sg]').forEach((cb) =>
+    cb.addEventListener('change', () => {
+      const n = pane.querySelectorAll('[data-sg]:checked').length;
+      ($('sg-apply') as HTMLElement).textContent = `应用已勾选（${n}）→ 生成新版本 + 变更日志`;
+    }),
+  );
+  $('sg-refresh').addEventListener('click', () => void aiSuggest());
+  $('sg-apply').addEventListener('click', () => void applySuggestions());
+}
+
+const RULE_BY_TYPE: Record<string, string> = {
+  syntax: 'R03-R06', long: 'R07', ref: 'R05', cut: 'R01', stiff: 'R08',
+  simpl: 'R02', zh: 'R02', oov: 'R02', hard: 'R02', factw: 'R00', others: 'R00', otherw: 'R00', fact: 'R00', goods: 'R11',
+};
+
+function csvCell(v: string): string {
+  return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+}
+
+async function applySuggestions(): Promise<void> {
+  const s = activeSession();
+  if (!s) return;
+  const checked = [...document.querySelectorAll<HTMLInputElement>('#pane-suggest [data-sg]:checked')].map((cb) => Number(cb.dataset.sg));
+  if (checked.length === 0) { setStatus('请先勾选要采用的修订', 'err'); return; }
+  let newMd = s.md;
+  const appliedIds: string[] = [];
+  const logRows: string[][] = [];
+  const date = new Date().toLocaleDateString('sv-SE');
+  const tier = (s.report?.tier ?? ($('tier') as HTMLSelectElement).value) as Tier;
+  for (const i of checked) {
+    const g = suggestions[i];
+    const mark = s.review.marks.find((m) => m.id === g.markId);
+    if (!mark) continue;
+    const at = newMd.indexOf(g.original);
+    if (at < 0) { logRows.push([`R?`, date, tier, `P${String(mark.pi + 1).padStart(2, '0')}`, `P${mark.pi + 1}-S${mark.si + 1}`, g.original, '(原句定位失败，未应用)', RULE_BY_TYPE[mark.type] ?? 'R00', g.basis, 'AI候选']); continue; }
+    newMd = newMd.slice(0, at) + g.revised + newMd.slice(at + g.original.length);
+    appliedIds.push(mark.id);
+    logRows.push(['R1', date, tier, `P${String(mark.pi + 1).padStart(2, '0')}`, `P${mark.pi + 1}-S${mark.si + 1}`, g.original, g.revised, RULE_BY_TYPE[mark.type] ?? 'R00', g.basis, 'AI候选']);
+  }
+  if (!s.sourcePath) { setStatus('示例模式不支持应用修订——请打开真实章节文件', 'err'); return; }
+  const dir = s.sourcePath.slice(0, s.sourcePath.lastIndexOf('/'));
+  const base = s.fileName.replace(/\.(md|txt|markdown)$/i, '');
+  const newPath = `${dir}/${base}_AI修订_${date}.md`;
+  const logPath = `${dir}/变更日志_AI审核.csv`;
+  try {
+    await invoke('write_text_file', { path: newPath, content: newMd });
+    let csv = '';
+    try {
+      csv = await invoke<string>('read_text_file', { path: logPath });
+    } catch { csv = ''; }
+    if (!csv.trim()) csv = CHANGELOG_HEADER.join(',') + '\n';
+    csv += logRows.map((r) => r.map(csvCell).join(',')).join('\n') + '\n';
+    await invoke('write_text_file', { path: logPath, content: csv });
+    // 移除已应用标记并落盘
+    s.review.marks = s.review.marks.filter((m) => !appliedIds.includes(m.id));
+    scheduleSave(s, () => undefined);
+    // 新版本作为新 tab 打开
+    await addSession(newMd, base + `_AI修订_${date}.md`, newPath);
+    suggestions = suggestions.filter((g) => !appliedIds.includes(g.markId));
+    renderSuggestions();
+    setStatus(`已应用 ${appliedIds.length} 条修订：新版本 ${newPath}；变更日志 ${logPath}；对应标记已清除`, 'saved');
+    void invoke('reveal_path', { path: newPath });
+  } catch (e) {
+    setStatus('应用失败：' + e, 'err');
+  }
+}
+
+$('btn-ai').addEventListener('click', () => void aiSuggest());
 
 /* ---------- 门禁说明弹层 ---------- */
 

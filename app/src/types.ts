@@ -94,3 +94,17 @@ export function newReviewState(fileName: string): ReviewState {
 export function newMarkId(): string {
   return 'm' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 }
+
+/** AI 修订建议（AI 只出候选；check 为本地 QC 引擎对建议句的机器复核） */
+export interface Suggestion {
+  markId: string;
+  type: string;
+  original: string;
+  revised: string;
+  basis: string;
+  alternative?: string;
+  check: { passive: boolean; relcl: boolean; pastperf: boolean; overlong: boolean };
+}
+
+/** 变更日志 CSV 表头（与原型审计 schema 一致） */
+export const CHANGELOG_HEADER = ['轮次', '日期', '版本', '章', '位置', '修改前', '修改后', '规则号', '依据/理由', '详单来源'];
