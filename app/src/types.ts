@@ -55,24 +55,9 @@ export const GATE_HELP: Record<string, string> = {
   'QC 指标达标': '自动质检的各项指标达到本层级参考标准（点击查看本章实际数字与参考值的核对表）。',
 };
 
-/** 各层级句长参考上限（词/句），源自原型项目三层设计 */
-export const TIER_MAX_LEN: Record<string, number> = { B: 14, M: 16, A: 20 };
-
-/** 分层方案（全局可调：教师按自己学生的情况定标准） */
-export interface TierPlan {
-  name: string;
-  desc: string;
-  maxLen: number;
-  /** A 层被动/定从解禁章号（0=全禁） */
-  passiveFromCh: number;
-  relclFromCh: number;
-}
-
-export const DEFAULT_TIER_PLANS: Record<string, TierPlan> = {
-  B: { name: 'B（支架）', desc: '最弱学生也能读懂：短句、全黑名单禁用、可增补衔接', maxLen: 14, passiveFromCh: 0, relclFromCh: 0 },
-  M: { name: 'M（中梯）', desc: '逐段对应原文：信息不删减，黑名单句法禁用', maxLen: 16, passiveFromCh: 0, relclFromCh: 0 },
-  A: { name: 'A（挑战）', desc: '文学性保留：被动第5章起、定从第8章起解禁，过去完成仍改写', maxLen: 20, passiveFromCh: 5, relclFromCh: 8 },
-};
+/** 简化标准的默认句长上限（词/句）。难度由教师词库锚定，不预设 B/M/A 层级；
+ *  需要更简版本：把简化结果再导入、再简化一遍（迭代深化）。 */
+export const DEFAULT_MAX_LEN = 16;
 
 export const WORD_TYPES: { key: WordMarkType; label: string; badge: string; cls: string }[] = [
   { key: 'simpl', label: '词汇简化', badge: '简', cls: 'mk-simpl' },

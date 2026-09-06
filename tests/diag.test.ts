@@ -18,7 +18,7 @@ test('配置摘要：域名化 baseUrl、布尔与数量，不含 Key/约定内�
     trustEdit: false,
     inPlaceEdit: true,
     lowThinking: true,
-    tiers: { B: {} },
+    simplify: { maxLen: 14 },
     recentFiles: ['/a.md', '/b.md'],
     instructions: '人名保留原文，歌篇不改写',
   }, '1.0.0', 'Mozilla/5.0 test');
@@ -27,13 +27,13 @@ test('配置摘要：域名化 baseUrl、布尔与数量，不含 Key/约定内�
     baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-chat',
     failover: [{ name: 'x', baseUrl: 'y', model: 'z' }],
     autoRewriteOnMark: true, trustEdit: false, inPlaceEdit: true, lowThinking: true,
-    tiers: { B: {} }, recentFiles: ['/a.md', '/b.md'], instructions: '人名保留原文，歌篇不改写',
+    simplify: { maxLen: 14 }, recentFiles: ['/a.md', '/b.md'], instructions: '人名保留原文，歌篇不改写',
   });
   assert.match(text, /api\.deepseek\.com/);        // 域名保留（定位服务商问题需要）
   assert.match(text, /deepseek-chat/);             // 模型名保留
   assert.equal(c['备用供应商数'], 1);
   assert.equal(c['全局AI直改'], true);
-  assert.equal(c['分层方案自定义'], true);
+  assert.equal(c['简化标准自定义'], true);
   assert.equal(c['最近文件数'], 2);
   assert.equal(c['长期审校约定字数'], 12); // 只记长度（12 字符含全角逗号）
   // 隐私红线：不出现约定内容与文件路径

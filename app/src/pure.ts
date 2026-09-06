@@ -142,7 +142,7 @@ export interface DiagConfigInput {
   trustEdit?: boolean;
   inPlaceEdit?: boolean;
   lowThinking?: boolean;
-  tiers?: unknown;
+  simplify?: unknown;
   recentFiles?: string[];
   instructions?: string;
 }
@@ -162,7 +162,7 @@ export function buildDiagSummary(cfg: DiagConfigInput, appVersion: string, userA
       信任模式: cfg.trustEdit ?? false,
       原地编辑原稿: cfg.inPlaceEdit ?? true,
       关闭思考: cfg.lowThinking !== false,
-      分层方案自定义: Boolean(cfg.tiers),
+      简化标准自定义: Boolean(cfg.simplify),
       长期审校约定字数: (cfg.instructions ?? '').length,
       最近文件数: cfg.recentFiles?.length ?? 0,
     },

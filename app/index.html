@@ -324,21 +324,14 @@
     <span class="logo">LayerText 分层读<small>v1.0</small></span>
     <button id="btn-demo">载入示例</button>
     <button id="btn-open">打开章节文件…</button>
-    <label class="tier">难度层
-      <select id="tier">
-        <option value="M" selected>M（中梯）</option>
-        <option value="B">B（支架）</option>
-        <option value="A">A（挑战）</option>
-      </select>
-    </label>
-    <button id="tier-q" class="qmark" style="margin-left:-4px" title="B/M/A 是什么？标准可以改">?</button>
+    <button id="tier-q" class="qmark" title="简化标准：句长上限（可调）。难度由你的词库决定——学生学过什么词，就简化到词库内；要更简版本，把简化结果再导入再简化">ⓘ</button>
     <button id="btn-run" class="primary" title="打开课文会自动体检；换了词库或改完正文后，点这里重新算一遍">▶ 重新质检</button>
-    <button id="btn-draft" title="第一次拿到一章原文时点它：让 AI 按所选难度层把整章改写一遍（自动质检、原稿不动），得到'分层初稿'；之后再用标记逐句精修。一章只用一次">✍ 分层初稿…</button>
+    <button id="btn-draft" title="让 AI 按当前简化标准把整章逐段改写一遍（自动体检、原稿不动），得到简化版；之后再用标记逐句精修。要更简的版本：把简化版再导入、再点一次这里">✨ AI 简化本章</button>
     <button id="btn-ai" title="把你在正文里做的标记批量交给 AI，逐条给出改写候选（默认你要点 ✓ 才生效；若在 AI 设置里开了'直接生效'则自动应用）">✨ AI 审核建议</button>
-    <div id="status">打开章节文件后自动进入审校。词库/术语/标记等更多操作见顶部菜单栏（文件 · 质检 · 帮助）。</div>
+    <div id="status">打开章节文件后自动体检、进入审校。词库/术语/标记等更多操作见顶部菜单栏（文件 · 质检 · 帮助）。</div>
   </header>
 
-  <div class="filetabs" id="filetabs"><span class="hint">可同时打开同一文本的多个难度版本（B/M/A 各一个文件）并排切换</span></div>
+  <div class="filetabs" id="filetabs"><span class="hint">可同时打开原文与简化版（含再简化的版本）并排切换、逐段对比</span></div>
 
   <div class="workbench">
     <div class="content">
@@ -367,7 +360,7 @@
         <div class="empty">还没有修订建议。<br/>方式一：正文里点词 →「✨ AI 改写本句」；<br/>方式二：标记若干处后点「✨ AI 审核建议」批量出；<br/>方式三：右侧「AI 助手」对话里直接让它改。<br/><span style="font-size:12px">AI 只给建议（黄色框显示在正文里），你点 ✓ 才生效</span></div>
       </section>
       <section id="pane-diff" class="pane">
-        <div class="empty">同时打开两个版本（如原文 + 分层初稿），这里逐段对比它们<br/><span style="font-size:12px">红=仅左侧版本 · 绿=已修改/仅右侧版本 · 无色=两版一致</span></div>
+        <div class="empty">同时打开两个版本（如原文 + 简化版），这里逐段对比它们<br/><span style="font-size:12px">红=仅左侧版本 · 绿=已修改/仅右侧版本 · 无色=两版一致</span></div>
       </section>
       <section id="pane-retro" class="pane">
         <div class="empty"><b>复盘：AI 建议采纳率与改进方向</b><br/>你每次点 ✓ 采纳 / ✗ 放弃 AI 建议，都会记入本书文件夹的《AI建议台账.csv》<br/>这里自动汇总：哪类建议最不可靠、该改提示词还是改规则</div>

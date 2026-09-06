@@ -3,13 +3,12 @@
  * 所有跨模块可变状态集中在 S 对象；UI 状态出口 setStatus / 文本转义 esc 也在此。
  */
 
-import type { TierPlan, Suggestion, FileSession } from './types.js';
+import type { Suggestion, FileSession } from './types.js';
 
 export interface AppConfig {
   baseUrl?: string;
   model?: string;
   instructions?: string;
-  tiers?: Record<string, TierPlan>;
   firstRunSeen?: boolean;
   tourSeen?: boolean;
   /** 信任模式：AI 助手可直接编辑（工作稿+日志，原稿不动） */
@@ -23,6 +22,8 @@ export interface AppConfig {
   recentFiles?: string[];
   /** 备用供应商序列（W3 failover）：主供应商失败时按序降级；key 留空则复用主 Key */
   failover?: { name?: string; baseUrl?: string; model?: string; key?: string }[];
+  /** 简化标准（无预设难度）：句长上限可调，黑名单句法一律禁用。旧配置的 tiers 字段已停用忽略 */
+  simplify?: { maxLen: number };
 }
 
 export interface RewriteRules {

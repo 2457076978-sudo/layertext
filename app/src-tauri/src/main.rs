@@ -338,7 +338,7 @@ fn main() {
                 .accelerator("CmdOrCtrl+R")
                 .build(app)?;
             let mi_ai = MenuItemBuilder::with_id("ai-suggest", "AI 审核建议…").build(app)?;
-            let mi_draft = MenuItemBuilder::with_id("draft", "生成分层初稿…").build(app)?;
+            let mi_draft = MenuItemBuilder::with_id("draft", "AI 简化本章…").build(app)?;
             let qc_menu = SubmenuBuilder::new(app, "质检").item(&mi_run).item(&mi_draft).separator().item(&mi_ai).build()?;
 
             let mi_vt = MenuItemBuilder::with_id("view-text", "正文审校").build(app)?;
@@ -371,7 +371,7 @@ fn main() {
                     .comments(Some("分层英语文本简化与审校工作台 · AI 只出候选，教师握定稿权 · 数据全在本机"))
                     .build()))
                 .text("ai-settings", "AI 设置…")
-                .text("tier-plan", "分层方案…（B/M/A 标准可调）")
+                .text("tier-plan", "简化标准…（句长上限可调）")
                 .separator()
                 .services()
                 .separator()

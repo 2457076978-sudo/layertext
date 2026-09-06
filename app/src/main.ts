@@ -13,7 +13,7 @@ import { unzipSync, zipSync, strFromU8, strToU8 } from 'fflate';
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, WidthType } from 'docx';
 import { applyRewriteTo, buildDiagSummary, checkRevisedText, mergeQuotaTexts, normalizeAndSplitChapters, parseAiJson, pickSentMarkType } from './pure.js';
 import { S, setStatus as uiSetStatus, esc } from './state.js';
-import { AI_PROVIDERS, aiErrHuman, buildAssistantPrompt, buildDraftSystemPrompt, buildPlotPointsPrompt, buildRewriteSentencePrompt, buildSystemPrompt, callChat, chatStream, loadConfig, reloadPrompts, saveConfig, setAiUi, tierMaxLen, tierPlan } from './ai.js';
+import { AI_PROVIDERS, aiErrHuman, buildAssistantPrompt, buildDraftSystemPrompt, buildPlotPointsPrompt, buildRewriteSentencePrompt, buildSystemPrompt, callChat, chatStream, loadConfig, promptSetVersion, reloadPrompts, saveConfig, setAiUi, simplifyMaxLen } from './ai.js';
 import bundledWordlist from '../../assets/wordlists/curriculum_2022_level3_1600.txt?raw';
 import bundledAmendment from '../../assets/wordlists/curriculum_2022_amendment.txt?raw';
 import exampleMd from '../../examples/texts/aesop_tortoise_hare.md?raw';
@@ -30,9 +30,9 @@ import {
 import { sentenceRisks } from '../../src/core/risks.js';
 import { jumpTo, refreshMarkDom, removeMarkDom, renderSidebar, restoreAllMarkDom, scheduleSave } from './review.js';
 import {
-  CHANGELOG_HEADER, DEFAULT_TIER_PLANS, GATES, GATE_HELP, SENT_TYPES, WORD_TYPES,
+  CHANGELOG_HEADER, GATES, GATE_HELP, SENT_TYPES, WORD_TYPES,
   newMarkId, newReviewState, typeLabel,
-  type FileSession, type Mark, type MarkType, type Suggestion, type TierPlan,
+  type FileSession, type Mark, type MarkType, type Suggestion,
 } from './types.js';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -43,7 +43,7 @@ const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getEleme
 /** 本地示例目录的附加词表（如原型项目的中考1600按词性分类表） */
 /** 当前会话的合并已知词表（含词句卡），供词面板显示原形 */
 
-/* ---------- 全局配置（~/.layertext.json：AI 设置 + 分层方案 + 首启动标记） ---------- */
+/* ---------- 全局配置（~/.layertext.json：AI 设置 + 简化标准 + 首启动标记） ---------- */
 
 
 /** 常见服务商预设（新手只需选服务商 + 贴 Key） */
@@ -166,14 +166,6 @@ async function loadLocalExampleConfig(): Promise<void> {
   }
 }
 
-/** 按文件名联动层级（含 A层/A版 → A；B版 → B；默认 M） */
-function autoTierFromName(name: string): void {
-  const sel = $('tier') as HTMLSelectElement;
-  if (/A层|A版|A挑战/.test(name)) sel.value = 'A';
-  else if (/B版|B层/.test(name)) sel.value = 'B';
-  else sel.value = 'M';
-}
-
 function setStatus(msg: string, cls = ''): void {
   $('status').innerHTML = msg ? `<span class="${cls}">${esc(msg)}</span>` : '';
 }
@@ -280,7 +272,7 @@ function renderAll(): void {
 function renderFileTabs(): void {
   const el = $('filetabs');
   if (S.sessions.length === 0) {
-    el.innerHTML = '<span class="hint">可同时打开同一文本的多个难度版本（B/M/A 各一个文件）并排切换</span>';
+    el.innerHTML = '<span class="hint">可同时打开原文与简化版（含再简化的版本）并排切换、逐段对比</span>';
     return;
   }
   el.innerHTML = S.sessions
@@ -303,8 +295,8 @@ function renderFileTabs(): void {
 }
 
 /** 改写文本复核（多句拆分逐句检测，超长=最长一句超限） */
-function checkRev(revised: string, tier: string): Suggestion['check'] {
-  return checkRevisedText(revised, tierMaxLen(tier), (sent, m) => {
+function checkRev(revised: string): Suggestion['check'] {
+  return checkRevisedText(revised, simplifyMaxLen(), (sent, m) => {
     const r = sentenceRisks(sent, m);
     return { passive: r.passive, relcl: r.relcl, pastperf: r.pastperf, overlong: r.overlong };
   });
@@ -624,13 +616,12 @@ function tagFromPath(p: string): string {
 async function runQcCurrent(opts: { auto?: boolean } = {}): Promise<void> {
   const s = activeSession();
   if (!s) { setStatus('请先载入文本', 'err'); return; }
-  const tier = ($('tier') as HTMLSelectElement).value as Tier;
   try {
     s.report = runQc(s.md, buildLexiconNow(), {
-      tier,
+      tier: 'M', // 引擎口径固定 M（黑名单全禁）；句长参考用「简化标准」simplifyMaxLen()
       fileName: s.fileName,
       chno: s.sourcePath ? chnoFromPath(s.sourcePath) : null,
-      tierGates: { passiveFromCh: tierPlan(tier).passiveFromCh, relclFromCh: tierPlan(tier).relclFromCh },
+      tierGates: { passiveFromCh: 0, relclFromCh: 0 },
       ...(S.properRows.length ? { propCheckList: S.properRows } : {}),
     });
   } catch (e) {
@@ -706,10 +697,7 @@ function renderReportPane(s: FileSession): void {
   const legacy = toLegacyReport(s.report) as Record<string, unknown>;
   const rows = Object.entries(legacy).filter(([k]) => k !== 'OOV词(去重)');
   const oov = [...new Set(s.report.oov)];
-  const gatesNote =
-    s.report.tier === 'A'
-      ? `A 层解禁：被动${s.report.gates.passiveOk ? '已解禁' : '未解禁（第5章起解禁）'} · 定从${s.report.gates.relclOk ? '已解禁' : '未解禁（第8章起解禁）'}`
-      : 'B/M 层：三项句法黑名单全时段计数';
+  const gatesNote = `句法黑名单（被动/定从/过去完成）一律禁用；句长参考 = 简化标准 ${simplifyMaxLen()} 词/句`;
   const risks = riskSentenceList(s);
 
   /* 生词清单：每个词两个动作——标记简化（进标记清单走 AI）/ 计入已学词（不再标红） */
@@ -1080,7 +1068,6 @@ async function openDemoMenu(): Promise<void> {
         await loadLocalExampleConfig();
         const md = await invoke<string>('read_text_file', { path });
         const name = path.slice(path.lastIndexOf('/') + 1);
-        autoTierFromName(name);
         await addSession(md, name, path);
         setStatus('已载入本地示例：' + name + (S.vocabCsvText ? '（词库已自动加载）' : ''));
       } catch (e) {
@@ -1216,7 +1203,7 @@ void listen<string>('menu-action', (ev) => {
     case 'ai-settings': showAiSettings(); break;
     case 'ai-suggest': void aiSuggest(); break;
     case 'draft': showDraftPop(); break;
-    case 'tier-plan': showTierPlanPop(); break;
+    case 'tier-plan': showStandardPop(); break;
     case 'book-config': void saveBookConfig(); break;
     case 'rewrite-rules': showRewritePop(); break;
     case 'help-key': void invoke('open_help_window', { which: 'key' }); break;
@@ -1225,7 +1212,7 @@ void listen<string>('menu-action', (ev) => {
     case 'export-docx': void exportDocx(); break;
     case 'export-tts': void exportTts(); break;
     case 'view-diff':
-      if (S.sessions.length < 2) setStatus('版本对比需要先打开两个版本（如原文与分层初稿）', 'err');
+      if (S.sessions.length < 2) setStatus('版本对比需要先打开两个版本（如原文与简化版）', 'err');
       else { renderDiff(0, 1); switchView('diff'); }
       break;
   }
@@ -1263,7 +1250,7 @@ function showAiSettings(): void {
       <button id="ai-close">关闭</button>
     </div>
     <div class="test-out" id="ai-test-out"></div>
-    <div class="hint-txt">这是什么？AI 功能（改写建议 / 分层初稿 / AI 助手对话）需要连接一个 AI 服务。上面四步配好后，AI 只负责"给建议"，每条建议都会先经本机质检引擎复核，最后由你点头才生效。不知道 Key 从哪来？点菜单 帮助 → 如何获取 AI 的 Key。<br/>每次 AI 调用（用了哪家/花了多少 tokens）自动记入成本台账，复盘页可查。</div>`;
+    <div class="hint-txt">这是什么？AI 功能（改写建议 / AI 简化本章 / AI 助手对话）需要连接一个 AI 服务。上面四步配好后，AI 只负责"给建议"，每条建议都会先经本机质检引擎复核，最后由你点头才生效。不知道 Key 从哪来？点菜单 帮助 → 如何获取 AI 的 Key。<br/>每次 AI 调用（用了哪家/花了多少 tokens）自动记入成本台账，复盘页可查。</div>`;
   aiPop.classList.add('open');
 
   const urlEl = $('ai-url') as HTMLInputElement;
@@ -1392,18 +1379,17 @@ function estTokens(s: string): number {
  * instruction 传入 = 会话式追问（携带 S.aiHistory，AI 知道上一轮建议过什么、你否决了什么）；
  * 不传 = 全新请求（上下文来自本地文件：标记清单+当前文本句子），并重建 S.aiHistory。
  */
-function buildAiUserPrompt(session: FileSession, tier: Tier): string {
+function buildAiUserPrompt(session: FileSession): string {
   const body = splitChapter(session.md).body;
   const paras = extractParas(body);
-  const maxLen = tierMaxLen(tier);
+  const maxLen = simplifyMaxLen();
   const r = session.report;
-  const gates = r?.gates ?? { passiveOk: tier !== 'A', relclOk: tier !== 'A' };
   const marks = session.review.marks.map((m) => {
     const sent = sentsOf(paras[m.pi] ?? '', false)[m.si] ?? '(未找到句子)';
     const label = m.level === 'word' ? `词标记：${m.word ?? ''}（${typeLabel(m.type)}${m.note ? '，备注：' + m.note : ''}）` : `句标记（${typeLabel(m.type)}${m.note ? '，备注：' + m.note : ''}）`;
     return `【${m.id}】${label}\n所在句：${sent}`;
   }).join('\n\n');
-  return `层级：${tier}（句长上限 ${maxLen} 词/句；被动${gates.passiveOk ? '已解禁' : '禁用'}、定语从句${gates.relclOk ? '已解禁' : '禁用'}、过去完成一律改写）
+  return `简化标准：句长上限 ${maxLen} 词/句；被动语态、定语从句禁用，过去完成时一律改写
 ${r ? `本章质检摘要：覆盖率 ${(r.coverage * 100).toFixed(1)}%，平均句长 ${r.avgLenNarrRaw.toFixed(1)} 词，被动 ${r.passive}、定从 ${r.relcl}、过去完成 ${r.pastperf}，超20词句 ${r.over20}` : ''}
 
 教师标记清单（逐条给修订建议）：
@@ -1420,7 +1406,6 @@ async function aiSuggest(instruction?: string): Promise<void> {
     showAiSettings();
     return;
   }
-  const tier = (s.report?.tier ?? ($('tier') as HTMLSelectElement).value) as Tier;
   const btn = $('btn-ai') as unknown as HTMLButtonElement;
   btn.textContent = '⏳ AI 请求中…';
   btn.disabled = true;
@@ -1431,7 +1416,7 @@ async function aiSuggest(instruction?: string): Promise<void> {
       S.aiHistory.push({ role: 'user', content: instruction + '\n\n请基于我们之前的对话重新输出完整的 JSON 数组（含未改动条目，original 用当前正文原句）。' });
       messages = [{ role: 'system', content: system }, ...S.aiHistory];
     } else {
-      const userMsg = buildAiUserPrompt(s, tier);
+      const userMsg = buildAiUserPrompt(s);
       S.aiHistory = [{ role: 'user', content: userMsg }];
       messages = [{ role: 'system', content: system }, { role: 'user', content: userMsg }];
     }
@@ -1440,11 +1425,10 @@ async function aiSuggest(instruction?: string): Promise<void> {
     const { raw: rawUnknown, usage } = await chatUntilJson(messages, 6000, '审核建议');
     const raw = rawUnknown as { id: string; type?: string; original?: string; revised?: string; basis?: string; alternative?: string }[];
     S.aiHistory.push({ role: 'assistant', content: JSON.stringify(raw) });
-    const maxLen = tierMaxLen(tier);
     S.suggestions = raw
       .filter((x) => x.revised)
       .map((x) => {
-        const risk = checkRev(String(x.revised), tier);
+        const risk = checkRev(String(x.revised));
         return {
           markId: String(x.id),
           type: x.type ?? '',
@@ -1548,7 +1532,6 @@ async function logSuggestion(
 ): Promise<void> {
   try {
     const outDir = s.sourcePath ? s.sourcePath.slice(0, s.sourcePath.lastIndexOf('/')) : await invoke<string>('reports_dir');
-    const tier = (s.report?.tier ?? ($('tier') as HTMLSelectElement).value) as Tier;
     const bad = g.check.passive || g.check.relcl || g.check.pastperf || g.check.overlong;
     let host = S.appConfig.baseUrl ?? '';
     try { host = new URL(host).host; } catch { if (host) host = '自定义'; }
@@ -1556,13 +1539,13 @@ async function logSuggestion(
     const row: LedgerRow = {
       ts: new Date().toLocaleString('sv-SE'),
       book: dir ? dir.slice(dir.lastIndexOf('/') + 1) : s.fileName,
-      chapter: s.fileName, tier, scene,
+      chapter: s.fileName, tier: `标准${simplifyMaxLen()}词`, scene,
       markType: g.type || (mark ? typeLabel(mark.type) : ''),
       rule: mark ? (RULE_BY_TYPE[mark.type] ?? 'R00') : 'R00',
       outcome,
       check: bad ? '⚠' : '通过',
       provider: host, model: S.appConfig.model ?? '',
-      promptVer: '内置v1', // W3 提示词外置后替换为实际版本号
+      promptVer: await promptSetVersion(),
       original: g.original, revised: g.revised, basis: g.basis,
       rejectReason: outcome === '拒绝' ? '（点✗放弃，未填原因）' : '',
     };
@@ -1720,7 +1703,6 @@ async function acceptSuggestion(g: Suggestion, opts: { scene?: string; outcome?:
   S.suggestions = S.suggestions.filter((x) => x !== g);
 
   const date = new Date().toLocaleDateString('sv-SE');
-  const tier = (s.report?.tier ?? ($('tier') as HTMLSelectElement).value) as Tier;
   const outDir = s.sourcePath ? s.sourcePath.slice(0, s.sourcePath.lastIndexOf('/')) : await invoke<string>('reports_dir');
   const logPath = `${outDir}/变更日志_AI审核.csv`;
   try {
@@ -1729,7 +1711,7 @@ async function acceptSuggestion(g: Suggestion, opts: { scene?: string; outcome?:
     try { csv = await invoke<string>('read_text_file', { path: logPath }); } catch { /* 新建 */ }
     if (!csv.trim()) csv = CHANGELOG_HEADER.join(',') + '\n';
     csv += [
-      'R1', date, tier,
+      'R1', date, `标准${simplifyMaxLen()}词`,
       `P${String((g.pi ?? 0) + 1).padStart(2, '0')}`,
       `P${(g.pi ?? 0) + 1}-S${(g.si ?? 0) + 1}`,
       g.original, g.revised,
@@ -1760,7 +1742,6 @@ async function aiRewriteSentence(pi: number, si: number, intent: string, autoMar
   const paras = extractParas(splitChapter(s.md).body);
   const sent = sentsOf(paras[pi] ?? '', false)[si];
   if (!sent) return;
-  const tier = (s.report?.tier ?? ($('tier') as HTMLSelectElement).value) as Tier;
   const system = await buildSystemPrompt();
   const btn = pop.querySelector('[data-mk="__rewrite"]') as HTMLElement | null;
   if (btn) { btn.textContent = '⏳ 改写中…'; (btn as HTMLButtonElement).disabled = true; }
@@ -1769,13 +1750,13 @@ async function aiRewriteSentence(pi: number, si: number, intent: string, autoMar
       { role: 'system', content: system },
       {
         role: 'user',
-        content: await buildRewriteSentencePrompt({ tier, maxLen: tierMaxLen(tier), intent, sent }),
+        content: await buildRewriteSentencePrompt({ maxLen: simplifyMaxLen(), intent, sent }),
       },
     ], 4000, '逐句改写');
     const arr = arrRaw as { original?: string; revised?: string; basis?: string; alternative?: string }[];
     const one = arr[0];
     if (!one?.revised) throw new Error('AI 未返回改写');
-    const risk = checkRev(String(one.revised), tier);
+    const risk = checkRev(String(one.revised));
     const g: Suggestion = {
       markId: autoMarkId ?? 'rw-' + Date.now().toString(36), type: intent || '词改写',
       original: String(one.original ?? sent), revised: String(one.revised),
@@ -1803,33 +1784,27 @@ async function aiRewriteSentence(pi: number, si: number, intent: string, autoMar
 
 $('btn-ai').addEventListener('click', () => void aiSuggest());
 
-/* ================= 分层初稿：首次导入按方向整章大改（两阶段工作流的第一阶段） ================= */
+/* ================= AI 简化本章：整章逐段改写（两阶段工作流的第一阶段；更简版本=把结果再导入再简化） ================= */
 
 const draftPop = $('draft-pop');
 
-const TIER_DRAFT_RULES: Record<string, string> = {};
-function tierRule(tier: string): string {
-  if (!TIER_DRAFT_RULES[tier]) {
-    const p = tierPlan(tier);
-    TIER_DRAFT_RULES[tier] = `${p.name} 层：平均句长 ≤${p.maxLen} 词；${p.desc}；${
-      p.passiveFromCh ? `被动语态第 ${p.passiveFromCh} 章起解禁（之前禁用）` : '被动语态禁用'
-    }；${p.relclFromCh ? `定语从句第 ${p.relclFromCh} 章起解禁（之前禁用）` : '定语从句禁用'}；过去完成时一律改写为一般过去时或 before/after 明示。`;
-  }
-  return TIER_DRAFT_RULES[tier];
+/** 简化规则行（注入每次简化请求；难度由教师词库锚定，标准只有句长上限一个数） */
+function simplifyRule(): string {
+  return `简化标准：平均句长 ≤${simplifyMaxLen()} 词；被动语态、定语从句禁用；过去完成时一律改写为一般过去时或 before/after 明示先后。`;
 }
 
 function showDraftPop(): void {
   const s = activeSession();
   if (!s) { setStatus('请先打开要简化的章节原文', 'err'); return; }
   draftPop.innerHTML = `
-    <div class="pop-h">分层初稿 · 整章按方向大改</div>
+    <div class="pop-h">AI 简化本章 · 整章逐段改写</div>
     <p style="color:var(--muted);font-size:12px;line-height:1.7;margin:6px 0 10px">
-      对「${esc(s.fileName)}」按所选层级逐段生成简化初稿（保留段落结构与全部情节），完成后自动质检、开新 tab——原稿不动，之后进入标记精修流程。</p>
-    <div class="fld"><label>层级（取当前工具栏选择，可在上方切换）</label><div id="draft-tier" style="font-weight:600"></div></div>
+      对「${esc(s.fileName)}」按<b>当前简化标准（句长上限 ${simplifyMaxLen()} 词，点工具栏 ⓘ 可调）</b>逐段生成简化版（保留段落结构与全部情节），完成后自动质检、开新 tab——原稿不动，之后进入标记精修。<br/>
+      需要<b>更简的版本</b>？把生成的简化版再导入、再点一次这里即可（词库不变，句子更短更浅）。</p>
     <div class="fld"><label>方向指令（写你的整体要求，AI 全程遵守）</label>
       <textarea id="draft-instructions" placeholder="例如：面向九年级；歌篇原样保留不改写；人名保留原文；第 3 段 Major 的演讲要压缩到一半"></textarea></div>
     <div class="row-btns">
-      <button id="draft-start" class="primary">开始生成</button>
+      <button id="draft-start" class="primary">开始简化</button>
       <button id="draft-cancel" style="display:none">取消</button>
       <button id="draft-close">关闭</button>
     </div>
@@ -1838,8 +1813,6 @@ function showDraftPop(): void {
       <div class="bar"><i id="draft-bar"></i></div>
     </div>`;
   draftPop.classList.add('open');
-  const t = ($('tier') as HTMLSelectElement).value as Tier;
-  $('draft-tier').textContent = t + ' 层';
   $('draft-close').addEventListener('click', () => { S.draftAbort?.abort(); draftPop.classList.remove('open'); });
   $('draft-cancel').addEventListener('click', () => { S.draftAbort?.abort(); });
   $('draft-start').addEventListener('click', () => void generateDraft());
@@ -1857,16 +1830,14 @@ async function generateDraft(): Promise<void> {
   if (!s) return;
   const key = await invoke<string>('load_api_key');
   if (!key) { showAiSettings(); return; }
-  const tier = (s.report?.tier ?? ($('tier') as HTMLSelectElement).value) as Tier;
   const instructions = ($('draft-instructions') as HTMLTextAreaElement).value.trim();
-  const chno = s.sourcePath ? chnoFromPath(s.sourcePath) : null;
 
   const md = s.md;
   const chLine = md.match(/^## Chapter \w+.*$/m)?.[0] ?? '## Chapter One';
   const header = md.slice(0, md.indexOf(chLine)) || '';
   const body = splitChapter(md).body;
   const segs = body.match(/\[P\d+\][\s\S]*?(?=\[P\d+\]|$)/g) ?? [];
-  if (segs.length === 0) { setStatus('未找到 [P##] 段落，无法生成初稿', 'err'); return; }
+  if (segs.length === 0) { setStatus('未找到 [P##] 段落，无法简化（打开时已自动转格式的文本都有）', 'err'); return; }
 
   S.draftAbort = new AbortController();
   const startBtn = $('draft-start') as HTMLButtonElement;
@@ -1876,8 +1847,8 @@ async function generateDraft(): Promise<void> {
   let tokens = 0;
   try {
     const system = await buildDraftSystemPrompt({
-      tierRule: TIER_DRAFT_RULES[tier] ?? TIER_DRAFT_RULES.M,
-      chnoNote: chno ? `（本章章号 ${chno}）` : '',
+      tierRule: simplifyRule(),
+      chnoNote: '',
       instructions: instructions ? `- 教师方向指令（最高优先级）：${instructions}` : '',
     });
     const out: string[] = [];
@@ -1891,28 +1862,28 @@ async function generateDraft(): Promise<void> {
           role: 'user',
           content: `前文（已简化，供语气与指代衔接参考）：\n…${prevTail}\n\n请简化以下段落：\n${segs[i].trim()}`,
         },
-      ], 2500, S.draftAbort!.signal, '分层初稿');
+      ], 2500, S.draftAbort!.signal, 'AI 简化本章');
       tokens += Number(usage.match(/(\d+) 出/)?.[1] ?? 0);
       out.push(applyRewrite(cleanDraftSeg(content, segs[i].match(/\[P\d+\]/)![0])));
     }
     ($('draft-bar') as HTMLElement).style.width = '100%';
-    $('draft-step').textContent = '生成完毕，正在保存并质检…';
+    $('draft-step').textContent = '简化完毕，正在保存并体检…';
 
     const date = new Date().toLocaleDateString('sv-SE');
     const newMd = `${header}${chLine}\n\n${out.join('\n\n')}\n`;
     let outPath: string;
     if (s.sourcePath) {
       const dir = s.sourcePath.slice(0, s.sourcePath.lastIndexOf('/'));
-      outPath = `${dir}/${s.fileName.replace(/\.(md|txt|markdown)$/i, '')}_分层初稿_${tier}_${date}.md`;
+      outPath = `${dir}/${s.fileName.replace(/\.(md|txt|markdown)$/i, '')}_简化_${date}.md`;
     } else {
       const dir = await invoke<string>('reports_dir');
-      outPath = `${dir}/示例_分层初稿_${tier}_${date}.md`;
+      outPath = `${dir}/示例_简化_${date}.md`;
     }
     await invoke('write_text_file', { path: outPath, content: newMd });
     draftPop.classList.remove('open');
     await addSession(newMd, outPath.slice(outPath.lastIndexOf('/') + 1), outPath, { noAutoQc: true });
     await runQcCurrent();
-    setStatus(`分层初稿已生成（${tier} 层，${segs.length} 段，约 ${tokens} 出tokens）：${outPath}。质检指标见报告页——继续用标记精修`, 'saved');
+    setStatus(`简化版已生成（${segs.length} 段，约 ${tokens} 出tokens）：${outPath}。体检指标见报告页——继续用标记精修；要更简版本：打开它再简化一次`, 'saved');
     void invoke('reveal_path', { path: outPath });
   } catch (e) {
     $('draft-step').textContent = '✗ 中断：' + e;
@@ -1924,7 +1895,7 @@ async function generateDraft(): Promise<void> {
 }
 
 $('btn-draft').addEventListener('click', showDraftPop);
-$('tier-q').addEventListener('click', (e) => { e.stopPropagation(); showTierPlanPop(); });
+$('tier-q').addEventListener('click', (e) => { e.stopPropagation(); showStandardPop(); });
 
 /* ---------- 启动序列：配置 → 首启动欢迎 ---------- */
 setAiUi({ onStatus: (s) => setStatus(s, 'dirty') });
@@ -1936,56 +1907,41 @@ void (async () => {
   await renderRecentInEmpty();
 })();
 
-/* ================= 分层方案（B/M/A 标准可调） · 本书配置 · 首启动欢迎 ================= */
+/* ================= 简化标准（句长上限，唯一可调项） · 本书配置 · 首启动欢迎 ================= */
 
 const tierPop = $('tier-pop');
 
-function showTierPlanPop(): void {
-  const rows = (['B', 'M', 'A'] as const).map((t) => {
-    const p = tierPlan(t);
-    return `
-    <div class="tier-row" data-tier="${t}">
-      <div class="tier-name">${p.name}<span class="dim">${t}</span></div>
-      <div class="tier-fields">
-        <label>句长上限 <input type="number" data-f="maxLen" value="${p.maxLen}" min="8" max="30" style="width:56px" /> 词</label>
-        <label>被动解禁 <input type="number" data-f="passiveFromCh" value="${p.passiveFromCh}" min="0" max="30" style="width:56px" /> 章起（0=全书禁用）</label>
-        <label>定从解禁 <input type="number" data-f="relclFromCh" value="${p.relclFromCh}" min="0" max="30" style="width:56px" /> 章起（0=全书禁用）</label>
-        <input type="text" data-f="desc" value="${esc(p.desc)}" style="flex:1" />
-      </div>
-    </div>`;
-  }).join('');
+function showStandardPop(): void {
   tierPop.innerHTML = `
-    <div class="pop-h">分层方案 —— 三个难度层的标准</div>
-    <p class="dim" style="margin:4px 0 10px">B=支架（最易）/ M=中梯 / A=挑战（最难）。默认值来自教学进度的通用设定；你的学生你最了解，改成适合他们的标准。改动影响：质检参考值、AI 改写规则、分层初稿。</p>
-    ${rows}
+    <div class="pop-h">简化标准 —— 句长上限</div>
+    <p class="dim" style="margin:4px 0 10px;line-height:1.8">
+      本工具不预设难度层：简化到什么程度由<b>你的词库</b>决定（学生学过什么词，就简化到词库内）。
+      句长上限是唯一的硬标准，影响：体检参考值、AI 改写与整章简化。<br/>
+      需要<b>更简的版本</b>？不用选"更低的层"——把简化结果再导入、再简化一遍就行，句子会更短更浅。</p>
+    <div class="fld" style="display:flex;align-items:center;gap:8px">
+      <label style="margin:0">句长上限</label>
+      <input type="number" id="std-maxlen" value="${simplifyMaxLen()}" min="8" max="30" style="width:64px" /> 词/句
+      <span class="dim">（默认 16；学生基础弱可降到 12~14）</span>
+    </div>
     <div class="row-btns">
-      <button id="tier-save" class="primary">保存</button>
-      <button id="tier-reset">恢复默认</button>
-      <button id="tier-close">关闭</button>
+      <button id="std-save" class="primary">保存</button>
+      <button id="std-reset">恢复默认（16 词）</button>
+      <button id="std-close">关闭</button>
     </div>`;
   tierPop.classList.add('open');
-  $('tier-close').addEventListener('click', () => tierPop.classList.remove('open'));
-  $('tier-reset').addEventListener('click', async () => { S.appConfig.tiers = undefined; await saveConfig(); tierPop.classList.remove('open'); setStatus('分层方案已恢复默认', 'saved'); });
-  $('tier-save').addEventListener('click', async () => {
-    const tiers: Record<string, TierPlan> = {};
-    for (const row of tierPop.querySelectorAll('.tier-row')) {
-      const t = (row as HTMLElement).dataset.tier!;
-      const base = DEFAULT_TIER_PLANS[t];
-      tiers[t] = {
-        name: base.name,
-        desc: (row.querySelector('[data-f="desc"]') as HTMLInputElement).value.trim() || base.desc,
-        maxLen: Number((row.querySelector('[data-f="maxLen"]') as HTMLInputElement).value) || base.maxLen,
-        passiveFromCh: Number((row.querySelector('[data-f="passiveFromCh"]') as HTMLInputElement).value) || 0,
-        relclFromCh: Number((row.querySelector('[data-f="relclFromCh"]') as HTMLInputElement).value) || 0,
-      };
-    }
-    S.appConfig.tiers = tiers;
-    for (const k of Object.keys(TIER_DRAFT_RULES)) delete TIER_DRAFT_RULES[k];
+  $('std-close').addEventListener('click', () => tierPop.classList.remove('open'));
+  const apply = async (v: number | undefined) => {
+    S.appConfig.simplify = v === undefined ? undefined : { maxLen: v };
     await saveConfig();
     tierPop.classList.remove('open');
     const s = activeSession();
     if (s) renderAll();
-    setStatus('分层方案已保存', 'saved');
+    setStatus(v === undefined ? '简化标准已恢复默认（16 词/句）' : `简化标准已保存：句长上限 ${v} 词/句`, 'saved');
+  };
+  $('std-reset').addEventListener('click', () => void apply(undefined));
+  $('std-save').addEventListener('click', () => {
+    const v = Number(($('std-maxlen') as HTMLInputElement).value);
+    void apply(v >= 8 && v <= 30 ? v : undefined);
   });
 }
 document.addEventListener('mousedown', (e) => {
@@ -2113,7 +2069,7 @@ function renderDiff(lIdx: number, rIdx: number): void {
   const pane = $('pane-diff');
   const L = S.sessions[lIdx];
   const R = S.sessions[rIdx];
-  if (!L || !R) { pane.innerHTML = '<div class="empty">先打开两个版本文件（如原文与分层初稿）</div>'; return; }
+  if (!L || !R) { pane.innerHTML = '<div class="empty">先打开两个版本文件（如原文与简化版）</div>'; return; }
   const lp = extractParas(splitChapter(L.md).body);
   const rp = extractParas(splitChapter(R.md).body);
   const n = Math.max(lp.length, rp.length);
@@ -2495,12 +2451,11 @@ async function executeTool(name: string, argsJson: string): Promise<string> {
           .map((m) => `${m.id}｜${m.level === 'word' ? `词「${m.word}」` : `句`}｜${typeLabel(m.type)}｜P${m.pi + 1}-S${m.si + 1}${m.note ? '｜备注：' + m.note : ''}`)
           .join('\n');
       case 'get_chapter_stats': {
-        const tier = (s.report?.tier ?? ($('tier') as HTMLSelectElement).value) as Tier;
-        const r = runQc(s.md, buildLexiconNow(), { tier, fileName: s.fileName, chno: s.sourcePath ? chnoFromPath(s.sourcePath) : null });
+        const r = runQc(s.md, buildLexiconNow(), { tier: 'M', fileName: s.fileName, chno: s.sourcePath ? chnoFromPath(s.sourcePath) : null });
         s.report = r;
         renderReportPane(s);
         return JSON.stringify({
-          层级: r.tier, 段落数: r.paraCount, 句数: r.sentCount, 词符数: r.tokenCount,
+          句长上限标准: simplifyMaxLen(), 段落数: r.paraCount, 句数: r.sentCount, 词符数: r.tokenCount,
           覆盖率: (r.coverage * 100).toFixed(1) + '%', 生词率: (r.newWordRate * 100).toFixed(1) + '%',
           平均句长: Number(r.avgLenNarrRaw.toFixed(1)), 最长句: r.maxLen, 超20词句数: r.over20,
           被动: r.passive, 定语从句: r.relcl, 过去完成: r.pastperf,
@@ -2511,7 +2466,7 @@ async function executeTool(name: string, argsJson: string): Promise<string> {
         const paras = extractParas(splitChapter(s.md).body);
         const sent = sentsOf(paras[Number(args.pi)] ?? '', false)[Number(args.si)];
         if (!sent) return `错误：P${Number(args.pi) + 1}-S${Number(args.si) + 1} 不存在`;
-        const risk = sentenceRisks(sent, tierMaxLen(($('tier') as HTMLSelectElement).value));
+        const risk = sentenceRisks(sent, simplifyMaxLen());
         const oovWords = tokenizeTxt(sent).filter((t) => !hit(t, S.currentKnown) && t.length > 1);
         return JSON.stringify({ 原句: sent, 词数: sent.split(/\s+/).length, 被动: risk.passive, 定从: risk.relcl, 过去完成: risk.pastperf, 超长: risk.overlong, 句内词表外词: [...new Set(oovWords)] });
       }
@@ -2535,8 +2490,7 @@ async function executeTool(name: string, argsJson: string): Promise<string> {
         const basis = String(args.basis ?? '');
         if (!original || !revised) return '错误：original/revised 不能为空';
         if (!s.md.includes(original)) return '错误：original 与正文不匹配——先用 search_text / get_sentence 取原句逐字复制';
-        const tier = (s.report?.tier ?? ($('tier') as HTMLSelectElement).value) as Tier;
-        const risk = checkRev(revised, tier);
+        const risk = checkRev(revised);
         const loc = locateOriginal(s, original);
         const g: Suggestion = {
           markId: String(args.markId ?? 'edit-' + Date.now().toString(36)), type: '直接编辑',
@@ -2554,8 +2508,7 @@ async function executeTool(name: string, argsJson: string): Promise<string> {
         const revised = String(args.revised ?? '');
         if (!original || !revised) return '错误：original/revised 不能为空';
         if (!s.md.includes(original)) return '错误：original 与正文不匹配（须与正文原句一字不差），请先用 get_sentence/search_text 取原句';
-        const tier = (s.report?.tier ?? ($('tier') as HTMLSelectElement).value) as Tier;
-        const risk = checkRev(revised, tier);
+        const risk = checkRev(revised);
         S.suggestions.push({
           markId: String(args.markId ?? 'chat-' + Date.now().toString(36)),
           type: '对话建议', original, revised, basis: String(args.basis ?? ''),
@@ -2679,11 +2632,9 @@ function showGateHelp(gate: string, anchor: HTMLElement): void {
   let body = `<p>${esc(GATE_HELP[gate] ?? '')}</p>`;
   const s = activeSession();
   if (isQc) {
-    const tier = (s?.report?.tier ?? ($('tier') as HTMLSelectElement).value) as Tier;
-    const maxLen = tierMaxLen(tier);
+    const maxLen = simplifyMaxLen();
     if (s?.report) {
       const r = s.report;
-      const gates2 = r.gates;
       const row = (name: string, value: string, ref: string, warn = false) =>
         `<tr class="${warn ? 'warnrow' : ''}"><td>${name}</td><td>${value}</td><td>${ref}</td></tr>`;
       body += `
@@ -2691,16 +2642,16 @@ function showGateHelp(gate: string, anchor: HTMLElement): void {
           <tr><th>指标</th><th>本章实际</th><th>参考</th></tr>
           ${row('词表覆盖率', (r.coverage * 100).toFixed(1) + '%', '越接近词库上限越好')}
           ${row('生词率（词型）', (r.newWordRate * 100).toFixed(1) + '%', '越低越好')}
-          ${row('平均句长', r.avgLenNarrRaw.toFixed(1) + ' 词', `≤ ${maxLen} 词（${tier} 层）`, r.avgLenNarrRaw > maxLen)}
-          ${row('单句最长', r.maxLen + ' 词', '≤ 20 词', r.maxLen > 20)}
-          ${row('超 20 词句数', String(r.over20), '0（个别文学长句可人工放行）', r.over20 > 0)}
-          ${row('被动式', String(r.passive), gates2.passiveOk ? `已解禁（第${tierPlan('A').passiveFromCh}章起）·建议人工复核` : '0', !gates2.passiveOk && r.passive > 0)}
-          ${row('定语从句', String(r.relcl), gates2.relclOk ? `已解禁（第${tierPlan('A').relclFromCh}章起）·建议人工复核` : '0', !gates2.relclOk && r.relcl > 0)}
+          ${row('平均句长', r.avgLenNarrRaw.toFixed(1) + ' 词', `≤ ${maxLen} 词（简化标准，ⓘ 可调）`, r.avgLenNarrRaw > maxLen)}
+          ${row('单句最长', r.maxLen + ' 词', `≤ ${maxLen} 词`, r.maxLen > maxLen)}
+          ${row(`超 ${maxLen} 词句数`, String(r.over20), '0（个别文学长句可人工放行）', r.over20 > 0)}
+          ${row('被动式', String(r.passive), '0（一律禁用）', r.passive > 0)}
+          ${row('定语从句', String(r.relcl), '0（一律禁用）', r.relcl > 0)}
           ${row('过去完成', String(r.pastperf), '0', r.pastperf > 0)}
           ${row('待定词命中', String(r.pendingHits), '逐个复核后定去留', r.pendingHits > 0)}
         </table>`;
     } else {
-      body += `<p class="dim">本章尚未质检——先点「▶ 质检本章」，再回来核对。</p>`;
+      body += `<p class="dim">本章尚未体检——打开课文会自动体检，或点「▶ 重新质检」。</p>`;
     }
     body += `<p class="dim">参考值源自原型项目三层设计；黄色行 = 超出参考，需你复核后决定。达标与否由你勾选确认（AI 只出数字，教师定稿）。</p>`;
   }

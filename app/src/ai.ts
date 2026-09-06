@@ -8,7 +8,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
 import { S, type AppConfig } from './state.js';
 import { withRetry } from './pure.js';
-import { DEFAULT_TIER_PLANS, type TierPlan } from './types.js';
+import { DEFAULT_MAX_LEN } from './types.js';
 import {
   buildTargets, composePrompt, COST_HEADER, parseManifest, providerNameOf, shouldFailover, toCostLine,
   type ProviderTarget, type PromptManifest,
@@ -72,12 +72,9 @@ export async function saveConfig(): Promise<void> {
   await invoke('save_app_config', { config: JSON.stringify(S.appConfig) });
 }
 
-export function tierPlan(tier: string): TierPlan {
-  return { ...DEFAULT_TIER_PLANS[tier] ?? DEFAULT_TIER_PLANS.M, ...(S.appConfig.tiers?.[tier] ?? {}) };
-}
-
-export function tierMaxLen(tier: string): number {
-  return tierPlan(tier).maxLen;
+/** 简化标准的句长上限（无预设难度：教师词库锚定难度，句长一个数可调；默认 16 词） */
+export function simplifyMaxLen(): number {
+  return S.appConfig.simplify?.maxLen ?? DEFAULT_MAX_LEN;
 }
 
 export const AI_PROVIDERS: { name: string; url: string; models: string[]; keyTip: string }[] = [
@@ -257,14 +254,14 @@ export function rewritePrompt(): string {
   return '\n\n' + lines.join('\n');
 }
 
-/** 分层初稿 system（system_simplify 规则 + system_draft 任务模板） */
+/** AI 简化本章 system（system_simplify 规则 + system_draft 任务模板） */
 export async function buildDraftSystemPrompt(vars: { tierRule: string; chnoNote: string; instructions: string }): Promise<string> {
   const tpl = (await loadPrompt('system_draft')).body;
   return `${await buildSystemPrompt()}\n\n${composePrompt(tpl, vars)}`;
 }
 
 /** 逐句改写 user 消息（模板占位符填充） */
-export async function buildRewriteSentencePrompt(vars: { tier: string; maxLen: number | string; intent: string; sent: string }): Promise<string> {
+export async function buildRewriteSentencePrompt(vars: { maxLen: number | string; intent: string; sent: string }): Promise<string> {
   const tpl = (await loadPrompt('rewrite_sentence')).body;
   return composePrompt(tpl, vars);
 }
