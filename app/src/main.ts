@@ -302,6 +302,17 @@ function checkRev(revised: string, tier: string): Suggestion['check'] {
   });
 }
 
+/** 改写生效的视觉反馈：新句子绿色高亮一闪 */
+function flashApplied(revised: string): void {
+  const key = revised.slice(0, 30);
+  const el = [...document.querySelectorAll('#reader .sent')].find((x) => (x.textContent ?? '').includes(key));
+  if (!el) return;
+  el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  el.classList.remove('just-applied');
+  void (el as HTMLElement).offsetWidth;
+  el.classList.add('just-applied');
+}
+
 function badge(text: string): HTMLElement {
   const b = document.createElement('sup');
   b.className = 'badge';
@@ -925,8 +936,9 @@ function showAiSettings(): void {
       <div class="key-tip" id="ai-key-tip" style="color:var(--muted);font-size:11px;margin-top:3px"></div></div>
     <div class="fld"><label>长期审校约定（可选；写上你每次都要 AI 遵守的要求，如"人名保留原文"）</label>
       <textarea id="ai-instructions" style="width:100%;height:50px;border:1px solid var(--line);border-radius:8px;padding:6px 10px;font-size:12px;font-family:inherit;resize:vertical;"></textarea></div>
-    <div class="fld"><label style="display:flex;align-items:flex-start;gap:6px"><input type="checkbox" id="ai-auto" style="width:auto;margin-top:3px" /> <span><b>AI 改写直接生效</b>（全局）：点标记、批量「✨AI审核建议」、逐句改写的全部结果<b>自动应用</b>，无需再点 ✓——改动一律写工作稿+变更日志，原稿永不覆盖。关闭则改为候选模式（正文行内 ✓/✗）</span></label></div>
-    <div class="fld"><label style="display:flex;align-items:flex-start;gap:6px"><input type="checkbox" id="ai-trust" style="width:auto;margin-top:3px" /> <span><b>信任模式</b>：允许 AI 助手在对话中直接修改正文（你说"直接改"即生效），同样只写工作稿</span></label></div>
+    <div class="fld"><label style="display:flex;align-items:flex-start;gap:6px"><input type="checkbox" id="ai-auto" style="width:auto;margin-top:3px" /> <span><b>AI 改写直接生效</b>（全局）：点标记、批量「✨AI审核建议」、逐句改写的全部结果<b>自动应用</b>，无需再点 ✓，改写的句子会绿色高亮一闪变成新句。关闭则改为候选模式（正文行内 ✓/✗）</span></label></div>
+    <div class="fld"><label style="display:flex;align-items:flex-start;gap:6px"><input type="checkbox" id="ai-trust" style="width:auto;margin-top:3px" /> <span><b>信任模式</b>：允许 AI 助手在对话中直接修改正文（你说"直接改"即生效）</span></label></div>
+    <div class="fld"><label style="display:flex;align-items:flex-start;gap:6px"><input type="checkbox" id="ai-inplace" style="width:auto;margin-top:3px" checked /> <span><b>直接修改原稿文件</b>（推荐）：改动直接写进书稿本身，不另存工作稿——<b>首次修改前自动备份</b>原始版（xxx_原始备份.md），随时可整体还原。关闭则另存工作稿、原稿不动</span></label></div>
     <div class="row-btns">
       <button id="ai-save" class="primary">保存</button>
       <button id="ai-test">测试连接（填完 ①-④ 就点这个）</button>
@@ -968,6 +980,7 @@ function showAiSettings(): void {
     ($('ai-instructions') as HTMLTextAreaElement).value = S.appConfig.instructions ?? '';
     ($('ai-auto') as HTMLInputElement).checked = S.appConfig.autoRewriteOnMark ?? false;
     ($('ai-trust') as HTMLInputElement).checked = S.appConfig.trustEdit ?? false;
+    ($('ai-inplace') as HTMLInputElement).checked = S.appConfig.inPlaceEdit ?? true;
   })();
 
   const currentModel = () => (modelSel.style.display !== 'none' ? modelSel.value : modelEl.value.trim());
@@ -981,6 +994,7 @@ function showAiSettings(): void {
       S.appConfig.instructions = ($('ai-instructions') as HTMLTextAreaElement).value.trim();
       S.appConfig.autoRewriteOnMark = ($('ai-auto') as HTMLInputElement).checked;
       S.appConfig.trustEdit = ($('ai-trust') as HTMLInputElement).checked;
+      S.appConfig.inPlaceEdit = ($('ai-inplace') as HTMLInputElement).checked;
       await saveConfig();
       const k = cur.value.trim();
       if (k) await invoke('save_api_key', { key: k });
@@ -1240,6 +1254,25 @@ function renderInlineOne(session: FileSession, g: Suggestion): void {
   sentEl.after(div);
 }
 
+/** 保存正文改动：默认直接写原稿文件（首次前自动备份原始版）；关闭"直接修改原稿"则写工作稿 */
+async function persistEdit(s: FileSession, newMd: string): Promise<string> {
+  if (s.sourcePath && (S.appConfig.inPlaceEdit ?? true)) {
+    const dir = s.sourcePath.slice(0, s.sourcePath.lastIndexOf('/'));
+    const base = s.fileName.replace(/\.(md|txt|markdown)$/i, '');
+    const backup = `${dir}/${base}_原始备份.md`;
+    try {
+      await invoke<string>('read_text_file', { path: backup });
+    } catch {
+      await invoke('write_text_file', { path: backup, content: s.md });
+    }
+    await invoke('write_text_file', { path: s.sourcePath, content: newMd });
+    return s.sourcePath;
+  }
+  const wf = s.sourcePath ? workPath(s) : (await invoke<string>('reports_dir')) + '/示例_工作稿.md';
+  await invoke('write_text_file', { path: wf, content: newMd });
+  return wf;
+}
+
 function workPath(s: FileSession): string {
   if (s.sourcePath) {
     const dir = s.sourcePath.slice(0, s.sourcePath.lastIndexOf('/'));
@@ -1299,18 +1332,10 @@ async function acceptSuggestion(g: Suggestion): Promise<void> {
 
   const date = new Date().toLocaleDateString('sv-SE');
   const tier = (s.report?.tier ?? ($('tier') as HTMLSelectElement).value) as Tier;
-  let outDir: string, logPath: string, workFile: string;
-  if (s.sourcePath) {
-    outDir = s.sourcePath.slice(0, s.sourcePath.lastIndexOf('/'));
-    workFile = workPath(s);
-    logPath = `${outDir}/变更日志_AI审核.csv`;
-  } else {
-    outDir = await invoke<string>('reports_dir');
-    workFile = `${outDir}/示例_工作稿.md`;
-    logPath = `${outDir}/变更日志_AI审核.csv`;
-  }
+  const outDir = s.sourcePath ? s.sourcePath.slice(0, s.sourcePath.lastIndexOf('/')) : await invoke<string>('reports_dir');
+  const logPath = `${outDir}/变更日志_AI审核.csv`;
   try {
-    await invoke('write_text_file', { path: workFile, content: s.md });
+    const savedTo = await persistEdit(s, s.md);
     let csv = '';
     try { csv = await invoke<string>('read_text_file', { path: logPath }); } catch { /* 新建 */ }
     if (!csv.trim()) csv = CHANGELOG_HEADER.join(',') + '\n';
@@ -1328,7 +1353,8 @@ async function acceptSuggestion(g: Suggestion): Promise<void> {
     attachInlineSuggestions();
     renderSidebar(s, sidebarHandlers);
     renderSuggestions();
-    setStatus(`✓ 已采纳：正文已更新。工作稿 ${workFile}（原稿未动）；变更已记入日志`, 'saved');
+    setStatus(`✓ 已采纳并写入 ${savedTo}${savedTo === s.sourcePath ? '（原稿，首改前已备份原始版）' : ''}；变更已记入日志`, 'saved');
+    flashApplied(g.revised);
   } catch (e) {
     setStatus('落盘失败：' + e, 'err');
   }
@@ -1879,12 +1905,12 @@ function showRewritePop(): void {
     if (s.md === before) { $('rw-out').textContent = '无可替换内容（或原词已清零）'; return; }
     void (async () => {
       try {
-        await invoke('write_text_file', { path: s.sourcePath ? `${s.sourcePath.slice(0, s.sourcePath.lastIndexOf('/'))}/${s.fileName.replace(/\.(md|txt|markdown)$/i, '')}_工作稿.md` : (await invoke<string>('reports_dir')) + '/示例_工作稿.md', content: s.md });
+        const savedTo = await persistEdit(s, s.md);
         renderReader(s);
         attachInlineSuggestions();
         renderSidebar(s, sidebarHandlers);
         $('rw-out').textContent = rewriteCheck();
-        setStatus('替换已执行并写入工作稿（原稿未动）', 'saved');
+        setStatus(`替换已执行并写入 ${savedTo}${savedTo === s.sourcePath ? '（已自动备份原始版）' : ''}`, 'saved');
       } catch (e) {
         setStatus('写入失败：' + e, 'err');
       }

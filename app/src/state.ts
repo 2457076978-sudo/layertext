@@ -16,6 +16,8 @@ export interface AppConfig {
   trustEdit?: boolean;
   /** 标记即改写：点标记后 AI 自动改写该句并直接生效 */
   autoRewriteOnMark?: boolean;
+  /** 直接修改原稿文件（首次修改前自动备份原始版）；关闭写工作稿 */
+  inPlaceEdit?: boolean;
   recentFiles?: string[];
 }
 

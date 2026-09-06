@@ -92,6 +92,8 @@
     .sbadge-goods  { background: #dcfce7; color: #15803d; }
     .sbadge-others { background: #e2e8f0; color: #475569; }
     .flash { animation: flash 2s ease-out; }
+    .just-applied { animation: appliedFlash 1.8s ease-out; }
+    @keyframes appliedFlash { 0% { background: #bbf7d0; box-shadow: 0 0 0 3px #86efac; } 100% { background: transparent; box-shadow: 0 0 0 0 transparent; } }
     @keyframes flash { 0% { outline: 2px solid var(--brand); background: #dbeafe; } 100% { outline: 2px solid transparent; background: transparent; } }
 
     /* ---------- 报告 ---------- */
