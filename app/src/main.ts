@@ -8,6 +8,8 @@ import { listen } from '@tauri-apps/api/event';
 import { open as openFileDialog, save as saveFileDialog } from '@tauri-apps/plugin-dialog';
 import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
 import * as XLSX from 'xlsx';
+import { unzipSync, strFromU8 } from 'fflate';
+import { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, WidthType } from 'docx';
 import bundledWordlist from '../../assets/wordlists/curriculum_2022_level3_1600.txt?raw';
 import exampleMd from '../../examples/texts/aesop_tortoise_hare.md?raw';
 import exampleVocab from '../../examples/vocab/sample_teaching_vocab.csv?raw';
@@ -267,6 +269,8 @@ async function addSession(md: string, fileName: string, sourcePath: string | nul
   aiHistory = [];
   suggestions = [];
   renderAll();
+  // 首次载入文件 → 自动进入四步导览
+  if (!appConfig.tourSeen && sessions.length === 1) setTimeout(() => tourShow(0), 600);
 }
 
 function closeSession(i: number): void {
@@ -662,8 +666,8 @@ function renderReportPane(s: FileSession): void {
 
 /* ---------- 视图切换 ---------- */
 
-function switchView(name: 'text' | 'report' | 'suggest'): void {
-  const map = [['tab-text', 'pane-text'], ['tab-report', 'pane-report'], ['tab-suggest', 'pane-suggest']] as const;
+function switchView(name: 'text' | 'report' | 'suggest' | 'diff'): void {
+  const map = [['tab-text', 'pane-text'], ['tab-report', 'pane-report'], ['tab-suggest', 'pane-suggest'], ['tab-diff', 'pane-diff']] as const;
   for (const [id, pane] of map) {
     $(id).classList.toggle('active', id === `tab-${name}`);
     $(pane).classList.toggle('active', pane === `pane-${name}`);
@@ -675,6 +679,7 @@ function switchView(name: 'text' | 'report' | 'suggest'): void {
 $('tab-text').addEventListener('click', () => switchView('text'));
 $('tab-report').addEventListener('click', () => switchView('report'));
 $('tab-suggest').addEventListener('click', () => switchView('suggest'));
+$('tab-diff').addEventListener('click', () => { renderDiff(0, Math.min(1, sessions.length - 1)); switchView('diff'); });
 
 /* ---------- 示例菜单 ---------- */
 
@@ -752,16 +757,59 @@ document.addEventListener('mousedown', (e) => {
   }
 });
 
+/* ---------- 导入无障碍：任意 txt/docx 自动转章节格式 ---------- */
+
+/** 纯文本/无标记文本 → 章节 md（按空行分段，自动编号 [P01]…） */
+function normalizeToChapter(raw: string, fileName: string): string {
+  const title = fileName.replace(/\.(md|txt|markdown|docx|doc)$/i, '');
+  const paras = raw
+    .replace(/\r\n?/g, '\n')
+    .split(/\n\s*\n/)
+    .map((p) => p.replace(/\s*\n\s*/g, ' ').trim())
+    .filter((p) => /[A-Za-z]/.test(p));
+  return `# ${title}\n\n## Chapter One\n\n${paras.map((p, i) => `[P${String(i + 1).padStart(2, '0')}] ${p}`).join('\n\n')}\n`;
+}
+
+/** docx → 文本（fflate 解压 + w:t 抽取，段落保序） */
+function docxToText(b64: string): string {
+  const bin = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+  const files = unzipSync(bin, { filter: (f) => f.name === 'word/document.xml' });
+  const xml = strFromU8(files['word/document.xml']!);
+  const paras = xml
+    .split(/<\/w:p>/)
+    .map((p) => (p.match(/<w:t[^>]*>([^<]*)<\/w:t>/g) ?? []).map((t) => t.replace(/<[^>]+>/g, '')).join(''))
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return paras.join('\n\n');
+}
+
 async function openChapterFiles(): Promise<void> {
   const paths = await openFileDialog({
     multiple: true,
-    filters: [{ name: '章节 Markdown / 文本', extensions: ['md', 'txt', 'markdown'] }],
+    filters: [{ name: '章节文件（Markdown / 文本 / Word）', extensions: ['md', 'txt', 'markdown', 'docx'] }],
   });
   const list = Array.isArray(paths) ? paths : paths ? [paths] : [];
   for (const p of list) {
     try {
-      const md = await invoke<string>('read_text_file', { path: p });
-      await addSession(md, p.slice(p.lastIndexOf('/') + 1), p);
+      let md: string;
+      let loadPath = p;
+      let name = p.slice(p.lastIndexOf('/') + 1);
+      if (p.toLowerCase().endsWith('.docx')) {
+        const b64 = await invoke<string>('read_file_base64', { path: p });
+        md = normalizeToChapter(docxToText(b64), name);
+        loadPath = `${p.slice(0, p.lastIndexOf('/'))}/${name.replace(/\.docx$/i, '')}_转换.md`;
+        await invoke('write_text_file', { path: loadPath, content: md });
+        name = name.replace(/\.docx$/i, '') + '_转换.md';
+      } else {
+        md = await invoke<string>('read_text_file', { path: p });
+        if (!md.includes('## Chapter')) {
+          md = normalizeToChapter(md, name);
+          loadPath = `${p.slice(0, p.lastIndexOf('/'))}/${name.replace(/\.(md|txt|markdown)$/i, '')}_转换.md`;
+          await invoke('write_text_file', { path: loadPath, content: md });
+          name = name.replace(/\.(md|txt|markdown)$/i, '') + '_转换.md';
+        }
+      }
+      await addSession(md, name, loadPath);
     } catch (e) {
       setStatus('读取失败：' + e, 'err');
     }
@@ -823,6 +871,12 @@ void listen<string>('menu-action', (ev) => {
     case 'tier-plan': showTierPlanPop(); break;
     case 'book-config': void saveBookConfig(); break;
     case 'help-key': void invoke('open_help_window', { which: 'key' }); break;
+    case 'export-docx': void exportDocx(); break;
+    case 'export-tts': void exportTts(); break;
+    case 'view-diff':
+      if (sessions.length < 2) setStatus('版本对比需要先打开两个版本（如原文与分层初稿）', 'err');
+      else { renderDiff(0, 1); switchView('diff'); }
+      break;
   }
 });
 
@@ -1574,6 +1628,153 @@ async function loadBookConfig(dir: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/* ---------- 导出 Word（学生用，含章末词句卡） ---------- */
+
+function bufToB64(buf: ArrayBuffer): string {
+  const bin = new Uint8Array(buf);
+  let s = '';
+  const CHUNK = 0x8000;
+  for (let i = 0; i < bin.length; i += CHUNK) s += String.fromCharCode(...bin.subarray(i, i + CHUNK));
+  return btoa(s);
+}
+
+async function exportDocx(): Promise<void> {
+  const s = activeSession();
+  if (!s) { setStatus('请先打开要导出的章节', 'err'); return; }
+  try {
+    const body = splitChapter(s.md).body;
+    const card = splitChapter(s.md).card;
+    const paras = extractParas(body);
+    const children: (Paragraph | Table)[] = [
+      new Paragraph({ text: s.fileName.replace(/\.(md|txt|markdown)$/i, ''), heading: HeadingLevel.HEADING_1 }),
+    ];
+    for (let i = 0; i < paras.length; i++) {
+      const text = sentsOf(paras[i], false).join(' ').replace(/\s+/g, ' ').trim();
+      if (text) children.push(new Paragraph({ children: [new TextRun({ text, size: 24, font: 'Georgia' })], spacing: { after: 160 } }));
+    }
+    const rows = card.split('\n').filter((l) => l.trim().startsWith('|') && !/^\|[\s:-]+\|$/.test(l.trim()));
+    if (rows.length >= 2) {
+      children.push(new Paragraph({ text: '词句卡', heading: HeadingLevel.HEADING_2, pageBreakBefore: true }));
+      children.push(new Table({
+        width: { size: 100, type: WidthType.PERCENTAGE },
+        rows: rows.map((r) => {
+          const cells = r.trim().replace(/^\|+|\|+$/g, '').split('|').map((c) => c.trim());
+          return new TableRow({
+            children: cells.map((c) => new TableCell({ children: [new Paragraph(c)] })),
+          });
+        }),
+      }));
+    }
+    const doc = new Document({ sections: [{ children }] });
+    const buf = await Packer.toBuffer(doc);
+    const out = s.sourcePath
+      ? s.sourcePath.slice(0, s.sourcePath.lastIndexOf('/')) + '/' + s.fileName.replace(/\.(md|txt|markdown)$/i, '') + '.docx'
+      : (await invoke<string>('reports_dir')) + '/示例导出.docx';
+    await invoke('write_file_base64', { path: out, b64: bufToB64(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength)) });
+    setStatus('已导出 Word 版：' + out, 'saved');
+    void invoke('reveal_path', { path: out });
+  } catch (e) {
+    setStatus('导出失败：' + e, 'err');
+  }
+}
+
+/* ---------- 朗读音频导出（macOS 系统语音） ---------- */
+
+async function exportTts(): Promise<void> {
+  const s = activeSession();
+  if (!s) { setStatus('请先打开章节', 'err'); return; }
+  try {
+    const text = extractParas(splitChapter(s.md).body)
+      .map((p) => sentsOf(p, false).join(' '))
+      .join('\n')
+      .replace(/\[[P\d\s]*?\]/g, '')
+      .trim();
+    if (!text) throw new Error('正文为空');
+    const base = s.sourcePath ? s.sourcePath.slice(0, s.sourcePath.lastIndexOf('/')) + '/' + s.fileName.replace(/\.(md|txt|markdown)$/i, '') : (await invoke<string>('reports_dir')) + '/示例朗读';
+    const out = base + '.aiff';
+    setStatus('正在生成朗读音频（几分钟文本约需几十秒）…');
+    await invoke('export_tts', { text, path: out, voice: 'Samantha' });
+    setStatus('已导出朗读音频：' + out, 'saved');
+    void invoke('reveal_path', { path: out });
+  } catch (e) {
+    setStatus('导出失败：' + e, 'err');
+  }
+}
+
+/* ---------- 版本对比 ---------- */
+
+function renderDiff(lIdx: number, rIdx: number): void {
+  const pane = $('pane-diff');
+  const L = sessions[lIdx];
+  const R = sessions[rIdx];
+  if (!L || !R) { pane.innerHTML = '<div class="empty">先打开两个版本文件（如原文与分层初稿）</div>'; return; }
+  const lp = extractParas(splitChapter(L.md).body);
+  const rp = extractParas(splitChapter(R.md).body);
+  const n = Math.max(lp.length, rp.length);
+  let rows = '';
+  let same = 0;
+  for (let i = 0; i < n; i++) {
+    const a = (lp[i] ?? '').replace(/\s+/g, ' ').trim();
+    const b = (rp[i] ?? '').replace(/\s+/g, ' ').trim();
+    const eq = a === b;
+    if (eq) same++;
+    rows += `<tr>
+      <td class="diff-pid">P${String(i + 1).padStart(2, '0')}</td>
+      <td class="${eq ? '' : 'diff-del'}">${esc(a) || '<i style="color:var(--muted)">（无此段）</i>'}</td>
+      <td class="${eq ? '' : 'diff-add'}">${esc(b) || '<i style="color:var(--muted)">（无此段）</i>'}</td>
+    </tr>`;
+  }
+  pane.innerHTML = `
+    <div class="sg-actions">
+      <b>版本对比</b>
+      <select id="diff-l">${sessions.map((x, i) => `<option value="${i}" ${i === lIdx ? 'selected' : ''}>${esc(x.fileName)}</option>`).join('')}</select>
+      <span>↔</span>
+      <select id="diff-r">${sessions.map((x, i) => `<option value="${i}" ${i === rIdx ? 'selected' : ''}>${esc(x.fileName)}</option>`).join('')}</select>
+      <span style="color:var(--muted);font-size:12px">段落一致 ${same}/${n}（红=仅左侧版本，绿=仅右侧版本/已修改）</span>
+    </div>
+    <table class="sgtable">
+      <tr><th>段</th><th style="width:44%">${esc(L.fileName)}</th><th style="width:44%">${esc(R.fileName)}</th></tr>
+      ${rows}
+    </table>`;
+  $('diff-l').addEventListener('change', () => renderDiff(Number(($('diff-l') as HTMLSelectElement).value), rIdx));
+  $('diff-r').addEventListener('change', () => renderDiff(lIdx, Number(($('diff-r') as HTMLSelectElement).value)));
+}
+
+/* ---------- 新手导览（coach marks） ---------- */
+
+const TOUR = [
+  { sel: '#btn-demo', title: '① 打开课文', text: '点「载入示例」看演示，或「打开章节文件」选你自己的书（Word 文件也可以，会自动转换）。' },
+  { sel: '#btn-run', title: '② 一键体检', text: '点「▶ 质检本章」：软件自动数生词率、句长、难句，生成体检报告。' },
+  { sel: '#reader', title: '③ 边读边标', text: '红色下划线是生词、淡红底是难句。点一个词、或拖选一句话，就能做标记。' },
+  { sel: '#sidebar', title: '④ 收尾把关', text: '右侧是审校清单：要点配额、终审门禁、标记清单。四项门禁全勾，这一章就算审完。' },
+];
+let tourIdx = -1;
+
+function tourShow(i: number): void {
+  tourIdx = i;
+  const tip = $('tour-pop');
+  if (i < 0 || i >= TOUR.length) {
+    tip.classList.remove('open');
+    $('tour-hl').style.display = 'none';
+    void (async () => { appConfig.tourSeen = true; await saveConfig(); })();
+    return;
+  }
+  const step = TOUR[i];
+  const el = document.querySelector(step.sel) as HTMLElement | null;
+  if (!el) { tourShow(i + 1); return; }
+  const r = el.getBoundingClientRect();
+  const hl = $('tour-hl');
+  hl.style.cssText = `display:block;left:${r.left - 6}px;top:${r.top - 6}px;width:${r.width + 12}px;height:${r.height + 12}px`;
+  tip.innerHTML = `<div class="pop-h">${step.title}</div><p style="line-height:1.8">${step.text}</p>
+    <div class="row-btns"><button id="tour-next" class="primary">${i === TOUR.length - 1 ? '完成' : '下一步'}</button><button id="tour-skip">跳过导览</button></div>`;
+  tip.classList.add('open');
+  const tr = tip.getBoundingClientRect();
+  tip.style.left = Math.min(Math.max(8, r.left), window.innerWidth - tr.width - 12) + 'px';
+  tip.style.top = (r.bottom + 10 + tr.height > window.innerHeight ? Math.max(8, r.top - tr.height - 10) : r.bottom + 10) + 'px';
+  $('tour-next').addEventListener('click', () => tourShow(i + 1));
+  $('tour-skip').addEventListener('click', () => tourShow(-1));
 }
 
 /* ---------- 首启动欢迎 ---------- */

@@ -1,6 +1,6 @@
 [package]
 name = "layertext"
-version = "0.1.0"
+version = "1.0.0"
 description = "LayerText 分层读 — 分层英语文本简化与审校工作台"
 edition = "2021"
 

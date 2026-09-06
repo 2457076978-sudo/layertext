@@ -45,6 +45,62 @@ fn write_text_file(path: String, content: String) -> Result<(), String> {
     std::fs::write(&path, content).map_err(|e| e.to_string())
 }
 
+/// 二进制写入（base64），供导出 Word/音频等
+#[tauri::command]
+fn write_file_base64(path: String, b64: String) -> Result<(), String> {
+    let bin = base64_decode(&b64)?;
+    if let Some(dir) = std::path::Path::new(&path).parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    std::fs::write(&path, bin).map_err(|e| e.to_string())
+}
+
+fn base64_decode(s: &str) -> Result<Vec<u8>, String> {
+    const REV: &[i8] = &[
+        -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+        -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 62, -1, -1, -1, 63, 52,
+        53, 54, 55, 56, 57, 58, 59, 60, 61, -1, -1, -1, -1, -1, -1, -1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9,
+        10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, -1, -1, -1, -1, -1, -1, 26,
+        27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49,
+        50, 51, -1, -1, -1, -1, -1,
+    ];
+    let mut out = Vec::with_capacity(s.len() / 4 * 3);
+    let mut buf = 0u32;
+    let mut bits = 0u32;
+    for c in s.bytes() {
+        if c == b'=' || c == b'\n' || c == b'\r' {
+            continue;
+        }
+        let v = *REV.get(c as usize).unwrap_or(&-1);
+        if v < 0 {
+            return Err(format!("base64 非法字符: {}", c as char));
+        }
+        buf = (buf << 6) | v as u32;
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((buf >> bits) as u8);
+        }
+    }
+    Ok(out)
+}
+
+/// 朗读音频导出：macOS 系统语音 say → AIFF
+#[tauri::command]
+fn export_tts(text: String, path: String, voice: String) -> Result<(), String> {
+    let status = std::process::Command::new("say")
+        .arg("-o").arg(&path)
+        .arg("-v").arg(&voice)
+        .arg(&text)
+        .output()
+        .map_err(|e| e.to_string())?;
+    if status.status.success() {
+        Ok(())
+    } else {
+        Err(String::from_utf8_lossy(&status.stderr).into_owned())
+    }
+}
+
 /// 示例模式的报告落盘目录：~/Documents/LayerText质检报告
 #[tauri::command]
 fn reports_dir() -> Result<String, String> {
@@ -194,6 +250,9 @@ fn main() {
                 .item(&sep2)
                 .item(&mi_exp)
                 .item(&mi_imp)
+                .separator()
+                .text("export-docx", "导出 Word 版（含章末词句卡）…")
+                .text("export-tts", "导出朗读音频（AIFF，系统语音）…")
                 .build()?;
 
             let mi_run = MenuItemBuilder::with_id("qc-run", "质检本章")
@@ -208,6 +267,7 @@ fn main() {
             let view_menu = SubmenuBuilder::new(app, "显示")
                 .item(&mi_vt)
                 .item(&mi_vr)
+                .text("view-diff", "版本对比…")
                 .item(&sep3)
                 .fullscreen()
                 .build()?;
@@ -221,7 +281,12 @@ fn main() {
                 .build()?;
 
             let app_menu = SubmenuBuilder::new(app, "LayerText")
-                .about(None)
+                .about(Some(tauri::menu::AboutMetadataBuilder::new()
+                    .name(Some("LayerText 分层读"))
+                    .version(Some("1.0.0"))
+                    .authors(Some(vec!["Wayne & LayerText contributors".to_string()]))
+                    .comments(Some("分层英语文本简化与审校工作台 · AI 只出候选，教师握定稿权 · 数据全在本机"))
+                    .build()))
                 .text("ai-settings", "AI 设置…")
                 .text("tier-plan", "分层方案…（B/M/A 标准可调）")
                 .separator()
@@ -283,7 +348,9 @@ fn main() {
             load_api_key,
             save_app_config,
             load_app_config,
-            open_help_window
+            open_help_window,
+            write_file_base64,
+            export_tts
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
