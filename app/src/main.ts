@@ -1020,16 +1020,42 @@ async function callChat(
     });
     if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${(await resp.text()).slice(0, 200)}`);
     const data = (await resp.json()) as {
-      choices?: { message?: { content?: string } }[];
+      choices?: { message?: { content?: string; reasoning_content?: string } }[];
       usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
     };
     const u = data.usage;
     const usage = u ? `（消耗 ${u.prompt_tokens ?? '?'} 入 + ${u.completion_tokens ?? '?'} 出 = ${u.total_tokens ?? '?'} tokens）` : '';
-    return { content: data.choices?.[0]?.message?.content ?? '', usage };
+    // 思考型模型（reasoner 类）正文可能在 reasoning_content；合并保证可见
+    const msg = data.choices?.[0]?.message;
+    const content = [msg?.content ?? '', msg?.reasoning_content ?? ''].filter(Boolean).join('\n');
+    return { content, usage };
   } finally {
     clearTimeout(timer);
     externalSignal?.removeEventListener('abort', onAbort);
   }
+}
+
+/** 从 AI 返回文本中尽力解析出 JSON 数组（容错：代码围栏/单对象/截断修复/前后解释文字） */
+function parseAiJson(raw: string): unknown[] {
+  let t = (raw ?? '').trim();
+  const fence = t.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (fence) t = fence[1].trim();
+  const s1 = t.indexOf('[');
+  const e1 = t.lastIndexOf(']');
+  if (s1 >= 0 && e1 > s1) {
+    const cut = t.slice(s1, e1 + 1);
+    try { return JSON.parse(cut) as unknown[]; } catch { /* 截断则尝试修复 */ }
+    const lastObj = cut.lastIndexOf('}');
+    if (lastObj > 0) {
+      try { return JSON.parse(cut.slice(0, lastObj + 1) + ']') as unknown[]; } catch { /* fall */ }
+    }
+  }
+  const s2 = t.indexOf('{');
+  const e2 = t.lastIndexOf('}');
+  if (s2 >= 0 && e2 > s2) {
+    try { return [JSON.parse(t.slice(s2, e2 + 1))]; } catch { /* fall */ }
+  }
+  throw new Error('AI 返回中未找到 JSON（AI 原话前 200 字：' + (raw ?? '').slice(0, 200).replace(/\s+/g, ' ') + '）');
 }
 
 /** 组装 system 提示词（含用户的长期审校约定 + 书级改写规则） */
@@ -1107,10 +1133,7 @@ async function aiSuggest(instruction?: string): Promise<void> {
     setStatus(`本次请求约 ${estIn} tokens 输入（只含标记相关句子，不发全章原文）…`);
     const { content, usage } = await callChat(messages, 4000);
     aiHistory.push({ role: 'assistant', content });
-    const start = content.indexOf('[');
-    const end = content.lastIndexOf(']');
-    if (start < 0 || end <= start) throw new Error('AI 返回中未找到 JSON 数组');
-    const raw = JSON.parse(content.slice(start, end + 1)) as { id: string; type?: string; original?: string; revised?: string; basis?: string; alternative?: string }[];
+    const raw = parseAiJson(content) as { id: string; type?: string; original?: string; revised?: string; basis?: string; alternative?: string }[];
     const maxLen = tierMaxLen(tier);
     suggestions = raw
       .filter((x) => x.revised)
@@ -1368,17 +1391,14 @@ async function aiRewriteSentence(pi: number, si: number, intent: string): Promis
   const btn = pop.querySelector('[data-mk="__rewrite"]') as HTMLElement | null;
   if (btn) { btn.textContent = '⏳ 改写中…'; btn.disabled = true; }
   try {
-    const { content } = await callChat([
+    const { content, usage } = await callChat([
       { role: 'system', content: system },
       {
         role: 'user',
-        content: `层级：${tier}（句长上限 ${tierMaxLen(tier)} 词）\n教师意图：${intent}\n请改写下面这句（只输出一个元素的 JSON 数组，original 必须与原句一字不差）：\n${sent}`,
+        content: `层级：${tier}（句长上限 ${tierMaxLen(tier)} 词）\n教师意图：${intent}\n请改写下面这句。输出要求：只输出一个 JSON 数组（形如 [{"original":"…","revised":"…","basis":"…"}]），不要思考过程、不要解释、不要代码块。original 必须与原句一字不差：\n${sent}`,
       },
-    ], 800);
-    const start = content.indexOf('[');
-    const end = content.lastIndexOf(']');
-    if (start < 0) throw new Error('AI 返回中未找到 JSON');
-    const arr = JSON.parse(content.slice(start, end + 1)) as { original?: string; revised?: string; basis?: string; alternative?: string }[];
+    ], 2000);
+    const arr = parseAiJson(content) as { original?: string; revised?: string; basis?: string; alternative?: string }[];
     const one = arr[0];
     if (!one?.revised) throw new Error('AI 未返回改写');
     const risk = sentenceRisks(String(one.revised), tierMaxLen(tier));
@@ -2113,6 +2133,7 @@ async function chatStream(
     const dec = new TextDecoder();
     let buf = '';
     let content = '';
+    let reasoning = '';
     let usage = '';
     const tc = new Map<number, { id: string; name: string; arguments: string }>();
     for (;;) {
@@ -2131,8 +2152,9 @@ async function chatStream(
             choices?: { delta?: { content?: string; tool_calls?: { index?: number; id?: string; function?: { name?: string; arguments?: string } }[] } }[];
             usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
           };
-          const d = j.choices?.[0]?.delta;
+          const d = j.choices?.[0]?.delta as { content?: string; reasoning_content?: string; tool_calls?: { index?: number; id?: string; function?: { name?: string; arguments?: string } }[] } | undefined;
           if (d?.content) { content += d.content; onDelta(d.content); }
+          if (d?.reasoning_content) reasoning += d.reasoning_content;
           for (const c of d?.tool_calls ?? []) {
             const i = c.index ?? 0;
             const cur = tc.get(i) ?? { id: '', name: '', arguments: '' };
@@ -2145,7 +2167,7 @@ async function chatStream(
         } catch { /* 忽略半行 */ }
       }
     }
-    return { content, toolCalls: [...tc.values()], usage };
+    return { content: content || reasoning, toolCalls: [...tc.values()], usage };
   } finally {
     clearTimeout(timer);
   }
