@@ -68,11 +68,8 @@ export function tokenizeTxt(txt: string): string[] {
     .filter((t) => t.length > 0);
 }
 
-/** 词表命中判定（词形还原：直接命中 → 不规则名词 → 反向剥后缀候选逐一回查） */
-export function hit(tok: string, known: Set<string>): boolean {
-  if (known.has(tok)) return true;
-  const sing = IRR_NOUN[tok];
-  if (sing !== undefined && known.has(sing)) return true;
+/** 词形还原候选（hit / hitOrigin 共用，顺序即命中优先级） */
+function suffixCandidates(tok: string): string[] {
   const cands: string[] = [tok];
   if (tok.endsWith('s')) cands.push(tok.slice(0, -1));
   if (tok.endsWith('es')) cands.push(tok.slice(0, -2));
@@ -85,7 +82,38 @@ export function hit(tok: string, known: Set<string>): boolean {
   if (tok.endsWith('ed') && tok.length > 5 && tok[tok.length - 3] === tok[tok.length - 4]) cands.push(tok.slice(0, -3));
   if (tok.endsWith('er')) cands.push(tok.slice(0, -1), tok.slice(0, -2));
   if (tok.endsWith('est')) cands.push(tok.slice(0, -3), tok.slice(0, -2));
-  return cands.some((c) => known.has(c));
+  return cands;
+}
+
+/** 词表命中判定（词形还原：直接命中 → 不规则名词 → 反向剥后缀候选逐一回查） */
+export function hit(tok: string, known: Set<string>): boolean {
+  if (known.has(tok)) return true;
+  const sing = IRR_NOUN[tok];
+  if (sing !== undefined && known.has(sing)) return true;
+  return suffixCandidates(tok).some((c) => known.has(c));
+}
+
+/** 命中时的原形（供审校面板显示"词表状态 + 原形"）；未命中返回 null */
+export function hitOrigin(tok: string, known: Set<string>): string | null {
+  if (known.has(tok)) return tok;
+  const sing = IRR_NOUN[tok];
+  if (sing !== undefined && known.has(sing)) return sing;
+  for (const c of suffixCandidates(tok)) if (known.has(c)) return c;
+  return null;
+}
+
+/** 词句卡首列词条集合（"注释后口径"并入已知；qc 引擎与审校面板共用） */
+export function cardGlossWords(card: string): Set<string> {
+  const gloss = new Set<string>();
+  for (const row of card.split('\n')) {
+    const r = row.trim();
+    if (r.startsWith('|')) {
+      const cell = r.replace(/^\|+/, '').replace(/\|+$/, '').split('|')[0].trim();
+      const m = cell.match(/^([A-Za-z][A-Za-z'\-]*(?: [A-Za-z][A-Za-z'\-]*)?)/);
+      if (m) for (const w of m[1].split(' ')) gloss.add(w.toLowerCase().replace(/-+$/, ''));
+    }
+  }
+  return gloss;
 }
 
 /** 待定词 token 命中（缩窄后缀集，保守口径） */

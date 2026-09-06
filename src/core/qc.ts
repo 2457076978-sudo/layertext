@@ -10,7 +10,7 @@
 
 import { FAKE, HAD_ADVERBS, IRR, PASSIVE_IRR, PART_LIST, THAT_EXEMPT } from './irregular.js';
 import type { Lexicon } from './lexicon.js';
-import { extractParas, hit, pendHit, sentsOf, splitChapter, tokenizeTxt } from './textpipe.js';
+import { extractParas, hit, pendHit, sentsOf, splitChapter, tokenizeTxt, cardGlossWords } from './textpipe.js';
 
 export type Tier = 'A' | 'B' | 'M';
 
@@ -124,15 +124,7 @@ export function runQc(md: string, lex: Lexicon, opts: QcOptions): QcResult {
   const passive = passiveBase + count(/,\s*\w+ed\s+by\s/g, txtNarr);
 
   // ---- 词句卡首列词条并入已知（注释后口径） ----
-  const gloss = new Set<string>();
-  for (const row of card.split('\n')) {
-    const r = row.trim();
-    if (r.startsWith('|')) {
-      const cell = r.replace(/^\|+/, '').replace(/\|+$/, '').split('|')[0].trim();
-      const m = cell.match(/^([A-Za-z][A-Za-z'\-]*(?: [A-Za-z][A-Za-z'\-]*)?)/);
-      if (m) for (const w of m[1].split(' ')) gloss.add(w.toLowerCase().replace(/-+$/, ''));
-    }
-  }
+  const gloss = cardGlossWords(card);
   const known = new Set([...lex.known, ...IRR, ...gloss]);
 
   // ---- 覆盖率 / 生词率 / 待定词风险 ----

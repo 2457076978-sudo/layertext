@@ -1,0 +1,193 @@
+/**
+ * 审校工作台核心逻辑：标记落盘（防抖）、正文增量着色、侧栏（配额/门禁/清单）、定位跳转。
+ *
+ * 对原型（AF审校阅读器_v0.1）的既有缺陷修复：
+ *  - 标记后增量更新受影响元素，不再全量重渲染（不丢选区）；
+ *  - 词/句定位用确定性索引（pi/si/wi），不用"文本包含"反查，重复句不串位；
+ *  - 删除句级标记不影响词级标记；词标记不区分大小写漂移；
+ *  - 落盘为本地 JSON 文件（防抖 600ms），不依赖 localStorage/服务端。
+ */
+
+import { invoke } from '@tauri-apps/api/core';
+import { WORD_TYPES, SENT_TYPES, GATES, typeLabel, type FileSession, type Mark } from './types.js';
+
+const SAVE_DEBOUNCE_MS = 600;
+
+export function scheduleSave(session: FileSession, onStatus: (s: 'dirty' | 'saved' | 'error', detail?: string) => void): void {
+  session.dirty = true;
+  onStatus('dirty');
+  const review = session.review;
+  review.updatedAt = Date.now();
+  clearTimeout((session as FileSession & { _t?: ReturnType<typeof setTimeout> })._t);
+  (session as FileSession & { _t?: ReturnType<typeof setTimeout> })._t = setTimeout(async () => {
+    try {
+      await invoke('write_text_file', {
+        path: session.markPath,
+        content: JSON.stringify(review, null, 1),
+      });
+      session.dirty = false;
+      onStatus('saved', session.markPath);
+    } catch (e) {
+      onStatus('error', String(e));
+    }
+  }, SAVE_DEBOUNCE_MS);
+}
+
+/* ---------- 正文增量着色 ---------- */
+
+function findSentEl(pi: number, si: number): HTMLElement | null {
+  return document.querySelector(`.sent[data-pi="${pi}"][data-si="${si}"]`);
+}
+
+export function refreshMarkDom(mark: Mark): void {
+  if (mark.level === 'word') {
+    const el = findSentEl(mark.pi, mark.si)?.querySelector(`.w[data-wi="${mark.wi}"]`);
+    el?.classList.add('mk-' + mark.type);
+  } else {
+    const sent = findSentEl(mark.pi, mark.si);
+    if (!sent) return;
+    const sentTypeEl = sent.querySelector(`.sbadge-${mark.type}`);
+    if (!sentTypeEl) {
+      const b = document.createElement('sup');
+      b.className = 'sbadge sbadge-' + mark.type;
+      b.dataset.type = mark.type;
+      b.textContent = typeLabel(mark.type);
+      sent.appendChild(b);
+    }
+  }
+}
+
+export function removeMarkDom(mark: Mark): void {
+  if (mark.level === 'word') {
+    const el = findSentEl(mark.pi, mark.si)?.querySelector(`.w[data-wi="${mark.wi}"]`);
+    el?.classList.remove('mk-' + mark.type);
+  } else {
+    findSentEl(mark.pi, mark.si)?.querySelector(`.sbadge-${mark.type}`)?.remove();
+  }
+}
+
+/** 打开文件后，把已保存的标记全部刷到正文 DOM */
+export function restoreAllMarkDom(session: FileSession): void {
+  for (const m of session.review.marks) refreshMarkDom(m);
+}
+
+/* ---------- 定位跳转 ---------- */
+
+export function jumpTo(mark: Mark): void {
+  const el = mark.level === 'word'
+    ? findSentEl(mark.pi, mark.si)?.querySelector(`.w[data-wi="${mark.wi}"]`)
+    : findSentEl(mark.pi, mark.si);
+  if (!el) return;
+  el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  el.classList.remove('flash');
+  void (el as HTMLElement).offsetWidth; // 重启动画
+  el.classList.add('flash');
+}
+
+/* ---------- 侧栏 ---------- */
+
+export function renderSidebar(
+  session: FileSession,
+  handlers: {
+    onQuotaToggle: (i: number) => void;
+    onQuotaRemove: (i: number) => void;
+    onQuotaAdd: (text: string) => void;
+    onGateToggle: (g: string) => void;
+    onMarkJump: (m: Mark) => void;
+    onMarkRemove: (m: Mark) => void;
+  },
+): void {
+  const r = session.review;
+  const gateDone = GATES.every((g) => r.gate[g]);
+  const byType = new Map<string, Mark[]>();
+  for (const m of r.marks) {
+    if (!byType.has(m.type)) byType.set(m.type, []);
+    byType.get(m.type)!.push(m);
+  }
+  const allTypes = [...WORD_TYPES, ...SENT_TYPES];
+
+  const quotaHtml = r.quota
+    .map(
+      (q, i) => `
+      <li class="quota ${q.done ? 'done' : ''}">
+        <label><input type="checkbox" data-quota="${i}" ${q.done ? 'checked' : ''} /> ${esc(q.text)}</label>
+        <button class="x" data-quota-rm="${i}" title="删除该要点">×</button>
+      </li>`,
+    )
+    .join('');
+
+  const gateHtml = GATES.map(
+    (g) => `
+    <li><label><input type="checkbox" data-gate="${esc(g)}" ${r.gate[g] ? 'checked' : ''} /> ${g}</label></li>`,
+  ).join('');
+
+  const listHtml = allTypes
+    .filter((t) => byType.has(t.key))
+    .map((t) => {
+      const ms = byType.get(t.key)!;
+      return `
+      <div class="mgroup">
+        <div class="mgroup-h">${t.label}<span class="cnt">${ms.length}</span></div>
+        ${ms
+          .map((m) => {
+            const label = m.level === 'word' ? (m.word ?? '') : (m.text ?? '').slice(0, 22) + '…';
+            return `<div class="mitem">
+              <span class="jump" data-jump="${m.id}" title="${esc(label)}${m.note ? ' ｜ ' + esc(m.note) : ''}">${esc(label)}</span>
+              ${m.note ? '<span class="note-dot" title="有备注">✎</span>' : ''}
+              <button class="x" data-rm="${m.id}" title="删除标记">×</button>
+            </div>`;
+          })
+          .join('')}
+      </div>`;
+    })
+    .join('') || '<div class="side-empty">暂无标记——正文里点词、拖选句子即可标记</div>';
+
+  const side = document.getElementById('sidebar')!;
+  side.innerHTML = `
+    <div class="side-sec">
+      <div class="side-h">本章要点配额 <span class="cnt">${r.quota.filter((q) => q.done).length}/${r.quota.length}</span></div>
+      <ul class="quota-list">${quotaHtml || '<li class="side-empty">未设置要点（如"保留风车线索"）</li>'}</ul>
+      <div class="quota-add"><input id="quota-input" placeholder="添加本章要点…" /><button id="quota-add-btn">＋</button></div>
+    </div>
+    <div class="side-sec">
+      <div class="side-h">终审门禁 ${gateDone ? '<span class="gate-ok">✅ 已通过</span>' : ''}</div>
+      <ul class="gate-list">${gateHtml}</ul>
+    </div>
+    <div class="side-sec">
+      <div class="side-h">标记清单 <span class="cnt">${r.marks.length}</span></div>
+      <div class="mlist">${listHtml}</div>
+    </div>`;
+
+  // 事件
+  side.querySelectorAll('[data-quota]').forEach((el) =>
+    el.addEventListener('change', () => handlers.onQuotaToggle(Number((el as HTMLElement).dataset.quota))),
+  );
+  side.querySelectorAll('[data-quota-rm]').forEach((el) =>
+    el.addEventListener('click', () => handlers.onQuotaRemove(Number((el as HTMLElement).dataset.quotaRm))),
+  );
+  side.querySelectorAll('[data-gate]').forEach((el) =>
+    el.addEventListener('change', () => handlers.onGateToggle((el as HTMLElement).dataset.gate!)),
+  );
+  side.querySelectorAll('[data-jump]').forEach((el) => {
+    const m = r.marks.find((x) => x.id === (el as HTMLElement).dataset.jump);
+    if (m) el.addEventListener('click', () => handlers.onMarkJump(m));
+  });
+  side.querySelectorAll('[data-rm]').forEach((el) => {
+    const m = r.marks.find((x) => x.id === (el as HTMLElement).dataset.rm);
+    if (m) el.addEventListener('click', () => handlers.onMarkRemove(m));
+  });
+  document.getElementById('quota-add-btn')?.addEventListener('click', () => {
+    const input = document.getElementById('quota-input') as HTMLInputElement | null;
+    if (input?.value.trim()) handlers.onQuotaAdd(input.value.trim());
+  });
+  document.getElementById('quota-input')?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      const input = e.target as HTMLInputElement;
+      if (input.value.trim()) handlers.onQuotaAdd(input.value.trim());
+    }
+  });
+}
+
+function esc(s: string): string {
+  return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
+}
