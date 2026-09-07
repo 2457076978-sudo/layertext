@@ -726,7 +726,7 @@ function renderReportPane(s: FileSession): void {
     ${s.reportSavedPath ? `<div class="saved-path">报告已自动保存：${esc(s.reportSavedPath)} <button id="btn-reveal">在访达中显示</button></div>` : ''}
     <table class="report">
       ${rows.map(([k, v]) => `<tr><th>${esc(k)}</th><td>${Array.isArray(v) ? v.length + ' 个' : esc(String(v))}</td></tr>`).join('')}
-      <tr><th>解禁门（A层）</th><td>${gatesNote}</td></tr>
+      <tr><th>句法黑名单</th><td>${gatesNote}</td></tr>
     </table>
 
     <div class="diag-h">① 生词清单（去重 ${oov.length} 词）<span class="dim">——勾一个动一个：要简化的进标记清单，学生已学过的立即不再标红</span></div>
@@ -2432,7 +2432,7 @@ function rewriteCheck(): string {
   if (S.rewriteRules.viewpoint === 'first') {
     const he = (body.match(/\b(he|his|him|she|her)\b/gi) ?? []).length;
     const I = (body.match(/\b(I|my|me)\b/g) ?? []).length;
-    out.push(`视角（第一人称）：第三人称代词 ${he} 处 / 第一人称 ${I} 处${he > I * 2 ? ' ⚠ 第一人称占比偏低，建议用「分层初稿」按规则重写' : ''}`);
+    out.push(`视角（第一人称）：第三人称代词 ${he} 处 / 第一人称 ${I} 处${he > I * 2 ? ' ⚠ 第一人称占比偏低，建议用「📖 整章改写」按规则重写' : ''}`);
   }
   return out.length ? out.join('\n') : '尚未设置规则';
 }
@@ -2538,7 +2538,7 @@ function showWelcome(): void {
   const stepWelcome = () => {
     wp.innerHTML = `
       <div class="pop-h" style="font-size:17px">欢迎使用 LayerText 分层读 🎉</div>
-      <p style="margin:8px 0 4px;line-height:1.8">这是帮你把英文原著<strong>简化成不同难度的版本</strong>给学生读的工具。先花一分钟完成初始设置：</p>
+      <p style="margin:8px 0 4px;line-height:1.8">这是帮你把英文原著<strong>简化成学生能读的版本</strong>的工具（简化到什么程度由你的词库决定）。先花一分钟完成初始设置：</p>
       <div class="w-steps">
         <div class="w-step"><b>① 连接 AI</b>（可跳过，不连也能用质检与标记）</div>
         <div class="w-step"><b>② 确认语言</b>（界面语言与要简化的文本语言）</div>
@@ -2555,7 +2555,7 @@ function showWelcome(): void {
   const stepAi = () => {
     wp.innerHTML = `
       <div class="pop-h">① 连接 AI（第 1/2 步）</div>
-      <p class="dim">AI 负责"帮改写"：分层初稿、逐句改写建议、对话助手。没 Key？点菜单 帮助 → 如何获取 AI 的 Key（教程 2 分钟）。也可以现在跳过，以后在菜单 LayerText → AI 设置 配。</p>
+      <p class="dim">AI 负责"帮改写"：整章改写、按标记修改、对话助手。没 Key？点菜单 帮助 → 如何获取 AI 的 Key（教程 2 分钟）。也可以现在跳过，以后在菜单 LayerText → AI 设置 配。</p>
       <div class="fld" style="margin-top:8px"><label style="display:block;color:var(--muted);font-size:12px;margin-bottom:4px">选择服务商</label>
         <select id="w-provider">${AI_PROVIDERS.map((p, i) => `<option value="${i}">${p.name}</option>`).join('')}</select></div>
       <div class="fld"><label style="display:block;color:var(--muted);font-size:12px;margin-bottom:4px">API Key（sk-…，只存本机）</label>
@@ -2952,7 +2952,7 @@ function showGateHelp(gate: string, anchor: HTMLElement): void {
     } else {
       body += `<p class="dim">本章尚未体检——打开课文会自动体检，或点「▶ 重新质检」。</p>`;
     }
-    body += `<p class="dim">参考值源自原型项目三层设计；黄色行 = 超出参考，需你复核后决定。达标与否由你勾选确认（AI 只出数字，教师定稿）。</p>`;
+    body += `<p class="dim">参考值即当前简化标准（句长上限 ⓘ 可调）；黄色行 = 超出参考，需你复核后决定。达标与否由你勾选确认（AI 只出数字，教师定稿）。</p>`;
   }
   gatePop.innerHTML = `<div class="pop-h">${esc(gate)}</div>${body}`;
   gatePop.classList.add('open');

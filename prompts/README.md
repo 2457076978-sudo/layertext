@@ -7,7 +7,7 @@
 | 文件 | 用途 | 版本 |
 |---|---|---|
 | `system_simplify.md` | 修订候选 system（词库边界/黑名单/输出格式） | v1.0 |
-| `system_draft.md` | 分层初稿 system（逐段改写，占位符见 manifest） | v1.0 |
+| `system_draft.md` | 整章简化 system（逐段改写，占位符见 manifest） | v1.0 |
 | `system_assistant.md` | AI 助手身份与工具调用协议 | v1.0 |
 | `rewrite_sentence.md` | 逐句改写 user 模板 | v1.0 |
 | `manifest.json` | 版本清单与变更记录（`setVersion` = 整套版本，写入成本台账/建议台账） | v1.0 |
