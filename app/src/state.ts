@@ -43,6 +43,9 @@ export const S = {
   termsText: null as string | null,
   properRows: [] as string[],
   extraWordlistText: null as string | null,
+  /** 已学词集/复现队列（_已学词.csv / _已学词.txt 自动加载；feature/reinforce：不计生词 + ⑩复现指标 + 简化注入约束） */
+  reinforceText: null as string | null,
+  reinforceName: '',
   /** 当前会话合并已知词表（含词句卡） */
   currentKnown: new Set<string>(),
   /** 全局配置（~/.layertext.json） */

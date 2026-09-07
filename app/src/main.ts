@@ -19,7 +19,7 @@ import bundledWordlist from '../../assets/wordlists/curriculum_2022_level3_1600.
 import bundledAmendment from '../../assets/wordlists/curriculum_2022_amendment.txt?raw';
 import exampleMd from '../../examples/texts/aesop_tortoise_hare.md?raw';
 import exampleVocab from '../../examples/vocab/sample_teaching_vocab.csv?raw';
-import { parseCsv } from '../../src/core/lexicon.js';
+import { parseCsv, parseReinforceText } from '../../src/core/lexicon.js';
 import { buildLexicon, type Lexicon } from '../../src/core/lexicon.js';
 import { IRR } from '../../src/core/irregular.js';
 import { runQc, toLegacyReport, type QcResult, type Tier } from '../../src/core/qc.js';
@@ -57,6 +57,13 @@ function buildLexiconNow(): Lexicon {
     terms: S.termsText ? S.termsText.split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#')) : [],
     properNouns: S.properRows.map((r) => r.toLowerCase()),
   });
+}
+
+/** 已学词集（复现队列）：示例目录/书目录的 _已学词.csv|.txt 宽容解析；空则 undefined（报告保持旧 schema） */
+function reinforceWordsNow(): string[] | undefined {
+  if (!S.reinforceText) return undefined;
+  const w = parseReinforceText(S.reinforceText);
+  return w.length ? w : undefined;
 }
 
 /** 章号识别 chnoFromPath / CSV 转义 csvCell / 唯一定位 locateOriginal / 标记重排 remapMarks 已抽至 pure.ts（O4） */
@@ -157,6 +164,12 @@ async function loadLocalExampleConfig(): Promise<void> {
     if (proper) {
       S.properRows = proper.split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
     }
+    const reinforceCsv = await readIf('_已学词.csv');
+    const reinforce = reinforceCsv ?? (await readIf('_已学词.txt'));
+    if (reinforce && reinforce.trim()) {
+      S.reinforceText = reinforce;
+      S.reinforceName = reinforceCsv ? '_已学词.csv（本地）' : '_已学词.txt（本地）';
+    }
   } catch {
     /* 目录不可用则跳过 */
   }
@@ -178,6 +191,8 @@ function fileSummary(): void {
   if (S.vocabCsvText) parts.push(`+ ${S.vocabName}`);
   if (S.termsText) parts.push('+ 术语表');
   parts.push('标记自动保存：' + (s ? s.markPath : '打开文件后生效'));
+  const rw = reinforceWordsNow();
+  if (rw) parts.push(`复现队列：${S.reinforceName}（${rw.length} 词，⑩指标+简化注入已启用）`);
   setStatus(parts.join(' ｜ '));
 }
 
@@ -620,6 +635,7 @@ async function runQcCurrent(opts: { auto?: boolean } = {}): Promise<void> {
       chno: s.sourcePath ? chnoFromPath(s.sourcePath) : null,
       tierGates: { passiveFromCh: 0, relclFromCh: 0 },
       ...(S.properRows.length ? { propCheckList: S.properRows } : {}),
+      ...(reinforceWordsNow() ? { reinforceWords: reinforceWordsNow()! } : {}),
     });
   } catch (e) {
     setStatus('质检失败：' + (e as Error).message, 'err');
@@ -699,6 +715,8 @@ function renderReportPane(s: FileSession): void {
   );
   const labelMap: Record<string, string> = {
     '①词表覆盖率(注释后口径=含A层术语)': '①词表覆盖率',
+    '⑩复现词命中(队列/命中/词次)': '⑩复现词命中（队列/命中/词次）',
+    '复现命中词': '⑩复现命中词（已学词在本篇重现）',
   };
   const oov = [...new Set(s.report.oov)];
   const gatesNote = `句法黑名单（被动/定从/过去完成）一律禁用；句长参考 = 简化标准 ${simplifyMaxLen()} 词/句`;
@@ -1051,7 +1069,7 @@ async function openDemoMenu(): Promise<void> {
     <div class="demo-item" data-demo="builtin">龟兔赛跑（含示例词库）</div>
     <div class="demo-group">本地示例（文稿/LayerText示例/，自动带词库与术语配置）</div>
     ${locals.map((p) => `<div class="demo-item" data-demo-path="${esc(p)}">${esc(p.slice(p.lastIndexOf('/') + 1))}</div>`).join('')}
-    <div class="demo-tip">把章节 md 与 _词库.csv / _术语表.txt / _专名表.txt 放入该文件夹即可出现在这里</div>`;
+    <div class="demo-tip">把章节 md 与 _词库.csv / _术语表.txt / _专名表.txt / _已学词.csv（复现队列，可选）放入该文件夹即可出现在这里</div>`;
   menu.classList.add('open');
   S.demoMenuOpen = true;
   menu.querySelectorAll('[data-demo]').forEach((el) =>
@@ -1807,7 +1825,8 @@ async function simplifyChapterCore(
   const system = await buildDraftSystemPrompt({
     tierRule: simplifyRule(),
     chnoNote: '',
-    instructions: instructions ? `- 教师方向指令（最高优先级）：${instructions}` : '',
+    instructions: (instructions ? `- 教师方向指令（最高优先级）：${instructions}` : '') +
+      (reinforceWordsNow() ? `\n- 复现词约束：以下学生已学词请择 5-8 个在本章自然复现（词形可按语境变化，融入情节，不硬塞不改故事）：${reinforceWordsNow()!.slice(0, 12).join(' / ')}` : ''),
   });
   const out: string[] = [];
   let tokens = 0;
@@ -2042,6 +2061,7 @@ async function runBatch(): Promise<void> {
           tier: 'M', fileName: outName, chno: chnoFromPath(item.path),
           tierGates: { passiveFromCh: 0, relclFromCh: 0 },
           ...(S.properRows.length ? { propCheckList: S.properRows } : {}),
+          ...(reinforceWordsNow() ? { reinforceWords: reinforceWordsNow()! } : {}),
         });
         rows.push({
           chapter: chapters.length > 1 ? `${item.name} · ${chi + 1}` : item.name,
