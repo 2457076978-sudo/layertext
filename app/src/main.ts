@@ -271,8 +271,9 @@ function renderAll(): void {
 
 function renderFileTabs(): void {
   const el = $('filetabs');
+  el.style.display = S.sessions.length === 0 ? 'none' : 'flex';  // 无文件时整行收起，不占位
   if (S.sessions.length === 0) {
-    el.innerHTML = '<span class="hint">可同时打开原文与简化版（含再简化的版本）并排切换、逐段对比</span>';
+    el.innerHTML = '';
     return;
   }
   el.innerHTML = S.sessions
