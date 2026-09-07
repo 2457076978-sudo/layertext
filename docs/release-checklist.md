@@ -5,7 +5,7 @@
 
 ## 1. 质量门禁
 
-- [ ] `npm test` 全绿（当前基线 56 项）
+- [ ] `npm test` 全绿（当前基线 92 项）
 - [ ] `npm run eval` 输出"✓ 不低于质量基线"（若规则有意变更：已 `--update-baseline` 并书面说明理由）
 - [ ] `node dist/tools/compare.js` 双引擎一致
 - [ ] `cd app && npx tsc --noEmit` 无错误
@@ -23,6 +23,8 @@
 - [ ] CI 绿（Release 工作流会再跑一遍门禁，但别浪费一次 tag）
 - [ ] Release 页出现的 dmg 可下载、可安装（首次右键→打开→打开）
 - [ ] Release 正文是 CHANGELOG 对应段落（不是空的或错版本）
+- [ ] **GUI 自动化验证（截图/走查）依赖屏幕解锁**——锁屏时截图全黑、辅助操作失效；无人值守环境不要安排 GUI 验证步骤（欠账#5，2026-09-07 写入）
+- [ ] **无 UI 环境（SSH/CI）打包 dmg 必须用 `hdiutil create`**——tauri 自带 bundle_dmg.sh 依赖 GUIAppleEvents，无用户会话会失败（欠账#5）
 
 ## 4. 新手首开路径（换位 walkthrough）
 

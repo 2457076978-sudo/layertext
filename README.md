@@ -19,6 +19,7 @@
    → 配词库（内置课标2022三级1600词 ∪ 教材已学词CSV ∪ 术语表——难度由此锚定）
    → 初步诊断（自动体检：生词/句法风险逐条可勾选处理；AI 摘情节要点预填配额）
    → AI 简化本章（整章逐段改写，句长上限可调；要更简=再导入再简化）
+      ↳ 或 📚 全书简化：整本书排队跑「简化+体检+规则校验」，书级汇总报告，中断可续跑
    → 审校工作台（点词划句标记，AI 只出候选、教师握定稿权）
    → 标记执行（修订对照表 → 确认 → 批量应用，每处留痕）
    → 版本与审计（变更日志 CSV、版本 diff）
@@ -34,13 +35,14 @@
 | 自动体检 | 生词率/覆盖率/句长/被动/定从/过去完成/专名一致性 + OOV 清单，报告自动落盘 |
 | 审校工作台 | 三态高亮正文、点词/拖选标记（7+8 类）、要点配额、终审门禁、标记清单跳转 |
 | AI 简化本章 | 整章逐段改写（方向指令+词库边界+黑名单约束，句长上限可调；**无预设难度**——要更简版本：结果再导入再简化），完成后自动体检 |
+| 全书批处理 | 📚 选书稿文件夹勾选章节→队列自动「AI 简化+体检+规则校验」→每章产物+**书级汇总报告**（生词率/句长/黑名单/规则残留/耗时/tokens 横向表）；**中断可续跑**，一本书压进一晚 |
 | AI 修订候选 | 标记→建议（对话/批量/逐句）→**正文行内对照**→点 ✓ 采纳（原稿不覆盖，工作稿+变更日志留痕） |
 | AI 助手 | 右侧流式对话，AI 调用本地工具（跑体检/查句子/提候选），每条建议经引擎复核 |
 | 新手友好 | 首启动向导、四步导览、AI 服务商预设+Key 教程、错误人话化、简化标准可调、本书配置随文件夹 |
 | 导出 | Word 版（含章末词句卡）/ 朗读音频（系统语音）/ 标记 JSON / 变更日志 CSV |
 | 版本对比 | 双版本逐段 diff（原文 vs 简化版 vs 再简化版） |
 
-引擎质量：**43 项回归测试全绿**（防坑规则 + 审校 DOM + 应用逻辑）；TS 引擎与 Python 原型在示例与真实章节上逐字段一致（[M1 对照报告](docs/M1-对照测试报告.md)）。
+引擎质量：**92 项回归测试全绿**（防坑规则 + 审校 DOM + UI 部件 + 应用逻辑）；TS 引擎与 Python 原型在示例与真实章节上逐字段一致（[M1 对照报告](docs/M1-对照测试报告.md)）。
 产品文档：[PRD（一页）](docs/PRD.md) · [CHANGELOG](CHANGELOG.md) · [工程化开发提示词](docs/工程化开发提示词_v1.0.md)。
 
 ## 安装（macOS）
@@ -74,7 +76,7 @@ npm run tauri build --target universal-apple-darwin
 git clone https://github.com/<your-org>/layertext.git
 cd layertext
 npm install
-npm test        # 67 项回归测试（防坑规则 + 审校 DOM + 应用逻辑 + MCP 工具层）
+  npm test        # 92 项回归测试（防坑规则 + 审校 DOM + UI 部件 + 应用逻辑 + MCP 工具层）
 npm run eval    # 金标准评测：黑名单命中率/OOV 对齐 vs 质量基线（低于基线退出码 1）
 
 # 对示例文本跑一次质检（报告自动落盘到文本同目录）
@@ -113,7 +115,7 @@ node dist/src/cli.js qc examples/texts/school_story_club.md \
 src/core/    QC 引擎（纯 TypeScript，无框架依赖：irregular / lexicon / textpipe / qc / risks / adoption / aiops）
 src/cli.ts   命令行入口　　src/eval.ts   评测入口（npm run eval）
 app/         macOS 桌面应用（Tauri 2：前端 Vite + 主进程 Rust，复用 src/core）
-tests/       回归测试（node:test，60 项）
+tests/       回归测试（node:test，92 项）
 tools/       qc_chapter_ref.py（Python 参照版）、compare.ts（对照测试）、adoption.ts（采纳率分析）、extract_changelog.mjs（发布）
 prompts/     版本化 AI 提示词（manifest 管版本，教师可自定义覆盖）
 docs/        PRD、QC 指标说明、质量基线、发布流程、M1 对照报告、工程化提示词、交付报告（docs/reports/）
@@ -150,9 +152,13 @@ examples/    示例文本与词库（自写 CC0）+ evals/ 金标准评测集
 - W3 [提示词版本化](prompts/README.md)（prompts/，教师可自定义覆盖）+ 供应商 failover + 成本台账
 - W4 [CI / Release 流水线](docs/发布流程.md) + [发布检查清单](docs/release-checklist.md)（首次推送 GitHub 后实跑验收）
 - W5 诊断包导出 + 本地错误日志（零遥测）+ [复盘模板](docs/复盘模板.md)
-- W3 提示词版本化 + 供应商 failover + 成本台账
-- W4 CI / Release 流水线 + 发布流程文档
-- W5 诊断包导出 + 本地错误日志 + 复盘模板
+
+**优化 ✅ 已完成**（O1–O5，2026-09-07，详见 [CHANGELOG](CHANGELOG.md) 与 [docs/reports/](docs/reports/)）
+
+- O1 稳定性清偿：对话自动压缩 / 空白容忍定位 / 错误分类补齐 / failover 台账纠偏
+- O2 全书批处理 + 书级汇总报告（中断可续跑）
+- O3 层级残留清理与文案审计（[报告](docs/reports/O3-残留审计报告.md)）
+- O4 UI 部件测试补强（[性能基线](docs/性能基线.md) 为 O5 交付）
 
 **规划 📌**（素材库，未立项；实现前先过红线检查）
 
