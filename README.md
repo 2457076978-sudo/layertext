@@ -47,7 +47,7 @@
 
 ## 安装（macOS）
 
-1. 下载 `LayerText_1.0.0_universal.dmg`（[Releases](../../releases) 页，或本地构建见下）；
+1. 下载 `LayerText_1.1.0_universal.dmg`（[Releases](../../releases) 页，或本地构建见下）；
 2. 双击打开 dmg，把 **LayerText** 拖入"应用程序"文件夹；
 3. 首次打开：**右键 → 打开 → 再点"打开"**（开源个人项目未做苹果签名公证，此提示属正常）。
 
@@ -176,4 +176,4 @@ examples/    示例文本与词库（自写 CC0）+ evals/ 金标准评测集
 
 ## 许可
 
-[MIT](LICENSE)。示例文本以 CC0 奉献。
+**PolyForm Noncommercial 1.0.0**（[LICENSE](LICENSE)）——**教师、学校、教育机构、公益组织、个人学习研究：免费使用、修改、分享**；商业用途（收费、集成进商业产品或服务）需另行获得授权（[提 Issue](https://github.com/2457076978-sudo/layertext/issues) 联系作者）。选择 source-available 而非完全开源的原因：方法公开可引用、可复现，商业开发需作者授权——详见 [发布流程](docs/发布流程.md) 的许可决策记录。示例文本以 CC0 奉献，可任意使用。

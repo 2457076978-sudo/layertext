@@ -18,6 +18,7 @@
 - **O4 UI 层测试补强**：模式胶囊/视图切换/版本对比渲染抽到 `widgets.ts`（DOM 依赖但无 Tauri，行为不变），`locateOriginal`/`remapMarks`/`csvCell`/`chnoFromPath` 抽到 `pure.ts`；新增 happy-dom 部件测试与纯函数测试。
 - **O5 性能基线**：`tools/perf_baseline.mjs`（AF 第一章 + 3 倍文本）实测管线/渲染/体检/对比，3x 渲染 60ms 远低于 200ms 阈值——**无需增量渲染**；见 [性能基线](docs/性能基线.md)。
 - O6 文档收口：README 三张产品截图（CC0 示例拍摄）、release-checklist 补 GUI 验证依赖屏幕解锁与 hdiutil 两条、发布流程 GitHub 路径核对；性能基线补 AI 实测（DeepSeek 单段约 1 秒）。
+- 许可变更：MIT → **PolyForm Noncommercial 1.0.0**（source-available：教师/学校/教育机构/个人研究免费使用与分享；商业用途需作者授权）。
 - 测试 67 → **92 项全绿**。以下为 1.0.0 之后、本次一并随 1.1.0 交付的变更：
 
 ### 界面 · 工具栏信息架构重组（用户核心批评：不知道点哪、模式不可见、入口关系不明）
