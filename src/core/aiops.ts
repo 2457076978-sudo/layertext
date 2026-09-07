@@ -68,6 +68,20 @@ export function shouldFailover(err: unknown): boolean {
   return /Failed to fetch|NetworkError|timeout|Timeout|aborted|ECONNRESET|socket|HTTP 5\d{2}|HTTP 429|HTTP 4\d{2}/.test(s);
 }
 
+/** 服务商错误 → 教师能看懂的人话（欠账#7：补 403/模型无权限等分类；不认识的原样返回） */
+export function aiErrHuman(e: unknown): string {
+  const s = String(e);
+  if (s.includes('403') || /permission|not authorized|access denied|无权限|权限不足|无权访问/i.test(s))
+    return 'Key 没有这个模型的权限——常见原因：①模型名写错（回到 AI 设置，选服务商后用自动推荐的模型名）②这个模型需要单独开通或实名认证 ③免费额度 Key 只支持部分模型。换个模型再试';
+  if (s.includes('401')) return 'Key 不对或已过期——回到服务商网站重新复制一次';
+  if (s.includes('404')) return '地址或模型名不对——检查 API 地址末尾是否带 /v1、模型名拼写是否与服务商一致';
+  if (s.includes('429')) return '请求太频繁或额度不足——稍等再试，或去服务商网站看看余额';
+  if (s.includes('Failed to fetch') || s.includes('NetworkError')) return '连不上服务器——检查网络，或 API 地址是否填错';
+  if (/insufficient|余额不足|欠费/i.test(s)) return '账户余额不足——到服务商网站充值';
+  if (/model.*not.*(found|exist)|invalid model|未知模型|模型不存在/i.test(s)) return '没有这个模型——AI 设置里检查模型名拼写（不同服务商叫法不同，用预设推荐的准没错）';
+  return s;
+}
+
 /* ---------- 成本台账 ---------- */
 
 export const COST_HEADER = ['时间', '场景', '书', '章节', '供应商', '模型', '提示词版本', '入tokens', '出tokens', '耗时ms', 'failover', '结果'] as const;

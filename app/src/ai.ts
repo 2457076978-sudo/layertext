@@ -10,7 +10,7 @@ import { S, type AppConfig } from './state.js';
 import { withRetry } from './pure.js';
 import { DEFAULT_MAX_LEN } from './types.js';
 import {
-  buildTargets, composePrompt, COST_HEADER, parseManifest, providerNameOf, shouldFailover, toCostLine,
+  aiErrHuman as aiErrHumanCore, buildTargets, composePrompt, COST_HEADER, parseManifest, providerNameOf, shouldFailover, toCostLine,
   type ProviderTarget, type PromptManifest,
 } from '../../src/core/aiops.js';
 import manifestText from '../../prompts/manifest.json?raw';
@@ -87,13 +87,7 @@ export const AI_PROVIDERS: { name: string; url: string; models: string[]; keyTip
 ];
 
 export function aiErrHuman(e: unknown): string {
-  const s = String(e);
-  if (s.includes('401')) return 'Key 不对或已过期——回到服务商网站重新复制一次';
-  if (s.includes('404')) return '地址或模型名不对——检查 API 地址末尾是否带 /v1、模型名拼写是否与服务商一致';
-  if (s.includes('429')) return '请求太频繁或额度不足——稍等再试，或去服务商网站看看余额';
-  if (s.includes('Failed to fetch') || s.includes('NetworkError')) return '连不上服务器——检查网络，或 API 地址是否填错';
-  if (s.includes('insufficient')) return '账户余额不足——到服务商网站充值';
-  return s;
+  return aiErrHumanCore(e);
 }
 
 /* ---------- 供应商序列（failover） ---------- */

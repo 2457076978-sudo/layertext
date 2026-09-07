@@ -91,3 +91,22 @@ test('成本台账：行写入与汇总（含按书过滤/failover/错误计数�
   assert.equal(oneBook.calls, 3);
   assert.equal(oneBook.promptTokens, 1500);
 });
+
+test('aiErrHuman：常见服务商错误码全覆盖（欠账#7：403/模型无权限）', async () => {
+  const { aiErrHuman } = await import('../src/core/aiops.js');
+  // 403 / 权限类 → 指向模型权限排查
+  assert.match(aiErrHuman('HTTP 403: Forbidden'), /权限/);
+  assert.match(aiErrHuman('Error: Permission denied for model glm-4.5'), /权限/);
+  assert.match(aiErrHuman('{"error":{"message":"无权限访问该模型"}}'), /权限/);
+  // 模型不存在类
+  assert.match(aiErrHuman('model not found: gpt-5'), /没有这个模型/);
+  // 既有分类不回归
+  assert.match(aiErrHuman('HTTP 401: unauthorized'), /Key 不对/);
+  assert.match(aiErrHuman('HTTP 404: not found'), /地址或模型名/);
+  assert.match(aiErrHuman('HTTP 429: rate limit'), /太频繁/);
+  assert.match(aiErrHuman('Failed to fetch'), /连不上/);
+  assert.match(aiErrHuman('Insufficient balance'), /余额不足/);
+  assert.match(aiErrHuman('账户余额不足'), /余额不足/);
+  // 不认识的原样返回
+  assert.equal(aiErrHuman('奇怪的错误'), '奇怪的错误');
+});
