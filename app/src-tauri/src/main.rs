@@ -407,7 +407,7 @@ fn main() {
             let app_menu = SubmenuBuilder::new(app, "LayerText")
                 .about(Some(tauri::menu::AboutMetadataBuilder::new()
                     .name(Some("LayerText 分层读"))
-                    .version(Some("1.0.0"))
+                    .version(Some("1.1.0"))
                     .authors(Some(vec!["Wayne & LayerText contributors".to_string()]))
                     .comments(Some("分层英语文本简化与审校工作台 · AI 只出候选，教师握定稿权 · 数据全在本机"))
                     .build()))
