@@ -224,3 +224,48 @@ test('planCompaction：assistant.tool_calls 与其 tool 结果不被拆开（都
     assert.ok(tail.some((m) => m.role === 'tool'), 'tool_calls 与 tool 结果未被拆散');
   }
 });
+
+/* ---------- 全书批处理（O2） ---------- */
+
+import { buildBookReportMd, planBatchChapters, type BatchProgressFile, type BookReportRow } from '../app/src/pure.js';
+
+test('planBatchChapters：进度文件里 done 的章标记已完成（续跑跳过），其余可跑', () => {
+  const progress: BatchProgressFile = {
+    date: '2026-09-07',
+    instructions: '面向九年级',
+    status: { '/book/第一章.md': 'done', '/book/第三章.md': 'failed' },
+  };
+  const items = planBatchChapters(['/book/第一章.md', '/book/第二章.md', '/book/第三章.md'], progress);
+  assert.deepEqual(items.map((x) => x.done), [true, false, false], '仅 done 标记跳过；failed 需重跑');
+  assert.equal(items[0].name, '第一章.md');
+});
+
+test('planBatchChapters：无进度文件全部可跑', () => {
+  const items = planBatchChapters(['/book/a.md'], null);
+  assert.equal(items[0].done, false);
+});
+
+test('buildBookReportMd：横向表 + 合计 + 失败章与残留提示', () => {
+  const rows: BookReportRow[] = [
+    { chapter: '第一章.md', output: '第一章_简化_2026-09-07.md', segCount: 10, oovRate: '2.1%', avgLen: '10.5', maxLen: 15, passive: 0, relcl: 1, pastperf: 0, overlong: 0, ruleLeft: 0, elapsedMs: 61000, outTokens: 3000, status: 'done' },
+    { chapter: '第二章.md', output: '', segCount: 8, oovRate: '', avgLen: '', maxLen: 0, passive: 0, relcl: 0, pastperf: 0, overlong: 0, ruleLeft: 0, elapsedMs: 5000, outTokens: 0, status: 'failed', error: 'HTTP 429: rate limit' },
+  ];
+  const md = buildBookReportMd(rows, { book: '动物农场', date: '2026-09-07', maxLen: 16, instructions: '面向九年级' });
+  assert.ok(md.includes('# 全书简化报告 · 动物农场'));
+  assert.ok(md.includes('完成 1/2 章'));
+  assert.ok(md.includes('| 第一章.md | 第一章_简化_2026-09-07.md | 10 | 2.1% | 10.5 | 15 | 0 | 1 |'));
+  assert.ok(md.includes('（失败）'), '失败章产物列显示失败');
+  assert.ok(md.includes('**合计**'));
+  assert.ok(md.includes('## 建议人工复查'));
+  assert.ok(md.includes('定从 1'), '黑名单残留章进入复查提示');
+  assert.ok(md.includes('简化失败（HTTP 429: rate limit）'));
+});
+
+test('buildBookReportMd：全部达标时不出现复查段，给 🎉 判读', () => {
+  const rows: BookReportRow[] = [
+    { chapter: '第一章.md', output: 'a_简化_1.md', segCount: 10, oovRate: '1.0%', avgLen: '10.0', maxLen: 14, passive: 0, relcl: 0, pastperf: 0, overlong: 0, ruleLeft: 0, elapsedMs: 60000, outTokens: 3000, status: 'done' },
+  ];
+  const md = buildBookReportMd(rows, { book: '书', date: '2026-09-07', maxLen: 16 });
+  assert.ok(!md.includes('## 建议人工复查'));
+  assert.ok(md.includes('🎉'));
+});

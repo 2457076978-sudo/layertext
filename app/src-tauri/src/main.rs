@@ -140,6 +140,46 @@ fn list_local_examples() -> Result<Vec<String>, String> {
     Ok(out)
 }
 
+/// 列出书稿文件夹中的章节文件（.md/.txt/.docx；_ 开头的配置与词库、既有产物（简化/工作稿/备份/质检报告）除外）
+#[tauri::command]
+fn list_dir(dir: String) -> Result<Vec<String>, String> {
+    let mut out = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(&dir) {
+        for e in entries.flatten() {
+            let p = e.path();
+            if !p.is_file() {
+                continue;
+            }
+            let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
+            let ext = p.extension().and_then(|x| x.to_str()).unwrap_or("").to_lowercase();
+            if !(ext == "md" || ext == "txt" || ext == "markdown" || ext == "docx") {
+                continue;
+            }
+            if name.starts_with('_')
+                || name.contains("简化")
+                || name.contains("工作稿")
+                || name.contains("原始备份")
+                || name.contains("质检报告")
+            {
+                continue;
+            }
+            out.push(p.to_string_lossy().to_string());
+        }
+    }
+    out.sort();
+    Ok(out)
+}
+
+/// 删除文件（批处理队列完结后清理进度文件；找不到视为成功）
+#[tauri::command]
+fn remove_file(path: String) -> Result<(), String> {
+    match std::fs::remove_file(&path) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
 #[tauri::command]
 fn reveal_path(path: String) -> Result<(), String> {
     std::process::Command::new("open")
@@ -339,7 +379,8 @@ fn main() {
                 .build(app)?;
             let mi_ai = MenuItemBuilder::with_id("ai-suggest", "AI 审核建议…").build(app)?;
             let mi_draft = MenuItemBuilder::with_id("draft", "AI 简化本章…").build(app)?;
-            let qc_menu = SubmenuBuilder::new(app, "质检").item(&mi_run).item(&mi_draft).separator().item(&mi_ai).build()?;
+            let mi_batch = MenuItemBuilder::with_id("batch", "全书批处理…（多章队列+汇总报告）").build(app)?;
+            let qc_menu = SubmenuBuilder::new(app, "质检").item(&mi_run).item(&mi_draft).item(&mi_batch).separator().item(&mi_ai).build()?;
 
             let mi_vt = MenuItemBuilder::with_id("view-text", "正文审校").build(app)?;
             let mi_vr = MenuItemBuilder::with_id("view-report", "质检报告").build(app)?;
@@ -426,6 +467,8 @@ fn main() {
             reports_dir,
             examples_dir,
             list_local_examples,
+            list_dir,
+            remove_file,
             reveal_path,
             save_api_key,
             load_api_key,

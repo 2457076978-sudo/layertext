@@ -227,6 +227,23 @@
     #draft-progress .bar { height: 6px; background: #eef2ff; border-radius: 999px; margin-top: 6px; overflow: hidden; }
     #draft-progress .bar i { display: block; height: 100%; background: var(--brand); width: 0; transition: width .3s; }
 
+    /* 全书批处理弹层 */
+    #batch-pop {
+      display: none; position: fixed; z-index: 57; width: 560px; max-width: 94vw;
+      background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+      box-shadow: 0 8px 30px rgba(15, 23, 42, .14); padding: 16px; font-size: 13px;
+      left: 50%; top: 10%; transform: translateX(-50%); max-height: 82vh; overflow-y: auto;
+    }
+    #batch-pop.open { display: block; }
+    #batch-pop .fld { margin-bottom: 10px; }
+    #batch-pop .fld label { display: block; color: var(--muted); font-size: 12px; margin-bottom: 4px; }
+    #batch-pop textarea {
+      width: 100%; height: 56px; border: 1px solid var(--line); border-radius: 8px;
+      padding: 6px 10px; font-size: 12px; font-family: inherit; resize: vertical;
+    }
+    #batch-pop .bar { height: 8px; background: #eef2ff; border-radius: 999px; margin-top: 6px; overflow: hidden; }
+    #batch-pop .bar i { display: block; height: 100%; background: var(--brand); width: 0; transition: width .3s; }
+
     /* 分层方案 & 欢迎弹层 */
     #tier-pop, #welcome-pop {
       position: fixed; z-index: 58; background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
@@ -335,6 +352,7 @@
     <span class="tgroup"><button id="btn-run" class="primary" title="打开课文会自动体检；换了词库或改完正文后，点这里重新算一遍">▶ 质检本章</button></span>
     <span class="tsep"></span>
     <span class="tgroup"><button id="btn-draft" title="整章大改：AI 按当前简化标准把全章重写成简化版（自动体检、原稿不动），适合第一次处理原文；要更简的版本，把简化版再导入再点一次">📖 整章改写…</button>
+      <button id="btn-batch" title="整本书排队跑：选书稿文件夹勾选章节，自动逐章『AI 简化+体检+规则校验』，跑完给一份全书汇总报告；中断可续跑">📚 全书简化…</button>
       <button id="btn-ai" title="精修：先在正文点词/划句做标记，再点这里成批改。改完即改还是等你确认，看右侧模式胶囊">✨ 按标记修改</button></span>
     <span class="tsep"></span>
     <button id="mode-pill" class="mode-pill" title="点击切换">…</button>
@@ -398,6 +416,7 @@
   <div id="gate-pop"></div>
   <div id="ai-pop"></div>
   <div id="draft-pop"></div>
+  <div id="batch-pop"></div>
   <div id="tier-pop"></div>
   <div id="rewrite-pop"></div>
   <div id="welcome-pop"></div>

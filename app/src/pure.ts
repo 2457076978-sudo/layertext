@@ -257,6 +257,101 @@ export function planCompaction(msgs: ChatMsgLike[], opts?: Partial<typeof COMPAC
   return { need, keptFrom: need ? cut : 0, headCount, estBefore, estHead, estTail: estBefore - estHead };
 }
 
+/* ---------- 全书批处理（O2）：队列规划与书级汇总报告（纯逻辑可测） ---------- */
+
+/** 进度文件（书稿文件夹/_全书批处理进度.json）：中断可续跑——done 的章下次自动跳过 */
+export interface BatchProgressFile {
+  date: string;
+  instructions: string;
+  /** key = 章节源文件完整路径 */
+  status: Record<string, 'done' | 'failed'>;
+}
+
+export interface BatchChapterItem {
+  path: string;
+  name: string;
+  /** 上次批处理已完成（续跑时默认跳过） */
+  done: boolean;
+  /** 源文本段落数（[P##] 计数；供队列预估） */
+  segCount: number;
+}
+
+/** 队列规划：全部候选文件 + 进度文件 → 待跑清单（保持文件名排序；done 项保留在列表中供界面展示"已完成"） */
+export function planBatchChapters(paths: string[], progress: BatchProgressFile | null): BatchChapterItem[] {
+  return paths.map((path) => ({
+    path,
+    name: path.slice(path.lastIndexOf('/') + 1),
+    done: progress?.status[path] === 'done',
+    segCount: 0,
+  }));
+}
+
+export interface BookReportRow {
+  chapter: string;
+  output: string;
+  segCount: number;
+  /** 生词率（词型） */
+  oovRate: string;
+  avgLen: string;
+  maxLen: number;
+  passive: number;
+  relcl: number;
+  pastperf: number;
+  overlong: number;
+  /** 书级替换规则残留总数 */
+  ruleLeft: number;
+  elapsedMs: number;
+  outTokens: number;
+  status: 'done' | 'failed';
+  error?: string;
+}
+
+/** 书级汇总报告（全书简化报告_日期.md）：各章指标横向表 + 合计 + 人工复查提示 */
+export function buildBookReportMd(
+  rows: BookReportRow[],
+  meta: { book: string; date: string; maxLen: number; instructions?: string; provider?: string },
+): string {
+  const done = rows.filter((r) => r.status === 'done');
+  const sum = (f: (r: BookReportRow) => number): number => done.reduce((n, r) => n + f(r), 0);
+  const cell = (r: BookReportRow, f: (x: BookReportRow) => number | string): string => (r.status === 'failed' ? '—' : String(f(r)));
+  const lines: string[] = [
+    `# 全书简化报告 · ${meta.book}`,
+    '',
+    `- 日期：${meta.date}｜简化标准：句长上限 ${meta.maxLen} 词/句｜完成 ${done.length}/${rows.length} 章`,
+  ];
+  if (meta.instructions) lines.push(`- 方向指令：${meta.instructions}`);
+  if (meta.provider) lines.push(`- AI 供应商：${meta.provider}`);
+  lines.push(
+    '',
+    '| 章 | 产物 | 段数 | 生词率 | 平均句长 | 最长句 | 被动 | 定从 | 过去完成 | 超长 | 规则残留 | 耗时 | 出tokens |',
+    '|---|---|---|---|---|---|---|---|---|---|---|---|---|',
+    ...rows.map((r) =>
+      `| ${r.chapter} | ${r.status === 'failed' ? '（失败）' : r.output} | ${cell(r, (x) => x.segCount)} | ${cell(r, (x) => x.oovRate)} | ${cell(r, (x) => x.avgLen)} | ${cell(r, (x) => x.maxLen)} | ${cell(r, (x) => x.passive)} | ${cell(r, (x) => x.relcl)} | ${cell(r, (x) => x.pastperf)} | ${cell(r, (x) => x.overlong)} | ${cell(r, (x) => x.ruleLeft)} | ${cell(r, (x) => `${(x.elapsedMs / 1000).toFixed(0)}s`)} | ${cell(r, (x) => x.outTokens)} |`,
+    ),
+    `| **合计** | | ${sum((r) => r.segCount)} | | | | ${sum((r) => r.passive)} | ${sum((r) => r.relcl)} | ${sum((r) => r.pastperf)} | ${sum((r) => r.overlong)} | ${sum((r) => r.ruleLeft)} | ${(sum((r) => r.elapsedMs) / 1000).toFixed(0)}s | ${sum((r) => r.outTokens)} |`,
+    '',
+  );
+  const attention = rows.filter((r) => r.status === 'failed' || (r.status === 'done' && (r.passive + r.relcl + r.pastperf + r.overlong > 0 || r.ruleLeft > 0)));
+  if (attention.length) {
+    lines.push('## 建议人工复查', '');
+    for (const r of attention) {
+      if (r.status === 'failed') lines.push(`- ${r.chapter}：简化失败（${r.error ?? '原因未知'}）——可单独打开该章用「📖 整章改写」处理`);
+      else {
+        const bits = [
+          r.passive ? `被动 ${r.passive}` : '', r.relcl ? `定从 ${r.relcl}` : '', r.pastperf ? `过去完成 ${r.pastperf}` : '',
+          r.overlong ? `超长 ${r.overlong}` : '', r.ruleLeft ? `替换规则残留 ${r.ruleLeft} 处` : '',
+        ].filter(Boolean);
+        lines.push(`- ${r.chapter}：${bits.join('、')}——打开产物做标记精修`);
+      }
+    }
+    lines.push('');
+  } else if (done.length) {
+    lines.push('全部章节黑名单清零、无规则残留 🎉 逐章打开产物做标记精修即可。', '');
+  }
+  lines.push('> 指标口径与单章体检一致（黑名单=被动/定从/过去完成一律禁用；超长=超过简化标准句长上限）。产物文件与本章报告在同一文件夹。');
+  return lines.join('\n');
+}
+
 /** 初步诊断：句法风险 → 对应的句标记类型（被/从/完归"语法太难"，超长归"句太长"） */
 export function pickSentMarkType(risk: { passive: boolean; relcl: boolean; pastperf: boolean; overlong: boolean }): 'syntax' | 'long' {
   return risk.passive || risk.relcl || risk.pastperf ? 'syntax' : 'long';
