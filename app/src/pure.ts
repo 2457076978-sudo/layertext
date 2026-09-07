@@ -213,6 +213,50 @@ export function buildDiagSummary(cfg: DiagConfigInput, appVersion: string, userA
   };
 }
 
+/** 估算 tokens（英文≈3.5字符/词符，中文≈1.6字）——压缩与请求前的成本预估共用同一口径 */
+export function estTokens(s: string): number {
+  const cjk = (s.match(/[\u4e00-\u9fff]/g) ?? []).length;
+  const rest = s.length - cjk;
+  return Math.round(cjk * 1.6 + rest / 3.5);
+}
+
+export interface ChatMsgLike {
+  role: string;
+  content: string;
+  tool_calls?: unknown;
+  tool_call_id?: string;
+}
+
+export interface CompactionPlan {
+  need: boolean;
+  /** 保留尾段的起始索引（need=true 时必为 user 消息：不拆散 assistant.tool_calls 与其 tool 结果） */
+  keptFrom: number;
+  /** 被压缩为摘要的前段条数 */
+  headCount: number;
+  estBefore: number;
+  estHead: number;
+  estTail: number;
+}
+
+export const COMPACT_DEFAULTS = { maxEst: 6000, maxMsgs: 40, keepUserTurns: 6, summaryEst: 300 } as const;
+
+/**
+ * 对话压缩计划（欠账#1：长对话越滚越贵越慢）。估算 tokens 超限或消息条数超限时，
+ * 把倒数第 keepUserTurns 轮 user 之前的旧消息摘要化。user 轮数不足时不压（没有安全切点）。
+ */
+export function planCompaction(msgs: ChatMsgLike[], opts?: Partial<typeof COMPACT_DEFAULTS>): CompactionPlan {
+  const o = { ...COMPACT_DEFAULTS, ...opts };
+  const estOf = (m: ChatMsgLike) => estTokens(m.content) + (m.tool_calls ? estTokens(JSON.stringify(m.tool_calls)) : 0);
+  const estBefore = msgs.reduce((n, m) => n + estOf(m), 0);
+  const userIdx: number[] = [];
+  msgs.forEach((m, i) => { if (m.role === 'user') userIdx.push(i); });
+  const cut = userIdx.length > o.keepUserTurns ? userIdx[userIdx.length - o.keepUserTurns] : -1;
+  const need = cut > 0 && (estBefore > o.maxEst || msgs.length > o.maxMsgs);
+  const headCount = need ? cut : 0;
+  const estHead = need ? msgs.slice(0, cut).reduce((n, m) => n + estOf(m), 0) : 0;
+  return { need, keptFrom: need ? cut : 0, headCount, estBefore, estHead, estTail: estBefore - estHead };
+}
+
 /** 初步诊断：句法风险 → 对应的句标记类型（被/从/完归"语法太难"，超长归"句太长"） */
 export function pickSentMarkType(risk: { passive: boolean; relcl: boolean; pastperf: boolean; overlong: boolean }): 'syntax' | 'long' {
   return risk.passive || risk.relcl || risk.pastperf ? 'syntax' : 'long';

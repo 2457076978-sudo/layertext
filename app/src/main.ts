@@ -11,7 +11,7 @@ import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
 import * as XLSX from 'xlsx';
 import { unzipSync, zipSync, strFromU8, strToU8 } from 'fflate';
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, WidthType } from 'docx';
-import { applyRewriteTo, buildDiagSummary, checkRevisedText, findOriginalFlex, mergeQuotaTexts, normalizeAndSplitChapters, parseAiJson, pickSentMarkType } from './pure.js';
+import { applyRewriteTo, buildDiagSummary, checkRevisedText, estTokens, findOriginalFlex, mergeQuotaTexts, normalizeAndSplitChapters, parseAiJson, pickSentMarkType, planCompaction } from './pure.js';
 import { S, setStatus as uiSetStatus, esc } from './state.js';
 import { AI_PROVIDERS, aiErrHuman, buildAssistantPrompt, buildDraftSystemPrompt, buildPlotPointsPrompt, buildRewriteSentencePrompt, buildSystemPrompt, callChat, chatStream, loadConfig, promptSetVersion, reloadPrompts, saveConfig, setAiUi, simplifyMaxLen } from './ai.js';
 import bundledWordlist from '../../assets/wordlists/curriculum_2022_level3_1600.txt?raw';
@@ -1369,12 +1369,7 @@ document.addEventListener('mousedown', (e) => {
 
 /** 组装 system 提示词（含用户的长期审校约定 + 书级改写规则） */
 /** 内置提示词模板：词库边界 + 句法黑名单 + 句长上限 + 方法论约束 */
-/** 估算 token（英文≈4字符/词符，中文≈1.6字） */
-function estTokens(s: string): number {
-  const cjk = (s.match(/[\u4e00-\u9fff]/g) ?? []).length;
-  const rest = s.length - cjk;
-  return Math.round(cjk * 1.6 + rest / 3.5);
-}
+/** 估算 token 的 estTokens 已抽至 pure.ts（对话压缩与请求预估共用口径） */
 
 /**
  * 请求 AI 修订候选。
@@ -2624,6 +2619,7 @@ async function sendChat(): Promise<void> {
     }
     statusEl.textContent = `就绪 ${usageTotal} · 对话 ${S.chatMsgs.filter((m) => m.role === 'user').length} 轮（已自动保存）`;
     scheduleChatSave();
+    void maybeCompactChat();
   } catch (e) {
     statusEl.textContent = '出错：' + e;
   } finally {
@@ -2637,6 +2633,34 @@ $('chat-clear').addEventListener('click', () => { S.chatMsgs = []; chatRender();
 $('chat-input').addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) void sendChat();
 });
+
+/* ---------- 对话历史自动压缩（欠账#1：长对话越滚越贵越慢；超限后旧轮摘要化，要点不丢） ---------- */
+
+async function maybeCompactChat(): Promise<void> {
+  const plan = planCompaction(S.chatMsgs);
+  if (!plan.need || S.chatBusy) return;
+  const snapLen = S.chatMsgs.length;
+  try {
+    const transcript = S.chatMsgs.slice(0, plan.keptFrom)
+      .filter((m) => m.role !== 'tool')
+      .map((m) => `${m.role === 'user' ? '教师' : 'AI'}：${m.content.slice(0, 500)}`)
+      .join('\n');
+    const { content } = await callChat([
+      { role: 'system', content: '你是审校对话记录压缩器。把下面的对话历史压缩成要点摘要，必须保留：教师的每个核心要求、已经做过的修改（哪句改成了什么）、教师否决过什么、关键结论与未完成事项。用中文列点，300 字以内，不要寒暄。' },
+      { role: 'user', content: transcript },
+    ], 700, undefined, '对话压缩');
+    if (S.chatBusy || S.chatMsgs.length !== snapLen) return; // 压缩期间教师又发话，放弃本次（下次再压）
+    const userTurns = S.chatMsgs.slice(0, plan.keptFrom).filter((m) => m.role === 'user').length;
+    S.chatMsgs = [
+      { role: 'user', content: `（系统提示：此前 ${userTurns} 轮对话较长，已自动压缩为以下摘要，请基于摘要继续回答：\n${content.trim()}）` },
+      ...S.chatMsgs.slice(plan.keptFrom),
+    ];
+    chatRender();
+    scheduleChatSave();
+    const estAfter = plan.estTail + estTokens(content) + 80;
+    setStatus(`✓ 对话历史已自动压缩：约 ${plan.estBefore} → ${estAfter} tokens（旧轮要点保留在摘要里，不影响回答质量）`, 'saved');
+  } catch { /* 压缩失败不影响使用，留待下次 */ }
+}
 
 /* 侧栏双页切换 */
 function switchSide(name: 'review' | 'ai'): void {

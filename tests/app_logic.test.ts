@@ -156,3 +156,71 @@ test('checkRevisedText：多句改写逐句复核（拆句后不再误报超长�
   const r2 = checkRevisedText('He ran. The car was driven away.', 20, fakeRisk);
   assert.equal(r2.passive, true);
 });
+
+/* ---------- 对话压缩（欠账#1） ---------- */
+
+import { COMPACT_DEFAULTS, estTokens, planCompaction, type ChatMsgLike } from '../app/src/pure.js';
+
+function mkMsgs(n: number, filler = 'word '): ChatMsgLike[] {
+  const out: ChatMsgLike[] = [];
+  for (let i = 0; i < n; i++) out.push({ role: i % 2 === 0 ? 'user' : 'assistant', content: (filler).repeat(80) + i });
+  return out;
+}
+
+test('estTokens：英文约 3.5 字符/词符，中文按 1.6 字计', () => {
+  assert.equal(estTokens('abcd'.repeat(10)), Math.round(40 / 3.5));
+  assert.equal(estTokens('中文中文'), Math.round(4 * 1.6));
+});
+
+test('planCompaction：低于阈值不压缩', () => {
+  const plan = planCompaction(mkMsgs(10));
+  assert.equal(plan.need, false);
+});
+
+test('planCompaction：估算 tokens 超限且 user 轮数足够 → 压缩，切点落在 user 消息上', () => {
+  const msgs = mkMsgs(20, 'a very long filler sentence here '); // 30 chars × 80 ≈ 2400 est/条 × 20 ≈ 48000
+  const plan = planCompaction(msgs);
+  assert.equal(plan.need, true);
+  assert.equal(msgs[plan.keptFrom].role, 'user', '尾段必须从 user 消息开始');
+  assert.equal(plan.headCount, plan.keptFrom);
+  assert.ok(plan.estBefore > COMPACT_DEFAULTS.maxEst);
+  assert.ok(plan.estTail < plan.estBefore);
+  // 压缩后总量（摘要估算 + 尾段）显著小于压缩前
+  assert.ok(plan.estTail + COMPACT_DEFAULTS.summaryEst < plan.estBefore);
+});
+
+test('planCompaction：消息条数超限同样触发', () => {
+  const msgs = mkMsgs(50, 'hi ');
+  const plan = planCompaction(msgs);
+  assert.equal(plan.need, true);
+  assert.ok(plan.keptFrom > 0);
+});
+
+test('planCompaction：user 轮数不足（无安全切点）不压缩', () => {
+  const msgs: ChatMsgLike[] = [
+    { role: 'user', content: 'x'.repeat(99999) },
+    { role: 'assistant', content: 'y'.repeat(99999), tool_calls: [{ id: 't1', function: { name: 'get_sentence', arguments: '{}' } }] },
+    { role: 'tool', tool_call_id: 't1', content: 'z'.repeat(99999) },
+    { role: 'assistant', content: 'w'.repeat(99999) },
+  ];
+  const plan = planCompaction(msgs);
+  assert.equal(plan.need, false, '只有 1 轮 user，没有可保留下来的尾段切点');
+});
+
+test('planCompaction：assistant.tool_calls 与其 tool 结果不被拆开（都留在同侧）', () => {
+  const msgs = mkMsgs(20, 'a very long filler sentence here ');
+  // 在尾段中部放一对 assistant(tool_calls) + tool 消息
+  msgs.push(
+    { role: 'assistant', content: '让我查一下', tool_calls: [{ id: 't9', function: { name: 'search_text', arguments: '{"query":"windmill"}' } }] },
+    { role: 'tool', tool_call_id: 't9', content: 'P02-S03｜The windmill stood.' },
+    { role: 'assistant', content: '查到了…' },
+  );
+  const plan = planCompaction(msgs);
+  assert.equal(plan.need, true);
+  const tail = msgs.slice(plan.keptFrom);
+  const hasCall = tail.some((m) => m.tool_calls && (m.tool_calls as unknown[]).length);
+  if (hasCall) {
+    // 尾段出现 tool_calls 时，对应的 tool 结果必须也在尾段（DeepSeek 要求成对回传）
+    assert.ok(tail.some((m) => m.role === 'tool'), 'tool_calls 与 tool 结果未被拆散');
+  }
+});
