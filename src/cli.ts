@@ -8,6 +8,8 @@
  * 选项：
  *   --tier A|B|M        层级（默认 M）
  *   --vocab <csv>       自定义词库 CSV，可多次（教材已学词等）
+ *   --reinforce <file>  已学词集/复现队列（txt 一行一词或 CSV 首列），可多次：
+ *                       ①队列词不再计 OOV ②报告新增⑩复现命中指标（队列/命中/词次）
  *   --wordlist <txt>    纯文本词表，可多次（省略则用内置课标 1600 词表）
  *   --terms <txt>       术语表（一行一词，# 注释）
  *   --proper <txt>      专名表（一行一词）
@@ -21,7 +23,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { buildLexicon } from './core/lexicon.js';
+import { buildLexicon, parseReinforceText } from './core/lexicon.js';
 import { runQc, toLegacyReport, type Tier } from './core/qc.js';
 
 const BUNDLED_WORDLIST = 'assets/wordlists/curriculum_2022_level3_1600.txt';
@@ -82,7 +84,7 @@ function readWordFile(p: string): string[] {
 function main(): void {
   const argv = process.argv.slice(2);
   if (argv[0] !== 'qc' || !argv[1] || argv[1].startsWith('--')) {
-    console.error('用法: node dist/src/cli.js qc <候选md> [--tier A|B|M] [--vocab x.csv]... [--wordlist x.txt]... [--terms x.txt] [--proper x.txt] [--anchor "短语"]... [--tag t] [--out file]');
+    console.error('用法: node dist/src/cli.js qc <候选md> [--tier A|B|M] [--vocab x.csv]... [--reinforce 已学词.txt]... [--wordlist x.txt]... [--terms x.txt] [--proper x.txt] [--anchor "短语"]... [--tag t] [--out file]');
     process.exit(2);
   }
   const path = argv[1];
@@ -111,6 +113,7 @@ function main(): void {
   }
   const terms = opts.terms ? opts.terms.flatMap(readWordFile) : [];
   const proper = opts.proper ? opts.proper.flatMap(readWordFile) : [];
+  const reinforce = (opts.reinforce ?? []).flatMap((p) => parseReinforceText(readFileSync(p, 'utf-8')));
 
   const md = readFileSync(path, 'utf-8');
   const lex = buildLexicon({
@@ -126,6 +129,7 @@ function main(): void {
     anchors: opts.anchor ?? [],
     propCheckList: proper.length ? proper.concat([]) : [],
     fileName: basename(path),
+    ...(reinforce.length ? { reinforceWords: reinforce } : {}),
   });
   const report = toLegacyReport(result);
 

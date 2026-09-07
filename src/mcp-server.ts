@@ -76,9 +76,12 @@ async function main(): Promise<void> {
 
   server.registerTool('layer_qc', {
     title: 'LayerText 全文体检',
-    description: '对一段英文文本做全面质检：词表覆盖率/生词率/句长/被动/定语从句/过去完成/OOV 生词清单。适合教师在简化前评估原文难度、简化后验收。',
-    inputSchema: z.object({ text: z.string().describe('英文文本（任意格式；按空行分段自动处理）') }),
-  }, async ({ text }) => ({ content: [{ type: 'text', text: JSON.stringify(toolQcText(text, lex), null, 1) }] }));
+    description: '对一段英文文本做全面质检：词表覆盖率/生词率/句长/被动/定语从句/过去完成/OOV 生词清单。适合教师在简化前评估原文难度、简化后验收。可传已学词集（复现队列）：队列词不再计 OOV，并输出⑩复现命中指标。',
+    inputSchema: z.object({
+      text: z.string().describe('英文文本（任意格式；按空行分段自动处理）'),
+      reinforce: z.array(z.string()).optional().describe('已学词集/复现队列（词形家族按词种计命中）'),
+    }),
+  }, async ({ text, reinforce }) => ({ content: [{ type: 'text', text: JSON.stringify(toolQcText(text, lex, 50, reinforce), null, 1) }] }));
 
   server.registerTool('layer_word_status', {
     title: 'LayerText 单词词表状态',

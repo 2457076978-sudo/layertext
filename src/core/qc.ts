@@ -28,6 +28,8 @@ export interface QcOptions {
   propCheckList?: string[];
   /** 免检专名（不出词句卡也不报错） */
   propExempt?: string[];
+  /** 已学词集（复现队列，feature/reinforce）：①不再计 OOV ②单独统计复现命中 */
+  reinforceWords?: string[];
   fileName?: string;
 }
 
@@ -52,6 +54,11 @@ export interface QcResult {
   pendingHits: number;     // ⑨ 待定词 token 命中（保守口径风险）
   oov: string[];           // OOV 词（未去重）
   gates: { passiveOk: boolean; relclOk: boolean }; // A 层解禁门
+  // ---- ⑩ 复现指标（feature/reinforce；仅当 reinforceWords 提供时存在，保证旧报告 schema 不变） ----
+  reinforceQueue?: number;     // 队列词数
+  reinforceHits?: number;      // 命中队列的词种数
+  reinforceTokens?: number;    // 命中 token 总次数（重复强度）
+  reinforceHitList?: string[]; // 命中词清单
 }
 
 function count(re: RegExp, t: string): number {
@@ -125,9 +132,11 @@ export function runQc(md: string, lex: Lexicon, opts: QcOptions): QcResult {
     count(/\b(?:[Nn]ever|[Hh]ardly|[Ss]carcely|[Ss]eldom|[Nn]o sooner)\s+had\s+\w+\s+\w+(?:ed|en)\b/g, txtNarr);
   const passive = passiveBase + count(/,\s*\w+ed\s+by\s/g, txtNarr);
 
-  // ---- 词句卡首列词条并入已知（注释后口径） ----
+  // ---- 词句卡首列词条并入已知（注释后口径）；已学词集（复现队列）同样并入 ----
   const gloss = cardGlossWords(card);
-  const known = new Set([...lex.known, ...IRR, ...gloss]);
+  const reinforceList = [...new Set((opts.reinforceWords ?? []).map((w) => w.trim().toLowerCase()).filter(Boolean))];
+  const hasReinforce = opts.reinforceWords !== undefined;
+  const known = new Set([...lex.known, ...IRR, ...gloss, ...reinforceList]);
 
   // ---- 覆盖率 / 生词率 / 待定词风险 ----
   const txt = allSents.join(' ');
@@ -136,6 +145,16 @@ export function runQc(md: string, lex: Lexicon, opts: QcOptions): QcResult {
   const coverage = toks.length ? 1 - oov.length / toks.length : 1;
   const newWordRate = new Set(toks).size ? new Set(oov).size / new Set(toks).size : 0;
   const pendingHits = toks.reduce((n, t) => (pendHit(t, lex.pending) ? n + 1 : n), 0);
+
+  // ---- ⑩ 复现词命中（队列词的词形家族计一次命中；token 次数计重复强度） ----
+  let reinforceHits = 0;
+  let reinforceTokens = 0;
+  const reinforceHitList: string[] = [];
+  for (const w of reinforceList) {
+    const single = new Set([w]);
+    const n = toks.reduce((acc, t) => acc + (hit(t, single) ? 1 : 0), 0);
+    if (n > 0) { reinforceHits++; reinforceTokens += n; reinforceHitList.push(w); }
+  }
 
   // ---- ⑧ 专名一致性（正文专名 ⊆ 词句卡，免检名单除外） ----
   const cardText = card;
@@ -168,6 +187,9 @@ export function runQc(md: string, lex: Lexicon, opts: QcOptions): QcResult {
       passiveOk: opts.tier !== 'A' || chno === null || chno >= (opts.tierGates?.passiveFromCh ?? 5),
       relclOk: opts.tier !== 'A' || chno === null || chno >= (opts.tierGates?.relclFromCh ?? 8),
     },
+    ...(hasReinforce
+      ? { reinforceQueue: reinforceList.length, reinforceHits, reinforceTokens, reinforceHitList }
+      : {}),
   };
 }
 
@@ -193,5 +215,11 @@ export function toLegacyReport(r: QcResult): Record<string, unknown> {
     that从句待人工复核: r.thatCheck,
     '⑨待定词token命中(保守口径风险)': r.pendingHits,
     'OOV词(去重)': [...new Set(r.oov)].sort(),
+    ...(r.reinforceQueue !== undefined
+      ? {
+          '⑩复现词命中(队列/命中/词次)': `${r.reinforceQueue}/${r.reinforceHits}/${r.reinforceTokens}`,
+          复现命中词: r.reinforceHitList ?? [],
+        }
+      : {}),
   };
 }

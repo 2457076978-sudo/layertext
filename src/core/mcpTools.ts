@@ -40,10 +40,10 @@ export function buildMcpLexicon(opts: McqLexiconOptions, bundledWordlists: strin
   });
 }
 
-/** 工具1 layer_qc：全文体检（生词率/覆盖率/句长/被动/定从/过去完成/OOV清单） */
-export function toolQcText(text: string, lex: Lexicon, oovLimit = 50): Record<string, unknown> {
+/** 工具1 layer_qc：全文体检（生词率/覆盖率/句长/被动/定从/过去完成/OOV清单）；reinforce=已学词集（⑩复现指标） */
+export function toolQcText(text: string, lex: Lexicon, oovLimit = 50, reinforceWords?: string[]): Record<string, unknown> {
   const md = /[P]\d+\]/.test(text) ? `# qc\n\n## Chapter One\n\n${text}` : wrapAsChapter(text);
-  const r = runQc(md, lex, { tier: 'M', fileName: 'mcp' });
+  const r = runQc(md, lex, { tier: 'M', fileName: 'mcp', ...(reinforceWords ? { reinforceWords } : {}) });
   const known = new Set([...lex.known, ...IRR]);
   const oovDetail = [...new Set(r.oov)].slice(0, oovLimit).map((w) => ({
     word: w,

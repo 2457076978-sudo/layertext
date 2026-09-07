@@ -101,3 +101,28 @@ export function lexiconFromWords(knownWords: string[], pendingWords: string[] = 
     pending: new Set(pendingWords.map((w) => w.toLowerCase())),
   };
 }
+
+/**
+ * 已学词（复现队列）装载：宽容格式解析（feature/reinforce）
+ * 支持三种行格式，逐行独立判断：
+ *   - 纯文本一行一词（# 注释行跳过）
+ *   - 「1. word」编号格式
+ *   - CSV/TSV 首列（自动剥表头「词 / word」）
+ * 多词短语（含空格，如 bring about）整词保留；统一小写去重。
+ */
+export function parseReinforceText(text: string): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (let line of text.replace(/^\uFEFF/, '').split('\n')) {
+    line = line.trim();
+    if (!line || line.startsWith('#')) continue;
+    if (line.includes(',')) line = line.split(',')[0].trim();
+    if (line.includes('\t')) line = line.split('\t')[0].trim();
+    line = line.replace(/^\d+[.、)]\s*/, '');
+    if (!line || line === '词' || line.toLowerCase() === 'word' || line.toLowerCase() === 'words') continue;
+    if (!/^[A-Za-z][A-Za-z'\- ]*$/.test(line)) continue;
+    const w = line.toLowerCase();
+    if (!seen.has(w)) { seen.add(w); out.push(w); }
+  }
+  return out;
+}
