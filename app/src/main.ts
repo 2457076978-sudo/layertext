@@ -692,7 +692,14 @@ function renderReportPane(s: FileSession): void {
     return;
   }
   const legacy = toLegacyReport(s.report) as Record<string, unknown>;
-  const rows = Object.entries(legacy).filter(([k]) => k !== 'OOV词(去重)');
+  // 显示层口径（引擎 legacy 字段不动，只改呈现）："层级/章号"是引擎内部字段不再展示；
+  // 指标名里的旧口径字样与硬编码 20 词按当前简化标准改写（O3 补漏）
+  const rows = Object.entries(legacy).filter(
+    ([k, v]) => k !== 'OOV词(去重)' && k !== '层级' && !(k === '章号' && (v === null || String(v) === 'null')),
+  );
+  const labelMap: Record<string, string> = {
+    '①词表覆盖率(注释后口径=含A层术语)': '①词表覆盖率',
+  };
   const oov = [...new Set(s.report.oov)];
   const gatesNote = `句法黑名单（被动/定从/过去完成）一律禁用；句长参考 = 简化标准 ${simplifyMaxLen()} 词/句`;
   const risks = riskSentenceList(s);
@@ -721,7 +728,7 @@ function renderReportPane(s: FileSession): void {
   pane.innerHTML = `
     ${s.reportSavedPath ? `<div class="saved-path">报告已自动保存：${esc(s.reportSavedPath)} <button id="btn-reveal">在访达中显示</button></div>` : ''}
     <table class="report">
-      ${rows.map(([k, v]) => `<tr><th>${esc(k)}</th><td>${Array.isArray(v) ? v.length + ' 个' : esc(String(v))}</td></tr>`).join('')}
+      ${rows.map(([k, v]) => `<tr><th>${esc(labelMap[k] ?? k)}</th><td>${Array.isArray(v) ? v.length + ' 个' : esc(String(v))}</td></tr>`).join('')}
       <tr><th>句法黑名单</th><td>${gatesNote}</td></tr>
     </table>
 
@@ -729,7 +736,7 @@ function renderReportPane(s: FileSession): void {
     ${oov.length ? `<table class="sgtable"><tr><th style="width:90px">词</th><th>处理（你说了算）</th></tr>${oovRows}</table>
     ${oov.length > 80 ? `<div class="dim" style="margin-bottom:10px">（只列前 80 词，处理或换词库后点「▶ 重新质检」看剩余）</div>` : ''}` : '<div class="dim" style="margin-bottom:10px">没有词表外生词 🎉</div>'}
 
-    <div class="diag-h">② 句法难句（${risks.length} 句：被=被动 从=定从 完=过去完成 长=超20词）<span class="dim">——勾"要改"的进标记清单，可批量交给 AI</span></div>
+    <div class="diag-h">② 句法难句（${risks.length} 句：被=被动 从=定从 完=过去完成 长=超20词·引擎口径）<span class="dim">——勾"要改"的进标记清单，可批量交给 AI</span></div>
     ${risks.length ? `<table class="sgtable"><tr><th style="width:110px">风险</th><th>句子</th><th style="width:110px">处理</th></tr>${riskRows}</table>
     ${risks.length > 40 ? `<div class="dim" style="margin-bottom:10px">（只列前 40 句）</div>` : ''}` : '<div class="dim" style="margin-bottom:10px">没有命中黑名单的难句 🎉</div>'}
 

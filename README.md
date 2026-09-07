@@ -68,6 +68,14 @@ npm run tauri build --target universal-apple-darwin
    还能让 AI 摘情节要点；再切 **「正文」** 页看三态高亮：词表外（红点）/待定词（橙点）/术语（蓝点），
    风险句淡红底并带「被/从/完/长」角标，点词/拖选句子即可标记。
 
+![正文审校](docs/screenshots/正文审校.jpg)
+
+![初步诊断台](docs/screenshots/初步诊断台.png)
+
+![全书批处理](docs/screenshots/全书批处理.png)
+
+> 截图使用内置 CC0 示例《龟兔赛跑》拍摄，不含任何真实学生数据。
+
 报告自动落盘：文件模式存到源文件同目录，示例模式存到 `文稿/LayerText质检报告/`。
 
 ## 命令行（CLI）
