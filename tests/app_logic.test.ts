@@ -269,3 +269,53 @@ test('buildBookReportMd：全部达标时不出现复查段，给 🎉 判读', 
   assert.ok(!md.includes('## 建议人工复查'));
   assert.ok(md.includes('🎉'));
 });
+
+/* ---------- O4：自 main.ts 抽出的纯函数 ---------- */
+
+import { chnoFromPath, csvCell, locateOriginal, remapMarks } from '../app/src/pure.js';
+import type { Mark } from '../app/src/types.js';
+
+test('chnoFromPath：第X章路径识别（一~十），无章号返回 null', () => {
+  assert.equal(chnoFromPath('/book/第一章.md'), 1);
+  assert.equal(chnoFromPath('/book/第十章.md'), 10);
+  assert.equal(chnoFromPath('/book/preface.md'), null);
+});
+
+test('csvCell：含逗号/引号/换行的单元格加引号转义，普通文本原样', () => {
+  assert.equal(csvCell('plain'), 'plain');
+  assert.equal(csvCell('a,b'), '"a,b"');
+  assert.equal(csvCell('say "hi"'), '"say ""hi"""');
+  assert.equal(csvCell('line1\nline2'), '"line1\nline2"');
+});
+
+test('locateOriginal：句文本唯一定位；重复句与未命中返回 null', () => {
+  const md = '# t\n\n## Chapter One\n\n[P01] The hare laughed. The hare laughed. The tortoise walked.\n';
+  assert.deepEqual(locateOriginal(md, 'The tortoise walked.'), { pi: 0, si: 2 });
+  assert.equal(locateOriginal(md, 'The hare laughed.'), null, '重复句无法唯一定位');
+  assert.equal(locateOriginal(md, 'Nothing.'), null);
+});
+
+test('remapMarks：替换句子后标记按句前缀重新对齐，词索引 wi 同步更新', () => {
+  const before = '# t\n\n## Chapter One\n\n[P01] The hare laughed loudly.\n\n[P02] A dog ran.\n';
+  const after = '# t\n\n## Chapter One\n\n[P01] The hare laughed loudly.\n\n[P02] A cat ran very fast.\n';
+  const marks: Mark[] = [
+    { id: 'm1', level: 'sent', pi: 1, si: 0, text: 'A dog ran', type: 'syntax', ts: 1 },
+    { id: 'm2', level: 'word', pi: 1, si: 0, wi: 1, word: 'dog', text: 'A dog ran', type: 'simpl', ts: 2 },
+  ];
+  remapMarks(marks, after);
+  // P02 句子被替换但句首前缀仍是 "A "…前缀取 text 前 12 字符 "A dog ran"——句子已改成 "A cat ran very fast."，前缀不匹配 → 全文唯一前缀搜索也无命中 → 保持原索引（待复核）
+  assert.equal(marks[0].pi, 1);
+  assert.equal(marks[1].pi, 1);
+
+  // 场景二：句首未变（拆句/前文插入导致索引位移）→ 前缀唯一命中新位置
+  const before2 = '# t\n\n## Chapter One\n\n[P01] Hello world.\n\n[P02] A dog ran.\n';
+  const after2 = '# t\n\n## Chapter One\n\n[P01] Hello world.\n\n[P02] New opening line.\n\n[P03] A dog ran.\n';
+  const marks2: Mark[] = [
+    { id: 'm3', level: 'sent', pi: 1, si: 0, text: 'A dog ran.', type: 'syntax', ts: 3 },
+    { id: 'm4', level: 'word', pi: 1, si: 0, wi: 1, word: 'dog', text: 'A dog ran.', type: 'simpl', ts: 4 },
+  ];
+  remapMarks(marks2, after2);
+  assert.equal(marks2[0].pi, 2, '句级标记跟到新段 P03');
+  assert.equal(marks2[1].pi, 2);
+  assert.equal(marks2[1].wi, 1, '词索引随句对齐');
+});

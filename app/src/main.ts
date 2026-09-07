@@ -11,7 +11,8 @@ import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
 import * as XLSX from 'xlsx';
 import { unzipSync, zipSync, strFromU8, strToU8 } from 'fflate';
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, WidthType } from 'docx';
-import { applyRewriteTo, buildBookReportMd, buildDiagSummary, checkRevisedText, estTokens, findOriginalFlex, mergeQuotaTexts, normalizeAndSplitChapters, parseAiJson, pickSentMarkType, planBatchChapters, planCompaction, type BatchChapterItem, type BatchProgressFile, type BookReportRow } from './pure.js';
+import { applyRewriteTo, buildBookReportMd, buildDiagSummary, checkRevisedText, chnoFromPath, csvCell, estTokens, findOriginalFlex, locateOriginal, mergeQuotaTexts, normalizeAndSplitChapters, parseAiJson, pickSentMarkType, planBatchChapters, planCompaction, remapMarks, type BatchChapterItem, type BatchProgressFile, type BookReportRow } from './pure.js';
+import { renderDiffPane, renderModePill, switchView as switchViewDom, type ViewName } from './widgets.js';
 import { S, setStatus as uiSetStatus, esc } from './state.js';
 import { AI_PROVIDERS, aiErrHuman, buildAssistantPrompt, buildDraftSystemPrompt, buildPlotPointsPrompt, buildRewriteSentencePrompt, buildSystemPrompt, callChat, chatStream, loadConfig, promptSetVersion, reloadPrompts, saveConfig, setAiUi, simplifyMaxLen } from './ai.js';
 import bundledWordlist from '../../assets/wordlists/curriculum_2022_level3_1600.txt?raw';
@@ -58,12 +59,7 @@ function buildLexiconNow(): Lexicon {
   });
 }
 
-/** 章号：从路径识别（第一章→1），与 CLI/原型一致 */
-const CH_MAP: Record<string, number> = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10 };
-function chnoFromPath(p: string): number | null {
-  for (const [k, v] of Object.entries(CH_MAP)) if (p.includes(`第${k}章`)) return v;
-  return null;
-}
+/** 章号识别 chnoFromPath / CSV 转义 csvCell / 唯一定位 locateOriginal / 标记重排 remapMarks 已抽至 pure.ts（O4） */
 
 /* ---------- 词表导入：宽容格式 ---------- */
 
@@ -838,14 +834,10 @@ async function aiPlotPoints(s: FileSession): Promise<void> {
   }
 }
 
-/* ---------- 视图切换 ---------- */
+/* ---------- 视图切换（实现在 widgets.ts，可 DOM 级测试） ---------- */
 
-function switchView(name: 'text' | 'report' | 'suggest' | 'diff' | 'retro'): void {
-  const map = [['tab-text', 'pane-text'], ['tab-report', 'pane-report'], ['tab-suggest', 'pane-suggest'], ['tab-diff', 'pane-diff'], ['tab-retro', 'pane-retro']] as const;
-  for (const [id, pane] of map) {
-    $(id).classList.toggle('active', id === `tab-${name}`);
-    $(pane).classList.toggle('active', pane === `pane-${name}`);
-  }
+function switchView(name: ViewName): void {
+  switchViewDom(document, name);
 }
 
 /* ---------- 复盘（W2 数据闭环）：读 AI建议台账 → 采纳率聚合 ---------- */
@@ -1511,10 +1503,6 @@ const RULE_BY_TYPE: Record<string, string> = {
   simpl: 'R02', zh: 'R02', oov: 'R02', hard: 'R02', factw: 'R00', others: 'R00', otherw: 'R00', fact: 'R00', goods: 'R11',
 };
 
-function csvCell(v: string): string {
-  return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
-}
-
 /** 读旧追加一行 CSV（无文件则连表头新建；台账与变更日志共用） */
 async function appendCsvLine(path: string, header: readonly string[], line: string): Promise<void> {
   let csv = '';
@@ -1568,16 +1556,9 @@ async function applySuggestions(): Promise<void> {
 
 /* ---------- 行内修订对照（左栏所见即所得） ---------- */
 
-/** 在正文中唯一定位原句；多处或未找到返回 null */
-function locateOriginal(session: FileSession, original: string): { pi: number; si: number } | null {
-  const paras = extractParas(splitChapter(session.md).body);
-  const hits: { pi: number; si: number }[] = [];
-  paras.forEach((p, pi) =>
-    sentsOf(p, false).forEach((sent, si) => {
-      if (sent === original) hits.push({ pi, si });
-    }),
-  );
-  return hits.length === 1 ? hits[0] : null;
+/** 在正文中唯一定位原句（实现已抽至 pure.ts locateOriginal，此处按会话包装） */
+function locateSent(session: FileSession, original: string): { pi: number; si: number } | null {
+  return locateOriginal(session.md, original);
 }
 
 /** 为 pending 建议挂行内（不唯一匹配的只进修订建议表） */
@@ -1588,7 +1569,7 @@ function attachInlineSuggestions(): void {
     if (g.status && g.status !== 'pending') continue;
     g.status = 'pending';
     if (g.pi === undefined) {
-      const loc = locateOriginal(s, g.original);
+      const loc = locateSent(s, g.original);
       if (!loc) continue;
       g.pi = loc.pi;
       g.si = loc.si;
@@ -1652,33 +1633,7 @@ function workPath(s: FileSession): string {
   return ''; // 示例模式由调用方处理
 }
 
-/** 文本变化后，按句子前缀把现有标记重新对齐（防替换/拆句后错位） */
-function remapMarks(session: FileSession): void {
-  const paras = extractParas(splitChapter(session.md).body);
-  const sents = paras.map((p) => sentsOf(p, false));
-  for (const m of session.review.marks) {
-    const prefix = (m.text ?? '').slice(0, 12);
-    if (!prefix) continue; // 旧数据无句前缀，保留原索引
-    const cur = sents[m.pi]?.[m.si];
-    let ok = cur && cur.startsWith(prefix);
-    if (!ok) {
-      const hits: [number, number][] = [];
-      sents.forEach((ss, pi) => ss.forEach((sent, si) => { if (sent.startsWith(prefix)) hits.push([pi, si]); }));
-      if (hits.length === 1) {
-        m.pi = hits[0][0];
-        m.si = hits[0][1];
-        ok = true;
-      }
-    }
-    if (ok && m.level === 'word' && m.word) {
-      const sent = sents[m.pi]?.[m.si] ?? '';
-      const toks = tokenizeTxt(sent);
-      const raws = sent.match(/[A-Za-z][A-Za-z'\-]*/g) ?? [];
-      const wi = raws.findIndex((w, i) => (toks[i] ?? w.toLowerCase()) === m.word!.toLowerCase());
-      if (wi >= 0) m.wi = wi;
-    }
-  }
-}
+/* 标记重排 remapMarks(marks, md) 已抽至 pure.ts（O4，行为不变） */
 
 async function acceptSuggestion(g: Suggestion, opts: { scene?: string; outcome?: '采纳' | '直改' } = {}): Promise<void> {
   const scene = opts.scene ?? '行内';
@@ -1688,7 +1643,7 @@ async function acceptSuggestion(g: Suggestion, opts: { scene?: string; outcome?:
   const paras = extractParas(splitChapter(s.md).body);
   const cur = sentsOf(paras[g.pi] ?? '', false)[g.si];
   if (cur !== g.original) {
-    const loc = locateOriginal(s, g.original);
+    const loc = locateSent(s, g.original);
     if (!loc) { setStatus('原句已变化且无法唯一定位，请重新请求建议', 'err'); return; }
     g.pi = loc.pi; g.si = loc.si;
   }
@@ -1703,7 +1658,7 @@ async function acceptSuggestion(g: Suggestion, opts: { scene?: string; outcome?:
   // 标记对齐 + 对应标记清除 + 落盘
   const removed = s.review.marks.filter((m) => m.id === g.markId);
   s.review.marks = s.review.marks.filter((m) => m.id !== g.markId);
-  remapMarks(s);
+  remapMarks(s.review.marks, s.md);
   g.status = 'accepted';
   S.suggestions = S.suggestions.filter((x) => x !== g);
 
@@ -2144,13 +2099,7 @@ document.addEventListener('mousedown', (e) => {
 
 /* ---------- 修改模式胶囊：一眼可见、一键切换（即改=立即生效 / 候选=点✓生效） ---------- */
 function updateModePill(): void {
-  const pill = $('mode-pill');
-  const on = S.appConfig.autoRewriteOnMark === true;
-  pill.className = 'mode-pill ' + (on ? 'green' : 'yellow');
-  pill.innerHTML = on ? '⚡ 即改模式：标记即生效' : '👁 候选模式：等你点 ✓';
-  pill.title = on
-    ? '当前：点了标记/建议，AI 改完立即生效（写原稿+日志）。点击切到候选模式'
-    : '当前：AI 只出建议（黄色框），你逐条点 ✓ 才生效。点击切到即改模式';
+  renderModePill($('mode-pill'), S.appConfig.autoRewriteOnMark === true);
 }
 $('mode-pill').addEventListener('click', async () => {
   S.appConfig.autoRewriteOnMark = !(S.appConfig.autoRewriteOnMark === true);
@@ -2329,43 +2278,10 @@ async function exportTts(): Promise<void> {
   }
 }
 
-/* ---------- 版本对比 ---------- */
+/* ---------- 版本对比（渲染实现已抽至 widgets.ts renderDiffPane，可 DOM 级测试） ---------- */
 
 function renderDiff(lIdx: number, rIdx: number): void {
-  const pane = $('pane-diff');
-  const L = S.sessions[lIdx];
-  const R = S.sessions[rIdx];
-  if (!L || !R) { pane.innerHTML = '<div class="empty">先打开两个版本文件（如原文与简化版）</div>'; return; }
-  const lp = extractParas(splitChapter(L.md).body);
-  const rp = extractParas(splitChapter(R.md).body);
-  const n = Math.max(lp.length, rp.length);
-  let rows = '';
-  let same = 0;
-  for (let i = 0; i < n; i++) {
-    const a = (lp[i] ?? '').replace(/\s+/g, ' ').trim();
-    const b = (rp[i] ?? '').replace(/\s+/g, ' ').trim();
-    const eq = a === b;
-    if (eq) same++;
-    rows += `<tr>
-      <td class="diff-pid">P${String(i + 1).padStart(2, '0')}</td>
-      <td class="${eq ? '' : 'diff-del'}">${esc(a) || '<i style="color:var(--muted)">（无此段）</i>'}</td>
-      <td class="${eq ? '' : 'diff-add'}">${esc(b) || '<i style="color:var(--muted)">（无此段）</i>'}</td>
-    </tr>`;
-  }
-  pane.innerHTML = `
-    <div class="sg-actions">
-      <b>版本对比</b>
-      <select id="diff-l">${S.sessions.map((x, i) => `<option value="${i}" ${i === lIdx ? 'selected' : ''}>${esc(x.fileName)}</option>`).join('')}</select>
-      <span>↔</span>
-      <select id="diff-r">${S.sessions.map((x, i) => `<option value="${i}" ${i === rIdx ? 'selected' : ''}>${esc(x.fileName)}</option>`).join('')}</select>
-      <span style="color:var(--muted);font-size:12px">段落一致 ${same}/${n}（红=仅左侧版本，绿=仅右侧版本/已修改）</span>
-    </div>
-    <table class="sgtable">
-      <tr><th>段</th><th style="width:44%">${esc(L.fileName)}</th><th style="width:44%">${esc(R.fileName)}</th></tr>
-      ${rows}
-    </table>`;
-  $('diff-l').addEventListener('change', () => renderDiff(Number(($('diff-l') as HTMLSelectElement).value), rIdx));
-  $('diff-r').addEventListener('change', () => renderDiff(lIdx, Number(($('diff-r') as HTMLSelectElement).value)));
+  renderDiffPane($('pane-diff'), S.sessions, lIdx, rIdx, (l, r) => renderDiff(l, r));
 }
 
 /* ---------- 新手导览（coach marks） ---------- */
@@ -2759,7 +2675,7 @@ async function executeTool(name: string, argsJson: string): Promise<string> {
         if (!flex) return '错误：original 与正文不匹配——先用 search_text / get_sentence 取原句逐字复制（句末标点要带上）';
         original = flex.exact; // 以正文原文为准：容忍 AI 多打/漏打空格（欠账#2）
         const risk = checkRev(revised);
-        const loc = locateOriginal(s, original);
+        const loc = locateSent(s, original);
         const g: Suggestion = {
           markId: String(args.markId ?? 'edit-' + Date.now().toString(36)), type: '直接编辑',
           original, revised, basis, status: 'pending',

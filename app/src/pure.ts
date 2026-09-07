@@ -1,7 +1,63 @@
 /**
  * 纯逻辑模块（无 DOM / Tauri 依赖，可单测）
- * AI 返回解析容错 · 书级替换 · 章节识别与导入归一化
+ * AI 返回解析容错 · 书级替换 · 章节识别与导入归一化 · 定位与标记重排（O4 自 main.ts 抽出）
  */
+
+import { extractParas, sentsOf, splitChapter } from '../../src/core/textpipe.js';
+import { tokenizeTxt } from '../../src/core/textpipe.js';
+import type { Mark } from './types.js';
+
+/** 章号：从路径识别（第一章→1），与 CLI/原型一致 */
+const CH_MAP: Record<string, number> = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10 };
+export function chnoFromPath(p: string): number | null {
+  for (const [k, v] of Object.entries(CH_MAP)) if (p.includes(`第${k}章`)) return v;
+  return null;
+}
+
+/** CSV 单元格转义（含逗号/引号/换行加双引号，内部引号翻倍） */
+export function csvCell(v: string): string {
+  return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+}
+
+/** 在正文中唯一定位原句（句文本精确匹配；多处或未找到返回 null）——行内建议挂载用 */
+export function locateOriginal(md: string, original: string): { pi: number; si: number } | null {
+  const paras = extractParas(splitChapter(md).body);
+  const hits: { pi: number; si: number }[] = [];
+  paras.forEach((p, pi) =>
+    sentsOf(p, false).forEach((sent, si) => {
+      if (sent === original) hits.push({ pi, si });
+    }),
+  );
+  return hits.length === 1 ? hits[0] : null;
+}
+
+/** 文本变化后，按句子前缀把现有标记重新对齐（防替换/拆句后错位；就地修改 marks） */
+export function remapMarks(marks: Mark[], md: string): void {
+  const paras = extractParas(splitChapter(md).body);
+  const sents = paras.map((p) => sentsOf(p, false));
+  for (const m of marks) {
+    const prefix = (m.text ?? '').slice(0, 12);
+    if (!prefix) continue; // 旧数据无句前缀，保留原索引
+    const cur = sents[m.pi]?.[m.si];
+    let ok = cur && cur.startsWith(prefix);
+    if (!ok) {
+      const hits: [number, number][] = [];
+      sents.forEach((ss, pi) => ss.forEach((sent, si) => { if (sent.startsWith(prefix)) hits.push([pi, si]); }));
+      if (hits.length === 1) {
+        m.pi = hits[0][0];
+        m.si = hits[0][1];
+        ok = true;
+      }
+    }
+    if (ok && m.level === 'word' && m.word) {
+      const sent = sents[m.pi]?.[m.si] ?? '';
+      const toks = tokenizeTxt(sent);
+      const raws = sent.match(/[A-Za-z][A-Za-z'\-]*/g) ?? [];
+      const wi = raws.findIndex((w, i) => (toks[i] ?? w.toLowerCase()) === m.word!.toLowerCase());
+      if (wi >= 0) m.wi = wi;
+    }
+  }
+}
 
 /** 从 AI 返回文本中尽力解析出 JSON 数组（代码围栏/单对象/多对象无括号/截断修复/前后解释文字） */
 export function parseAiJson(raw: string): unknown[] {
