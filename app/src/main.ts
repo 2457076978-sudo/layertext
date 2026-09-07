@@ -11,7 +11,7 @@ import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
 import * as XLSX from 'xlsx';
 import { unzipSync, zipSync, strFromU8, strToU8 } from 'fflate';
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, WidthType } from 'docx';
-import { applyRewriteTo, buildDiagSummary, checkRevisedText, mergeQuotaTexts, normalizeAndSplitChapters, parseAiJson, pickSentMarkType } from './pure.js';
+import { applyRewriteTo, buildDiagSummary, checkRevisedText, findOriginalFlex, mergeQuotaTexts, normalizeAndSplitChapters, parseAiJson, pickSentMarkType } from './pure.js';
 import { S, setStatus as uiSetStatus, esc } from './state.js';
 import { AI_PROVIDERS, aiErrHuman, buildAssistantPrompt, buildDraftSystemPrompt, buildPlotPointsPrompt, buildRewriteSentencePrompt, buildSystemPrompt, callChat, chatStream, loadConfig, promptSetVersion, reloadPrompts, saveConfig, setAiUi, simplifyMaxLen } from './ai.js';
 import bundledWordlist from '../../assets/wordlists/curriculum_2022_level3_1600.txt?raw';
@@ -1693,7 +1693,11 @@ async function acceptSuggestion(g: Suggestion, opts: { scene?: string; outcome?:
     if (!loc) { setStatus('原句已变化且无法唯一定位，请重新请求建议', 'err'); return; }
     g.pi = loc.pi; g.si = loc.si;
   }
-  const at = s.md.indexOf(g.original);
+  let at = s.md.indexOf(g.original);
+  if (at < 0) {
+    const flex = findOriginalFlex(s.md, g.original); // 空白差异容忍（欠账#2）
+    if (flex) { at = flex.start; g.original = flex.exact; }
+  }
   if (at < 0) { setStatus('正文中找不到该原句', 'err'); return; }
   s.md = s.md.slice(0, at) + g.revised + s.md.slice(at + g.original.length);
 
@@ -2432,7 +2436,7 @@ const AI_TOOLS = [
     type: 'function',
     function: {
       name: 'apply_edit',
-      description: '【直接编辑】仅当教师开启信任模式且明确要求"直接改"时使用：核对原句后直接替换正文（自动落工作稿与变更日志，原稿不动）。original 必须与正文一字不差',
+      description: '【直接编辑】仅当教师开启信任模式且明确要求"直接改"时使用：核对原句后直接替换正文（自动落工作稿与变更日志，原稿不动）。original 需与正文原句一致（空格差异可容忍，句末标点必须带上）',
       parameters: {
         type: 'object',
         properties: {
@@ -2447,7 +2451,7 @@ const AI_TOOLS = [
     type: 'function',
     function: {
       name: 'propose_revision',
-      description: '把一条修订候选提交到「修订建议」页（教师仍需逐条勾选确认才会应用）。original 必须与正文原句一字不差',
+      description: '把一条修订候选提交到「修订建议」页（教师仍需逐条勾选确认才会应用）。original 需与正文原句一致（空格差异可容忍，句末标点必须带上）',
       parameters: {
         type: 'object',
         properties: {
@@ -2507,11 +2511,13 @@ async function executeTool(name: string, argsJson: string): Promise<string> {
       }
       case 'apply_edit': {
         if (!S.appConfig.trustEdit) return '错误：教师未开启信任模式（AI 设置 → 允许 AI 直接编辑）。请改用 propose_revision 提交候选。';
-        const original = String(args.original ?? '');
+        let original = String(args.original ?? '');
         const revised = String(args.revised ?? '');
         const basis = String(args.basis ?? '');
         if (!original || !revised) return '错误：original/revised 不能为空';
-        if (!s.md.includes(original)) return '错误：original 与正文不匹配——先用 search_text / get_sentence 取原句逐字复制';
+        const flex = findOriginalFlex(s.md, original);
+        if (!flex) return '错误：original 与正文不匹配——先用 search_text / get_sentence 取原句逐字复制（句末标点要带上）';
+        original = flex.exact; // 以正文原文为准：容忍 AI 多打/漏打空格（欠账#2）
         const risk = checkRev(revised);
         const loc = locateOriginal(s, original);
         const g: Suggestion = {
@@ -2526,10 +2532,12 @@ async function executeTool(name: string, argsJson: string): Promise<string> {
         return `已直接应用并写入工作稿（引擎复核：${risk.passive || risk.relcl || risk.pastperf || risk.overlong ? '仍命中黑名单/超长，建议教师复核' : '通过'}）。正文已实时更新。`;
       }
       case 'propose_revision': {
-        const original = String(args.original ?? '');
+        let original = String(args.original ?? '');
         const revised = String(args.revised ?? '');
         if (!original || !revised) return '错误：original/revised 不能为空';
-        if (!s.md.includes(original)) return '错误：original 与正文不匹配（须与正文原句一字不差），请先用 get_sentence/search_text 取原句';
+        const flex = findOriginalFlex(s.md, original);
+        if (!flex) return '错误：original 与正文不匹配（须与正文原句一致，句末标点要带上），请先用 get_sentence/search_text 取原句';
+        original = flex.exact; // 空白差异容忍（欠账#2）：以正文原文为准，避免 AI 因空格反复重试
         const risk = checkRev(revised);
         S.suggestions.push({
           markId: String(args.markId ?? 'chat-' + Date.now().toString(36)),

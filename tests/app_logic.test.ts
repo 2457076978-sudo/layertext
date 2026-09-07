@@ -2,7 +2,7 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { applyRewriteTo, normalizeAndSplitChapters, parseAiJson, withRetry } from '../app/src/pure.js';
+import { applyRewriteTo, findOriginalFlex, normalizeAndSplitChapters, normWs, parseAiJson, withRetry } from '../app/src/pure.js';
 
 test('withRetry：网络错误自动重试后成功', async () => {
   let calls = 0;
@@ -101,6 +101,40 @@ test('章节识别：已含 ## Chapter 标记直接使用', () => {
   const r = normalizeAndSplitChapters(md, 'a.md');
   assert.equal(r.alreadyFormatted, true);
   assert.equal(r.chapters[0].md, md);
+});
+
+test('findOriginalFlex：唯一精确匹配直接返回（欠账#2 回归）', () => {
+  const md = '[P01] The hare laughed. The tortoise walked slowly.';
+  const r = findOriginalFlex(md, 'The tortoise walked slowly.');
+  assert.ok(r);
+  assert.equal(r.start, md.indexOf('The tortoise'));
+  assert.equal(r.exact, 'The tortoise walked slowly.');
+});
+
+test('findOriginalFlex：句末多空格/句中多重空格差异仍命中，返回正文原文切片', () => {
+  const md = '[P01] The hare   laughed.   The tortoise walked slowly.  ';
+  // AI 抄句时把多重空格压成一个、句末空格丢了——仍应命中，且 exact 是正文里的原样
+  const r = findOriginalFlex(md, 'The hare laughed. The tortoise walked slowly.');
+  assert.ok(r);
+  assert.equal(r.exact, 'The hare   laughed.   The tortoise walked slowly.');
+  assert.equal(md.slice(r.start, r.start + r.exact.length), r.exact);
+});
+
+test('findOriginalFlex：换行差异（AI 给了单空格，正文是换行）也能命中', () => {
+  const md = '[P01] The hare\nlaughed loudly.';
+  const r = findOriginalFlex(md, 'The hare laughed loudly.');
+  assert.ok(r);
+  assert.equal(r.exact, 'The hare\nlaughed loudly.');
+});
+
+test('findOriginalFlex：多处命中（歧义）与未命中返回 null', () => {
+  assert.equal(findOriginalFlex('Same words. Same words.', 'Same words.'), null);
+  assert.equal(findOriginalFlex('Nothing here.', 'The hare laughed.'), null);
+  assert.equal(findOriginalFlex('anything', '   '), null);
+});
+
+test('normWs：连续空白压一、去首尾', () => {
+  assert.equal(normWs('  a \n\n b\t c  '), 'a b c');
 });
 
 test('checkRevisedText：多句改写逐句复核（拆句后不再误报超长）', async () => {
