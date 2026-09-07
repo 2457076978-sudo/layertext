@@ -27,6 +27,12 @@
     }
     button:hover { border-color: var(--brand); color: var(--brand); }
     button.primary { background: var(--brand); border-color: var(--brand); color: #fff; }
+    .tgroup { display: flex; align-items: center; gap: 8px; }
+    .tg-label { font-size: 10px; color: var(--muted); align-self: flex-start; margin-top: 3px; white-space: nowrap; }
+    .tsep { width: 1px; height: 26px; background: var(--line); margin: 0 2px; }
+    .mode-pill { border-radius: 999px; padding: 7px 12px; font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+    .mode-pill.green { background: #dcfce7; color: #15803d; border: 1px solid #86efac; }
+    .mode-pill.yellow { background: #fef9c3; color: #a16207; border: 1px solid #fde047; }
     button.primary:hover { opacity: .9; }
     #status { width: 100%; color: var(--muted); font-size: 12px; padding-top: 2px; }
     #status .saved { color: #16a34a; }
@@ -322,12 +328,19 @@
 <body>
   <header>
     <span class="logo">LayerText 分层读<small>v1.0</small></span>
-    <button id="btn-demo">载入示例</button>
-    <button id="btn-open">打开章节文件…</button>
-    <button id="tier-q" class="qmark" title="简化标准：句长上限（可调）。难度由你的词库决定——学生学过什么词，就简化到词库内；要更简版本，把简化结果再导入再简化">ⓘ</button>
-    <button id="btn-run" class="primary" title="打开课文会自动体检；换了词库或改完正文后，点这里重新算一遍">▶ 重新质检</button>
-    <button id="btn-draft" title="让 AI 按当前简化标准把整章逐段改写一遍（自动体检、原稿不动），得到简化版；之后再用标记逐句精修。要更简的版本：把简化版再导入、再点一次这里">✨ AI 简化本章</button>
-    <button id="btn-ai" title="把你在正文里做的标记批量交给 AI，逐条给出改写候选（默认你要点 ✓ 才生效；若在 AI 设置里开了'直接生效'则自动应用）">✨ AI 审核建议</button>
+    <span class="tgroup"><span class="tg-label">① 拿到课文</span>
+      <button id="btn-demo">载入示例▾</button>
+      <button id="btn-open">打开文件…</button>
+      <button id="tier-q" class="qmark" title="简化标准：句长上限（可调）。难度由你的词库决定——学生学过什么词，就简化到词库内；要更简版本，把简化结果再导入再简化">ⓘ</button></span>
+    <span class="tsep"></span>
+    <span class="tgroup"><span class="tg-label">② 体检</span>
+      <button id="btn-run" class="primary" title="打开课文会自动体检；换了词库或改完正文后，点这里重新算一遍">▶ 质检本章</button></span>
+    <span class="tsep"></span>
+    <span class="tgroup"><span class="tg-label">③ AI 修改（两种改法）</span>
+      <button id="btn-draft" title="整章大改：AI 按当前简化标准把全章重写成简化版（自动体检、原稿不动），适合第一次处理原文；要更简的版本，把简化版再导入再点一次">📖 整章改写…</button>
+      <button id="btn-ai" title="精修：先在正文点词/划句做标记，再点这里成批改。改完即改还是等你确认，看右侧模式胶囊">✨ 按标记修改</button></span>
+    <span class="tsep"></span>
+    <button id="mode-pill" class="mode-pill" title="点击切换">…</button>
     <div id="status">打开章节文件后自动体检、进入审校。词库/术语/标记等更多操作见顶部菜单栏（文件 · 质检 · 帮助）。</div>
   </header>
 
@@ -373,7 +386,7 @@
       </div>
       <div id="side-review"><div class="side-empty">打开文件后：要点配额 / 终审门禁 / 标记清单</div></div>
       <div id="side-ai" style="display:none">
-        <div id="chat-log"><div class="chat-empty">与 AI 实时交流——它能调用本地工具（跑质检/查句子/列标记/提修订候选），所有验证由本机 QC 引擎完成。</div></div>
+        <div id="chat-log"><div class="chat-empty"><b>对话式助手</b>：适合提问、查证、零散改（"这句怎么改""这个词学过吗"）。工具栏两个按钮适合成批、固定动作（整章/按标记）——两边能力等价，用哪个都行。</div></div>
         <div class="chat-input-row">
           <textarea id="chat-input" placeholder="例如：把第一章最长的那句改简单点／列出所有被动句／这个词学生学过吗？"></textarea>
           <button id="chat-send" class="primary">发送</button>

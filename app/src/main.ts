@@ -1321,6 +1321,7 @@ function showAiSettings(): void {
       S.appConfig.model = currentModel();
       S.appConfig.instructions = ($('ai-instructions') as HTMLTextAreaElement).value.trim();
       S.appConfig.autoRewriteOnMark = ($('ai-auto') as HTMLInputElement).checked;
+      updateModePill();
       S.appConfig.trustEdit = ($('ai-trust') as HTMLInputElement).checked;
       S.appConfig.inPlaceEdit = ($('ai-inplace') as HTMLInputElement).checked;
       S.appConfig.lowThinking = ($('ai-lowthink') as HTMLInputElement).checked;
@@ -1895,6 +1896,26 @@ async function generateDraft(): Promise<void> {
 }
 
 $('btn-draft').addEventListener('click', showDraftPop);
+
+/* ---------- 修改模式胶囊：一眼可见、一键切换（即改=立即生效 / 候选=点✓生效） ---------- */
+function updateModePill(): void {
+  const pill = $('mode-pill');
+  const on = S.appConfig.autoRewriteOnMark === true;
+  pill.className = 'mode-pill ' + (on ? 'green' : 'yellow');
+  pill.innerHTML = on ? '⚡ 即改模式：标记即生效' : '👁 候选模式：等你点 ✓';
+  pill.title = on
+    ? '当前：点了标记/建议，AI 改完立即生效（写原稿+日志）。点击切到候选模式'
+    : '当前：AI 只出建议（黄色框），你逐条点 ✓ 才生效。点击切到即改模式';
+}
+$('mode-pill').addEventListener('click', async () => {
+  S.appConfig.autoRewriteOnMark = !(S.appConfig.autoRewriteOnMark === true);
+  await saveConfig();
+  updateModePill();
+  setStatus(S.appConfig.autoRewriteOnMark
+    ? '已切换【即改模式】：点标记/AI建议将立即生效（写原稿+变更日志，首次修改前自动备份）'
+    : '已切换【候选模式】：AI 只出建议，你点 ✓ 才生效', 'saved');
+});
+updateModePill();
 $('tier-q').addEventListener('click', (e) => { e.stopPropagation(); showStandardPop(); });
 
 /* ---------- 启动序列：配置 → 首启动欢迎 ---------- */
