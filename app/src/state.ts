@@ -54,6 +54,8 @@ export const S = {
   /** AI 助手对话 */
   chatMsgs: [] as { role: 'user' | 'assistant' | 'tool'; content: string; tool_calls?: unknown; tool_call_id?: string }[],
   chatBusy: false,
+  /** 最近一次成功请求实际使用的供应商（欠账#8：failover 切换后建议台账也要记实际那家） */
+  lastProvider: null as { name: string; model: string } | null,
   /** 书级改写规则 */
   rewriteRules: { replacements: [], viewpoint: 'keep', viewpointName: '', extra: '' } as RewriteRules,
   draftAbort: null as AbortController | null,

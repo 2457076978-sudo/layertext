@@ -1532,6 +1532,9 @@ async function logSuggestion(
     const bad = g.check.passive || g.check.relcl || g.check.pastperf || g.check.overlong;
     let host = S.appConfig.baseUrl ?? '';
     try { host = new URL(host).host; } catch { if (host) host = '自定义'; }
+    // 欠账#8：failover 切过供应商时记实际那家（与成本台账同一命名），不再误记主服务商
+    const providerUsed = S.lastProvider?.name ?? host;
+    const modelUsed = S.lastProvider?.model ?? S.appConfig.model ?? '';
     const dir = s.sourcePath ? s.sourcePath.slice(0, s.sourcePath.lastIndexOf('/')) : '';
     const row: LedgerRow = {
       ts: new Date().toLocaleString('sv-SE'),
@@ -1541,7 +1544,7 @@ async function logSuggestion(
       rule: mark ? (RULE_BY_TYPE[mark.type] ?? 'R00') : 'R00',
       outcome,
       check: bad ? '⚠' : '通过',
-      provider: host, model: S.appConfig.model ?? '',
+      provider: providerUsed, model: modelUsed,
       promptVer: await promptSetVersion(),
       original: g.original, revised: g.revised, basis: g.basis,
       rejectReason: outcome === '拒绝' ? '（点✗放弃，未填原因）' : '',

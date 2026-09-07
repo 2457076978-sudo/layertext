@@ -200,6 +200,7 @@ async function callWithFailover<T>(
     const start = Date.now();
     try {
       const { result, usage } = await attempt(t);
+      S.lastProvider = { name: t.name, model: t.model }; // 实际用哪家（failover 切换后为备用名）——建议台账据此记录
       await logCost(scene, t, Date.now() - start, true, usage);
       if (t.index > 0) ui?.onStatus?.(`主供应商不可用，已自动切换到备用「${t.name}」（本次请求已正常完成）`);
       return { result, usage, provider: t.name, model: t.model, failoverUsed: t.index > 0 };
