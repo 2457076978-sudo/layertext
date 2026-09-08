@@ -508,7 +508,15 @@ fn main() {
             let mi_ai = MenuItemBuilder::with_id("ai-suggest", "AI 审核建议…").build(app)?;
             let mi_draft = MenuItemBuilder::with_id("draft", "AI 简化本章…").build(app)?;
             let mi_batch = MenuItemBuilder::with_id("batch", "全书批处理…（多章队列+汇总报告）").build(app)?;
-            let qc_menu = SubmenuBuilder::new(app, "质检").item(&mi_run).item(&mi_draft).item(&mi_batch).separator().item(&mi_ai).build()?;
+            let mi_cls = MenuItemBuilder::with_id("cls", "班级多人定制…（勾选分组，质检/改写按其口径）").build(app)?;
+            let qc_menu = SubmenuBuilder::new(app, "质检")
+                .item(&mi_run)
+                .item(&mi_draft)
+                .item(&mi_batch)
+                .item(&mi_cls)
+                .separator()
+                .item(&mi_ai)
+                .build()?;
 
             let mi_vt = MenuItemBuilder::with_id("view-text", "正文审校").build(app)?;
             let mi_vr = MenuItemBuilder::with_id("view-report", "质检报告").build(app)?;

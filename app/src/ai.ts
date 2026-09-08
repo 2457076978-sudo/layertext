@@ -187,19 +187,24 @@ async function chatOnce(t: ProviderTarget, messages: { role: string; content: st
         }),
       (s) => ui?.onStatus?.(s),
     );
-    if (!resp.ok && /reasoning_effort|thinking|unknown (field|parameter|argument)/i.test(await resp.text())) {
-      resp = await withRetry(
-        () =>
-          tauriFetch(`${t.baseUrl}/chat/completions`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${t.key}` },
-            body: mkBody(false),
-            signal: ctrl.signal,
-          }),
-        (s) => ui?.onStatus?.(s),
-      );
+    if (!resp.ok) {
+      const errText = (await resp.text()).slice(0, 200); // body 只读一次，之后要么重试要么抛出
+      if (/reasoning_effort|thinking|unknown (field|parameter|argument)/i.test(errText)) {
+        resp = await withRetry(
+          () =>
+            tauriFetch(`${t.baseUrl}/chat/completions`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${t.key}` },
+              body: mkBody(false),
+              signal: ctrl.signal,
+            }),
+          (s) => ui?.onStatus?.(s),
+        );
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${(await resp.text()).slice(0, 200)}`);
+      } else {
+        throw new Error(`HTTP ${resp.status}: ${errText}`);
+      }
     }
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${(await resp.text()).slice(0, 200)}`);
     const data = (await resp.json()) as {
       choices?: { message?: { content?: string; reasoning_content?: string } }[];
       usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
@@ -330,19 +335,24 @@ export async function chatStream(
           }),
         (s) => ui?.onStatus?.(s),
       );
-      if (!resp.ok && /reasoning_effort|thinking|unknown (field|parameter|argument)/i.test(await resp.text())) {
-        resp = await withRetry(
-          () =>
-            tauriFetch(`${t.baseUrl}/chat/completions`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${t.key}` },
-              body: mkBody(false),
-              signal: ctrl.signal,
-            }),
-          (s) => ui?.onStatus?.(s),
-        );
+      if (!resp.ok) {
+        const errText = (await resp.text()).slice(0, 200); // body 只读一次，之后要么重试要么抛出
+        if (/reasoning_effort|thinking|unknown (field|parameter|argument)/i.test(errText)) {
+          resp = await withRetry(
+            () =>
+              tauriFetch(`${t.baseUrl}/chat/completions`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${t.key}` },
+                body: mkBody(false),
+                signal: ctrl.signal,
+              }),
+            (s) => ui?.onStatus?.(s),
+          );
+          if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${(await resp.text()).slice(0, 200)}`);
+        } else {
+          throw new Error(`HTTP ${resp.status}: ${errText}`);
+        }
       }
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${(await resp.text()).slice(0, 200)}`);
       const reader = resp.body!.getReader();
       const dec = new TextDecoder();
       let buf = '';

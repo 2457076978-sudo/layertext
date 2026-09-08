@@ -148,6 +148,60 @@
         background: var(--line);
         margin: 0 2px;
       }
+      .tspacer {
+        flex: 1;
+      }
+      /* 自绘窗控：三个 9px 小圆点（灰态、悬停显色），占位在布局流里——任何界面元素都不会再被原生红黄绿遮挡 */
+      .win-dots {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+        margin-right: 2px;
+      }
+      .win-dots button {
+        width: 18px;
+        height: 18px;
+        padding: 0;
+        border: none;
+        border-radius: 50%;
+        background: transparent;
+        position: relative;
+      }
+      .win-dots button::after {
+        content: '';
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        width: 9px;
+        height: 9px;
+        margin: -4.5px 0 0 -4.5px;
+        border-radius: 50%;
+        background: var(--line2, #a8aeb9);
+        transition:
+          background 0.12s ease,
+          box-shadow 0.12s ease;
+      }
+      .win-dots button:hover::after {
+        box-shadow: 0 0 0 4px rgba(125, 125, 135, 0.16);
+      }
+      .win-dots #win-close:hover::after {
+        background: #ed6a5e;
+      }
+      .win-dots #win-min:hover::after {
+        background: #f4bf4f;
+      }
+      .win-dots #win-max:hover::after {
+        background: #61c554;
+      }
+      [data-theme='dark'] .win-dots button::after {
+        background: #5a6070;
+      }
+      /* 书架态（无章节会话）：章节级界面一概让位——以人为本，编辑页该出现的再出现 */
+      body.no-session #sidebar,
+      body.no-session #mode-pill,
+      body.no-session #findbar {
+        display: none !important;
+      }
       .mode-pill {
         border-radius: 999px;
         padding: 7px 12px;
@@ -2602,8 +2656,9 @@
         <rect x="13" y="13" width="7" height="7" rx="1" />
       </symbol>
       <symbol id="i-settings" viewBox="0 0 24 24">
-        <circle cx="12" cy="12" r="3.2" />
-        <path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M18.7 5.3l-2.1 2.1M7.4 16.6l-2.1 2.1" />
+        <path d="M4 7.5h16M4 16.5h16" />
+        <circle cx="9.5" cy="7.5" r="2.4" />
+        <circle cx="14.5" cy="16.5" r="2.4" />
       </symbol>
       <symbol id="i-sun" viewBox="0 0 24 24">
         <circle cx="12" cy="12" r="4.2" />
@@ -2654,46 +2709,28 @@
       </symbol>
     </svg>
     <header data-tauri-drag-region>
-      <span class="logo">LayerText 分层读<small>v1.1</small></span>
+      <span class="win-dots" aria-label="窗口控制">
+        <button id="win-close" title="关闭窗口"></button>
+        <button id="win-min" title="最小化"></button>
+        <button id="win-max" title="缩放窗口"></button>
+      </span>
+      <span class="logo">LayerText</span>
       <span class="tgroup"
         ><button id="btn-home" title="回到书架（当前章节自动保存，随时回来）">
           <svg class="ico"><use href="#i-home" /></svg>书架
         </button>
-        <button id="btn-demo">
-          载入示例<svg class="ico sm"><use href="#i-chev" /></svg>
-        </button>
-        <button id="btn-open">打开文件…</button>
-        <button id="tier-q" class="qmark" title="简化标准：句长上限（可调）。难度由你的词库决定——学生学过什么词，就简化到词库内；要更简版本，把简化结果再导入再简化">ⓘ</button></span
+        <button id="btn-open" title="打开章节文件（⌘O）；菜单 文件 → 载入示例 可看演示">打开…</button></span
       >
-      <span class="tsep"></span>
-      <span class="tgroup"
-        ><button
-          id="btn-cls"
-          title="班级多人定制：从 ~/Documents/LayerText配置/班级分组/ 读分组与个人目标，勾选后质检⑩/整章改写/批处理都按这批人的口径（句长取最严、复现词取并集），简化稿自动带目标标签"
-        >
-          <svg class="ico"><use href="#i-users" /></svg>班级定制
-        </button></span
-      >
-      <span class="tsep"></span>
-      <span class="tgroup"
+      <span class="tgroup" id="grp-chapter" style="display: none"
         ><button id="btn-run" class="primary" title="打开课文会自动体检；换了词库或改完正文后，点这里重新算一遍">
           <svg class="ico"><use href="#i-play" /></svg>质检本章
-        </button></span
-      >
-      <span class="tsep"></span>
-      <span class="tgroup"
-        ><button id="btn-draft" title="整章大改：AI 按当前简化标准把全章重写成简化版（自动体检、原稿不动），适合第一次处理原文；要更简的版本，把简化版再导入再点一次">
-          <svg class="ico"><use href="#i-book" /></svg>整章改写…
-        </button>
-        <button id="btn-batch" title="整本书排队跑：选书稿文件夹勾选章节，自动逐章『AI 简化+体检+规则校验』，跑完给一份全书汇总报告；中断可续跑">
-          <svg class="ico"><use href="#i-books" /></svg>全书简化…
         </button>
         <button id="btn-ai" title="精修：先在正文点词/划句做标记，再点这里成批改。改完即改还是等你确认，看右侧模式胶囊">
           <svg class="ico"><use href="#i-sparkle" /></svg>按标记修改
         </button></span
       >
-      <span class="tsep"></span>
-      <span class="tgroup">
+      <span class="tspacer"></span>
+      <span class="tgroup" id="grp-edit" style="display: none">
         <button id="btn-undo" title="撤销上一次文件级更改（⌘⌥Z）">↩︎</button>
         <button id="btn-redo" title="重做（⌘⌥⇧Z）">↪︎</button>
         <button id="btn-find" title="查找 / 替换（⌘F）">
@@ -2701,16 +2738,17 @@
         </button>
         <button id="btn-font-minus" title="字号减小（⌘-）">A－</button>
         <button id="btn-font-plus" title="字号增大（⌘+）">A＋</button>
+      </span>
+      <span class="tgroup">
         <button id="btn-theme" title="主题：白/灰/深色，点击切换">
           <svg class="ico"><use href="#i-sun" /></svg>
         </button>
-        <button id="btn-settings" title="设置：字号/行距/主题/句长/编辑与 AI 开关">
+        <button id="btn-settings" title="设置：字号/行距/主题/句长/词库与班级口径/编辑与 AI 开关">
           <svg class="ico"><use href="#i-settings" /></svg>
         </button>
       </span>
-      <span class="tsep"></span>
       <button id="mode-pill" class="mode-pill" title="点击切换">…</button>
-      <div id="status">打开章节文件后自动体检、进入审校。词库/术语/标记等更多操作见顶部菜单栏（文件 · 质检 · 帮助）。</div>
+      <div id="status"></div>
     </header>
 
     <div class="wstabs" id="wstabs" style="display: none"></div>
@@ -2754,8 +2792,6 @@
             <span><i class="dot" style="background: var(--pending)"></i>待定（橙）</span>
             <span><i class="dot" style="background: var(--term)"></i>术语（蓝）</span>
             <span><i class="dot" style="background: var(--riskbg); border: 1px solid #f5c6c2"></i>难句（自动检测）</span>
-            <span style="color: #2563eb">点词 → 做标记</span>
-            <span style="color: #7c3aed">拖选句子 → 做标记</span>
           </div>
           <div id="reader">
             <div class="empty">

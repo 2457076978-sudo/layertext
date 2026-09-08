@@ -6,6 +6,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { getVersion } from '@tauri-apps/api/app';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import { open as openFileDialog, save as saveFileDialog } from '@tauri-apps/plugin-dialog';
 import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
 import * as XLSX from 'xlsx';
@@ -355,19 +356,11 @@ function activeSession(): FileSession | null {
   return S.activeIdx >= 0 ? S.sessions[S.activeIdx] : null;
 }
 
+/** 状态行只放"现在在哪"：文件名（班级口径生效时附带）。词库/复现等完整口径见 设置 弹层 */
 function fileSummary(): void {
   const s = activeSession();
-  const parts: string[] = [];
-  parts.push(s ? `当前：${s.fileName}` : '未载入文本');
-  parts.push('词库：课标1600（内置）');
-  if (S.vocabCsvText) parts.push(`+ ${S.vocabName}`);
-  if (S.termsText) parts.push('+ 术语表');
-  parts.push('标记自动保存：' + (s ? s.markPath : '打开文件后生效'));
-  const rw = reinforceWordsNow();
-  if (rw) parts.push(`复现队列：${S.reinforceName}（${rw.length} 词，⑩指标+简化注入已启用）`);
-  const selCls = mergedSelection();
-  if (selCls.active) parts.push(`班级定制：【${selCls.label}】句长≤${selCls.minLen}`);
-  setStatus(parts.join(' ｜ '));
+  const sel = mergedSelection();
+  setStatus(s ? `${s.fileName}${sel.active ? ` ｜ 班级 ${sel.label}` : ''}` : '');
 }
 
 /* ---------- 会话管理 ---------- */
@@ -427,7 +420,7 @@ async function addSession(md: string, fileName: string, sourcePath: string | nul
   if (!opts.noAutoQc) void runQcCurrent({ auto: true });
   // 换书提醒：本书文件夹无配套配置时提示（学生水平/词库可能需要切换）
   if (sourcePath && S.sessions.filter((x) => x.sourcePath && x.sourcePath.slice(0, x.sourcePath.lastIndexOf('/')) === sourcePath.slice(0, sourcePath.lastIndexOf('/'))).length === 1) {
-    setStatus(`已打开「${fileName}」。注意：这本书还没有专属词库配置（学生水平诊断依据）——若当前词库是别的书的，请 文件 → 导入自定义词库 后「保存为本书配置」`, '');
+    setStatus('本书尚未配专属词库——文件 → 导入自定义词库 后「保存为本书配置」', '');
   }
   // 首次载入文件 → 自动进入四步导览
   if (!S.appConfig.tourSeen && S.sessions.length === 1) setTimeout(() => tourShow(0), 600);
@@ -441,13 +434,26 @@ function closeSession(i: number): void {
 
 /* ---------- 渲染 ---------- */
 
+/** 界面随上下文显隐：打开章节才出现章节工具（质检/按标记修改/撤销/查找/字号），书架态只留书架级界面 */
+function syncChrome(): void {
+  const s = activeSession();
+  const hasChapter = !!s;
+  document.body.classList.toggle('no-session', !hasChapter);
+  for (const id of ['grp-chapter', 'grp-edit']) document.getElementById(id)!.style.display = hasChapter ? '' : 'none';
+  $('tab-toc').style.display = s ? '' : 'none'; // 书架/版本页无章节概念，目录按钮收起
+  // 看板/档案是书级视图，书架也能进；仅正文场景整行收起
+  const activeTab = document.querySelector('.viewtabs button.active') as HTMLElement | null;
+  const bookView = !!activeTab && activeTab.id !== 'tab-text';
+  (document.querySelector('.viewtabs') as HTMLElement).style.display = !hasChapter && !bookView ? 'none' : 'flex';
+}
+
 function renderAll(): void {
   renderFileTabs();
   const s = activeSession();
-  const tocBtn = $('tab-toc');
-  tocBtn.style.display = s ? '' : 'none'; // 书架/版本页无章节概念，目录按钮收起
   if (!s) {
+    switchViewDom(document, 'text'); // 回正文窗格=书架首页（清掉残留的书级视图）
     void renderShelf(); // 首页=书架（示例+我的书；点书进入工作区）
+    syncChrome();
     $('pane-report').innerHTML = '<div class="empty"><b>打开课文会自动体检</b><br/>生词率、句长、难句自动数好，报告页每条可勾选处理</div>';
     $('side-review').innerHTML =
       '<div class="side-empty">这里是你的审校 checklist：<br/>· 要点配额：本章必须保留的情节点，自己添加打勾<br/>· 终审门禁：四项全勾才算审完（点 ? 看每项查什么）<br/>· 标记清单：正文里做的标记都在这，点击跳回原文</div>';
@@ -459,6 +465,7 @@ function renderAll(): void {
   attachInlineSuggestions();
   renderReportPane(s);
   renderSidebar(s, sidebarHandlers);
+  syncChrome();
   fileSummary();
 }
 
@@ -867,9 +874,9 @@ async function runQcCurrent(opts: { auto?: boolean } = {}): Promise<void> {
     s.reportSavedPath = outPath;
     if (opts.auto) {
       const r = s.report;
-      setStatus(`✓ 已自动体检：生词率 ${(r.newWordRate * 100).toFixed(1)}%、难句 ${r.passive + r.relcl + r.pastperf + r.over20} 处——「质检报告」页可逐条勾选处理`, 'saved');
+      toast(`自动体检完成：生词率 ${(r.newWordRate * 100).toFixed(1)}% · 难句 ${r.passive + r.relcl + r.pastperf + r.over20} 处`, 'ok');
     } else {
-      setStatus('质检完成，报告已自动保存：' + outPath, 'saved');
+      toast('质检完成，报告已保存', 'ok');
     }
   } catch (e) {
     s.reportSavedPath = null;
@@ -1117,6 +1124,7 @@ async function aiPlotPoints(s: FileSession): Promise<void> {
 
 function switchView(name: ViewName): void {
   switchViewDom(document, name);
+  syncChrome();
 }
 
 /* ---------- 复盘（W2 数据闭环）：读 AI建议台账 → 采纳率聚合 ---------- */
@@ -1346,7 +1354,7 @@ async function openDemoMenu(): Promise<void> {
     loadBuiltinDemo();
     return;
   }
-  const btn = $('btn-demo').getBoundingClientRect();
+  const btn = $('btn-open').getBoundingClientRect();
   menu.style.left = btn.left + 'px';
   menu.style.top = btn.bottom + 6 + 'px';
   menu.innerHTML = `
@@ -1392,16 +1400,12 @@ function loadBuiltinDemo(): void {
     S.vocabName = '示例词库 sample_teaching_vocab.csv';
   }
   void addSession(exampleMd, 'aesop_tortoise_hare.md（示例）', null).then(() => {
-    setStatus('已载入内置示例（含示例词库）。正文点词/拖选句子开始审校；「质检本章」看报告。');
+    setStatus('已载入内置示例（含示例词库）');
   });
 }
 
-$('btn-demo').addEventListener('click', () => {
-  if (S.demoMenuOpen) closeDemoMenu();
-  else void openDemoMenu();
-});
 document.addEventListener('mousedown', (e) => {
-  if (S.demoMenuOpen && !(e.target as HTMLElement).closest('#demo-menu') && !(e.target as HTMLElement).closest('#btn-demo')) {
+  if (S.demoMenuOpen && !(e.target as HTMLElement).closest('#demo-menu') && !(e.target as HTMLElement).closest('#btn-open')) {
     closeDemoMenu();
   }
 });
@@ -1602,7 +1606,7 @@ function renderShelfChrome(el: HTMLElement, books: ShelfBook[]): void {
   el.innerHTML = `
     <div class="shelf">
       ${ls?.files?.length ? `<div class="shelf-resume" id="shelf-resume"><svg class="ico"><use href="#i-play"/></svg>继续上次编辑：${esc(ls.workspace ? ls.workspace + ' · ' : '')}${esc(ls.files[Math.min(ls.activeIdx, ls.files.length - 1)]?.path.split('/').pop() ?? '')} <span class="dim">（${esc(ls.savedAt)}）</span></div>` : ''}
-      <div class="shelf-h"><svg class="ico"><use href="#i-books"/></svg>我的书架<span class="dim">——点一本书，先选版本（如 B/M/A），再进工作区</span></div>
+      <div class="shelf-h"><svg class="ico"><use href="#i-books"/></svg>我的书架</div>
       <div class="shelf-tools">
         <input type="search" id="shelf-q" placeholder="搜索书名 / 分组…" value="${esc(S.shelfQ)}"/>
         <span class="viewseg">
@@ -1621,7 +1625,6 @@ function renderShelfChrome(el: HTMLElement, books: ShelfBook[]): void {
           : ''
       }
       <div id="shelf-body"></div>
-      <div class="dim" style="margin-top:16px">书目录里放一张 cover.jpg 或 封面.png 即可作书封；没有图就用书名当封面。也可以用上方「打开文件…」直接开单章。</div>
     </div>`;
 }
 
@@ -1651,7 +1654,7 @@ function renderShelfGrid(el: HTMLElement, books: ShelfBook[], covers: Map<string
     <div class="shelf-cover${covers.get(b.目录) ? ' has-img' : ''}" style="${coverStyle(b)}"><div class="cover-title" style="font-size:${coverTitlePx(b.名)}px">${esc(b.名)}</div></div>
     <div class="shelf-info">
       <div class="shelf-sub">${esc(b.副标题 ?? '')}</div>
-      <div class="shelf-meta">${esc(timeOf(b) ? '最近 ' + timeOf(b) : '点书选版本')}</div>
+      ${timeOf(b) ? `<div class="shelf-meta">${esc('最近 ' + timeOf(b))}</div>` : ''}
       ${progHtml(b)}
     </div>
   </div>`,
@@ -1676,20 +1679,20 @@ function renderShelfGrid(el: HTMLElement, books: ShelfBook[], covers: Map<string
   body.innerHTML =
     view === 'list'
       ? `<div class="shelf-grid list">${rowCards || `<div class="dim" style="padding:20px 4px">${emptyHint}</div>`}
-        <div class="shelf-row add-row" id="shelf-add">＋ 添加书稿文件夹（含章节 md；可配 _工作区.json / _词库.csv）</div></div>`
+        <div class="shelf-row add-row" id="shelf-add">＋ 添加书稿文件夹</div></div>`
       : `<div class="shelf-grid">
         <div class="shelf-card demo" id="shelf-demo" title="打开内置示例">
           <div class="shelf-cover" style="background:${shelfColor('龟兔赛跑')}"><div class="cover-title" style="font-size:${coverTitlePx('龟兔赛跑')}px">龟兔赛跑</div></div>
-          <div class="shelf-info"><div class="shelf-sub">内置示例 · 含示例词库</div><div class="shelf-meta">随时可用</div></div>
+          <div class="shelf-info"><div class="shelf-sub">内置示例 · 含示例词库</div></div>
         </div>
         ${gridCards || `<div class="dim" style="grid-column:1/-1;padding:16px 4px">${emptyHint}</div>`}
-        <div class="shelf-card add" id="shelf-add" title="把一个书稿文件夹注册到书架">
+        <div class="shelf-card add" id="shelf-add" title="把一个书稿文件夹注册到书架（目录里放 cover.jpg 作书封，_词库.csv / _工作区.json 自动生效）">
           <div class="shelf-cover">＋</div>
-          <div class="shelf-info"><div class="shelf-sub">添加书稿文件夹</div><div class="shelf-meta">含章节 md；可配 _工作区.json / _词库.csv</div></div>
+          <div class="shelf-info"><div class="shelf-sub">添加书稿文件夹</div></div>
         </div>
       </div>`;
   const count = el.querySelector<HTMLElement>('#shelf-count');
-  if (count) count.textContent = `${shown.length === books.length ? `${books.length} 本` : `${shown.length}/${books.length} 本`} · 右键书卡设分组`;
+  if (count) count.textContent = `${shown.length === books.length ? `${books.length} 本` : `${shown.length}/${books.length} 本`}`;
   for (const id of ['view-grid', 'view-list']) {
     const btn = document.getElementById(id);
     if (btn) btn.classList.toggle('cur', (id === 'view-grid') === (view === 'grid'));
@@ -1852,7 +1855,7 @@ function renderBookVersions(b: ShelfBook): void {
       <div class="ver-back" id="ver-back">← 返回书架</div>
       <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">
         <div id="ver-cover" style="width:54px;flex-shrink:0"></div>
-        <div class="ver-h">《${esc(b.名)}》<span class="dim">选一个版本进入——各版本绑定各自的定制口径</span></div>
+        <div class="ver-h">《${esc(b.名)}》<span class="dim">选一个版本进入</span></div>
       </div>
       ${
         cards.length
@@ -2142,6 +2145,15 @@ async function importMarks(): Promise<void> {
 }
 
 $('btn-home').addEventListener('click', () => backToShelf());
+
+/* 自绘窗控（无边框窗口）：三个 9px 小圆点，随 header 布局流，不遮挡任何内容 */
+$('win-close').addEventListener('click', () => void getCurrentWindow().close());
+$('win-min').addEventListener('click', () => void getCurrentWindow().minimize());
+$('win-max').addEventListener('click', () => void getCurrentWindow().toggleMaximize());
+document.querySelector('header')?.addEventListener('dblclick', (e) => {
+  if ((e.target as HTMLElement).closest('button, input, select, .mode-pill')) return;
+  void getCurrentWindow().toggleMaximize(); // macOS 惯例：标题栏双击缩放
+});
 $('btn-theme').addEventListener('click', stepTheme);
 $('tab-toc').addEventListener('click', toggleToc);
 $('btn-open').addEventListener('click', () => void openChapterFiles());
@@ -2157,13 +2169,14 @@ $('find-next').addEventListener('click', () => jumpFind(1));
 $('find-replace-all').addEventListener('click', () => void replaceAllFind());
 $('find-close').addEventListener('click', closeFind);
 $('find-input').addEventListener('input', runFind);
-$('btn-cls').addEventListener('click', () => {
+/** 班级多人定制面板：工具栏不再常驻，入口在 质检 菜单 与 设置 弹层 */
+function toggleClsPanel(): void {
   const p = document.getElementById('cls-panel') as HTMLElement | null;
   if (!p) return;
   const show = p.style.display === 'none' || !p.style.display;
   renderClsPanel();
   p.style.display = show ? 'block' : 'none';
-});
+}
 
 /* 原生菜单事件分发 */
 void listen<string>('menu-action', (ev) => {
@@ -2192,6 +2205,9 @@ void listen<string>('menu-action', (ev) => {
       break;
     case 'qc-run':
       void runQcCurrent();
+      break;
+    case 'cls':
+      toggleClsPanel();
       break;
     case 'view-text':
       switchView('text');
@@ -3029,8 +3045,6 @@ async function generateDraft(): Promise<void> {
   }
 }
 
-$('btn-draft').addEventListener('click', showDraftPop);
-
 /* ================= O2 全书批处理：勾选多章 → 队列「AI 简化 + 体检 + 规则校验」→ 书级汇总报告 ================= */
 
 const BATCH_PROGRESS_FILE = '_全书批处理进度.json';
@@ -3338,7 +3352,6 @@ async function runBatch(): Promise<void> {
   batchAbort = null;
 }
 
-$('btn-batch').addEventListener('click', showBatchPop);
 document.addEventListener('mousedown', (e) => {
   if (batchPop.classList.contains('open') && !(e.target as HTMLElement).closest('#batch-pop')) {
     batchAbort?.abort();
@@ -3357,10 +3370,6 @@ $('mode-pill').addEventListener('click', async () => {
   setStatus(S.appConfig.autoRewriteOnMark ? '已切换【即改模式】：点标记/AI建议将立即生效（写原稿+变更日志，首次修改前自动备份）' : '已切换【候选模式】：AI 只出建议，你点 ✓ 才生效', 'saved');
 });
 updateModePill();
-$('tier-q').addEventListener('click', (e) => {
-  e.stopPropagation();
-  showStandardPop();
-});
 
 /* ---------- 启动序列：配置 → 首启动欢迎 ---------- */
 setAiUi({ onStatus: (s) => setStatus(s, 'dirty') });
@@ -3580,6 +3589,7 @@ function renderSettings(): void {
   const pop = document.getElementById('settings-pop');
   if (!pop) return;
   const sel = mergedSelection();
+  const rw = reinforceWordsNow();
   const row = (label: string, ctrl: string) => `<div class="set-row"><span>${label}</span>${ctrl}</div>`;
   pop.innerHTML = `<div class="pop-h"><svg class="ico"><use href="#i-settings"/></svg>设置 <span class="dim" style="font-weight:400;font-size:12px">（改完即存）</span></div>
     ${row('阅读字号', `<button id="set-fm">A－</button> <b id="set-fv">${S.appConfig.readerFont ?? 17}</b>px <button id="set-fp">A＋</button>`)}
@@ -3588,8 +3598,10 @@ function renderSettings(): void {
     ${row('句长上限（简化标准）', `<button id="set-len">调整（${simplifyMaxLen()} 词）</button>`)}
     ${row('直接修改原稿（首改自动备份）', `<input type="checkbox" id="set-inplace" ${(S.appConfig.inPlaceEdit ?? true) ? 'checked' : ''}/>`)}
     ${row('AI 改写直接生效', `<input type="checkbox" id="set-autorew" ${S.appConfig.autoRewriteOnMark ? 'checked' : ''}/>`)}
-    ${row('当前班级定制口径', `<span class="dim">${sel.active ? `【${sel.label}】句长≤${sel.minLen} · 复现${sel.dueUnion.length}词${sel.coverageTarget ? ' · 覆盖≥' + sel.coverageTarget + '%' : ''}` : '未选择（班级定制面板里选）'}</span>`)}
-    <div class="dim" style="margin-top:8px">LayerText v1.1 · feature/reinforce · 词库以书目录 _词库.csv 为准</div>`;
+    ${row('词库', `<span class="dim">课标1600（内置）${S.vocabCsvText ? ` + ${esc(S.vocabName ?? '自定义词库')}` : ''}${S.termsText ? ' + 术语表' : ''}</span>`)}
+    ${row('复现队列', `<span class="dim">${rw ? `${esc(S.reinforceName ?? '已学词')} · ${rw.length} 词 · ⑩指标与简化注入已启用` : '未启用（班级定制勾选后自动生效）'}</span>`)}
+    ${row('班级定制口径', `<button id="set-cls">${sel.active ? `【${esc(sel.label)}】句长≤${sel.minLen} · 更换` : '选择班级…'}</button>`)}
+    <div class="dim" style="margin-top:8px">LayerText v1.1 · 词库以书目录 _词库.csv 为准</div>`;
   pop.querySelectorAll<HTMLElement>('[data-lh]').forEach((b) =>
     b.addEventListener('click', () => {
       setReaderLineHeight(Number(b.dataset.lh));
@@ -3614,6 +3626,9 @@ function renderSettings(): void {
   });
   document.getElementById('set-len')?.addEventListener('click', () => {
     showStandardPop();
+  });
+  document.getElementById('set-cls')?.addEventListener('click', () => {
+    toggleClsPanel();
   });
   document.getElementById('set-inplace')?.addEventListener('change', (e) => {
     S.appConfig.inPlaceEdit = (e.target as HTMLInputElement).checked;
@@ -3846,7 +3861,7 @@ function showStandardPop(): void {
   });
 }
 document.addEventListener('mousedown', (e) => {
-  if (tierPop.classList.contains('open') && !(e.target as HTMLElement).closest('#tier-pop') && !(e.target as HTMLElement).closest('#tier-q')) tierPop.classList.remove('open');
+  if (tierPop.classList.contains('open') && !(e.target as HTMLElement).closest('#tier-pop')) tierPop.classList.remove('open');
 });
 
 /* ---------- 本书配置：词库/术语/专名/约定 随书稿文件夹保存与自动加载 ---------- */
@@ -4340,7 +4355,7 @@ async function exportBookDossier(): Promise<void> {
 /* ---------- 新手导览（coach marks） ---------- */
 
 const TOUR = [
-  { sel: '#btn-demo', title: '① 打开课文', text: '点「载入示例」看演示，或「打开章节文件」选你自己的书（Word 文件也可以，会自动转换）。打开后会<b>自动体检</b>。' },
+  { sel: '#btn-open', title: '① 打开课文', text: '点「打开…」选你的书稿（Word 也可以，会自动转换）；菜单 文件 → 载入示例 可先看演示。打开后会<b>自动体检</b>。' },
   { sel: '#btn-run', title: '② 看体检结果', text: '体检报告里生词、难句一条条列着，<b>每条都能勾选处理</b>：生词勾"要简化/已学过"，难句勾"要改"。换了词库点这里重新算。' },
   { sel: '#reader', title: '③ 边读边标', text: '红色下划线是生词、淡红底是难句。点一个词、或拖选一句话，就能做标记。' },
   { sel: '#sidebar', title: '④ 收尾把关', text: '右侧是审校清单：要点配额（可让 AI 摘情节要点）、终审门禁、标记清单。四项门禁全勾，这一章就算审完。' },
@@ -4603,7 +4618,7 @@ function showWelcome(): void {
       </div>`;
     $('w-finish').addEventListener('click', () => {
       void closeWelcome();
-      setStatus('设置完成！点「载入示例」看演示，或「打开章节文件」开始你的书——首次载入后会有四步导览', 'saved');
+      setStatus('设置完成！从书架选一本书，或点「打开…」开始', 'saved');
     });
   };
 
