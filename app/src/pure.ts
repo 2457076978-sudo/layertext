@@ -437,12 +437,12 @@ export interface MergedTargets {
   minLen: number;        // 最严句长上限（无选择=全局）
   coverageTarget: number | null; // 多目标取最严覆盖目标带（max）；无=用文献通用 95/98
   knownInter: string[];  // 已学词交集（只在有个人词集的目标间求交；组词集=全体成员并集，参与交集）
-  dueUnion: string[];    // 到期词并集（稳定序：被选次数降序→字母序，上限 8）
+  dueUnion: string[];    // 到期词并集（稳定序：被选次数降序→字母序，上限 12——"尽量多复现"教师指令）
   label: string;         // 目标标签（命名/提示用）
 }
 
 /** 多选合并口径：句长取最严、已学词取交集、到期词取并集（5-8 词/篇的复现预算） */
-export function mergeTargets(selected: ClassTarget[], globalMaxLen: number, dueCap = 8): MergedTargets {
+export function mergeTargets(selected: ClassTarget[], globalMaxLen: number, dueCap = 12): MergedTargets {
   if (selected.length === 0) {
     return { active: false, minLen: globalMaxLen, coverageTarget: null, knownInter: [], dueUnion: [], label: '' };
   }

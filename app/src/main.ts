@@ -1923,7 +1923,7 @@ async function simplifyChapterCore(
     chnoNote: '',
     instructions: (instructions ? `- 教师方向指令（最高优先级）：${instructions}` : '') +
       (mergedSelection().active ? `\n- 班级定制目标（${mergedSelection().label}）：本篇句长上限取最严 ${mergedSelection().minLen} 词/句` : '') +
-      (reinforceWordsNow() ? `\n- 复现词约束：以下学生已学词请择 5-8 个在本章自然复现（词形可按语境变化，融入情节，不硬塞不改故事）：${reinforceWordsNow()!.slice(0, 12).join(' / ')}` : ''),
+      (reinforceWordsNow() ? `\n- 复现词约束：以下学生已学词请择 8-12 个在本章自然复现（教师指令：尽量多复现）（词形可按语境变化，融入情节，不硬塞不改故事）：${reinforceWordsNow()!.slice(0, 12).join(' / ')}` : ''),
   });
   const out: string[] = [];
   let tokens = 0;

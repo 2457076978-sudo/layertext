@@ -331,7 +331,7 @@ test('mergeTargets：未选择=不激活，用全局句长', () => {
   assert.deepEqual(m.knownInter, []); assert.deepEqual(m.dueUnion, []);
 });
 
-test('mergeTargets：句长取最严、到期词并集按共选频次截断8', () => {
+test('mergeTargets：句长取最严、到期词并集按共选频次（默认上限12·教师指令尽量多复现）', () => {
   const g = T('组:B', 'B层(32)', '组', { 句长上限: 14, 到期词: ['enormous', 'cynical', 'oats'] });
   const p1 = T('人:甲', '甲(B)', '人', { 句长上限: 12, 到期词: ['enormous', 'majestic'] });
   const m = mergeTargets([g, p1], 16);
@@ -368,4 +368,10 @@ test('mergeTargets：覆盖目标取最严（max），无目标为 null', () => 
   const m = mergeTargets([b, a], 16);
   assert.equal(m.coverageTarget, 98);           // 弱读者从严
   assert.equal(mergeTargets([T('组:M', 'M', '组')], 16).coverageTarget, null); // 无目标字段→null 用文献带
+});
+
+test('mergeTargets：dueCap 显式截断仍生效', () => {
+  const g = T('组:B', 'B层', '组', { 到期词: ['a','b','c','d','e','f','g','h','i','j','k','l','m','n'] });
+  assert.equal(mergeTargets([g], 16).dueUnion.length, 12);          // 默认 12
+  assert.equal(mergeTargets([g], 16, 8).dueUnion.length, 8);        // 显式回 8
 });
