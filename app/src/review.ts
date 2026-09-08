@@ -180,7 +180,7 @@ export function renderSidebar(
   side.innerHTML = `
     <div class="side-sec">
       <div class="side-h">本章要点配额 <span class="cnt">${r.quota.filter((q) => q.done).length}/${r.quota.length}</span></div>
-      <ul class="quota-list">${quotaHtml || '<li class="side-empty">未设置要点——「质检报告」页点「✨ AI 摘情节要点」，或这里手动加（如"保留风车线索"）</li>'}</ul>
+      <ul class="quota-list">${quotaHtml || '<li class="side-empty">未设置要点——「质检报告」页点「AI 摘情节要点」，或这里手动加（如"保留风车线索"）</li>'}</ul>
       <div class="quota-add"><input id="quota-input" placeholder="添加本章要点…" /><button id="quota-add-btn">＋</button></div>
     </div>
     <div class="side-sec">
