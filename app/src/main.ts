@@ -11,7 +11,7 @@ import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
 import * as XLSX from 'xlsx';
 import { unzipSync, zipSync, strFromU8, strToU8 } from 'fflate';
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, WidthType } from 'docx';
-import { applyRewriteTo, buildBookReportMd, buildDiagSummary, checkRevisedText, chnoFromPath, csvCell, estTokens, filterTargets, findOriginalFlex, locateOriginal, mergeQuotaTexts, mergeTargets, normalizeAndSplitChapters, parseAiJson, pickSentMarkType, planBatchChapters, planCompaction, remapMarks, type BatchChapterItem, type BatchProgressFile, type BookReportRow, type ClassTarget } from './pure.js';
+import { applyRewriteTo, buildBookReportMd, buildDiagSummary, checkRevisedText, chnoFromPath, csvCell, estTokens, filterTargets, findOriginalFlex, locateOriginal, mergeQuotaTexts, mergeTargets, normalizeAndSplitChapters, parseAiJson, parseWorkspaces, pickSentMarkType, planBatchChapters, planCompaction, remapMarks, workspaceChipName, type BatchChapterItem, type BatchProgressFile, type BookReportRow, type ClassTarget } from './pure.js';
 import { renderDiffPane, renderModePill, switchView as switchViewDom, type ViewName } from './widgets.js';
 import { S, setStatus as uiSetStatus, esc } from './state.js';
 import { AI_PROVIDERS, aiErrHuman, buildAssistantPrompt, buildDraftSystemPrompt, buildPlotPointsPrompt, buildRewriteSentencePrompt, buildSystemPrompt, callChat, chatStream, loadConfig, promptSetVersion, reloadPrompts, saveConfig, setAiUi, simplifyMaxLen } from './ai.js';
@@ -305,6 +305,7 @@ async function addSession(md: string, fileName: string, sourcePath: string | nul
   if (sourcePath) {
     const dir = sourcePath.slice(0, sourcePath.lastIndexOf('/'));
     if (await loadBookConfig(dir)) setStatus('已自动加载本书配置（词库/术语/约定）', 'saved');
+    await loadWorkspaces(dir);   // 工作区：先章目录再书稿根（_工作区.json）
   }
   const markPath = await markPathFor(sourcePath, fileName);
   const review = newReviewState(fileName);
@@ -390,6 +391,7 @@ function renderFileTabs(): void {
   el.querySelectorAll('[data-ftab-close]').forEach((x) =>
     x.addEventListener('click', () => closeSession(Number((x as HTMLElement).dataset.ftabClose))),
   );
+  renderWorkspaceBar();
 }
 
 /** 改写文本复核（多句拆分逐句检测，超长=最长一句超限） */
@@ -1235,26 +1237,80 @@ function docxToText(b64: string): string {
   return paras.join('\n\n');
 }
 
+async function openPathIntoSession(p: string): Promise<void> {
+  const name = p.slice(p.lastIndexOf('/') + 1);
+  const raw = p.toLowerCase().endsWith('.docx')
+    ? docxToText(await invoke<string>('read_file_base64', { path: p }))
+    : await invoke<string>('read_text_file', { path: p });
+  // 智能归一化：已合规直接用；多章标题拆多 tab；无章节结构的文本内存包装直接显示（原文件不动）
+  const { chapters } = normalizeAndSplitChapters(raw, name);
+  for (const ch of chapters) await addSession(ch.md, chapters.length > 1 ? ch.title : name, p);
+}
+
 async function openChapterFiles(): Promise<void> {
   const paths = await openFileDialog({
     multiple: true,
     filters: [{ name: '章节文件（Markdown / 文本 / Word）', extensions: ['md', 'txt', 'markdown', 'docx'] }],
   });
-  const list = Array.isArray(paths) ? paths : paths ? [paths] : [];
+  const list = Array.isArray(paths) ? paths : [paths];
   for (const p of list) {
     try {
-      const name = p.slice(p.lastIndexOf('/') + 1);
-      const raw = p.toLowerCase().endsWith('.docx')
-        ? docxToText(await invoke<string>('read_file_base64', { path: p }))
-        : await invoke<string>('read_text_file', { path: p });
-      // 智能归一化：已合规直接用；多章标题拆多 tab；无章节结构的文本内存包装直接显示（原文件不动）
-      const { chapters } = normalizeAndSplitChapters(raw, name);
-      for (const ch of chapters) await addSession(ch.md, chapters.length > 1 ? ch.title : name, p);
-      if (chapters.length > 1) setStatus(`识别到 ${chapters.length} 个章节，已分标签页打开`, 'saved');
+      await openPathIntoSession(p);
     } catch (e) {
       setStatus('读取失败：' + e, 'err');
     }
   }
+}
+
+/* ---------- 工作区（书目录 _工作区.json：3 层次=3 工作区，浏览器标签式切换） ---------- */
+
+async function loadWorkspaces(dir: string): Promise<void> {
+  for (const d of [dir, dir.slice(0, dir.lastIndexOf('/'))]) {   // 先章目录，再书稿根目录
+    try {
+      const raw = await invoke<string>('read_text_file', { path: `${d}/_工作区.json` });
+      const ws = parseWorkspaces(raw);
+      if (ws.length > 0) {
+        S.workspaces = ws;
+        if (!S.activeWorkspace || !ws.some((w) => w.名 === S.activeWorkspace)) S.activeWorkspace = null;
+        return;
+      }
+    } catch { /* 无配置则试上级 */ }
+  }
+  S.workspaces = [];
+  S.activeWorkspace = null;
+}
+
+function activateWorkspace(name: string): void {
+  S.activeWorkspace = name;
+  const w = S.workspaces.find((x) => x.名 === name);
+  if (w?.定制目标) {
+    if (S.classTargets.some((t) => t.id === w.定制目标)) {
+      S.selectedIds = [w.定制目标];
+      fileSummary();
+    } else {
+      setStatus(`工作区已切到【${name}】；绑定目标 ${w.定制目标} 尚未加载——点「👥班级定制→刷新」`, 'err');
+    }
+  }
+  renderWorkspaceBar();
+}
+
+function renderWorkspaceBar(): void {
+  const el = document.getElementById('wstabs') as HTMLElement | null;
+  if (!el) return;
+  if (S.workspaces.length === 0) { el.style.display = 'none'; el.innerHTML = ''; return; }
+  const active = S.workspaces.find((w) => w.名 === S.activeWorkspace);
+  const cur = activeSession()?.sourcePath ?? null;
+  el.style.display = 'flex';
+  el.innerHTML =
+    S.workspaces.map((w) => `<span class="ftab ws ${w.名 === S.activeWorkspace ? 'active' : ''}" data-ws="${esc(w.名)}" title="${w.定制目标 ? `绑定定制口径 ${w.定制目标}` : ''}">${esc(w.名)}</span>`).join('') +
+    (active ? `<span class="ws-files">${active.文件.map((f) => `<span class="wschip ${f === cur ? 'cur' : ''}" data-wsfile="${esc(f)}" title="${esc(f)}">${esc(workspaceChipName(f))}</span>`).join('')}</span>` : '');
+  el.querySelectorAll('[data-ws]').forEach((t) => t.addEventListener('click', () => activateWorkspace((t as HTMLElement).dataset.ws!)));
+  el.querySelectorAll('[data-wsfile]').forEach((c) =>
+    c.addEventListener('click', () => {
+      const f = (c as HTMLElement).dataset.wsfile!;
+      openPathIntoSession(f).then(() => setStatus(`已打开：${workspaceChipName(f)}（工作区【${S.activeWorkspace}】口径）`, 'saved')).catch((e) => setStatus('打开失败：' + e, 'err'));
+    }),
+  );
 }
 
 async function exportMarks(): Promise<void> {

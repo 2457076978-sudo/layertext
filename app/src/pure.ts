@@ -470,3 +470,36 @@ export function filterTargets(targets: ClassTarget[], q: string): ClassTarget[] 
   if (!s) return targets;
   return targets.filter((t) => t.名称.toLowerCase().includes(s) || t.id.toLowerCase().includes(s));
 }
+
+/* ---------- 工作区（2026-09-08 Wayne 指令：3 层次=3 工作区，像浏览器标签切换） ---------- */
+
+export interface Workspace {
+  名: string;              // 如 "B层工作区"
+  定制目标?: string;       // 绑定的班级定制目标 id（如 "组:B"），激活工作区时自动勾选
+  文件: string[];          // 章节文件绝对路径（按序展示为章节 chips）
+}
+
+/** 解析书目录 _工作区.json（宽容：缺字段/空文件列表跳过；返回 [] 表示无工作区） */
+export function parseWorkspaces(raw: string): Workspace[] {
+  let j: { 工作区?: unknown };
+  try { j = JSON.parse(raw) as { 工作区?: unknown }; } catch { return []; }
+  if (!Array.isArray(j.工作区)) return [];
+  const out: Workspace[] = [];
+  for (const w of j.工作区 as Array<Record<string, unknown>>) {
+    const 名 = typeof w.名 === 'string' ? w.名.trim() : '';
+    const files = Array.isArray(w.文件) ? (w.文件 as unknown[]).filter((f): f is string => typeof f === 'string' && f.trim() !== '') : [];
+    if (!名 || files.length === 0) continue;
+    out.push({ 名, 定制目标: typeof w.定制目标 === 'string' ? w.定制目标 : undefined, 文件: files });
+  }
+  return out;
+}
+
+/** 工作区章节 chip 显示名：候选版文件（同层各章同名）取目录名（第一章），否则取文件名去扩展 */
+export function workspaceChipName(path: string): string {
+  const file = path.slice(path.lastIndexOf('/') + 1).replace(/\.(md|txt|markdown|docx)$/i, '');
+  if (file.startsWith('候选版')) {
+    const dir = path.slice(0, path.lastIndexOf('/')).split('/').pop() ?? '';
+    if (/^第.{1,4}章$|^Chapter/i.test(dir)) return dir;   // 只认章节目录名，避免普通目录名误用
+  }
+  return file || path;
+}

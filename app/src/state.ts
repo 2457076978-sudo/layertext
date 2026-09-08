@@ -49,6 +49,9 @@ export const S = {
   /** 班级多人定制（折叠多选栏）：分组/个人目标与当前选择 */
   classTargets: [] as import('./pure.js').ClassTarget[],
   selectedIds: [] as string[],
+  /** 工作区（书目录 _工作区.json，像浏览器标签按版本切换；各工作区可绑定班级定制目标） */
+  workspaces: [] as import('./pure.js').Workspace[],
+  activeWorkspace: null as string | null,
   /** 当前会话合并已知词表（含词句卡） */
   currentKnown: new Set<string>(),
   /** 全局配置（~/.layertext.json） */

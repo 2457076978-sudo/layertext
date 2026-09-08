@@ -375,3 +375,25 @@ test('mergeTargets：dueCap 显式截断仍生效', () => {
   assert.equal(mergeTargets([g], 16).dueUnion.length, 12);          // 默认 12
   assert.equal(mergeTargets([g], 16, 8).dueUnion.length, 8);        // 显式回 8
 });
+
+/* ---------- 工作区：parseWorkspaces / workspaceChipName ---------- */
+import { parseWorkspaces, workspaceChipName } from '../app/src/pure.js';
+
+test('parseWorkspaces：正常解析/坏JSON容错/空文件列表剔除', () => {
+  const ws = parseWorkspaces(JSON.stringify({ 工作区: [
+    { 名: 'B层工作区', 定制目标: '组:B', 文件: ['/a/第一章/候选版_v0.1_中梯队.md', '/a/第二章/候选版_v0.1_中梯队.md'] },
+    { 名: '坏行', 文件: [] },
+    { 名: '无文件' },
+  ] }));
+  assert.equal(ws.length, 1);
+  assert.equal(ws[0].定制目标, '组:B');
+  assert.equal(ws[0].文件.length, 2);
+  assert.deepEqual(parseWorkspaces('not json'), []);
+  assert.deepEqual(parseWorkspaces('{}'), []);
+});
+
+test('workspaceChipName：候选版取目录名，普通文件取文件名', () => {
+  assert.equal(workspaceChipName('/x/第一章/候选版_v0.1_中梯队.md'), '第一章');
+  assert.equal(workspaceChipName('/x/候选版_v0.1_中梯队.md'), '候选版_v0.1_中梯队');  // 无目录名可用→回退文件名
+  assert.equal(workspaceChipName('/x/ch3.md'), 'ch3');
+});

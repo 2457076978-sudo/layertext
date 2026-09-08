@@ -340,7 +340,14 @@
     #demo-menu .demo-item { padding: 7px 10px; border-radius: 8px; cursor: pointer; word-break: break-all; }
     #demo-menu .demo-item:hover { background: #eef2ff; color: var(--brand); }
     #demo-menu .demo-tip { color: var(--muted); font-size: 11px; padding: 6px 8px; border-top: 1px solid var(--line); margin-top: 6px; }
-  </style>
+  /* 工作区条（浏览器标签式：B/M/A 工作区 + 当前工作区章节 chips） */
+.wstabs { display: none; gap: 4px; align-items: center; padding: 3px 10px; border-bottom: 1px solid #e0e0e0; background: #fafafa; overflow-x: auto; }
+.wstabs .ftab.ws { padding: 1px 10px; font-size: 12px; }
+.ws-files { display: inline-flex; gap: 4px; margin-left: 8px; padding-left: 8px; border-left: 1px solid #ddd; }
+.wschip { font-size: 11.5px; color: #444; padding: 1px 7px; border: 1px solid #d8d8d8; border-radius: 10px; cursor: pointer; white-space: nowrap; }
+.wschip:hover { background: #eef4ee; }
+.wschip.cur { background: #1f5c4d; color: #fff; border-color: #1f5c4d; }
+</style>
 </head>
 <body>
   <header>
@@ -361,6 +368,7 @@
     <div id="status">打开章节文件后自动体检、进入审校。词库/术语/标记等更多操作见顶部菜单栏（文件 · 质检 · 帮助）。</div>
   </header>
 
+  <div class="wstabs" id="wstabs" style="display:none"></div>
   <div class="filetabs" id="filetabs" style="display:none"></div>
 
   <div class="workbench">
