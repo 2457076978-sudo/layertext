@@ -265,7 +265,7 @@ async function loadClassGroups(): Promise<void> {
 }
 
 /** 分组就位保证：已加载直接返回；加载一次后记住（目录里确实没有分组文件也算"就位"，避免反复读盘）。
- *  需要重读盘的场景只有用户显式点「🔄 刷新分组文件」。 */
+ *  需要重读盘的场景只有用户显式点「刷新分组文件」。 */
 let classGroupsReady = false;
 function ensureClassGroups(): Promise<void> {
   if (classGroupsReady) return Promise.resolve();
@@ -285,16 +285,16 @@ function renderClsPanel(): void {
   const groups = S.classTargets.filter((t) => t.类型 === '组');
   const persons = S.classTargets.filter((t) => t.类型 === '人');
   if (S.classTargets.length === 0) {
-    panel.innerHTML = `<div style="display:flex;justify-content:space-between"><b><span class="tico">👥</span>班级定制</b><button id="cls-close">×</button></div>
-      <div class="dim" style="line-height:1.8;margin-top:6px">未找到分组文件。把画像导出的分组 JSON 放到：<br><code>~/Documents/LayerText配置/班级分组/</code><br>（班级画像目录运行 <code>python3 画像_分组导出.py</code> 自动生成），然后点「🔄 刷新」。</div>
-      <button id="cls-reload" style="margin-top:8px">🔄 刷新</button>`;
+    panel.innerHTML = `<div style="display:flex;justify-content:space-between"><b><svg class="ico"><use href="#i-users"/></svg>班级定制</b><button id="cls-close">×</button></div>
+      <div class="dim" style="line-height:1.8;margin-top:6px">未找到分组文件。把画像导出的分组 JSON 放到：<br><code>~/Documents/LayerText配置/班级分组/</code><br>（班级画像目录运行 <code>python3 画像_分组导出.py</code> 自动生成），然后点「刷新」。</div>
+      <button id="cls-reload" style="margin-top:8px"><svg class="ico"><use href="#i-refresh"/></svg>刷新</button>`;
   } else {
     const q = ((document.getElementById('cls-search') as HTMLInputElement | null)?.value ?? '').trim();
     const shown = filterTargets(persons, q);
     const sel = mergedSelection();
     const ck = (t: ClassTarget) =>
       `<label style="display:inline-block;margin:2px 6px;white-space:nowrap"><input type="checkbox" data-cls-id="${esc(t.id)}" ${S.selectedIds.includes(t.id) ? 'checked' : ''}/> ${esc(t.名称)}${t.句长上限 ? `<span class="dim">≤${t.句长上限}词</span>` : ''}</label>`;
-    panel.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center"><b><span class="tico">👥</span>班级定制（${S.classTargets.length} 目标）</b>
+    panel.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center"><b><svg class="ico"><use href="#i-users"/></svg>班级定制（${S.classTargets.length} 目标）</b>
         <span><button id="cls-clear" title="清空选择">清空</button> <button id="cls-close">×</button></span></div>
       <div style="margin:6px 0 2px"><b>分组</b></div>
       <div>${groups.map(ck).join('') || '<span class="dim">无</span>'}</div>
@@ -305,11 +305,11 @@ function renderClsPanel(): void {
       <div style="margin-top:8px;padding:6px 8px;background:${sel.active ? '#e8f5e9' : '#f5f5f5'};border-radius:4px;line-height:1.7">
         ${
           sel.active
-            ? `已选 <b>${S.selectedIds.length}</b> 目标【${esc(sel.label)}】<br/>句长 ≤<b>${sel.minLen}</b> 词 ｜ 共同已学词 <b>${sel.knownInter.length}</b> ｜ 本篇复现队列 <b>${sel.dueUnion.length}</b> 词${sel.dueUnion.length ? '：' + esc(sel.dueUnion.slice(0, 6).join(', ')) + (sel.dueUnion.length > 6 ? '…' : '') : ''}<br/><span class="dim">对「▶ 质检本章 / 整章改写 / 全书批处理」生效；简化稿自动带目标标签</span>`
+            ? `已选 <b>${S.selectedIds.length}</b> 目标【${esc(sel.label)}】<br/>句长 ≤<b>${sel.minLen}</b> 词 ｜ 共同已学词 <b>${sel.knownInter.length}</b> ｜ 本篇复现队列 <b>${sel.dueUnion.length}</b> 词${sel.dueUnion.length ? '：' + esc(sel.dueUnion.slice(0, 6).join(', ')) + (sel.dueUnion.length > 6 ? '…' : '') : ''}<br/><span class="dim">对「质检本章 / 整章改写 / 全书批处理」生效；简化稿自动带目标标签</span>`
             : '未选择——质检与简化用全局词库口径。勾选目标后按“句长取最严、复现词取并集”执行。'
         }
       </div>
-      <div style="margin-top:6px"><button id="cls-reload">🔄 刷新分组文件</button> <span class="dim">目录：~/Documents/LayerText配置/班级分组/</span></div>`;
+      <div style="margin-top:6px"><button id="cls-reload"><svg class="ico"><use href="#i-refresh"/></svg>刷新分组文件</button> <span class="dim">目录：~/Documents/LayerText配置/班级分组/</span></div>`;
     const search = document.getElementById('cls-search') as HTMLInputElement | null;
     search?.addEventListener('input', () => renderClsPanel());
     const keepFocus = q && search;
@@ -763,7 +763,7 @@ function showWordPanel(session: FileSession, wEl: HTMLElement, x: number, y: num
     <div class="pop-h">${esc(wEl.textContent ?? '')}</div>
     <div class="pop-info">词表状态：${stateLabel}${origin && origin !== tok ? `<br/>词形还原原形：${esc(origin)}` : ''}</div>
     <div class="pop-marks"></div>
-    <div class="pop-btns"><button data-mk="__rewrite" class="primary" title="让 AI 按当前标记意图改写这一句（快捷键 R）"><span class="tico">✨</span>AI 改写本句</button>${WORD_TYPES.map((t, i) => `<button data-mk="${t.key}"><span class="kbd">${i + 1}</span>${t.label}</button>`).join('')}</div>
+    <div class="pop-btns"><button data-mk="__rewrite" class="primary" title="让 AI 按当前标记意图改写这一句（快捷键 R）"><svg class="ico"><use href="#i-sparkle"/></svg>AI 改写本句</button>${WORD_TYPES.map((t, i) => `<button data-mk="${t.key}"><span class="kbd">${i + 1}</span>${t.label}</button>`).join('')}</div>
     <textarea id="pop-note" placeholder="备注（可选，随下一条标记保存）"></textarea>
     <div class="pop-tip">先标记意图再点「AI 改写本句」，改写会直接出现在正文中供采纳</div>`;
   bindTypeButtons(session, 'word', pi, si, wi);
@@ -921,7 +921,7 @@ function riskSentenceList(s: FileSession): RiskSentItem[] {
 function renderReportPane(s: FileSession): void {
   const pane = $('pane-report');
   if (!s.report) {
-    pane.innerHTML = '<div class="empty">尚未体检（打开课文会自动体检；换词库或改完文后点上方「▶ 重新质检」）</div>';
+    pane.innerHTML = '<div class="empty">尚未体检（打开课文会自动体检；换词库或改完文后点上方「重新质检」）</div>';
     return;
   }
   const legacy = toLegacyReport(s.report) as Record<string, unknown>;
@@ -977,8 +977,8 @@ function renderReportPane(s: FileSession): void {
     ${
       oov.length
         ? `<table class="sgtable"><tr><th style="width:90px">词</th><th>处理（你说了算）</th></tr>${oovRows}</table>
-    ${oov.length > 80 ? `<div class="dim" style="margin-bottom:10px">（只列前 80 词，处理或换词库后点「▶ 重新质检」看剩余）</div>` : ''}`
-        : '<div class="dim" style="margin-bottom:10px">没有词表外生词 🎉</div>'
+    ${oov.length > 80 ? `<div class="dim" style="margin-bottom:10px">（只列前 80 词，处理或换词库后点「重新质检」看剩余）</div>` : ''}`
+        : '<div class="dim" style="margin-bottom:10px">没有词表外生词——全部在词表内</div>'
     }
 
     <div class="diag-h">② 句法难句（${risks.length} 句：被=被动 从=定从 完=过去完成 长=超20词·引擎口径）<span class="dim">——勾"要改"的进标记清单，可批量交给 AI</span></div>
@@ -986,12 +986,12 @@ function renderReportPane(s: FileSession): void {
       risks.length
         ? `<table class="sgtable"><tr><th style="width:110px">风险</th><th>句子</th><th style="width:110px">处理</th></tr>${riskRows}</table>
     ${risks.length > 40 ? `<div class="dim" style="margin-bottom:10px">（只列前 40 句）</div>` : ''}`
-        : '<div class="dim" style="margin-bottom:10px">没有命中黑名单的难句 🎉</div>'
+        : '<div class="dim" style="margin-bottom:10px">没有命中黑名单的难句</div>'
     }
 
     <div class="diag-h">③ 情节要点（AI 摘候选 → 你勾选 → 进右侧"要点配额"）</div>
     <div style="margin-bottom:8px">
-      <button id="diag-plot-btn" class="primary"><span class="tico">✨</span>AI 摘情节要点</button>
+      <button id="diag-plot-btn" class="primary"><svg class="ico"><use href="#i-sparkle"/></svg>AI 摘情节要点</button>
       <span class="dim">让 AI 通读本章，摘出"简化时绝不能丢的情节点/伏笔"（5~8 条），你逐条勾选后进配额清单；没配 AI 也可以在右侧手动添加</span>
     </div>
     <div id="diag-plot-out"></div>`;
@@ -1004,7 +1004,7 @@ function renderReportPane(s: FileSession): void {
       const tok = (btn as HTMLElement).dataset.oovSimpl!;
       const loc = locateWordFirst(s, tok);
       if (!loc) {
-        setStatus(`正文中没找到 "${tok}"（可能已修改，点「▶ 重新质检」）`, 'err');
+        setStatus(`正文中没找到 "${tok}"（可能已修改，点「重新质检」）`, 'err');
         return;
       }
       const sent = sentsOf(extractParas(splitChapter(s.md).body)[loc.pi], false)[loc.si];
@@ -1021,7 +1021,7 @@ function renderReportPane(s: FileSession): void {
         ts: Date.now(),
       });
       renderReportPane(s);
-      setStatus(`✓ 已标记简化「${loc.raw}」——处理完一批后点「✨AI 审核建议」批量改`, 'saved');
+      setStatus(`✓ 已标记简化「${loc.raw}」——处理完一批后点「AI 审核建议」批量改`, 'saved');
     }),
   );
 
@@ -1052,7 +1052,7 @@ function renderReportPane(s: FileSession): void {
         ts: Date.now(),
       });
       renderReportPane(s);
-      setStatus(`✓ 已标记要改（P${pi + 1}-S${si + 1}，${item.badges.join('/')}）——可批量点「✨AI 审核建议」`, 'saved');
+      setStatus(`✓ 已标记要改（P${pi + 1}-S${si + 1}，${item.badges.join('/')}）——可批量点「AI 审核建议」`, 'saved');
     }),
   );
 
@@ -1109,7 +1109,7 @@ async function aiPlotPoints(s: FileSession): Promise<void> {
     setStatus('AI 摘要点失败：' + e, 'err');
   } finally {
     btn.disabled = false;
-    btn.textContent = '✨ AI 摘情节要点';
+    btn.textContent = '<svg class="ico"><use href="#i-sparkle"/></svg>AI 摘情节要点';
   }
 }
 
@@ -1392,7 +1392,7 @@ function loadBuiltinDemo(): void {
     S.vocabName = '示例词库 sample_teaching_vocab.csv';
   }
   void addSession(exampleMd, 'aesop_tortoise_hare.md（示例）', null).then(() => {
-    setStatus('已载入内置示例（含示例词库）。正文点词/拖选句子开始审校；「▶ 质检本章」看报告。');
+    setStatus('已载入内置示例（含示例词库）。正文点词/拖选句子开始审校；「质检本章」看报告。');
   });
 }
 
@@ -1488,7 +1488,7 @@ async function activateWorkspace(name: string): Promise<void> {
       fileSummary();
       renderWorkspaceBar();
     } else if (S.activeWorkspace === name) {
-      setStatus(`工作区【${name}】绑定的口径 ${w.定制目标} 在分组文件里没找到（👥 班级定制里可查目录位置）`, 'dirty');
+      setStatus(`工作区【${name}】绑定的口径 ${w.定制目标} 在分组文件里没找到（<svg class="ico"><use href="#i-users"/></svg>班级定制里可查目录位置）`, 'dirty');
     }
   }
 }
@@ -1601,13 +1601,13 @@ function renderShelfChrome(el: HTMLElement, books: ShelfBook[]): void {
   const ls = S.appConfig.lastSession;
   el.innerHTML = `
     <div class="shelf">
-      ${ls?.files?.length ? `<div class="shelf-resume" id="shelf-resume"><span class="tri">▶</span>继续上次编辑：${esc(ls.workspace ? ls.workspace + ' · ' : '')}${esc(ls.files[Math.min(ls.activeIdx, ls.files.length - 1)]?.path.split('/').pop() ?? '')} <span class="dim">（${esc(ls.savedAt)}）</span></div>` : ''}
-      <div class="shelf-h"><span class="tico">📚</span>我的书架<span class="dim">——点一本书，先选版本（如 B/M/A），再进工作区</span></div>
+      ${ls?.files?.length ? `<div class="shelf-resume" id="shelf-resume"><svg class="ico"><use href="#i-play"/></svg>继续上次编辑：${esc(ls.workspace ? ls.workspace + ' · ' : '')}${esc(ls.files[Math.min(ls.activeIdx, ls.files.length - 1)]?.path.split('/').pop() ?? '')} <span class="dim">（${esc(ls.savedAt)}）</span></div>` : ''}
+      <div class="shelf-h"><svg class="ico"><use href="#i-books"/></svg>我的书架<span class="dim">——点一本书，先选版本（如 B/M/A），再进工作区</span></div>
       <div class="shelf-tools">
         <input type="search" id="shelf-q" placeholder="搜索书名 / 分组…" value="${esc(S.shelfQ)}"/>
         <span class="viewseg">
-          <button id="view-grid" title="书封视图——挑书">▦ 书封</button>
-          <button id="view-list" title="清单视图——管审校进度"><span class="tico">☰</span>进度</button>
+          <button id="view-grid" title="书封视图——挑书"><svg class="ico"><use href="#i-grid"/></svg>书封</button>
+          <button id="view-list" title="清单视图——管审校进度"><svg class="ico"><use href="#i-list"/></svg>进度</button>
         </span>
         <span class="dim" id="shelf-count" style="font-size:11px"></span>
       </div>
@@ -1913,7 +1913,7 @@ function ensureTocDom(): { mask: HTMLElement; panel: HTMLElement } {
     panel = document.createElement('aside');
     panel.id = 'toc-panel';
     panel.innerHTML = `
-      <div class="toc-h"><span class="tico">☰</span>目录<span class="dim" id="toc-sub"></span><button id="toc-close" title="关闭（Esc）">×</button></div>
+      <div class="toc-h"><svg class="ico"><use href="#i-list"/></svg>目录<span class="dim" id="toc-sub"></span><button id="toc-close" title="关闭（Esc）">×</button></div>
       <div class="toc-list" id="toc-list"></div>
       <div class="toc-bm-h" id="toc-bm-h" style="display:none">★ 本章书签 <span class="cnt" id="toc-bm-cnt"></span><span class="dim" style="font-weight:400;font-size:10.5px">— 双击正文段号收藏</span></div>
       <div class="toc-bm" id="toc-bm"></div>`;
@@ -2032,9 +2032,9 @@ async function refreshToc(): Promise<void> {
 /* ---------- 阅读体验：主题（白/灰/深色）与行距 ---------- */
 
 const THEMES: { key: 'light' | 'gray' | 'dark'; label: string; icon: string }[] = [
-  { key: 'light', label: '白', icon: '☀' },
-  { key: 'gray', label: '灰', icon: '◐' },
-  { key: 'dark', label: '深色', icon: '🌙' },
+  { key: 'light', label: '白', icon: 'i-sun' },
+  { key: 'gray', label: '灰', icon: 'i-contrast' },
+  { key: 'dark', label: '深色', icon: 'i-moon' },
 ];
 
 function applyTheme(): void {
@@ -2042,7 +2042,7 @@ function applyTheme(): void {
   document.documentElement.dataset.theme = t;
   const btn = document.getElementById('btn-theme');
   if (btn) {
-    btn.innerHTML = `<span class="tico">${THEMES.find((x) => x.key === t)?.icon ?? '☀'}</span>`;
+    btn.innerHTML = `<svg class="ico"><use href="#${THEMES.find((x) => x.key === t)?.icon ?? 'i-sun'}"/></svg>`;
     btn.title = `主题：${THEMES.map((x) => (x.key === t ? `【${x.label}】` : x.label)).join('/')}，点击切换`;
   }
 }
@@ -2511,7 +2511,7 @@ async function aiSuggest(instruction?: string): Promise<void> {
     const hint = String(e).includes('未找到 JSON') ? '（模型思考太长占满输出上限——建议 AI 设置里换非思考型模型，或减少一次标记的数量分批出）' : '';
     setStatus('AI 请求失败：' + e + hint, 'err');
   } finally {
-    btn.textContent = '✨ AI 审核建议';
+    btn.textContent = '<svg class="ico"><use href="#i-sparkle"/></svg>AI 审核建议';
     btn.disabled = false;
   }
 }
@@ -2528,7 +2528,7 @@ function checkLabel(c: Suggestion['check']): string {
 function renderSuggestions(): void {
   const pane = $('pane-suggest');
   if (S.suggestions.length === 0) {
-    pane.innerHTML = '<div class="empty">暂无修订建议——点「✨ AI 审核建议」生成</div>';
+    pane.innerHTML = '<div class="empty">暂无修订建议——点「AI 审核建议」生成</div>';
     return;
   }
   pane.innerHTML = `
@@ -2870,7 +2870,7 @@ async function aiRewriteSentence(pi: number, si: number, intent: string, autoMar
     setStatus('AI 改写失败：' + e + hint, 'err');
   } finally {
     if (btn) {
-      btn.textContent = '✨ AI 改写本句';
+      btn.textContent = '<svg class="ico"><use href="#i-sparkle"/></svg>AI 改写本句';
       (btn as HTMLButtonElement).disabled = false;
     }
   }
@@ -3044,7 +3044,7 @@ function showBatchPop(): void {
   batchDir = '';
   batchItems = [];
   batchPop.innerHTML = `
-    <div class="pop-h"><span class="tico">📚</span>全书简化 · 批处理队列</div>
+    <div class="pop-h"><svg class="ico"><use href="#i-books"/></svg>全书简化 · 批处理队列</div>
     <p class="dim" style="margin:4px 0 10px;line-height:1.8">对整本书逐章执行「AI 简化 + 自动体检 + 书级规则校验」。每章产物与单章操作完全相同（<b>xxx_简化_日期.md</b>，原稿不动），全部跑完生成<b>《全书简化报告_日期.md》</b>横向对比各章指标。<b>中断可续跑</b>：已完成的章下次自动跳过；单章失败不拖垮后面的章。</p>
     <div class="fld"><label>① 书稿文件夹（一本书一个文件夹；词库/规则随《_LayerText项目.json》自动生效）</label>
       <div class="row-btns"><button id="bt-pick" class="primary">选择书稿文件夹…</button><span class="dim" id="bt-dir-label" style="align-self:center;word-break:break-all"></span></div></div>
@@ -3581,14 +3581,14 @@ function renderSettings(): void {
   if (!pop) return;
   const sel = mergedSelection();
   const row = (label: string, ctrl: string) => `<div class="set-row"><span>${label}</span>${ctrl}</div>`;
-  pop.innerHTML = `<div class="pop-h"><span class="tico">⚙</span>设置 <span class="dim" style="font-weight:400;font-size:12px">（改完即存）</span></div>
+  pop.innerHTML = `<div class="pop-h"><svg class="ico"><use href="#i-settings"/></svg>设置 <span class="dim" style="font-weight:400;font-size:12px">（改完即存）</span></div>
     ${row('阅读字号', `<button id="set-fm">A－</button> <b id="set-fv">${S.appConfig.readerFont ?? 17}</b>px <button id="set-fp">A＋</button>`)}
     ${row('行间距', `<span class="seg">${LINE_HEIGHTS.map((h) => `<button class="${(S.appConfig.lineHeight ?? 2.1) === h ? 'cur' : ''}" data-lh="${h}">${h}</button>`).join('')}</span>`)}
     ${row('主题', `<span class="seg">${THEMES.map((t) => `<button class="${(S.appConfig.theme ?? 'light') === t.key ? 'cur' : ''}" data-theme="${t.key}">${t.label}</button>`).join('')}</span>`)}
     ${row('句长上限（简化标准）', `<button id="set-len">调整（${simplifyMaxLen()} 词）</button>`)}
     ${row('直接修改原稿（首改自动备份）', `<input type="checkbox" id="set-inplace" ${(S.appConfig.inPlaceEdit ?? true) ? 'checked' : ''}/>`)}
     ${row('AI 改写直接生效', `<input type="checkbox" id="set-autorew" ${S.appConfig.autoRewriteOnMark ? 'checked' : ''}/>`)}
-    ${row('当前班级定制口径', `<span class="dim">${sel.active ? `【${sel.label}】句长≤${sel.minLen} · 复现${sel.dueUnion.length}词${sel.coverageTarget ? ' · 覆盖≥' + sel.coverageTarget + '%' : ''}` : '未选择（👥班级定制）'}</span>`)}
+    ${row('当前班级定制口径', `<span class="dim">${sel.active ? `【${sel.label}】句长≤${sel.minLen} · 复现${sel.dueUnion.length}词${sel.coverageTarget ? ' · 覆盖≥' + sel.coverageTarget + '%' : ''}` : '未选择（班级定制面板里选）'}</span>`)}
     <div class="dim" style="margin-top:8px">LayerText v1.1 · feature/reinforce · 词库以书目录 _词库.csv 为准</div>`;
   pop.querySelectorAll<HTMLElement>('[data-lh]').forEach((b) =>
     b.addEventListener('click', () => {
@@ -4040,7 +4040,7 @@ function renderAlignPane(): void {
 
   pane.innerHTML = `
     <div class="align-bar">
-      <b><span class="tico">⇄</span>逐句对照</b>
+      <b><svg class="ico"><use href="#i-columns"/></svg>逐句对照</b>
       <span class="dim" style="font-size:12px">基准</span>
       <select id="align-base">
         ${others.length ? others.map((x, i) => `<option value="s${i}">${esc(x.fileName)}（已打开）</option>`).join('') : ''}
@@ -4248,11 +4248,11 @@ async function renderDossierPane(): Promise<void> {
   const hasBase = d.基准摘要 !== undefined;
   pane.innerHTML = `
     <div class="align-bar">
-      <b><span class="tico">📄</span>审校档案</b>
-      <span class="dim" style="font-size:12px">${esc(d.书名)} · ${esc(d.章名)}${d.版本 ? ' · ' + esc(d.版本) : ''}${hasBase ? ' · 基准已选（对照与指标含基准列）' : ' · <span style="color:var(--pending)">未选基准：去「⇄ 逐句对照」选一个基准版本，档案会多出指标对照与丢句明细</span>'}</span>
+      <b><svg class="ico"><use href="#i-doc"/></svg>审校档案</b>
+      <span class="dim" style="font-size:12px">${esc(d.书名)} · ${esc(d.章名)}${d.版本 ? ' · ' + esc(d.版本) : ''}${hasBase ? ' · 基准已选（对照与指标含基准列）' : ' · <span style="color:var(--pending)">未选基准：去「逐句对照」选一个基准版本，档案会多出指标对照与丢句明细</span>'}</span>
       <span style="flex:1"></span>
-      <button id="dos-export-ch" class="primary"><span class="tico">📄</span>导出本章档案</button>
-      <button id="dos-export-book"><span class="tico">📚</span>导出全书档案</button>
+      <button id="dos-export-ch" class="primary"><svg class="ico"><use href="#i-doc"/></svg>导出本章档案</button>
+      <button id="dos-export-book"><svg class="ico"><use href="#i-books"/></svg>导出全书档案</button>
     </div>
     <table class="sgtable">
       <tr><th>指标</th>${hasBase ? '<th>基准版</th>' : ''}<th>当前版</th></tr>
@@ -4407,7 +4407,7 @@ function rewriteCheck(): string {
   if (S.rewriteRules.viewpoint === 'first') {
     const he = (body.match(/\b(he|his|him|she|her)\b/gi) ?? []).length;
     const I = (body.match(/\b(I|my|me)\b/g) ?? []).length;
-    out.push(`视角（第一人称）：第三人称代词 ${he} 处 / 第一人称 ${I} 处${he > I * 2 ? ' ⚠ 第一人称占比偏低，建议用「📖 整章改写」按规则重写' : ''}`);
+    out.push(`视角（第一人称）：第三人称代词 ${he} 处 / 第一人称 ${I} 处${he > I * 2 ? ' ⚠ 第一人称占比偏低，建议用「整章改写」按规则重写' : ''}`);
   }
   return out.length ? out.join('\n') : '尚未设置规则';
 }
@@ -4526,7 +4526,7 @@ function showWelcome(): void {
   wp.classList.add('open');
   const stepWelcome = () => {
     wp.innerHTML = `
-      <div class="pop-h" style="font-size:17px">欢迎使用 LayerText 分层读 🎉</div>
+      <div class="pop-h" style="font-size:17px">欢迎使用 LayerText 分层读</div>
       <p style="margin:8px 0 4px;line-height:1.8">这是帮你把英文原著<strong>简化成学生能读的版本</strong>的工具（简化到什么程度由你的词库决定）。先花一分钟完成初始设置：</p>
       <div class="w-steps">
         <div class="w-step"><b>① 连接 AI</b>（可跳过，不连也能用质检与标记）</div>
@@ -4814,7 +4814,10 @@ function chatRender(): void {
             if (m.role === 'user') return `<div class="chat-msg user"><div class="bubble">${esc(m.content)}</div></div>`;
             if (m.role === 'tool') return '';
             const toolsHtml = ((m.tool_calls as { function: { name: string; arguments: string } }[] | undefined) ?? [])
-              .map((t) => `<div class="chat-tool">🔧 ${esc(t.function.name)}(${esc(t.function.arguments.slice(0, 60))}${t.function.arguments.length > 60 ? '…' : ''})</div>`)
+              .map(
+                (t) =>
+                  `<div class="chat-tool"><svg class="ico sm"><use href="#i-wrench"/></svg>${esc(t.function.name)}(${esc(t.function.arguments.slice(0, 60))}${t.function.arguments.length > 60 ? '…' : ''})</div>`,
+              )
               .join('');
             return `<div class="chat-msg assistant">${toolsHtml}<div class="bubble" ${m.content === '' ? 'id="chat-cur"' : ''}>${esc(m.content)}</div></div>`;
           })
@@ -4984,7 +4987,7 @@ function showGateHelp(gate: string, anchor: HTMLElement): void {
           ${row('待定词命中', String(r.pendingHits), '逐个复核后定去留', r.pendingHits > 0)}
         </table>`;
     } else {
-      body += `<p class="dim">本章尚未体检——打开课文会自动体检，或点「▶ 重新质检」。</p>`;
+      body += `<p class="dim">本章尚未体检——打开课文会自动体检，或点「重新质检」。</p>`;
     }
     body += `<p class="dim">参考值即当前简化标准（句长上限 ⓘ 可调）；黄色行 = 超出参考，需你复核后决定。达标与否由你勾选确认（AI 只出数字，教师定稿）。</p>`;
   }

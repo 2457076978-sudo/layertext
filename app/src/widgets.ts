@@ -10,7 +10,7 @@ import { extractParas, splitChapter } from '../../src/core/textpipe.js';
 
 export function renderModePill(pill: HTMLElement, autoRewrite: boolean): void {
   pill.className = 'mode-pill ' + (autoRewrite ? 'green' : 'yellow');
-  pill.innerHTML = autoRewrite ? '⚡ 即改模式：标记即生效' : '👁 候选模式：等你点 ✓';
+  pill.innerHTML = autoRewrite ? '<svg class="ico"><use href="#i-bolt"/></svg>即改模式：标记即生效' : '<svg class="ico"><use href="#i-eye"/></svg>候选模式：等你点 ✓';
   pill.title = autoRewrite ? '当前：点了标记/建议，AI 改完立即生效（写原稿+日志）。点击切到候选模式' : '当前：AI 只出建议（黄色框），你逐条点 ✓ 才生效。点击切到即改模式';
 }
 

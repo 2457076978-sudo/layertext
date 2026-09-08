@@ -1562,15 +1562,29 @@
         max-width: 1480px;
         margin: 0 auto;
       }
-      .tri {
-        display: inline-block;
-        transform: translate(1px, 0.5px); /* 三角形光学补偿：重心在几何盒左下，纯居中显得偏左坠 */
-        margin-right: 2px;
+      .ico {
+        width: 1em;
+        height: 1em;
+        stroke: currentColor;
+        fill: none;
+        stroke-width: 1.8;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        vertical-align: -0.13em; /* 图标与文字基线的光学对位 */
+        margin-right: 5px;
+        flex-shrink: 0;
       }
-      .tico {
-        display: inline-block;
-        transform: translateY(1px); /* emoji/表意字符光学基线补偿：与汉字视觉中线对齐 */
-        margin-right: 7px;
+      .ico.fill {
+        fill: currentColor;
+        stroke: none;
+      }
+      .ico.sm {
+        width: 0.8em;
+        height: 0.8em;
+        margin-right: 3px;
+      }
+      button > .ico:first-child {
+        margin-left: -2px; /* 按钮内图标与文字的视觉重心（去图标侧空隙） */
       }
       .shelf-h {
         font-size: 17px;
@@ -2524,11 +2538,107 @@
     </style>
   </head>
   <body>
+    <svg xmlns="http://www.w3.org/2000/svg" style="display: none" aria-hidden="true">
+      <symbol id="i-home" viewBox="0 0 24 24">
+        <path d="M4 11 12 4l8 7" />
+        <path d="M6 10v10h12V10" />
+      </symbol>
+      <symbol id="i-search" viewBox="0 0 24 24">
+        <circle cx="11" cy="11" r="6.5" />
+        <path d="M16 16l5 5" />
+      </symbol>
+      <symbol id="i-users" viewBox="0 0 24 24">
+        <circle cx="9" cy="8" r="3.2" />
+        <path d="M3.5 19c.8-3 3-4.5 5.5-4.5s4.7 1.5 5.5 4.5" />
+        <circle cx="16.8" cy="9.3" r="2.5" />
+        <path d="M16 14.7c2.4.2 4.3 1.7 5 4.3" />
+      </symbol>
+      <symbol id="i-play" viewBox="0 0 24 24"><path d="M9 7.5v9l8-4.5z" /></symbol>
+      <symbol id="i-book" viewBox="0 0 24 24">
+        <path d="M12 6c-1.5-1.6-3.8-2-6-2v14c2.2 0 4.5.4 6 2 1.5-1.6 3.8-2 6-2V4c-2.2 0-4.5.4-6 2z" />
+        <path d="M12 6v14" />
+      </symbol>
+      <symbol id="i-books" viewBox="0 0 24 24">
+        <path d="M4 20V6l3-1v15" />
+        <path d="M10 20V4l4 1v15" />
+        <path d="M17 6l3 1v13" />
+        <path d="M3 20h18" />
+      </symbol>
+      <symbol id="i-sparkle" viewBox="0 0 24 24">
+        <path d="M12 3c.6 3.8 1.9 5.1 5.7 5.7-3.8.6-5.1 1.9-5.7 5.7-.6-3.8-1.9-5.1-5.7-5.7C10.1 8.1 11.4 6.8 12 3z" />
+        <path d="M18.5 15.5c.3 1.9.9 2.5 2.8 2.8-1.9.3-2.5.9-2.8 2.8-.3-1.9-.9-2.5-2.8-2.8 1.9-.3 2.5-.9 2.8-2.8z" />
+      </symbol>
+      <symbol id="i-doc" viewBox="0 0 24 24">
+        <path d="M7 3h7l4 4v14H7z" />
+        <path d="M14 3v4h4" />
+        <path d="M9.5 12h5M9.5 15.5h5" />
+      </symbol>
+      <symbol id="i-chart" viewBox="0 0 24 24">
+        <path d="M5 20v-8M11 20V6M17 20v-9" />
+        <path d="M3 20h18" />
+      </symbol>
+      <symbol id="i-columns" viewBox="0 0 24 24">
+        <rect x="3.5" y="5" width="7.5" height="14" rx="1.5" />
+        <rect x="13" y="5" width="7.5" height="14" rx="1.5" />
+      </symbol>
+      <symbol id="i-list" viewBox="0 0 24 24">
+        <path d="M8.5 6H20M8.5 12H20M8.5 18H20" />
+        <circle cx="4.3" cy="6" r="1" fill="currentColor" stroke="none" />
+        <circle cx="4.3" cy="12" r="1" fill="currentColor" stroke="none" />
+        <circle cx="4.3" cy="18" r="1" fill="currentColor" stroke="none" />
+      </symbol>
+      <symbol id="i-grid" viewBox="0 0 24 24">
+        <rect x="4" y="4" width="7" height="7" rx="1" />
+        <rect x="13" y="4" width="7" height="7" rx="1" />
+        <rect x="4" y="13" width="7" height="7" rx="1" />
+        <rect x="13" y="13" width="7" height="7" rx="1" />
+      </symbol>
+      <symbol id="i-settings" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="3.2" />
+        <path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M18.7 5.3l-2.1 2.1M7.4 16.6l-2.1 2.1" />
+      </symbol>
+      <symbol id="i-sun" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="4.2" />
+        <path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M19.1 4.9l-1.8 1.8M6.7 17.3l-1.8 1.8" />
+      </symbol>
+      <symbol id="i-contrast" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="8" />
+        <path d="M12 4a8 8 0 0 1 0 16z" fill="currentColor" stroke="none" />
+      </symbol>
+      <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 13.5A8 8 0 1 1 10.5 4 6.5 6.5 0 0 0 20 13.5z" /></symbol>
+      <symbol id="i-undo" viewBox="0 0 24 24">
+        <path d="M8 7 4 11l4 4" />
+        <path d="M4 11h10a6 6 0 0 1 6 6v1" />
+      </symbol>
+      <symbol id="i-redo" viewBox="0 0 24 24">
+        <path d="M16 7l4 4-4 4" />
+        <path d="M20 11H10a6 6 0 0 0-6 6v1" />
+      </symbol>
+      <symbol id="i-chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6" /></symbol>
+      <symbol id="i-chev-up" viewBox="0 0 24 24"><path d="M6 15l6-6 6 6" /></symbol>
+      <symbol id="i-refresh" viewBox="0 0 24 24">
+        <path d="M20 9a8 8 0 0 0-14.5-2" />
+        <path d="M4 15a8 8 0 0 0 14.5 2" />
+        <path d="M5.5 2.5V7H10M18.5 21.5V17H14" />
+      </symbol>
+      <symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13 2 5 13h5l-1 9 8-11h-5z" /></symbol>
+      <symbol id="i-eye" viewBox="0 0 24 24">
+        <path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z" />
+        <circle cx="12" cy="12" r="3" />
+      </symbol>
+      <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></symbol>
+      <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18" /></symbol>
+      <symbol id="i-wrench" viewBox="0 0 24 24"><path d="M14.5 6.5a4.5 4.5 0 0 0-6 5.6L3 17.6 6.4 21l5.5-5.5a4.5 4.5 0 0 0 5.6-6L14 13l-3-3z" /></symbol>
+    </svg>
     <header data-tauri-drag-region>
       <span class="logo">LayerText 分层读<small>v1.1</small></span>
       <span class="tgroup"
-        ><button id="btn-home" title="回到书架（当前章节自动保存，随时回来）"><span class="tico">🏠</span>书架</button>
-        <button id="btn-demo">载入示例▾</button>
+        ><button id="btn-home" title="回到书架（当前章节自动保存，随时回来）">
+          <svg class="ico"><use href="#i-home" /></svg>书架
+        </button>
+        <button id="btn-demo">
+          载入示例<svg class="ico sm"><use href="#i-chev" /></svg>
+        </button>
         <button id="btn-open">打开文件…</button>
         <button id="tier-q" class="qmark" title="简化标准：句长上限（可调）。难度由你的词库决定——学生学过什么词，就简化到词库内；要更简版本，把简化结果再导入再简化">ⓘ</button></span
       >
@@ -2538,30 +2648,42 @@
           id="btn-cls"
           title="班级多人定制：从 ~/Documents/LayerText配置/班级分组/ 读分组与个人目标，勾选后质检⑩/整章改写/批处理都按这批人的口径（句长取最严、复现词取并集），简化稿自动带目标标签"
         >
-          👥 班级定制
+          <svg class="ico"><use href="#i-users" /></svg>班级定制
         </button></span
       >
       <span class="tsep"></span>
       <span class="tgroup"
-        ><button id="btn-run" class="primary" title="打开课文会自动体检；换了词库或改完正文后，点这里重新算一遍"><span class="tri">▶</span>质检本章</button></span
+        ><button id="btn-run" class="primary" title="打开课文会自动体检；换了词库或改完正文后，点这里重新算一遍">
+          <svg class="ico"><use href="#i-play" /></svg>质检本章
+        </button></span
       >
       <span class="tsep"></span>
       <span class="tgroup"
         ><button id="btn-draft" title="整章大改：AI 按当前简化标准把全章重写成简化版（自动体检、原稿不动），适合第一次处理原文；要更简的版本，把简化版再导入再点一次">
-          <span class="tico">📖</span>整章改写…
+          <svg class="ico"><use href="#i-book" /></svg>整章改写…
         </button>
-        <button id="btn-batch" title="整本书排队跑：选书稿文件夹勾选章节，自动逐章『AI 简化+体检+规则校验』，跑完给一份全书汇总报告；中断可续跑"><span class="tico">📚</span>全书简化…</button>
-        <button id="btn-ai" title="精修：先在正文点词/划句做标记，再点这里成批改。改完即改还是等你确认，看右侧模式胶囊"><span class="tico">✨</span>按标记修改</button></span
+        <button id="btn-batch" title="整本书排队跑：选书稿文件夹勾选章节，自动逐章『AI 简化+体检+规则校验』，跑完给一份全书汇总报告；中断可续跑">
+          <svg class="ico"><use href="#i-books" /></svg>全书简化…
+        </button>
+        <button id="btn-ai" title="精修：先在正文点词/划句做标记，再点这里成批改。改完即改还是等你确认，看右侧模式胶囊">
+          <svg class="ico"><use href="#i-sparkle" /></svg>按标记修改
+        </button></span
       >
       <span class="tsep"></span>
       <span class="tgroup">
         <button id="btn-undo" title="撤销上一次文件级更改（⌘⌥Z）">↩︎</button>
         <button id="btn-redo" title="重做（⌘⌥⇧Z）">↪︎</button>
-        <button id="btn-find" title="查找 / 替换（⌘F）">🔍</button>
+        <button id="btn-find" title="查找 / 替换（⌘F）">
+          <svg class="ico"><use href="#i-search" /></svg>
+        </button>
         <button id="btn-font-minus" title="字号减小（⌘-）">A－</button>
         <button id="btn-font-plus" title="字号增大（⌘+）">A＋</button>
-        <button id="btn-theme" title="主题：白/灰/深色，点击切换">☀</button>
-        <button id="btn-settings" title="设置：字号/行距/主题/句长/编辑与 AI 开关">⚙</button>
+        <button id="btn-theme" title="主题：白/灰/深色，点击切换">
+          <svg class="ico"><use href="#i-sun" /></svg>
+        </button>
+        <button id="btn-settings" title="设置：字号/行距/主题/句长/编辑与 AI 开关">
+          <svg class="ico"><use href="#i-settings" /></svg>
+        </button>
       </span>
       <span class="tsep"></span>
       <button id="mode-pill" class="mode-pill" title="点击切换">…</button>
@@ -2583,14 +2705,22 @@
     <div class="workbench">
       <div class="content">
         <div class="viewtabs">
-          <button id="tab-toc" title="全书章节目录与本章书签（再点或 Esc 关闭）"><span class="tico">☰</span>目录</button>
+          <button id="tab-toc" title="全书章节目录与本章书签（再点或 Esc 关闭）">
+            <svg class="ico"><use href="#i-list" /></svg>目录
+          </button>
           <button id="tab-text" class="active">正文审校</button>
           <button id="tab-report">质检报告</button>
           <button id="tab-suggest">修订建议</button>
           <button id="tab-diff">版本对比</button>
-          <button id="tab-align" title="基准版（如原文）与当前章行对行核对：左丢什么、右加什么，机器核数字与专名"><span class="tico">⇄</span>逐句对照</button>
-          <button id="tab-board" title="全书审校看板：每章门禁/标记/生词率/建议采纳率——还剩多少活一眼看清"><span class="tico">📊</span>看板</button>
-          <button id="tab-dossier" title="审校过程档案：指标对照+逐句对照+决策记录，一键成卷（论文素材）"><span class="tico">📄</span>档案</button>
+          <button id="tab-align" title="基准版（如原文）与当前章行对行核对：左丢什么、右加什么，机器核数字与专名">
+            <svg class="ico"><use href="#i-columns" /></svg>逐句对照
+          </button>
+          <button id="tab-board" title="全书审校看板：每章门禁/标记/生词率/建议采纳率——还剩多少活一眼看清">
+            <svg class="ico"><use href="#i-chart" /></svg>看板
+          </button>
+          <button id="tab-dossier" title="审校过程档案：指标对照+逐句对照+决策记录，一键成卷（论文素材）">
+            <svg class="ico"><use href="#i-doc" /></svg>档案
+          </button>
           <button id="tab-retro">复盘</button>
         </div>
         <section id="pane-text" class="pane active">
@@ -2613,7 +2743,7 @@
         </section>
         <section id="pane-suggest" class="pane">
           <div class="empty">
-            还没有修订建议。<br />方式一：正文里点词 →「✨ AI 改写本句」；<br />方式二：标记若干处后点「✨ AI 审核建议」批量出；<br />方式三：右侧「AI 助手」对话里直接让它改。<br /><span
+            还没有修订建议。<br />方式一：正文里点词 →「AI 改写本句」；<br />方式二：标记若干处后点「AI 审核建议」批量出；<br />方式三：右侧「AI 助手」对话里直接让它改。<br /><span
               style="font-size: 12px"
               >AI 只给建议（黄色框显示在正文里），你点 ✓ 才生效</span
             >
