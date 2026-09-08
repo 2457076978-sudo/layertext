@@ -709,7 +709,7 @@ function renderPopMarks(existing: Mark[]): void {
   const box = pop.querySelector('.pop-marks');
   if (!box) return;
   box.innerHTML = existing.length
-    ? existing.map((m) => `<span class="mchip">${typeLabel(m.type)}${m.note ? ' ✎' : ''}<button class="x" data-pop-rm="${m.id}" title="删除该标记">×</button></span>`).join('')
+    ? existing.map((m) => `<span class="mchip">${typeLabel(m.type)}${m.note ? ' ✎︎' : ''}<button class="x" data-pop-rm="${m.id}" title="删除该标记">×</button></span>`).join('')
     : '<span style="color:var(--muted);font-size:12px">尚无标记</span>';
   box.querySelectorAll('[data-pop-rm]').forEach((btn) =>
     btn.addEventListener('click', () => {
@@ -785,7 +785,7 @@ function showSentPanel(session: FileSession, sentEl: HTMLElement, x: number, y: 
   delete pop.dataset.wi;
   pop.innerHTML = `
     <div class="pop-h">句子标记（P${String(pi + 1).padStart(2, '0')} · 第${si + 1}句 · ${wc} 词）</div>
-    <div class="pop-info">${esc(text.slice(0, 80))}${text.length > 80 ? '…' : ''}<br/>自动检测：${riskBits ? `<span class="warn">${riskBits}</span>` : '<span class="ok">未命中黑名单句法</span>'}${crossSentence ? '<br/>⚠ 跨句选择，仅标记所选末句' : ''}</div>
+    <div class="pop-info">${esc(text.slice(0, 80))}${text.length > 80 ? '…' : ''}<br/>自动检测：${riskBits ? `<span class="warn">${riskBits}</span>` : '<span class="ok">未命中黑名单句法</span>'}${crossSentence ? '<br/>⚠︎ 跨句选择，仅标记所选末句' : ''}</div>
     <div class="pop-marks"></div>
     <div class="pop-btns">${SENT_TYPES.map((t, i) => `<button data-mk="${t.key}"><span class="kbd">${i + 1}</span>${t.label}</button>`).join('')}</div>
     <textarea id="pop-note" placeholder="备注（可选，随下一条标记保存）"></textarea>`;
@@ -1181,16 +1181,16 @@ async function renderRetroPane(): Promise<void> {
       ${card('累计建议', String(o.total), '台账自动记录每次 采纳/拒绝/直改')}
       ${card('明确采纳率', pct(o.explicitRate), `教师过目部分（采纳 ${o.accepted}/拒绝 ${o.rejected}）`)}
       ${card('总接受率', pct(o.overallRate), `含直改 ${o.autoApplied} 条（你开启的自动模式）`)}
-      ${card('复核⚠被拒率', pct(cc.warnTotal ? cc.warnRejected / cc.warnTotal : null), `复核⚠ ${cc.warnTotal} 条中 ${cc.warnRejected} 条被拒；复核通过的为 ${pct(cc.okTotal ? cc.okRejected / cc.okTotal : null)}`)}
+      ${card('复核⚠︎被拒率', pct(cc.warnTotal ? cc.warnRejected / cc.warnTotal : null), `复核⚠︎ ${cc.warnTotal} 条中 ${cc.warnRejected} 条被拒；复核通过的为 ${pct(cc.okTotal ? cc.okRejected / cc.okTotal : null)}`)}
       ${costHtml}
     </div>
     <table class="sgtable">
-      <tr><th>标记类型</th><th>建议数</th><th>采纳</th><th>拒绝</th><th>直改</th><th>明确采纳率</th><th>复核⚠比</th></tr>
+      <tr><th>标记类型</th><th>建议数</th><th>采纳</th><th>拒绝</th><th>直改</th><th>明确采纳率</th><th>复核⚠︎比</th></tr>
       ${groupRows(a.byMark)}
     </table>
     ${
       a.topRejected.length
-        ? `<table class="sgtable"><tr><th>最常被拒 Top${a.topRejected.length}</th><th>被拒次数</th><th>采纳</th><th>复核⚠比</th></tr>
+        ? `<table class="sgtable"><tr><th>最常被拒 Top${a.topRejected.length}</th><th>被拒次数</th><th>采纳</th><th>复核⚠︎比</th></tr>
       ${a.topRejected.map((g) => `<tr><td>${esc(g.key)}</td><td>${g.rejected}</td><td>${g.accepted}</td><td>${pct(g.checkWarnRatio)}</td></tr>`).join('')}</table>`
         : ''
     }
@@ -2490,7 +2490,7 @@ async function aiSuggest(instruction?: string): Promise<void> {
         };
       });
     if (S.appConfig.autoRewriteOnMark && S.suggestions.length > 0) {
-      // 全局直改：所有建议自动生效（写工作稿+日志；⚠ 复核项计数提醒复查）
+      // 全局直改：所有建议自动生效（写工作稿+日志；⚠︎ 复核项计数提醒复查）
       let warned = 0;
       let applied = 0;
       for (const g of [...S.suggestions]) {
@@ -2500,7 +2500,7 @@ async function aiSuggest(instruction?: string): Promise<void> {
           applied++;
         }
       }
-      setStatus(`AI 直改完成：自动应用 ${applied} 条${warned ? `，其中 ${warned} 条引擎复核⚠（黑名单/超长残留），已留痕变更日志，建议复查` : ''} ${usage}`, 'saved');
+      setStatus(`AI 直改完成：自动应用 ${applied} 条${warned ? `，其中 ${warned} 条引擎复核⚠︎（黑名单/超长残留），已留痕变更日志，建议复查` : ''} ${usage}`, 'saved');
       return;
     }
     renderSuggestions();
@@ -2522,7 +2522,7 @@ function checkLabel(c: Suggestion['check']): string {
   if (c.relcl) bad.push('定从');
   if (c.pastperf) bad.push('过去完成');
   if (c.overlong) bad.push('超长');
-  return bad.length ? `<span class="warn-badge">⚠ 仍含${bad.join('/')}</span>` : '<span class="ok-badge">✓ 复核通过</span>';
+  return bad.length ? `<span class="warn-badge">⚠︎ 仍含${bad.join('/')}</span>` : '<span class="ok-badge">✓ 复核通过</span>';
 }
 
 function renderSuggestions(): void {
@@ -2535,7 +2535,7 @@ function renderSuggestions(): void {
     <div class="sg-actions">
       <button id="sg-apply" class="primary">应用已勾选（0）→ 生成新版本 + 变更日志</button>
       <button id="sg-refresh">重新请求 AI</button>
-      <span style="color:var(--muted);font-size:12px">默认全不勾；引擎复核 ⚠ 的条目请人工确认后再勾</span>
+      <span style="color:var(--muted);font-size:12px">默认全不勾；引擎复核 ⚠︎ 的条目请人工确认后再勾</span>
     </div>
     <table class="sgtable">
       <tr><th></th><th>标记</th><th class="orig">原句</th><th class="rev">AI 建议</th><th>引擎复核</th><th>依据</th></tr>
@@ -2616,7 +2616,7 @@ async function logSuggestion(s: FileSession, g: Suggestion, outcome: '采纳' | 
       markType: g.type || (mark ? typeLabel(mark.type) : ''),
       rule: mark ? (RULE_BY_TYPE[mark.type] ?? 'R00') : 'R00',
       outcome,
-      check: bad ? '⚠' : '通过',
+      check: bad ? '⚠︎' : '通过',
       provider: providerUsed,
       model: modelUsed,
       promptVer: await promptSetVersion(),
@@ -2681,7 +2681,7 @@ function renderInlineOne(session: FileSession, g: Suggestion): void {
   div.dataset.markId = g.markId;
   div.innerHTML = `
     <span class="rev-text">${esc(g.revised)}</span>
-    ${bad ? `<span class="sug-warn">⚠ 引擎复核：仍含${[g.check.passive ? '被动' : '', g.check.relcl ? '定从' : '', g.check.pastperf ? '过去完成' : '', g.check.overlong ? '超长' : ''].filter(Boolean).join('/')}</span>` : ''}
+    ${bad ? `<span class="sug-warn">⚠︎ 引擎复核：仍含${[g.check.passive ? '被动' : '', g.check.relcl ? '定从' : '', g.check.pastperf ? '过去完成' : '', g.check.overlong ? '超长' : ''].filter(Boolean).join('/')}</span>` : ''}
     <span class="sug-basis">${esc(g.basis)}${g.alternative ? '｜备选：' + esc(g.alternative) : ''}</span>
     <button class="btn-ok">✓ 采纳（正文立即更新，改动记入工作稿）</button>
     <button class="btn-no">✗ 放弃</button>`;
@@ -4022,12 +4022,12 @@ function renderAlignPane(): void {
       if (r.kind === 'match') {
         return `<div class="align-pair">
           <div class="al-side base">${pos(r.base)}${esc(r.base?.text ?? '')}</div>
-          <div class="al-side cur${r.lostSignals ? ' warn' : ''}">${pos(r.cur)}${esc(r.cur?.text ?? '')}${r.lostSignals ? `<span class="al-sig">⚠ 基准有此处无：${esc(r.lostSignals.join('、'))}</span>` : ''}</div>
+          <div class="al-side cur${r.lostSignals ? ' warn' : ''}">${pos(r.cur)}${esc(r.cur?.text ?? '')}${r.lostSignals ? `<span class="al-sig">⚠︎ 基准有此处无：${esc(r.lostSignals.join('、'))}</span>` : ''}</div>
         </div>`;
       }
       if (r.kind === 'lost') {
         return `<div class="align-pair">
-          <div class="al-side lost">${pos(r.base)}${esc(r.base?.text ?? '')}<span class="al-sig">⚠ 当前章没有对应句（疑似丢信息）</span></div>
+          <div class="al-side lost">${pos(r.base)}${esc(r.base?.text ?? '')}<span class="al-sig">⚠︎ 当前章没有对应句（疑似丢信息）</span></div>
           <div class="al-side none">（无对应句）</div>
         </div>`;
       }
@@ -4407,7 +4407,7 @@ function rewriteCheck(): string {
   if (S.rewriteRules.viewpoint === 'first') {
     const he = (body.match(/\b(he|his|him|she|her)\b/gi) ?? []).length;
     const I = (body.match(/\b(I|my|me)\b/g) ?? []).length;
-    out.push(`视角（第一人称）：第三人称代词 ${he} 处 / 第一人称 ${I} 处${he > I * 2 ? ' ⚠ 第一人称占比偏低，建议用「整章改写」按规则重写' : ''}`);
+    out.push(`视角（第一人称）：第三人称代词 ${he} 处 / 第一人称 ${I} 处${he > I * 2 ? ' ⚠︎ 第一人称占比偏低，建议用「整章改写」按规则重写' : ''}`);
   }
   return out.length ? out.join('\n') : '尚未设置规则';
 }
@@ -4794,7 +4794,7 @@ async function executeTool(name: string, argsJson: string): Promise<string> {
         renderSuggestions();
         attachInlineSuggestions();
         setStatus('AI 在对话中提交了 1 条修订候选（经引擎复核）——正文黄色区域点 ✓ 采纳', 'saved');
-        return `已提交到修订建议页（引擎复核：${risk.passive || risk.relcl || risk.pastperf || risk.overlong ? '仍命中黑名单/超长，已标⚠' : '通过'}）。提醒教师勾选确认。`;
+        return `已提交到修订建议页（引擎复核：${risk.passive || risk.relcl || risk.pastperf || risk.overlong ? '仍命中黑名单/超长，已标⚠︎' : '通过'}）。提醒教师勾选确认。`;
       }
       default:
         return `错误：未知工具 ${name}`;

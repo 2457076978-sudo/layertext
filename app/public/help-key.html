@@ -1,49 +1,109 @@
 <!doctype html>
 <html lang="zh-CN">
-<head>
-  <meta charset="UTF-8" />
-  <title>如何获取 AI 的 Key（新手向）</title>
-  <style>
-    body { font-family: -apple-system, "PingFang SC", sans-serif; max-width: 620px; margin: 24px auto; padding: 0 24px 40px; color: #1f2933; line-height: 2; font-size: 14px; }
-    h1 { font-size: 20px; } h2 { font-size: 16px; margin-top: 26px; border-left: 4px solid #2f6fed; padding-left: 10px; }
-    code { background: #f3f4f6; border-radius: 4px; padding: 1px 6px; font-size: 12px; }
-    .tip { background: #eef6ff; border-radius: 8px; padding: 10px 14px; margin: 10px 0; }
-    ol, ul { padding-left: 22px; }
-    table { border-collapse: collapse; width: 100%; font-size: 13px; }
-    th, td { border: 1px solid #e5e7eb; padding: 6px 10px; text-align: left; }
-    th { background: #fafbfc; }
-  </style>
-</head>
-<body>
-  <h1>如何获取 AI 的 Key（完全新手向）</h1>
+  <head>
+    <meta charset="UTF-8" />
+    <title>如何获取 AI 的 Key（新手向）</title>
+    <style>
+      body {
+        font-family: -apple-system, 'PingFang SC', sans-serif;
+        max-width: 620px;
+        margin: 24px auto;
+        padding: 0 24px 40px;
+        color: #1f2933;
+        line-height: 2;
+        font-size: 14px;
+      }
+      h1 {
+        font-size: 20px;
+      }
+      h2 {
+        font-size: 16px;
+        margin-top: 26px;
+        border-left: 4px solid #2f6fed;
+        padding-left: 10px;
+      }
+      code {
+        background: #f3f4f6;
+        border-radius: 4px;
+        padding: 1px 6px;
+        font-size: 12px;
+      }
+      .tip {
+        background: #eef6ff;
+        border-radius: 8px;
+        padding: 10px 14px;
+        margin: 10px 0;
+      }
+      ol,
+      ul {
+        padding-left: 22px;
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+        font-size: 13px;
+      }
+      th,
+      td {
+        border: 1px solid #e5e7eb;
+        padding: 6px 10px;
+        text-align: left;
+      }
+      th {
+        background: #fafbfc;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>如何获取 AI 的 Key（完全新手向）</h1>
 
-  <p>「Key」就像一张<b>门票</b>：AI 服务商发的很长一串字符（通常 <code>sk-</code> 开头）。LayerText 拿它去连接 AI，就像用会员卡进门。门票只属于你，<b>不要发给任何人</b>。</p>
+    <p>「Key」就像一张<b>门票</b>：AI 服务商发的很长一串字符（通常 <code>sk-</code> 开头）。LayerText 拿它去连接 AI，就像用会员卡进门。门票只属于你，<b>不要发给任何人</b>。</p>
 
-  <h2>选哪家？（都能用，挑一家注册即可）</h2>
-  <table>
-    <tr><th>服务商</th><th>注册网址</th><th>费用参考</th></tr>
-    <tr><td>DeepSeek（深度求索）</td><td>platform.deepseek.com</td><td>最便宜之一，改一整本书通常几毛到几块钱</td></tr>
-    <tr><td>智谱 AI</td><td>bigmodel.cn</td><td>有免费额度，新用户够用很久</td></tr>
-    <tr><td>月之暗面 Kimi</td><td>platform.moonshot.cn</td><td>有免费额度</td></tr>
-    <tr><td>阿里通义</td><td>bailian.aliyun.com</td><td>有免费额度</td></tr>
-  </table>
+    <h2>选哪家？（都能用，挑一家注册即可）</h2>
+    <table>
+      <tr>
+        <th>服务商</th>
+        <th>注册网址</th>
+        <th>费用参考</th>
+      </tr>
+      <tr>
+        <td>DeepSeek（深度求索）</td>
+        <td>platform.deepseek.com</td>
+        <td>最便宜之一，改一整本书通常几毛到几块钱</td>
+      </tr>
+      <tr>
+        <td>智谱 AI</td>
+        <td>bigmodel.cn</td>
+        <td>有免费额度，新用户够用很久</td>
+      </tr>
+      <tr>
+        <td>月之暗面 Kimi</td>
+        <td>platform.moonshot.cn</td>
+        <td>有免费额度</td>
+      </tr>
+      <tr>
+        <td>阿里通义</td>
+        <td>bailian.aliyun.com</td>
+        <td>有免费额度</td>
+      </tr>
+    </table>
 
-  <h2>通用四步（每家都差不多）</h2>
-  <ol>
-    <li>打开上面任一网站，<b>注册账号</b>（手机号即可），部分需要实名；</li>
-    <li>登录后找到 <b>「API Keys」/「API 密钥」</b> 页面（一般在"控制台"里）；</li>
-    <li>点 <b>「创建 / Create」</b>，给个名字（如 layertext），<b>立刻复制</b>弹出的那串 <code>sk-…</code>——很多网站只显示这一次；</li>
-    <li>回到 LayerText：菜单 LayerText → <b>AI 设置</b> → ①下拉选这家服务商（地址自动填好）→ ④把 <code>sk-…</code> 粘贴进 Key 框 → 点<b>「测试连接」</b>，出现 ✓ 后点「保存」。完成！</li>
-  </ol>
+    <h2>通用四步（每家都差不多）</h2>
+    <ol>
+      <li>打开上面任一网站，<b>注册账号</b>（手机号即可），部分需要实名；</li>
+      <li>登录后找到 <b>「API Keys」/「API 密钥」</b> 页面（一般在"控制台"里）；</li>
+      <li>点 <b>「创建 / Create」</b>，给个名字（如 layertext），<b>立刻复制</b>弹出的那串 <code>sk-…</code>——很多网站只显示这一次；</li>
+      <li>回到 LayerText：菜单 LayerText → <b>AI 设置</b> → ①下拉选这家服务商（地址自动填好）→ ④把 <code>sk-…</code> 粘贴进 Key 框 → 点<b>「测试连接」</b>，出现 ✓ 后点「保存」。完成！</li>
+    </ol>
 
-  <div class="tip">💡 提示：Key 保存在这台电脑的"钥匙串"里，不会写进书稿、不会随文件发出去。若换电脑，重新注册或到同网站再建一个 Key 即可。</div>
+    <div class="tip"><b>提示</b>——Key 保存在这台电脑的"钥匙串"里，不会写进书稿、不会随文件发出去。若换电脑，重新注册或到同网站再建一个 Key 即可。</div>
 
-  <h2>常见问题</h2>
-  <ul>
-    <li><b>测试连接显示 401</b>：Key 复制错了（少了字符）或已删除——回去重新复制；</li>
-    <li><b>显示 404 / 模型不存在</b>：模型名和网站上的不一致——AI 设置里 ③ 换成网站列出的模型名；</li>
-    <li><b>显示余额不足</b>：账户没钱了——到服务商网站充值（DeepSeek 充 10 元够用很久）；</li>
-    <li><b>不配 AI 行不行？</b>行。质检、标记、报告、要点配额、终审门禁全是本机功能，AI 只是"帮改写的助手"。</li>
-  </ul>
-</body>
+    <h2>常见问题</h2>
+    <ul>
+      <li><b>测试连接显示 401</b>：Key 复制错了（少了字符）或已删除——回去重新复制；</li>
+      <li><b>显示 404 / 模型不存在</b>：模型名和网站上的不一致——AI 设置里 ③ 换成网站列出的模型名；</li>
+      <li><b>显示余额不足</b>：账户没钱了——到服务商网站充值（DeepSeek 充 10 元够用很久）；</li>
+      <li><b>不配 AI 行不行？</b>行。质检、标记、报告、要点配额、终审门禁全是本机功能，AI 只是"帮改写的助手"。</li>
+    </ul>
+  </body>
 </html>

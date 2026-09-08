@@ -1,64 +1,129 @@
 <!doctype html>
 <html lang="zh-CN">
-<head>
-  <meta charset="UTF-8" />
-  <title>LayerText 使用说明</title>
-  <style>
-    body { font-family: -apple-system, "PingFang SC", sans-serif; max-width: 640px; margin: 24px auto; padding: 0 24px 40px; color: #1f2933; line-height: 1.9; font-size: 14px; }
-    h1 { font-size: 20px; } h2 { font-size: 16px; margin-top: 28px; border-left: 4px solid #2f6fed; padding-left: 10px; }
-    code, kbd { background: #f3f4f6; border-radius: 4px; padding: 1px 6px; font-size: 12px; }
-    ol, ul { padding-left: 22px; } li { margin: 4px 0; }
-    .tip { background: #eef6ff; border-radius: 8px; padding: 10px 14px; margin: 10px 0; }
-    table { border-collapse: collapse; width: 100%; font-size: 13px; }
-    th, td { border: 1px solid #e5e7eb; padding: 6px 10px; text-align: left; }
-    th { background: #fafbfc; }
-  </style>
-</head>
-<body>
-  <h1>LayerText 分层读 · 使用说明</h1>
+  <head>
+    <meta charset="UTF-8" />
+    <title>LayerText 使用说明</title>
+    <style>
+      body {
+        font-family: -apple-system, 'PingFang SC', sans-serif;
+        max-width: 640px;
+        margin: 24px auto;
+        padding: 0 24px 40px;
+        color: #1f2933;
+        line-height: 1.9;
+        font-size: 14px;
+      }
+      h1 {
+        font-size: 20px;
+      }
+      h2 {
+        font-size: 16px;
+        margin-top: 28px;
+        border-left: 4px solid #2f6fed;
+        padding-left: 10px;
+      }
+      code,
+      kbd {
+        background: #f3f4f6;
+        border-radius: 4px;
+        padding: 1px 6px;
+        font-size: 12px;
+      }
+      ol,
+      ul {
+        padding-left: 22px;
+      }
+      li {
+        margin: 4px 0;
+      }
+      .tip {
+        background: #eef6ff;
+        border-radius: 8px;
+        padding: 10px 14px;
+        margin: 10px 0;
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+        font-size: 13px;
+      }
+      th,
+      td {
+        border: 1px solid #e5e7eb;
+        padding: 6px 10px;
+        text-align: left;
+      }
+      th {
+        background: #fafbfc;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>LayerText 分层读 · 使用说明</h1>
 
-  <h2>五分钟上手（完全新手版）</h2>
-  <p>这个软件做什么：把一本英文书<strong>简化成几个难度版本</strong>（B 最易 / M 中等 / A 最难）给学生读。你不需要懂任何技术，跟着下面做：</p>
-  <ol>
-    <li><b>看个例子</b>（30 秒）：点「载入示例」→ 龟兔赛跑演示文本就打开了；</li>
-    <li><b>点「▶ 质检本章」</b>（30 秒）：软件自动数出这篇的生词率、句长、难句——这就是"体检报告"；</li>
-    <li><b>回「正文审校」页</b>（1 分钟）：红色下划线=生词、淡红底=难句。点一个词或拖选一句话试试做标记；</li>
-    <li><b>配 AI</b>（2 分钟，可选）：想让 AI 帮你改写？菜单 LayerText → AI 设置，照 4 步填完（不知道 Key 哪来 → 帮助菜单「如何获取 AI 的 Key」）。配好后点「✨ AI 简化本章」让 AI 整章逐段改写，或点词后「✨ AI 改写本句」逐句改；</li>
-    <li><b>保存</b>：所有标记和报告自动存在书稿旁边，什么都不用点。放心用，原稿永远不会被覆盖。</li>
-  </ol>
-  <div class="tip">记住一句话就够了：<b>AI 只给建议，你点 ✓ 才算数</b>——每一步修改都由你拍板、都有记录。</div>
+    <h2>五分钟上手（完全新手版）</h2>
+    <p>这个软件做什么：把一本英文书<strong>简化成几个难度版本</strong>（B 最易 / M 中等 / A 最难）给学生读。你不需要懂任何技术，跟着下面做：</p>
+    <ol>
+      <li><b>看个例子</b>（30 秒）：点「载入示例」→ 龟兔赛跑演示文本就打开了；</li>
+      <li><b>点「▶ 质检本章」</b>（30 秒）：软件自动数出这篇的生词率、句长、难句——这就是"体检报告"；</li>
+      <li><b>回「正文审校」页</b>（1 分钟）：红色下划线=生词、淡红底=难句。点一个词或拖选一句话试试做标记；</li>
+      <li>
+        <b>配 AI</b>（2 分钟，可选）：想让 AI 帮你改写？菜单 LayerText → AI 设置，照 4 步填完（不知道 Key 哪来 → 帮助菜单「如何获取 AI 的 Key」）。配好后点「AI 简化本章」让 AI
+        整章逐段改写，或点词后「AI 改写本句」逐句改；
+      </li>
+      <li><b>保存</b>：所有标记和报告自动存在书稿旁边，什么都不用点。放心用，原稿永远不会被覆盖。</li>
+    </ol>
+    <div class="tip">记住一句话就够了：<b>AI 只给建议，你点 ✓ 才算数</b>——每一步修改都由你拍板、都有记录。</div>
 
-  <h2>标准用法（五步流程）</h2>
-  <ol>
-    <li><b>载入文本</b>：点「载入示例」或菜单 文件 → 打开章节文件…（<kbd>⌘O</kbd>）。可同时打开原文与简化版（含再简化的版本）并排切换、逐段对比。</li>
-    <li><b>配词库</b>（可选）：内置课标 2022 三级 1600 词，开箱即用。菜单 文件 → 导入自定义词库… 可加教材已学词；术语表/专名表按需导入。</li>
-    <li><b>自动质检</b>：点「▶ 质检本章」（<kbd>⌘R</kbd>），查看覆盖率、生词率、句长、被动/定从/过去完成等指标，报告自动保存到章节同目录。</li>
-    <li><b>审校标记</b>：正文<b>点词</b>（词汇简化/标注/超纲…）或<b>拖选句子</b>（语法难/太长/指代…）做标记；右侧栏管理要点配额、终审门禁和标记清单。标记自动保存。</li>
-    <li><b>备份</b>：菜单 文件 → 导出标记… 生成 JSON 备份；换电脑或分享时用 导入标记… 合并。</li>
-  </ol>
+    <h2>标准用法（五步流程）</h2>
+    <ol>
+      <li><b>载入文本</b>：点「载入示例」或菜单 文件 → 打开章节文件…（<kbd>⌘O</kbd>）。可同时打开原文与简化版（含再简化的版本）并排切换、逐段对比。</li>
+      <li><b>配词库</b>（可选）：内置课标 2022 三级 1600 词，开箱即用。菜单 文件 → 导入自定义词库… 可加教材已学词；术语表/专名表按需导入。</li>
+      <li><b>自动质检</b>：点「▶ 质检本章」（<kbd>⌘R</kbd>），查看覆盖率、生词率、句长、被动/定从/过去完成等指标，报告自动保存到章节同目录。</li>
+      <li><b>审校标记</b>：正文<b>点词</b>（词汇简化/标注/超纲…）或<b>拖选句子</b>（语法难/太长/指代…）做标记；右侧栏管理要点配额、终审门禁和标记清单。标记自动保存。</li>
+      <li><b>备份</b>：菜单 文件 → 导出标记… 生成 JSON 备份；换电脑或分享时用 导入标记… 合并。</li>
+    </ol>
 
-  <h2>本地示例文件夹</h2>
-  <p>菜单 帮助 → 打开本地示例文件夹（<code>文稿/LayerText示例/</code>）。放进去的章节文件会出现在「载入示例」菜单里；同目录可放四个配置文件，载入本地示例时自动生效：</p>
-  <table>
-    <tr><th>文件</th><th>作用</th></tr>
-    <tr><td><code>_词库.csv</code></td><td>自定义词库（标准格式见下）</td></tr>
-    <tr><td><code>_词表.txt</code></td><td>附加词表（一行一词或「1. word」编号格式）</td></tr>
-    <tr><td><code>_术语表.txt</code></td><td>术语（正文蓝点标记）</td></tr>
-    <tr><td><code>_专名表.txt</code></td><td>专名（计入已知 + ⑧专名一致性检查）</td></tr>
-  </table>
+    <h2>本地示例文件夹</h2>
+    <p>菜单 帮助 → 打开本地示例文件夹（<code>文稿/LayerText示例/</code>）。放进去的章节文件会出现在「载入示例」菜单里；同目录可放四个配置文件，载入本地示例时自动生效：</p>
+    <table>
+      <tr>
+        <th>文件</th>
+        <th>作用</th>
+      </tr>
+      <tr>
+        <td><code>_词库.csv</code></td>
+        <td>自定义词库（标准格式见下）</td>
+      </tr>
+      <tr>
+        <td><code>_词表.txt</code></td>
+        <td>附加词表（一行一词或「1. word」编号格式）</td>
+      </tr>
+      <tr>
+        <td><code>_术语表.txt</code></td>
+        <td>术语（正文蓝点标记）</td>
+      </tr>
+      <tr>
+        <td><code>_专名表.txt</code></td>
+        <td>专名（计入已知 + ⑧专名一致性检查）</td>
+      </tr>
+    </table>
 
-  <h2>词库格式（尽量宽容）</h2>
-  <ul>
-    <li><b>标准 CSV</b>：表头 <code>词,类型,词性,释义,来源册,来源单元,音标,备注</code>；类型填 单词 / 课标词 / 待定词；</li>
-    <li><b>无表头</b>：每行一个词（CSV / TXT / TSV 均可，多余列忽略），按"单词"导入；</li>
-    <li><b>Excel</b>：直接选 .xlsx / .xls，取第一列。</li>
-  </ul>
-  <div class="tip">词表只用于判断"学生是否认识这个词"，词形变化（复数、过去式、-ing 等）会自动还原后再查表，无需列出所有变化形。</div>
+    <h2>词库格式（尽量宽容）</h2>
+    <ul>
+      <li><b>标准 CSV</b>：表头 <code>词,类型,词性,释义,来源册,来源单元,音标,备注</code>；类型填 单词 / 课标词 / 待定词；</li>
+      <li><b>无表头</b>：每行一个词（CSV / TXT / TSV 均可，多余列忽略），按"单词"导入；</li>
+      <li><b>Excel</b>：直接选 .xlsx / .xls，取第一列。</li>
+    </ul>
+    <div class="tip">词表只用于判断"学生是否认识这个词"，词形变化（复数、过去式、-ing 等）会自动还原后再查表，无需列出所有变化形。</div>
 
-  <h2>章节文件格式</h2>
-  <p>Markdown 或纯文本：开头一行 <code>## Chapter One</code> 章节标记，段落以 <code>[P01] [P02] …</code> 开头；章末可附 <code>## 词句卡</code> 生词表（Markdown 表格，首列词条计入已知——"注释后口径"）。</p>
+    <h2>章节文件格式</h2>
+    <p>
+      Markdown 或纯文本：开头一行 <code>## Chapter One</code> 章节标记，段落以 <code>[P01] [P02] …</code> 开头；章末可附 <code>## 词句卡</code> 生词表（Markdown
+      表格，首列词条计入已知——"注释后口径"）。
+    </p>
 
-  <h2>数据安全</h2>
-  <p>全部数据存在你的电脑上：标记与报告写在章节文件同目录（或 <code>文稿/LayerText质检报告/</code>）。应用无任何网络访问与遥测。</p>
-</body>
+    <h2>数据安全</h2>
+    <p>全部数据存在你的电脑上：标记与报告写在章节文件同目录（或 <code>文稿/LayerText质检报告/</code>）。应用无任何网络访问与遥测。</p>
+  </body>
 </html>
