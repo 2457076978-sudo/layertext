@@ -1398,7 +1398,7 @@ async function openBook(b: ShelfBook): Promise<void> {
   try {
     await loadBookConfig(b.目录);
     await loadWorkspaces(b.目录);
-    void loadClassGroups();
+    if (S.classTargets.length === 0) await loadClassGroups();   // 先就位再绑定，避免"目标未加载"竞态
     const books = await loadShelf();
     const i = books.findIndex((x) => x.目录 === b.目录);
     if (i >= 0) { books[i].最近打开 = new Date().toLocaleDateString('sv-SE'); await saveShelf(books); }
