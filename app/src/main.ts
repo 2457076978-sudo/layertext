@@ -835,6 +835,7 @@ function renderReportPane(s: FileSession): void {
     <table class="report">
       ${rows.map(([k, v]) => `<tr><th>${esc(labelMap[k] ?? k)}</th><td>${Array.isArray(v) ? v.length + ' 个' : esc(String(v))}</td></tr>`).join('')}
       <tr><th>句法黑名单</th><td>${gatesNote}</td></tr>
+      <tr><th>覆盖率文献参考带</th><td class="dim">95% = 最低限度理解（Laufer 1989）；98% = 无辅助顺畅阅读（Hu & Nation 2000）——词卡/中文注释可补偿覆盖缺口（详见 docs/文献对齐）</td></tr>
     </table>
 
     <div class="diag-h">① 生词清单（去重 ${oov.length} 词）<span class="dim">——勾一个动一个：要简化的进标记清单，学生已学过的立即不再标红</span></div>
