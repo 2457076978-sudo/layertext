@@ -347,6 +347,17 @@
 .wschip { font-size: 11.5px; color: #444; padding: 1px 7px; border: 1px solid #d8d8d8; border-radius: 10px; cursor: pointer; white-space: nowrap; }
 .wschip:hover { background: #eef4ee; }
 .wschip.cur { background: #1f5c4d; color: #fff; border-color: #1f5c4d; }
+/* UX 补齐：toast / 查找条 / 设置 / 命中闪烁 / 继续上次 */
+#toast-box { position: fixed; top: 52px; right: 14px; z-index: 900; display: flex; flex-direction: column; gap: 6px; }
+.toast { background: #323a36; color: #fff; padding: 7px 14px; border-radius: 7px; font-size: 13px; box-shadow: 0 3px 12px rgba(0,0,0,.25); max-width: 380px; }
+.toast.err { background: #a33; } .toast.ok { background: #2e6b4f; }
+.toast.out { opacity: 0; transition: opacity .4s; }
+#findbar { position: fixed; top: 44px; right: 12px; z-index: 400; background: #fff; border: 1px solid #ccc; border-radius: 8px; padding: 6px 8px; display: flex; gap: 6px; align-items: center; box-shadow: 0 4px 16px rgba(0,0,0,.15); }
+.flash-hit { background: #ffe08a !important; outline: 2px solid #e6a817; border-radius: 3px; }
+#settings-pop { position: fixed; top: 44px; right: 12px; z-index: 400; background: #fff; border: 1px solid #ccc; border-radius: 8px; padding: 12px 16px; box-shadow: 0 4px 16px rgba(0,0,0,.15); min-width: 340px; }
+.set-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 5px 0; border-bottom: 1px dashed #eee; font-size: 13px; }
+.shelf-resume { background: #1f5c4d; color: #fff; border-radius: 8px; padding: 8px 14px; font-size: 13.5px; cursor: pointer; margin-bottom: 10px; }
+.shelf-resume:hover { background: #2a7263; }
 /* 书架（首页） */
 .shelf { padding: 26px 30px; max-width: 900px; }
 .shelf-h { font-size: 17px; font-weight: 700; margin-bottom: 14px; }
@@ -375,11 +386,29 @@
       <button id="btn-batch" title="整本书排队跑：选书稿文件夹勾选章节，自动逐章『AI 简化+体检+规则校验』，跑完给一份全书汇总报告；中断可续跑">📚 全书简化…</button>
       <button id="btn-ai" title="精修：先在正文点词/划句做标记，再点这里成批改。改完即改还是等你确认，看右侧模式胶囊">✨ 按标记修改</button></span>
     <span class="tsep"></span>
+    <span class="tgroup">
+      <button id="btn-undo" title="撤销上一次文件级更改（⌘⌥Z）">↩︎</button>
+      <button id="btn-redo" title="重做（⌘⌥⇧Z）">↪︎</button>
+      <button id="btn-find" title="查找 / 替换（⌘F）">🔍</button>
+      <button id="btn-font-minus" title="字号减小（⌘-）">A－</button>
+      <button id="btn-font-plus" title="字号增大（⌘+）">A＋</button>
+      <button id="btn-settings" title="设置：字号/句长/编辑与 AI 开关">⚙</button>
+    </span>
+    <span class="tsep"></span>
     <button id="mode-pill" class="mode-pill" title="点击切换">…</button>
     <div id="status">打开章节文件后自动体检、进入审校。词库/术语/标记等更多操作见顶部菜单栏（文件 · 质检 · 帮助）。</div>
   </header>
 
   <div class="wstabs" id="wstabs" style="display:none"></div>
+  <div id="findbar" style="display:none">
+    <input id="find-input" placeholder="查找…" style="width:150px"/>
+    <span id="find-count" class="dim" style="min-width:64px;text-align:center"></span>
+    <button id="find-prev" title="上一个（⏎下一个）">↑</button>
+    <button id="find-next">↓</button>
+    <input id="replace-input" placeholder="替换为…" style="width:130px"/>
+    <button id="find-replace-all" title="全部替换（可撤销）">全部替换</button>
+    <button id="find-close" title="关闭（Esc）">×</button>
+  </div>
   <div class="filetabs" id="filetabs" style="display:none"></div>
 
   <div class="workbench">

@@ -384,8 +384,11 @@ function renderFileTabs(): void {
     t.addEventListener('click', (e) => {
       const x = (e.target as HTMLElement).closest('[data-ftab-close]');
       if (x) return;
+      const prev = activeSession(); if (prev) prev.scrollTop = scrollNow();
       S.activeIdx = Number((t as HTMLElement).dataset.ftab);
       renderAll();
+      const cur = activeSession();
+      if (cur?.scrollTop) setTimeout(() => { const sc = scrollEl(); if (sc) sc.scrollTop = cur.scrollTop!; }, 50);
     }),
   );
   el.querySelectorAll('[data-ftab-close]').forEach((x) =>
@@ -1317,17 +1320,32 @@ async function saveShelf(books: ShelfBook[]): Promise<void> {
 
 async function renderShelf(): Promise<void> {
   const el = $('reader');
+  try {
+    await renderShelfInner(el);
+  } catch (e) {
+    el.innerHTML = `<div class="empty"><b>书架加载失败</b><br/>${esc(String(e))}<br/><span style="font-size:12px">把这条错误发给开发者即可修复</span></div>`;
+  }
+}
+
+function shelfColor(name: string): string {
+  let h = 0; for (const c of name) h = (h * 31 + c.charCodeAt(0)) % 360;
+  return `hsl(${h},45%,45%)`;
+}
+
+async function renderShelfInner(el: HTMLElement): Promise<void> {
   const books = await loadShelf();
   const cards = books.map((b, i) => {
-    return `<div class="shelf-card" data-shelf="${i}">
+    return `<div class="shelf-card" data-shelf="${i}" style="border-left:6px solid ${shelfColor(b.名)}">
       <div class="shelf-title">${esc(b.名)}</div>
       <div class="shelf-sub">${esc(b.副标题 ?? '')}</div>
       <div class="shelf-meta">${esc(b.最近打开 ? '最近打开 ' + b.最近打开 : '')}</div>
       <button class="shelf-open" data-shelf-open="${i}">打开这本书</button>
     </div>`;
   }).join('');
+  const ls = S.appConfig.lastSession;
   el.innerHTML = `
     <div class="shelf">
+      ${ls?.files?.length ? `<div class="shelf-resume" id="shelf-resume">▶ 继续上次编辑：${esc(ls.workspace ? ls.workspace + ' · ' : '')}${esc(ls.files[Math.min(ls.activeIdx, ls.files.length - 1)]?.path.split('/').pop() ?? '')} <span class="dim">（${esc(ls.savedAt)}）</span></div>` : ''}
       <div class="shelf-h">📚 我的书架<span class="dim">——点一本书进入工作区（版本标签+章节一键打开）</span></div>
       <div class="shelf-grid">
         <div class="shelf-card demo" id="shelf-demo">
@@ -1345,6 +1363,7 @@ async function renderShelf(): Promise<void> {
       </div>
       <div class="dim" style="margin-top:14px">也可以继续用上方「打开文件…」直接开单章；「载入示例▾」看内置示例。</div>
     </div>`;
+  document.getElementById('shelf-resume')?.addEventListener('click', () => void resumeLastSession());
   document.getElementById('shelf-demo-open')?.addEventListener('click', () => loadBuiltinDemo());
   document.getElementById('shelf-add')?.addEventListener('click', () => void addBookToShelf());
   el.querySelectorAll('[data-shelf-open]').forEach((btn) =>
@@ -1383,6 +1402,7 @@ async function openBook(b: ShelfBook): Promise<void> {
     const books = await loadShelf();
     const i = books.findIndex((x) => x.目录 === b.目录);
     if (i >= 0) { books[i].最近打开 = new Date().toLocaleDateString('sv-SE'); await saveShelf(books); }
+    S.appConfig.lastSession = { bookDir: b.目录, workspace: undefined, files: [], activeIdx: 0, savedAt: new Date().toLocaleString('zh-CN') };
     if (S.workspaces.length > 0) {
       activateWorkspace(S.workspaces[0].名);
       await openPathIntoSession(S.workspaces[0].文件[0]);
@@ -1451,6 +1471,17 @@ async function importMarks(): Promise<void> {
 
 $('btn-open').addEventListener('click', () => void openChapterFiles());
 $('btn-run').addEventListener('click', () => void runQcCurrent());
+$('btn-undo').addEventListener('click', () => void doUndo());
+$('btn-redo').addEventListener('click', () => void doRedo());
+$('btn-find').addEventListener('click', openFind);
+$('btn-font-minus').addEventListener('click', () => stepReaderFont(-1));
+$('btn-font-plus').addEventListener('click', () => stepReaderFont(1));
+$('btn-settings').addEventListener('click', toggleSettings);
+$('find-prev').addEventListener('click', () => jumpFind(-1));
+$('find-next').addEventListener('click', () => jumpFind(1));
+$('find-replace-all').addEventListener('click', () => void replaceAllFind());
+$('find-close').addEventListener('click', closeFind);
+$('find-input').addEventListener('input', runFind);
 $('btn-cls').addEventListener('click', () => {
   const p = document.getElementById('cls-panel') as HTMLElement | null;
   if (!p) return;
@@ -1888,6 +1919,11 @@ function renderInlineOne(session: FileSession, g: Suggestion): void {
 
 /** 保存正文改动：默认直接写原稿文件（首次前自动备份原始版）；关闭"直接修改原稿"则写工作稿 */
 async function persistEdit(s: FileSession, newMd: string): Promise<string> {
+  if (newMd !== s.md) {   // 文件级撤销栈（≤50 快照；重做栈清空）
+    (s.undoStack ??= []).push(s.md);
+    if (s.undoStack.length > 50) s.undoStack.shift();
+    s.redoStack = [];
+  }
   if (s.sourcePath && (S.appConfig.inPlaceEdit ?? true)) {
     const dir = s.sourcePath.slice(0, s.sourcePath.lastIndexOf('/'));
     const base = s.fileName.replace(/\.(md|txt|markdown)$/i, '');
@@ -2399,11 +2435,194 @@ $('tier-q').addEventListener('click', (e) => { e.stopPropagation(); showStandard
 /* ---------- 启动序列：配置 → 首启动欢迎 ---------- */
 setAiUi({ onStatus: (s) => setStatus(s, 'dirty') });
 
+/* ================= UX 补齐（2026-09-08 Wayne：文本软件该有的东西） ================= */
+
+function toast(msg: string, kind: 'ok' | 'err' | 'info' = 'info'): void {
+  let box = document.getElementById('toast-box');
+  if (!box) { box = document.createElement('div'); box.id = 'toast-box'; document.body.appendChild(box); }
+  const el = document.createElement('div');
+  el.className = 'toast ' + kind; el.textContent = msg; box.appendChild(el);
+  setTimeout(() => { el.classList.add('out'); setTimeout(() => el.remove(), 400); }, kind === 'err' ? 6000 : 2600);
+}
+window.addEventListener('error', (e) => toast('脚本错误：' + e.message, 'err'));
+window.addEventListener('unhandledrejection', (e) => toast('异步错误：' + (((e.reason as Error)?.message) ?? String(e.reason)), 'err'));
+
+function scrollEl(): HTMLElement | null {
+  for (const sel of ['#reader', '.content', 'main']) {
+    const el = document.querySelector<HTMLElement>(sel);
+    if (el && el.scrollHeight > el.clientHeight) return el;
+  }
+  return document.querySelector<HTMLElement>('#reader');
+}
+function scrollNow(): number { return scrollEl()?.scrollTop ?? 0; }
+
+/* ---- 会话恢复：回到上次编辑 ---- */
+let lastSessionTimer: ReturnType<typeof setTimeout> | null = null;
+function saveLastSession(): void {
+  if (S.sessions.length === 0) return;
+  const cur = activeSession(); if (cur) cur.scrollTop = scrollNow();
+  const dir = S.sessions.find((x) => x.sourcePath)?.sourcePath;
+  S.appConfig.lastSession = {
+    bookDir: dir ? dir.slice(0, dir.lastIndexOf('/')) : undefined,
+    workspace: S.activeWorkspace ?? undefined,
+    files: S.sessions.filter((x) => x.sourcePath).map((x) => ({ path: x.sourcePath!, scroll: x.scrollTop ?? 0 })),
+    activeIdx: S.activeIdx,
+    savedAt: new Date().toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }),
+  };
+  void saveConfig();
+}
+function scheduleSaveLastSession(): void {
+  if (lastSessionTimer) clearTimeout(lastSessionTimer);
+  lastSessionTimer = setTimeout(saveLastSession, 1500);
+}
+async function resumeLastSession(): Promise<void> {
+  const ls = S.appConfig.lastSession;
+  if (!ls?.files?.length) { toast('没有上次的编辑记录'); return; }
+  let opened = 0;
+  for (const f of ls.files) {
+    try { await openPathIntoSession(f.path); opened++; } catch { /* 文件可能被移走，跳过 */ }
+  }
+  if (opened === 0) { toast('上次的文件都打不开了（可能被移动）', 'err'); return; }
+  if (ls.workspace && S.workspaces.some((w) => w.名 === ls.workspace)) activateWorkspace(ls.workspace);
+  const idx = Math.min(ls.activeIdx, S.sessions.length - 1);
+  S.activeIdx = idx;
+  const s = activeSession();
+  if (s && (ls.files[idx]?.scroll ?? 0) > 0) {
+    setTimeout(() => { const el = scrollEl(); if (el) el.scrollTop = ls.files[idx].scroll; }, 60);
+  }
+  renderAll();
+  toast(`已回到上次：${ls.workspace ? ls.workspace + ' · ' : ''}${s?.fileName ?? ''}（${ls.savedAt}）`, 'ok');
+}
+
+/* ---- 撤销 / 重做 ---- */
+async function applyMdSnapshot(s: FileSession, md: string, label: string): Promise<void> {
+  await persistEdit(s, md);
+  s.md = md;
+  renderAll();
+  setStatus(label + '（文件已同步保存）', 'saved');
+  scheduleSaveLastSession();
+}
+async function doUndo(): Promise<void> {
+  const s = activeSession();
+  if (!s?.undoStack?.length) { toast('没有可撤销的更改'); return; }
+  const prev = s.undoStack.pop()!;
+  (s.redoStack ??= []).push(s.md);
+  await applyMdSnapshot(s, prev, '↩︎ 已撤销');
+}
+async function doRedo(): Promise<void> {
+  const s = activeSession();
+  if (!s?.redoStack?.length) { toast('没有可重做的更改'); return; }
+  const next = s.redoStack.pop()!;
+  (s.undoStack ??= []).push(s.md);
+  await applyMdSnapshot(s, next, '↪︎ 已重做');
+}
+
+/* ---- 查找 / 替换 ---- */
+let findHits: HTMLElement[] = [];
+let findPos = -1;
+function openFind(): void {
+  const bar = document.getElementById('findbar'); if (!bar) return;
+  bar.style.display = 'flex';
+  const inp = document.getElementById('find-input') as HTMLInputElement | null;
+  inp?.focus(); inp?.select();
+  runFind();
+}
+function closeFind(): void {
+  const bar = document.getElementById('findbar'); if (bar) bar.style.display = 'none';
+  document.querySelectorAll('.flash-hit').forEach((el) => el.classList.remove('flash-hit'));
+}
+function runFind(): void {
+  const q = (document.getElementById('find-input') as HTMLInputElement | null)?.value.trim().toLowerCase() ?? '';
+  document.querySelectorAll('.flash-hit').forEach((el) => el.classList.remove('flash-hit'));
+  findHits = []; findPos = -1;
+  const cnt = document.getElementById('find-count');
+  if (!q) { if (cnt) cnt.textContent = ''; return; }
+  document.querySelectorAll<HTMLElement>('#reader .sent').forEach((el) => {
+    if (el.textContent?.toLowerCase().includes(q)) findHits.push(el);
+  });
+  if (cnt) cnt.textContent = findHits.length ? `${findHits.length} 句命中` : '无命中';
+}
+function jumpFind(dir: 1 | -1): void {
+  if (findHits.length === 0) return;
+  findPos = (findPos + dir + findHits.length) % findHits.length;
+  const el = findHits[findPos];
+  el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  el.classList.add('flash-hit');
+  const cnt = document.getElementById('find-count');
+  if (cnt) cnt.textContent = `${findPos + 1}/${findHits.length} 句`;
+}
+async function replaceAllFind(): Promise<void> {
+  const s = activeSession(); if (!s) { toast('先打开章节'); return; }
+  const q = (document.getElementById('find-input') as HTMLInputElement)?.value ?? '';
+  const r = (document.getElementById('replace-input') as HTMLInputElement)?.value ?? '';
+  if (!q) { toast('先输入要查找的内容'); return; }
+  const n = s.md.split(q).length - 1;
+  if (n === 0) { toast('没有可替换的内容'); return; }
+  if (!confirm(`把「${q}」全部替换为「${r}」？共 ${n} 处（可用 ↩︎ 撤销）`)) return;
+  await applyMdSnapshot(s, s.md.split(q).join(r), `已替换 ${n} 处`);
+  toast(`已替换 ${n} 处（↩︎ 可撤销）`, 'ok');
+}
+
+/* ---- 阅读字号 ---- */
+function applyReaderFont(): void {
+  const n = S.appConfig.readerFont ?? 15;
+  const el = document.getElementById('reader');
+  if (el) el.style.fontSize = n + 'px';
+}
+function stepReaderFont(d: number): void {
+  const n = Math.min(24, Math.max(12, (S.appConfig.readerFont ?? 15) + d));
+  S.appConfig.readerFont = n;
+  applyReaderFont();
+  void saveConfig();
+  toast('字号 ' + n + 'px');
+}
+
+/* ---- 设置弹层 ---- */
+function toggleSettings(): void {
+  let pop = document.getElementById('settings-pop');
+  if (pop) { const show = pop.style.display === 'none'; pop.style.display = show ? 'block' : 'none'; if (show) renderSettings(); return; }
+  pop = document.createElement('div');
+  pop.id = 'settings-pop'; pop.style.display = 'block';
+  document.body.appendChild(pop);
+  renderSettings();
+}
+function renderSettings(): void {
+  const pop = document.getElementById('settings-pop'); if (!pop) return;
+  const sel = mergedSelection();
+  const row = (label: string, ctrl: string) => `<div class="set-row"><span>${label}</span>${ctrl}</div>`;
+  pop.innerHTML = `<div class="pop-h">⚙ 设置 <span class="dim" style="font-weight:400;font-size:12px">（改完即存）</span></div>
+    ${row('阅读字号', `<button id="set-fm">A－</button> <b id="set-fv">${S.appConfig.readerFont ?? 15}</b>px <button id="set-fp">A＋</button>`)}
+    ${row('句长上限（简化标准）', `<button id="set-len">调整（${simplifyMaxLen()} 词）</button>`)}
+    ${row('直接修改原稿（首改自动备份）', `<input type="checkbox" id="set-inplace" ${S.appConfig.inPlaceEdit ?? true ? 'checked' : ''}/>`)}
+    ${row('AI 改写直接生效', `<input type="checkbox" id="set-autorew" ${S.appConfig.autoRewriteOnMark ? 'checked' : ''}/>`)}
+    ${row('当前班级定制口径', `<span class="dim">${sel.active ? `【${sel.label}】句长≤${sel.minLen} · 复现${sel.dueUnion.length}词${sel.coverageTarget ? ' · 覆盖≥' + sel.coverageTarget + '%' : ''}` : '未选择（👥班级定制）'}</span>`)}
+    <div class="dim" style="margin-top:8px">LayerText v1.1 · feature/reinforce · 词库以书目录 _词库.csv 为准</div>`;
+  document.getElementById('set-fm')?.addEventListener('click', () => { stepReaderFont(-1); renderSettings(); });
+  document.getElementById('set-fp')?.addEventListener('click', () => { stepReaderFont(1); renderSettings(); });
+  document.getElementById('set-len')?.addEventListener('click', () => { showStandardPop(); });
+  document.getElementById('set-inplace')?.addEventListener('change', (e) => { S.appConfig.inPlaceEdit = (e.target as HTMLInputElement).checked; void saveConfig(); toast('已保存'); });
+  document.getElementById('set-autorew')?.addEventListener('change', (e) => { S.appConfig.autoRewriteOnMark = (e.target as HTMLInputElement).checked; void saveConfig(); toast('已保存'); });
+}
+
+/* ---- 全局快捷键 ---- */
+document.addEventListener('keydown', (e) => {
+  const mod = e.metaKey || e.ctrlKey;
+  if (mod && (e.key === 'f' || e.key === 'F')) { e.preventDefault(); openFind(); }
+  else if (e.key === 'Escape') closeFind();
+  else if (mod && e.altKey && (e.key === 'z' || e.key === 'Z')) { e.preventDefault(); void (e.shiftKey ? doRedo() : doUndo()); }
+  else if (mod && (e.key === '=' || e.key === '+')) { e.preventDefault(); stepReaderFont(1); }
+  else if (mod && e.key === '-') { e.preventDefault(); stepReaderFont(-1); }
+  else if (e.key === 'Enter' && (document.activeElement?.id === 'find-input')) { e.preventDefault(); jumpFind(1); }
+});
+document.addEventListener('scroll', () => scheduleSaveLastSession(), true);
+
 void (async () => {
   await loadConfig();
   if (!S.appConfig.firstRunSeen) showWelcome();
   await restoreChat();
+  applyReaderFont();
   await renderShelf();   // 首页=书架（示例+我的书；原"最近编辑"空状态升级为书架）
+  setInterval(() => void saveLastSession(), 20000);   // 兜底：上次会话自动保存
 })();
 
 /* ================= 简化标准（句长上限，唯一可调项） · 本书配置 · 首启动欢迎 ================= */

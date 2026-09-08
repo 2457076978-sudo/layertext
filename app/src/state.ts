@@ -24,6 +24,9 @@ export interface AppConfig {
   failover?: { name?: string; baseUrl?: string; model?: string; key?: string }[];
   /** 简化标准（无预设难度）：句长上限可调，黑名单句法一律禁用。旧配置的 tiers 字段已停用忽略 */
   simplify?: { maxLen: number };
+  /* UX 补齐：阅读字号 + 上次会话恢复（书架"继续上次编辑"） */
+  readerFont?: number;
+  lastSession?: { bookDir?: string; book名?: string; workspace?: string; files: { path: string; scroll: number }[]; activeIdx: number; savedAt: string } | null;
 }
 
 export interface RewriteRules {

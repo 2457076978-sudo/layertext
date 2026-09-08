@@ -43,6 +43,10 @@ export interface FileSession {
   report: QcResult | null;
   reportSavedPath: string | null;
   dirty: boolean;            // 有未落盘的标记变更（防抖中）
+  /* UX 补齐（2026-09-08）：文件级撤销栈 + 滚动位置记忆 */
+  undoStack?: string[];
+  redoStack?: string[];
+  scrollTop?: number;
 }
 
 export const GATES = ['事实核对', '情节要点齐全', '段落对齐', 'QC 指标达标'] as const;
