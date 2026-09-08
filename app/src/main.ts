@@ -11,7 +11,7 @@ import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
 import * as XLSX from 'xlsx';
 import { unzipSync, zipSync, strFromU8, strToU8 } from 'fflate';
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, WidthType } from 'docx';
-import { applyRewriteTo, buildBookReportMd, buildDiagSummary, checkRevisedText, chnoFromPath, csvCell, estTokens, findOriginalFlex, locateOriginal, mergeQuotaTexts, normalizeAndSplitChapters, parseAiJson, pickSentMarkType, planBatchChapters, planCompaction, remapMarks, type BatchChapterItem, type BatchProgressFile, type BookReportRow } from './pure.js';
+import { applyRewriteTo, buildBookReportMd, buildDiagSummary, checkRevisedText, chnoFromPath, csvCell, estTokens, filterTargets, findOriginalFlex, locateOriginal, mergeQuotaTexts, mergeTargets, normalizeAndSplitChapters, parseAiJson, pickSentMarkType, planBatchChapters, planCompaction, remapMarks, type BatchChapterItem, type BatchProgressFile, type BookReportRow, type ClassTarget } from './pure.js';
 import { renderDiffPane, renderModePill, switchView as switchViewDom, type ViewName } from './widgets.js';
 import { S, setStatus as uiSetStatus, esc } from './state.js';
 import { AI_PROVIDERS, aiErrHuman, buildAssistantPrompt, buildDraftSystemPrompt, buildPlotPointsPrompt, buildRewriteSentencePrompt, buildSystemPrompt, callChat, chatStream, loadConfig, promptSetVersion, reloadPrompts, saveConfig, setAiUi, simplifyMaxLen } from './ai.js';
@@ -49,18 +49,29 @@ const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getEleme
 
 /** 常见服务商预设（新手只需选服务商 + 贴 Key） */
 function buildLexiconNow(): Lexicon {
+  const sel = mergedSelection();
   return buildLexicon({
     vocabCsvTexts: S.vocabCsvText ? [S.vocabCsvText] : [],
-    plainWordlistTexts: S.extraWordlistText
-      ? [bundledWordlist, bundledAmendment, S.extraWordlistText]
-      : [bundledWordlist, bundledAmendment],
+    plainWordlistTexts: [
+      bundledWordlist,
+      bundledAmendment,
+      ...(S.extraWordlistText ? [S.extraWordlistText] : []),
+      ...(sel.active && sel.knownInter.length ? [sel.knownInter.join('\n')] : []),
+    ],
     terms: S.termsText ? S.termsText.split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#')) : [],
     properNouns: S.properRows.map((r) => r.toLowerCase()),
   });
 }
 
-/** 已学词集（复现队列）：示例目录/书目录的 _已学词.csv|.txt 宽容解析；空则 undefined（报告保持旧 schema） */
+/** 班级多人定制：当前选择的合并口径（句长最严/已学词交集/到期词并集） */
+function mergedSelection() {
+  return mergeTargets(S.classTargets.filter((t) => S.selectedIds.includes(t.id)), simplifyMaxLen());
+}
+
+/** 已学词集（复现队列）：班级定制选择优先，其次示例/书目录 _已学词.csv|.txt；空则 undefined（报告保持旧 schema） */
 function reinforceWordsNow(): string[] | undefined {
+  const sel = mergedSelection();
+  if (sel.active && sel.dueUnion.length > 0) return sel.dueUnion;
   if (!S.reinforceText) return undefined;
   const w = parseReinforceText(S.reinforceText);
   return w.length ? w : undefined;
@@ -175,6 +186,79 @@ async function loadLocalExampleConfig(): Promise<void> {
   }
 }
 
+/* ---------- 班级多人定制（折叠多选栏，feature/reinforce） ---------- */
+
+async function loadClassGroups(): Promise<void> {
+  try {
+    const dir = await invoke<string>('class_groups_dir');
+    const files = (await invoke<string[]>('list_dir', { dir })).filter((f) => f.toLowerCase().endsWith('.json'));
+    const targets: ClassTarget[] = [];
+    for (const f of files) {
+      try {
+        const j = JSON.parse(await invoke<string>('read_text_file', { path: f })) as { targets?: ClassTarget[] };
+        if (Array.isArray(j.targets)) targets.push(...j.targets);
+      } catch { /* 单个文件损坏跳过 */ }
+    }
+    S.classTargets = targets;
+    S.selectedIds = S.selectedIds.filter((id) => targets.some((t) => t.id === id));
+  } catch {
+    S.classTargets = [];
+  }
+}
+
+function renderClsPanel(): void {
+  let panel = document.getElementById('cls-panel') as HTMLElement | null;
+  if (!panel) {
+    panel = document.createElement('div');
+    panel.id = 'cls-panel';
+    panel.style.cssText = 'position:fixed;top:44px;right:12px;z-index:300;width:340px;max-height:70vh;overflow:auto;background:#fff;border:1px solid #cfd8dc;border-radius:8px;box-shadow:0 6px 24px rgba(0,0,0,.16);padding:12px;font-size:13px;display:none';
+    document.body.appendChild(panel);
+  }
+  const groups = S.classTargets.filter((t) => t.类型 === '组');
+  const persons = S.classTargets.filter((t) => t.类型 === '人');
+  if (S.classTargets.length === 0) {
+    panel.innerHTML = `<div style="display:flex;justify-content:space-between"><b>👥 班级定制</b><button id="cls-close">×</button></div>
+      <div class="dim" style="line-height:1.8;margin-top:6px">未找到分组文件。把画像导出的分组 JSON 放到：<br><code>~/Documents/LayerText配置/班级分组/</code><br>（班级画像目录运行 <code>python3 画像_分组导出.py</code> 自动生成），然后点「🔄 刷新」。</div>
+      <button id="cls-reload" style="margin-top:8px">🔄 刷新</button>`;
+  } else {
+    const q = ((document.getElementById('cls-search') as HTMLInputElement | null)?.value ?? '').trim();
+    const shown = filterTargets(persons, q);
+    const sel = mergedSelection();
+    const ck = (t: ClassTarget) => `<label style="display:inline-block;margin:2px 6px;white-space:nowrap"><input type="checkbox" data-cls-id="${esc(t.id)}" ${S.selectedIds.includes(t.id) ? 'checked' : ''}/> ${esc(t.名称)}${t.句长上限 ? `<span class="dim">≤${t.句长上限}词</span>` : ''}</label>`;
+    panel.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center"><b>👥 班级定制（${S.classTargets.length} 目标）</b>
+        <span><button id="cls-clear" title="清空选择">清空</button> <button id="cls-close">×</button></span></div>
+      <div style="margin:6px 0 2px"><b>分组</b></div>
+      <div>${groups.map(ck).join('') || '<span class="dim">无</span>'}</div>
+      <details ${q ? 'open' : ''} style="margin-top:6px"><summary style="cursor:pointer">个人（${persons.length}）${q ? '· 搜索中' : ''}</summary>
+        <input id="cls-search" placeholder="搜索姓名…" style="width:96%;margin:6px 0" value="${esc(q)}"/>
+        <div style="max-height:200px;overflow:auto;border:1px solid #eceff1;border-radius:4px;padding:4px">${shown.map(ck).join('') || '<span class="dim">无匹配</span>'}</div>
+      </details>
+      <div style="margin-top:8px;padding:6px 8px;background:${sel.active ? '#e8f5e9' : '#f5f5f5'};border-radius:4px;line-height:1.7">
+        ${sel.active
+          ? `已选 <b>${S.selectedIds.length}</b> 目标【${esc(sel.label)}】<br/>句长 ≤<b>${sel.minLen}</b> 词 ｜ 共同已学词 <b>${sel.knownInter.length}</b> ｜ 本篇复现队列 <b>${sel.dueUnion.length}</b> 词${sel.dueUnion.length ? '：' + esc(sel.dueUnion.slice(0, 6).join(', ')) + (sel.dueUnion.length > 6 ? '…' : '') : ''}<br/><span class="dim">对「▶ 质检本章 / 整章改写 / 全书批处理」生效；简化稿自动带目标标签</span>`
+          : '未选择——质检与简化用全局词库口径。勾选目标后按“句长取最严、复现词取并集”执行。'}
+      </div>
+      <div style="margin-top:6px"><button id="cls-reload">🔄 刷新分组文件</button> <span class="dim">目录：~/Documents/LayerText配置/班级分组/</span></div>`;
+    const search = document.getElementById('cls-search') as HTMLInputElement | null;
+    search?.addEventListener('input', () => renderClsPanel());
+    const keepFocus = q && search;
+    if (keepFocus) { search.focus(); search.setSelectionRange(search.value.length, search.value.length); }
+  }
+  const bind = (id: string, fn: () => void) => document.getElementById(id)?.addEventListener('click', fn);
+  bind('cls-close', () => { panel!.style.display = 'none'; });
+  bind('cls-reload', () => void loadClassGroups().then(() => { renderClsPanel(); fileSummary(); }));
+  bind('cls-clear', () => { S.selectedIds = []; renderClsPanel(); fileSummary(); });
+  panel.querySelectorAll<HTMLInputElement>('input[data-cls-id]').forEach((el) => {
+    el.addEventListener('change', () => {
+      const id = el.dataset.clsId!;
+      if (el.checked) S.selectedIds.push(id);
+      else S.selectedIds = S.selectedIds.filter((x) => x !== id);
+      renderClsPanel();
+      fileSummary();
+    });
+  });
+}
+
 function setStatus(msg: string, cls = ''): void {
   $('status').innerHTML = msg ? `<span class="${cls}">${esc(msg)}</span>` : '';
 }
@@ -193,6 +277,8 @@ function fileSummary(): void {
   parts.push('标记自动保存：' + (s ? s.markPath : '打开文件后生效'));
   const rw = reinforceWordsNow();
   if (rw) parts.push(`复现队列：${S.reinforceName}（${rw.length} 词，⑩指标+简化注入已启用）`);
+  const selCls = mergedSelection();
+  if (selCls.active) parts.push(`班级定制：【${selCls.label}】句长≤${selCls.minLen}`);
   setStatus(parts.join(' ｜ '));
 }
 
@@ -719,7 +805,8 @@ function renderReportPane(s: FileSession): void {
     '复现命中词': '⑩复现命中词（已学词在本篇重现）',
   };
   const oov = [...new Set(s.report.oov)];
-  const gatesNote = `句法黑名单（被动/定从/过去完成）一律禁用；句长参考 = 简化标准 ${simplifyMaxLen()} 词/句`;
+  const sel = mergedSelection();
+  const gatesNote = `句法黑名单（被动/定从/过去完成）一律禁用；句长参考 = ${sel.active ? `班级定制【${sel.label}】最严 ${sel.minLen}` : `简化标准 ${simplifyMaxLen()}`} 词/句`;
   const risks = riskSentenceList(s);
 
   /* 生词清单：每个词两个动作——标记简化（进标记清单走 AI）/ 计入已学词（不再标红） */
@@ -1084,6 +1171,7 @@ async function openDemoMenu(): Promise<void> {
       const path = (el as HTMLElement).dataset.demoPath!;
       try {
         await loadLocalExampleConfig();
+        void loadClassGroups();
         const md = await invoke<string>('read_text_file', { path });
         const name = path.slice(path.lastIndexOf('/') + 1);
         await addSession(md, name, path);
@@ -1203,6 +1291,13 @@ async function importMarks(): Promise<void> {
 
 $('btn-open').addEventListener('click', () => void openChapterFiles());
 $('btn-run').addEventListener('click', () => void runQcCurrent());
+$('btn-cls').addEventListener('click', () => {
+  const p = document.getElementById('cls-panel') as HTMLElement | null;
+  if (!p) return;
+  const show = p.style.display === 'none' || !p.style.display;
+  renderClsPanel();
+  p.style.display = show ? 'block' : 'none';
+});
 
 /* 原生菜单事件分发 */
 void listen<string>('menu-action', (ev) => {
@@ -1826,6 +1921,7 @@ async function simplifyChapterCore(
     tierRule: simplifyRule(),
     chnoNote: '',
     instructions: (instructions ? `- 教师方向指令（最高优先级）：${instructions}` : '') +
+      (mergedSelection().active ? `\n- 班级定制目标（${mergedSelection().label}）：本篇句长上限取最严 ${mergedSelection().minLen} 词/句` : '') +
       (reinforceWordsNow() ? `\n- 复现词约束：以下学生已学词请择 5-8 个在本章自然复现（词形可按语境变化，融入情节，不硬塞不改故事）：${reinforceWordsNow()!.slice(0, 12).join(' / ')}` : ''),
   });
   const out: string[] = [];
@@ -1867,10 +1963,11 @@ async function generateDraft(): Promise<void> {
     $('draft-step').textContent = '简化完毕，正在保存并体检…';
 
     const date = new Date().toLocaleDateString('sv-SE');
+    const clsTag = mergedSelection().active ? `_${mergedSelection().label.replace(/[/\\?%*:|"<>&]/g, '')}` : '';
     let outPath: string;
     if (s.sourcePath) {
       const dir = s.sourcePath.slice(0, s.sourcePath.lastIndexOf('/'));
-      outPath = `${dir}/${s.fileName.replace(/\.(md|txt|markdown)$/i, '')}_简化_${date}.md`;
+      outPath = `${dir}/${s.fileName.replace(/\.(md|txt|markdown)$/i, '')}_简化_${date}${clsTag}.md`;
     } else {
       const dir = await invoke<string>('reports_dir');
       outPath = `${dir}/示例_简化_${date}.md`;
@@ -2049,7 +2146,7 @@ async function runBatch(): Promise<void> {
         const ch = chapters[chi];
         const tCh = Date.now();
         const base = item.name.replace(/\.(md|txt|markdown|docx)$/i, '');
-        const outName = `${chapters.length > 1 ? `${base}_${chi + 1}` : base}_简化_${date}.md`;
+        const outName = `${chapters.length > 1 ? `${base}_${chi + 1}` : base}_简化_${date}${mergedSelection().active ? `_${mergedSelection().label.replace(/[/\\?%*:|"<>&]/g, '')}` : ''}.md`;
         const { md: newMd, outTokens: tk, segCount } = await simplifyChapterCore(ch.md, instructions, (i, total) => {
           doneSegsAll = Math.min(doneSegsAll + 1, totalSegsAll);
           setStep(`第 ${ci + 1}/${runItems.length} 章 · ${ch.title}：正在简化第 ${i + 1}/${total} 段（全书进度 ${doneSegsAll}/${totalSegsAll} 段）`);

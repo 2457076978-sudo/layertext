@@ -46,6 +46,9 @@ export const S = {
   /** 已学词集/复现队列（_已学词.csv / _已学词.txt 自动加载；feature/reinforce：不计生词 + ⑩复现指标 + 简化注入约束） */
   reinforceText: null as string | null,
   reinforceName: '',
+  /** 班级多人定制（折叠多选栏）：分组/个人目标与当前选择 */
+  classTargets: [] as import('./pure.js').ClassTarget[],
+  selectedIds: [] as string[],
   /** 当前会话合并已知词表（含词句卡） */
   currentKnown: new Set<string>(),
   /** 全局配置（~/.layertext.json） */

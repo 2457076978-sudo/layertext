@@ -111,6 +111,15 @@ fn reports_dir() -> Result<String, String> {
 }
 
 /// 本地示例目录：~/Documents/LayerText示例（教师可放入自己的章节/词库/术语表，不随应用分发）
+/// 班级分组配置目录（班级多人定制：分组/个人词库与复现队列；本地数据，不进仓库）
+#[tauri::command]
+fn class_groups_dir() -> Result<String, String> {
+    let home = std::env::var("HOME").map_err(|e| e.to_string())?;
+    let dir = format!("{}/Documents/LayerText配置/班级分组", home);
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir)
+}
+
 #[tauri::command]
 fn examples_dir() -> Result<String, String> {
     let home = std::env::var("HOME").map_err(|e| e.to_string())?;
@@ -466,6 +475,7 @@ fn main() {
             write_text_file,
             reports_dir,
             examples_dir,
+        class_groups_dir,
             list_local_examples,
             list_dir,
             remove_file,

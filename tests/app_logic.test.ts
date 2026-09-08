@@ -319,3 +319,45 @@ test('remapMarks：替换句子后标记按句前缀重新对齐，词索引 wi 
   assert.equal(marks2[1].pi, 2);
   assert.equal(marks2[1].wi, 1, '词索引随句对齐');
 });
+
+/* ---------- 班级多人定制：mergeTargets / filterTargets（全假数据） ---------- */
+import { filterTargets, mergeTargets, type ClassTarget } from '../app/src/pure.js';
+
+const T = (id: string, 名称: string, 类型: '组' | '人', o: Partial<ClassTarget> = {}): ClassTarget => ({ id, 名称, 类型, ...o });
+
+test('mergeTargets：未选择=不激活，用全局句长', () => {
+  const m = mergeTargets([], 16);
+  assert.equal(m.active, false); assert.equal(m.minLen, 16);
+  assert.deepEqual(m.knownInter, []); assert.deepEqual(m.dueUnion, []);
+});
+
+test('mergeTargets：句长取最严、到期词并集按共选频次截断8', () => {
+  const g = T('组:B', 'B层(32)', '组', { 句长上限: 14, 到期词: ['enormous', 'cynical', 'oats'] });
+  const p1 = T('人:甲', '甲(B)', '人', { 句长上限: 12, 到期词: ['enormous', 'majestic'] });
+  const m = mergeTargets([g, p1], 16);
+  assert.equal(m.active, true);
+  assert.equal(m.minLen, 12);
+  assert.equal(m.dueUnion[0], 'enormous');      // 两人都有 → 频次2排最前
+  assert.ok(m.dueUnion.includes('cynical') && m.dueUnion.includes('majestic'));
+  assert.equal(m.dueUnion.length, 4);  // 并集去重：enormous/cynical/oats/majestic
+});
+
+test('mergeTargets：已学词只在有词集的目标间求交；空词集目标不吞交', () => {
+  const a = T('人:甲', '甲', '人', { 已学词: ['care', 'hay', 'oats'] });
+  const b = T('人:乙', '乙', '人', { 已学词: ['hay', 'oats', 'jones'] });
+  const c = T('组:B', 'B层', '组', {}); // 无词集
+  const m = mergeTargets([a, b, c], 16);
+  assert.deepEqual(m.knownInter, ['hay', 'oats']);
+});
+
+test('mergeTargets：label 超长截断', () => {
+  const many = Array.from({ length: 9 }, (_, i) => T(`人:${i}`, `学生${i}`, '人'));
+  assert.ok(mergeTargets(many, 16).label.endsWith('…'));
+});
+
+test('filterTargets：按名称或id模糊过滤，空查询全量', () => {
+  const ts = [T('组:B', 'B层(32)', '组'), T('人:焦佳琪', '焦佳琪(B)', '人'), T('人:李正浨', '李正浨(A)', '人')];
+  assert.equal(filterTargets(ts, '').length, 3);
+  assert.equal(filterTargets(ts, '焦').length, 1);
+  assert.equal(filterTargets(ts, '组:').length, 1);
+});
