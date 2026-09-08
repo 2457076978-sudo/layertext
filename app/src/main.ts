@@ -25,6 +25,7 @@ import {
   findOriginalFlex,
   locateOriginal,
   mergeQuotaTexts,
+  filterShelfBooks,
   mergeTargets,
   normalizeAndSplitChapters,
   parseAiJson,
@@ -32,7 +33,10 @@ import {
   pickSentMarkType,
   planBatchChapters,
   planCompaction,
+  progressPct,
   remapMarks,
+  shelfGroupsOf,
+  toggleParaBookmark,
   workspaceChipName,
   type BatchChapterItem,
   type BatchProgressFile,
@@ -71,7 +75,7 @@ import { aggregate, diagnose, LEDGER_HEADER, parseLedger, toLedgerLine, type Led
 import { summarizeCost } from '../../src/core/aiops.js';
 import { extractParas, hitOrigin, hit, pendHit, sentsOf, splitChapter, tokenizeTxt, cardGlossWords } from '../../src/core/textpipe.js';
 import { sentenceRisks } from '../../src/core/risks.js';
-import { jumpTo, refreshMarkDom, removeMarkDom, renderSidebar, restoreAllMarkDom, scheduleSave } from './review.js';
+import { jumpTo, jumpToBookmark, refreshBookmarksDom, refreshMarkDom, removeMarkDom, renderSidebar, restoreAllMarkDom, scheduleSave } from './review.js';
 import { CHANGELOG_HEADER, GATES, GATE_HELP, SENT_TYPES, WORD_TYPES, newMarkId, newReviewState, typeLabel, type FileSession, type Mark, type MarkType, type Suggestion } from './types.js';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -382,12 +386,15 @@ async function addSession(md: string, fileName: string, sourcePath: string | nul
       review.marks = parsed.marks;
       review.quota = parsed.quota ?? [];
       review.gate = parsed.gate ?? {};
+      review.bookmarks = Array.isArray(parsed.bookmarks) ? parsed.bookmarks : [];
     }
   } catch {
     /* 无历史标记，正常 */
   }
   S.sessions.push({ md, fileName, sourcePath, markPath, review, report: null, reportSavedPath: null, dirty: false });
   S.activeIdx = S.sessions.length - 1;
+  touchProgress(sourcePath ?? ''); // 阅读进度记账（书根未锚定则静默跳过）
+  if (tocPanelEl()?.classList.contains('open')) void refreshToc(); // 目录开着时同步高亮/书签区
   // 会话保持（学 harness）：切换文件不清空对话，注入上下文提示让 AI 知道当前章节
   if (S.chatMsgs.length > 0) {
     S.chatMsgs.push({ role: 'user', content: `（系统提示：教师已切换到「${fileName}」，后续操作与回答默认针对这一章）` });
@@ -418,6 +425,8 @@ function closeSession(i: number): void {
 function renderAll(): void {
   renderFileTabs();
   const s = activeSession();
+  const tocBtn = $('tab-toc');
+  tocBtn.style.display = s ? '' : 'none'; // 书架/版本页无章节概念，目录按钮收起
   if (!s) {
     void renderShelf(); // 首页=书架（示例+我的书；点书进入工作区）
     $('pane-report').innerHTML = '<div class="empty"><b>打开课文会自动体检</b><br/>生词率、句长、难句自动数好，报告页每条可勾选处理</div>';
@@ -533,9 +542,23 @@ function renderReader(session: FileSession): void {
   extractParas(body).forEach((p, pi) => {
     const div = document.createElement('div');
     div.className = 'para';
+    div.dataset.pi = String(pi);
     const pid = document.createElement('span');
     pid.className = 'pid';
-    pid.textContent = 'P' + String(pi + 1).padStart(2, '0');
+    const pidLabel = 'P' + String(pi + 1).padStart(2, '0');
+    pid.textContent = pidLabel;
+    pid.dataset.orig = pidLabel;
+    pid.title = '双击收藏本段书签（★，目录面板可查看与跳转）';
+    pid.addEventListener('dblclick', () => {
+      const s = activeSession();
+      if (!s) return;
+      const firstSent = sentsOf(p, false)[0] ?? '';
+      const r = toggleParaBookmark(s.review.bookmarks, pi, firstSent, Date.now());
+      s.review.bookmarks = r.list;
+      refreshBookmarksDom(s);
+      scheduleSave(s, () => undefined);
+      toast(r.added ? `已收藏段落书签 ${pidLabel}（双击段号可移除）` : `已移除段落书签 ${pidLabel}`);
+    });
     div.appendChild(pid);
     sentsOf(p, false).forEach((sent, si) => {
       const s = document.createElement('span');
@@ -1481,6 +1504,8 @@ interface ShelfBook {
   目录: string;
   副标题?: string;
   最近打开?: string;
+  /** 分组（右键书卡指派；空=未分组。书多之前只做轻量指派，不做管理弹层） */
+  分组?: string;
 }
 
 async function shelfPath(): Promise<string> {
@@ -1539,18 +1564,58 @@ function coverHtml(名: string, img: string | null): string {
   </div>`;
 }
 
+/** 阅读进度记账：打开过的章节去重累计 + 最近章/时间；total 缺失时补记全书章数 */
+function touchProgress(path: string): void {
+  if (!path || !S.currentBookDir) return;
+  const all = (S.appConfig.progress ??= {});
+  const rec = (all[S.currentBookDir] ??= { chapters: [] });
+  if (!rec.chapters.includes(path)) rec.chapters.push(path);
+  rec.lastChapter = path;
+  rec.lastAt = new Date().toLocaleDateString('sv-SE');
+}
+
 async function renderShelfInner(el: HTMLElement): Promise<void> {
   const books = await loadShelf();
+  loadShelfCached = books; // 右键分组菜单同帧可用
   const covers = await Promise.all(books.map((b) => coverDataUrl(b.目录)));
-  const cards = books
+  const groups = shelfGroupsOf(books);
+  const shown = filterShelfBooks(books, { q: S.shelfQ, group: S.shelfGroup });
+  const view = S.appConfig.shelfView ?? 'grid';
+  const prog = S.appConfig.progress ?? {};
+  const pctOf = (b: ShelfBook): number => {
+    const r = prog[b.目录];
+    return r ? progressPct(r.chapters.length, r.total) : 0;
+  };
+  const timeOf = (b: ShelfBook): string => prog[b.目录]?.lastAt ?? b.最近打开 ?? '';
+  const progHtml = (b: ShelfBook): string => {
+    const pct = pctOf(b);
+    return `<div class="shelf-progress" title="审校进度：${pct}%"><i style="width:${pct}%"></i></div><div class="shelf-progress-pct">${pct ? `已审 ${pct}%` : '未开始'}</div>`;
+  };
+  const badgeHtml = (b: ShelfBook): string => (b.分组?.trim() ? `<span class="shelf-badge">${esc(b.分组.trim())}</span>` : '');
+
+  const gridCards = shown
     .map(
-      (b, i) => `<div class="shelf-card" data-shelf="${i}" title="打开《${esc(b.名)}》">
-    ${coverHtml(b.名, covers[i])}
+      (b) => `<div class="shelf-card" data-shelf="${books.indexOf(b)}" title="打开《${esc(b.名)}》${b.分组 ? ' · 分组 ' + esc(b.分组) : '（右键可设分组）'}">
+    ${coverHtml(b.名, covers[books.indexOf(b)])}
     <div class="shelf-info">
       <div class="shelf-sub">${esc(b.副标题 ?? '')}</div>
-      <div class="shelf-meta">${esc(b.最近打开 ? '最近打开 ' + b.最近打开 : '点书选版本')}</div>
+      <div class="shelf-meta">${esc(timeOf(b) ? '最近 ' + timeOf(b) : '点书选版本')}</div>
+      ${progHtml(b)}
     </div>
   </div>`,
+    )
+    .join('');
+  const rowCards = shown
+    .map(
+      (b) => `<div class="shelf-row" data-shelf="${books.indexOf(b)}" title="打开《${esc(b.名)}》（右键可设分组）">
+      <div class="row-cover" style="${covers[books.indexOf(b)] ? `background-image:url(${covers[books.indexOf(b)]})` : `background:${shelfColor(b.名)}`}"></div>
+      <div class="row-main">
+        <div class="row-name">${esc(b.名)}${badgeHtml(b)}</div>
+        <div class="row-sub">${esc(b.副标题 ?? '')}</div>
+      </div>
+      <div class="row-progress">${progHtml(b)}</div>
+      <div class="row-time">${esc(timeOf(b))}</div>
+    </div>`,
     )
     .join('');
   const ls = S.appConfig.lastSession;
@@ -1558,24 +1623,121 @@ async function renderShelfInner(el: HTMLElement): Promise<void> {
     <div class="shelf">
       ${ls?.files?.length ? `<div class="shelf-resume" id="shelf-resume">▶ 继续上次编辑：${esc(ls.workspace ? ls.workspace + ' · ' : '')}${esc(ls.files[Math.min(ls.activeIdx, ls.files.length - 1)]?.path.split('/').pop() ?? '')} <span class="dim">（${esc(ls.savedAt)}）</span></div>` : ''}
       <div class="shelf-h">📚 我的书架<span class="dim">——点一本书，先选版本（如 B/M/A），再进工作区</span></div>
-      <div class="shelf-grid">
+      <div class="shelf-tools">
+        <input type="search" id="shelf-q" placeholder="搜索书名 / 分组…" value="${esc(S.shelfQ)}"/>
+        <span class="viewseg">
+          <button id="view-grid" class="${view === 'grid' ? 'cur' : ''}" title="书封视图——挑书">▦ 书封</button>
+          <button id="view-list" class="${view === 'list' ? 'cur' : ''}" title="清单视图——管审校进度">☰ 进度</button>
+        </span>
+        <span class="dim" style="font-size:11px">${shown.length === books.length ? `${books.length} 本` : `${shown.length}/${books.length} 本`} · 右键书卡设分组</span>
+      </div>
+      ${
+        groups.length
+          ? `<div class="shelf-groups">
+        <span class="gchip ${S.shelfGroup === null ? 'cur' : ''}" data-group="">全部</span>
+        <span class="gchip ${S.shelfGroup === '' ? 'cur' : ''}" data-group="__none__">未分组</span>
+        ${groups.map((g) => `<span class="gchip ${S.shelfGroup === g ? 'cur' : ''}" data-group="${esc(g)}">${esc(g)}</span>`).join('')}
+      </div>`
+          : ''
+      }
+      ${
+        view === 'list'
+          ? `<div class="shelf-grid list">${rowCards || '<div class="dim" style="padding:20px 4px">没有匹配的书——换个搜索词，或点分组「全部」</div>'}
+        <div class="shelf-row add-row" id="shelf-add">＋ 添加书稿文件夹（含章节 md；可配 _工作区.json / _词库.csv）</div></div>`
+          : `<div class="shelf-grid">
         <div class="shelf-card demo" id="shelf-demo" title="打开内置示例">
           ${coverHtml('龟兔赛跑', null)}
           <div class="shelf-info"><div class="shelf-sub">内置示例 · 含示例词库</div><div class="shelf-meta">随时可用</div></div>
         </div>
-        ${cards}
+        ${gridCards || '<div class="dim" style="grid-column:1/-1;padding:16px 4px">没有匹配的书——换个搜索词，或点分组「全部」</div>'}
         <div class="shelf-card add" id="shelf-add" title="把一个书稿文件夹注册到书架">
           <div class="shelf-cover">＋</div>
           <div class="shelf-info"><div class="shelf-sub">添加书稿文件夹</div><div class="shelf-meta">含章节 md；可配 _工作区.json / _词库.csv</div></div>
         </div>
-      </div>
+      </div>`
+      }
       <div class="dim" style="margin-top:16px">书目录里放一张 cover.jpg 或 封面.png 即可作书封；没有图就用书名当封面。也可以用上方「打开文件…」直接开单章。</div>
     </div>`;
   document.getElementById('shelf-resume')?.addEventListener('click', () => void resumeLastSession());
   document.getElementById('shelf-demo')?.addEventListener('click', () => loadBuiltinDemo());
   document.getElementById('shelf-add')?.addEventListener('click', () => void addBookToShelf());
-  el.querySelectorAll('[data-shelf]').forEach((card) => card.addEventListener('click', () => void openBook(books[Number((card as HTMLElement).dataset.shelf)])));
+  const q = document.getElementById('shelf-q') as HTMLInputElement | null;
+  q?.addEventListener('input', () => {
+    S.shelfQ = q.value;
+    void renderShelf();
+    // 重渲染后焦点回到搜索框并保持光标在末尾（输入连续性）
+    const q2 = document.getElementById('shelf-q') as HTMLInputElement | null;
+    if (q2) {
+      q2.focus();
+      q2.setSelectionRange(q2.value.length, q2.value.length);
+    }
+  });
+  document.getElementById('view-grid')?.addEventListener('click', () => setShelfView('grid'));
+  document.getElementById('view-list')?.addEventListener('click', () => setShelfView('list'));
+  el.querySelectorAll('[data-group]').forEach((chip) =>
+    chip.addEventListener('click', () => {
+      const g = (chip as HTMLElement).dataset.group!;
+      S.shelfGroup = g === '' ? null : g === '__none__' ? '' : g;
+      void renderShelf();
+    }),
+  );
+  el.querySelectorAll<HTMLElement>('[data-shelf]').forEach((card) => {
+    const b = books[Number(card.dataset.shelf)];
+    card.addEventListener('click', () => void openBook(b));
+    card.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      showShelfCtxMenu(b, e.clientX, e.clientY);
+    });
+  });
 }
+
+/** 视图切换（持久化）：网格=挑书，列表=管进度 */
+function setShelfView(v: 'grid' | 'list'): void {
+  S.appConfig.shelfView = v;
+  void saveConfig();
+  void renderShelf();
+}
+
+/** 书卡右键轻量分组菜单：指派到现有分组 / 新建（书多之前不做管理弹层） */
+function showShelfCtxMenu(b: ShelfBook, x: number, y: number): void {
+  closeShelfCtxMenu();
+  const menu = document.createElement('div');
+  menu.className = 'shelf-ctxmenu';
+  menu.id = 'shelf-ctxmenu';
+  const groups = shelfGroupsOf(loadShelfCached ?? []);
+  menu.innerHTML =
+    `<div class="ci ${!b.分组?.trim() ? 'cur' : ''}" data-g="">未分组</div>` +
+    groups.map((g) => `<div class="ci ${b.分组?.trim() === g ? 'cur' : ''}" data-g="${esc(g)}">${esc(g)}</div>`).join('') +
+    `<div class="sep"></div><input id="ctx-new-group" placeholder="新建分组名，回车确认"/>`;
+  menu.style.left = Math.min(x, window.innerWidth - 190) + 'px';
+  menu.style.top = Math.min(y, window.innerHeight - 180) + 'px';
+  document.body.appendChild(menu);
+  const pick = async (g: string): Promise<void> => {
+    closeShelfCtxMenu();
+    const books = await loadShelf();
+    const i = books.findIndex((x2) => x2.目录 === b.目录);
+    if (i < 0) return;
+    books[i].分组 = g.trim() || undefined;
+    if (!g.trim()) delete books[i].分组;
+    await saveShelf(books);
+    loadShelfCached = books;
+    await renderShelf();
+    setStatus(g.trim() ? `《${b.名}》已移入分组「${g.trim()}」` : `《${b.名}》已设为未分组`, 'saved');
+  };
+  menu.querySelectorAll<HTMLElement>('[data-g]').forEach((ci) => ci.addEventListener('click', () => void pick(ci.dataset.g ?? '')));
+  const inp = menu.querySelector('#ctx-new-group') as HTMLInputElement | null;
+  inp?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && inp.value.trim()) void pick(inp.value);
+  });
+  setTimeout(() => document.addEventListener('mousedown', closeShelfCtxMenu, { once: true }), 0);
+}
+
+function closeShelfCtxMenu(): void {
+  document.getElementById('shelf-ctxmenu')?.remove();
+}
+
+/** renderShelfInner 同帧内右键菜单可用的书架缓存（避免右键时再异步读盘） */
+let loadShelfCached: ShelfBook[] | null = null;
 
 async function addBookToShelf(): Promise<void> {
   const dir = await openFileDialog({ directory: true });
@@ -1616,6 +1778,15 @@ async function openBook(b: ShelfBook): Promise<void> {
     await loadBookConfig(b.目录);
     await loadWorkspaces(b.目录);
     if (S.classTargets.length === 0) await loadClassGroups(); // 提前就位，进版本即可绑定口径
+    S.currentBookDir = b.目录; // 进度记账锚定书根
+    // 首次打开时补记全书章数（进度百分比分母；之后版本结构不变不再重复算）
+    const total = S.workspaces.length ? S.workspaces.reduce((n, w) => n + w.文件.length, 0) : 0;
+    const rec = ((S.appConfig.progress ??= {})[b.目录] ??= { chapters: [] });
+    if (total > 0) rec.total = total;
+    else if (!rec.total) {
+      const files = (await invoke<string[]>('list_dir', { dir: b.目录 })).filter((f) => /\.(md|txt)$/i.test(f));
+      rec.total = files.length;
+    }
     const books = await loadShelf();
     const i = books.findIndex((x) => x.目录 === b.目录);
     if (i >= 0) {
@@ -1690,8 +1861,185 @@ async function backToShelf(): Promise<void> {
   S.activeIdx = -1;
   S.workspaces = [];
   S.activeWorkspace = null;
+  S.currentBookDir = null;
+  closeToc();
   hidePop();
   renderAll();
+}
+
+/* ---------- 目录侧滑面板（章节 + 审校状态徽标 + 本章书签；审校台的目录，不是小说目录） ---------- */
+
+function tocPanelEl(): HTMLElement | null {
+  return document.getElementById('toc-panel');
+}
+
+function ensureTocDom(): { mask: HTMLElement; panel: HTMLElement } {
+  let mask = document.getElementById('toc-mask');
+  let panel = tocPanelEl();
+  if (!mask) {
+    mask = document.createElement('div');
+    mask.id = 'toc-mask';
+    mask.addEventListener('mousedown', () => closeToc());
+    document.body.appendChild(mask);
+  }
+  if (!panel) {
+    panel = document.createElement('aside');
+    panel.id = 'toc-panel';
+    panel.innerHTML = `
+      <div class="toc-h">☰ 目录<span class="dim" id="toc-sub"></span><button id="toc-close" title="关闭（Esc）">×</button></div>
+      <div class="toc-list" id="toc-list"></div>
+      <div class="toc-bm-h" id="toc-bm-h" style="display:none">★ 本章书签 <span class="cnt" id="toc-bm-cnt"></span><span class="dim" style="font-weight:400;font-size:10.5px">— 双击正文段号收藏</span></div>
+      <div class="toc-bm" id="toc-bm"></div>`;
+    document.body.appendChild(panel);
+    panel.querySelector('#toc-close')?.addEventListener('click', () => closeToc());
+  }
+  return { mask, panel: panel! };
+}
+
+function toggleToc(): void {
+  const panel = tocPanelEl();
+  if (panel?.classList.contains('open')) {
+    closeToc();
+    return;
+  }
+  const s = activeSession();
+  if (!s) {
+    toast('先打开一章，目录跟着书走');
+    return;
+  }
+  const { mask, panel: p } = ensureTocDom();
+  p.classList.add('open');
+  mask.classList.add('open');
+  void refreshToc();
+}
+
+function closeToc(): void {
+  tocPanelEl()?.classList.remove('open');
+  document.getElementById('toc-mask')?.classList.remove('open');
+}
+
+/** 目录章节数据源：当前工作区文件 → 书目录单章 md → 已打开会话（单文件模式） */
+async function tocChapters(): Promise<string[]> {
+  const active = S.workspaces.find((w) => w.名 === S.activeWorkspace);
+  if (active) return active.文件;
+  if (S.currentBookDir) {
+    try {
+      const fs = await invoke<string[]>('list_dir', { dir: S.currentBookDir });
+      return fs.filter((f) => /\.(md|txt)$/i.test(f));
+    } catch {
+      return [];
+    }
+  }
+  return S.sessions.map((x) => x.sourcePath).filter((x): x is string => !!x);
+}
+
+async function refreshToc(): Promise<void> {
+  const panel = tocPanelEl();
+  if (!panel) return;
+  const s = activeSession();
+  const cur = s?.sourcePath ?? null;
+  const chapters = await tocChapters();
+  document.getElementById('toc-sub')!.textContent =
+    `${S.currentBookDir ? (S.currentBookDir.split('/').pop() ?? '') : '本次打开'}${S.activeWorkspace ? ' · ' + S.activeWorkspace : ''} · ${chapters.length} 章`;
+  const list = document.getElementById('toc-list')!;
+  if (!chapters.length) {
+    list.innerHTML = `<div class="toc-bm-empty">当前没有书上下文（单章模式）——从书架点书进入后，这里列全书章节并显示各章审校状态。</div>`;
+  } else {
+    list.innerHTML = chapters
+      .map(
+        (f) =>
+          `<div class="toc-item ${f === cur ? 'cur' : ''}" data-tocf="${esc(f)}" title="${esc(f)}"><span class="t" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(workspaceChipName(f))}</span><span class="toc-badge" data-badge="${esc(f)}">…</span></div>`,
+      )
+      .join('');
+    list.querySelectorAll('[data-tocf]').forEach((item) =>
+      item.addEventListener('click', () => {
+        const f = (item as HTMLElement).dataset.tocf!;
+        closeToc();
+        openPathIntoSession(f)
+          .then(() => setStatus(`已打开：${workspaceChipName(f)}（工作区【${S.activeWorkspace ?? '—'}】口径）`, 'saved'))
+          .catch((e) => setStatus('打开失败：' + e, 'err'));
+      }),
+    );
+    // 各章审校状态：批量读 _审校标记.json，标记数进徽标（读不到=未标记；路径含特殊字符，用 dataset 匹配不用属性选择器）
+    const badgeOf = (f: string): HTMLElement | null => [...list.querySelectorAll<HTMLElement>('[data-badge]')].find((b) => b.dataset.badge === f) ?? null;
+    for (const f of chapters) {
+      if (f === cur) {
+        const b = badgeOf(f);
+        if (b) b.textContent = s ? `${s.review.marks.length} 标记` : '当前';
+        continue;
+      }
+      void (async () => {
+        let label = '未标记';
+        try {
+          const base = f.slice(f.lastIndexOf('/') + 1).replace(/\.(md|txt|markdown|docx)$/i, '');
+          const mp = `${f.slice(0, f.lastIndexOf('/'))}/${base}_审校标记.json`;
+          const j = JSON.parse(await invoke<string>('read_text_file', { path: mp })) as { marks?: unknown[] };
+          const n = Array.isArray(j.marks) ? j.marks.length : 0;
+          if (n) label = `${n} 标记`;
+        } catch {
+          /* 无标记文件 */
+        }
+        const b = badgeOf(f);
+        if (b) b.textContent = label;
+      })();
+    }
+  }
+  // 本章书签区
+  const bmBox = document.getElementById('toc-bm');
+  const bmH = document.getElementById('toc-bm-h');
+  const bms = s?.review.bookmarks ?? [];
+  bmH!.style.display = 'flex';
+  document.getElementById('toc-bm-cnt')!.textContent = String(bms.length);
+  bmBox!.innerHTML = bms.length
+    ? bms
+        .map((b) => `<div class="toc-bm-item" data-bm="${b.pi}"><span class="p">★P${String(b.pi + 1).padStart(2, '0')}</span><span class="t" title="${esc(b.text)}">${esc(b.text)}</span></div>`)
+        .join('')
+    : `<div class="toc-bm-empty">本章还没有书签——正文中双击段落号（P01/P02…）即可收藏，回头从这里一键跳回。</div>`;
+  bmBox!.querySelectorAll('[data-bm]').forEach((item) =>
+    item.addEventListener('click', () => {
+      jumpToBookmark(Number((item as HTMLElement).dataset.bm));
+    }),
+  );
+}
+
+/* ---------- 阅读体验：主题（白/灰/深色）与行距 ---------- */
+
+const THEMES: { key: 'light' | 'gray' | 'dark'; label: string; icon: string }[] = [
+  { key: 'light', label: '白', icon: '☀' },
+  { key: 'gray', label: '灰', icon: '◐' },
+  { key: 'dark', label: '深色', icon: '🌙' },
+];
+
+function applyTheme(): void {
+  const t = S.appConfig.theme ?? 'light';
+  document.documentElement.dataset.theme = t;
+  const btn = document.getElementById('btn-theme');
+  if (btn) {
+    btn.textContent = THEMES.find((x) => x.key === t)?.icon ?? '☀';
+    btn.title = `主题：${THEMES.map((x) => (x.key === t ? `【${x.label}】` : x.label)).join('/')}，点击切换`;
+  }
+}
+
+function stepTheme(): void {
+  const cur = S.appConfig.theme ?? 'light';
+  const next = THEMES[(THEMES.findIndex((x) => x.key === cur) + 1) % THEMES.length].key;
+  S.appConfig.theme = next;
+  applyTheme();
+  void saveConfig();
+  toast(`主题：${THEMES.find((x) => x.key === next)!.label}`);
+}
+
+const LINE_HEIGHTS = [1.7, 1.9, 2.1];
+
+function applyReaderLineHeight(): void {
+  document.documentElement.style.setProperty('--read-lh', String(S.appConfig.lineHeight ?? 2.1));
+}
+
+function setReaderLineHeight(v: number): void {
+  S.appConfig.lineHeight = v;
+  applyReaderLineHeight();
+  void saveConfig();
+  toast(`行距 ${v}`);
 }
 
 function renderWorkspaceBar(): void {
@@ -1782,6 +2130,8 @@ async function importMarks(): Promise<void> {
 }
 
 $('btn-home').addEventListener('click', () => void backToShelf());
+$('btn-theme').addEventListener('click', stepTheme);
+$('tab-toc').addEventListener('click', toggleToc);
 $('btn-open').addEventListener('click', () => void openChapterFiles());
 $('btn-run').addEventListener('click', () => void runQcCurrent());
 $('btn-undo').addEventListener('click', () => void doUndo());
@@ -3067,6 +3417,7 @@ async function resumeLastSession(): Promise<void> {
     toast('没有上次的编辑记录');
     return;
   }
+  S.currentBookDir = ls.bookDir ?? null; // 进度记账锚定回书根
   let opened = 0;
   for (const f of ls.files) {
     try {
@@ -3223,11 +3574,27 @@ function renderSettings(): void {
   const row = (label: string, ctrl: string) => `<div class="set-row"><span>${label}</span>${ctrl}</div>`;
   pop.innerHTML = `<div class="pop-h">⚙ 设置 <span class="dim" style="font-weight:400;font-size:12px">（改完即存）</span></div>
     ${row('阅读字号', `<button id="set-fm">A－</button> <b id="set-fv">${S.appConfig.readerFont ?? 15}</b>px <button id="set-fp">A＋</button>`)}
+    ${row('行间距', `<span class="seg">${LINE_HEIGHTS.map((h) => `<button class="${(S.appConfig.lineHeight ?? 2.1) === h ? 'cur' : ''}" data-lh="${h}">${h}</button>`).join('')}</span>`)}
+    ${row('主题', `<span class="seg">${THEMES.map((t) => `<button class="${(S.appConfig.theme ?? 'light') === t.key ? 'cur' : ''}" data-theme="${t.key}">${t.label}</button>`).join('')}</span>`)}
     ${row('句长上限（简化标准）', `<button id="set-len">调整（${simplifyMaxLen()} 词）</button>`)}
     ${row('直接修改原稿（首改自动备份）', `<input type="checkbox" id="set-inplace" ${(S.appConfig.inPlaceEdit ?? true) ? 'checked' : ''}/>`)}
     ${row('AI 改写直接生效', `<input type="checkbox" id="set-autorew" ${S.appConfig.autoRewriteOnMark ? 'checked' : ''}/>`)}
     ${row('当前班级定制口径', `<span class="dim">${sel.active ? `【${sel.label}】句长≤${sel.minLen} · 复现${sel.dueUnion.length}词${sel.coverageTarget ? ' · 覆盖≥' + sel.coverageTarget + '%' : ''}` : '未选择（👥班级定制）'}</span>`)}
     <div class="dim" style="margin-top:8px">LayerText v1.1 · feature/reinforce · 词库以书目录 _词库.csv 为准</div>`;
+  pop.querySelectorAll<HTMLElement>('[data-lh]').forEach((b) =>
+    b.addEventListener('click', () => {
+      setReaderLineHeight(Number(b.dataset.lh));
+      renderSettings();
+    }),
+  );
+  pop.querySelectorAll<HTMLElement>('[data-theme]').forEach((b) =>
+    b.addEventListener('click', () => {
+      S.appConfig.theme = b.dataset.theme as 'light' | 'gray' | 'dark';
+      applyTheme();
+      void saveConfig();
+      renderSettings();
+    }),
+  );
   document.getElementById('set-fm')?.addEventListener('click', () => {
     stepReaderFont(-1);
     renderSettings();
@@ -3257,8 +3624,11 @@ document.addEventListener('keydown', (e) => {
   if (mod && (e.key === 'f' || e.key === 'F')) {
     e.preventDefault();
     openFind();
-  } else if (e.key === 'Escape') closeFind();
-  else if (mod && e.altKey && (e.key === 'z' || e.key === 'Z')) {
+  } else if (e.key === 'Escape') {
+    closeFind();
+    closeToc();
+    closeShelfCtxMenu();
+  } else if (mod && e.altKey && (e.key === 'z' || e.key === 'Z')) {
     e.preventDefault();
     void (e.shiftKey ? doRedo() : doUndo());
   } else if (mod && (e.key === '=' || e.key === '+')) {
@@ -3279,6 +3649,8 @@ void (async () => {
   if (!S.appConfig.firstRunSeen) showWelcome();
   await restoreChat();
   applyReaderFont();
+  applyReaderLineHeight();
+  applyTheme();
   await renderShelf(); // 首页=书架（示例+我的书；原"最近编辑"空状态升级为书架）
   setInterval(() => void saveLastSession(), 20000); // 兜底：上次会话自动保存
 })();

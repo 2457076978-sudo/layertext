@@ -69,14 +69,45 @@ export function removeMarkDom(mark: Mark): void {
 /** 打开文件后，把已保存的标记全部刷到正文 DOM */
 export function restoreAllMarkDom(session: FileSession): void {
   for (const m of session.review.marks) refreshMarkDom(m);
+  refreshBookmarksDom(session);
+}
+
+/* ---------- 段落书签（双击段号收藏） ---------- */
+
+function paraEl(pi: number): HTMLElement | null {
+  return document.querySelector(`.para[data-pi="${pi}"]`);
+}
+
+/** 书签视觉：段号变实心徽标 + 段左侧细条（恢复/添加/移除共用——幂等，先清再加；原文案存 pid.dataset.orig） */
+export function refreshBookmarksDom(session: FileSession): void {
+  document.querySelectorAll<HTMLElement>('.para.bookmarked').forEach((el) => {
+    const pid = el.querySelector<HTMLElement>('.pid');
+    el.classList.remove('bookmarked');
+    if (pid?.dataset.orig) pid.textContent = pid.dataset.orig;
+  });
+  for (const b of session.review.bookmarks ?? []) {
+    const el = paraEl(b.pi);
+    if (!el) continue;
+    el.classList.add('bookmarked');
+    const pid = el.querySelector<HTMLElement>('.pid');
+    if (pid) pid.textContent = '★' + String(b.pi + 1).padStart(2, '0');
+  }
+}
+
+/** 跳到段落书签（滚动居中 + 闪烁提示） */
+export function jumpToBookmark(pi: number): void {
+  const el = paraEl(pi);
+  if (!el) return;
+  el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  el.classList.remove('flash');
+  void (el as HTMLElement).offsetWidth;
+  el.classList.add('flash');
 }
 
 /* ---------- 定位跳转 ---------- */
 
 export function jumpTo(mark: Mark): void {
-  const el = mark.level === 'word'
-    ? findSentEl(mark.pi, mark.si)?.querySelector(`.w[data-wi="${mark.wi}"]`)
-    : findSentEl(mark.pi, mark.si);
+  const el = mark.level === 'word' ? findSentEl(mark.pi, mark.si)?.querySelector(`.w[data-wi="${mark.wi}"]`) : findSentEl(mark.pi, mark.si);
   if (!el) return;
   el.scrollIntoView({ behavior: 'smooth', block: 'center' });
   el.classList.remove('flash');
@@ -123,11 +154,12 @@ export function renderSidebar(
         <button class="qmark" data-gate-help="${esc(g)}" title="这是什么？">?</button></li>`,
   ).join('');
 
-  const listHtml = allTypes
-    .filter((t) => byType.has(t.key))
-    .map((t) => {
-      const ms = byType.get(t.key)!;
-      return `
+  const listHtml =
+    allTypes
+      .filter((t) => byType.has(t.key))
+      .map((t) => {
+        const ms = byType.get(t.key)!;
+        return `
       <div class="mgroup">
         <div class="mgroup-h">${t.label}<span class="cnt">${ms.length}</span></div>
         ${ms
@@ -141,8 +173,8 @@ export function renderSidebar(
           })
           .join('')}
       </div>`;
-    })
-    .join('') || '<div class="side-empty">暂无标记——正文里点词、拖选句子即可标记</div>';
+      })
+      .join('') || '<div class="side-empty">暂无标记——正文里点词、拖选句子即可标记</div>';
 
   const side = document.getElementById('side-review')!;
   side.innerHTML = `
@@ -161,15 +193,9 @@ export function renderSidebar(
     </div>`;
 
   // 事件
-  side.querySelectorAll('[data-quota]').forEach((el) =>
-    el.addEventListener('change', () => handlers.onQuotaToggle(Number((el as HTMLElement).dataset.quota))),
-  );
-  side.querySelectorAll('[data-quota-rm]').forEach((el) =>
-    el.addEventListener('click', () => handlers.onQuotaRemove(Number((el as HTMLElement).dataset.quotaRm))),
-  );
-  side.querySelectorAll('[data-gate]').forEach((el) =>
-    el.addEventListener('change', () => handlers.onGateToggle((el as HTMLElement).dataset.gate!)),
-  );
+  side.querySelectorAll('[data-quota]').forEach((el) => el.addEventListener('change', () => handlers.onQuotaToggle(Number((el as HTMLElement).dataset.quota))));
+  side.querySelectorAll('[data-quota-rm]').forEach((el) => el.addEventListener('click', () => handlers.onQuotaRemove(Number((el as HTMLElement).dataset.quotaRm))));
+  side.querySelectorAll('[data-gate]').forEach((el) => el.addEventListener('change', () => handlers.onGateToggle((el as HTMLElement).dataset.gate!)));
   side.querySelectorAll('[data-gate-help]').forEach((el) =>
     el.addEventListener('click', (e) => {
       e.stopPropagation();

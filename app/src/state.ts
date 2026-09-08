@@ -27,6 +27,13 @@ export interface AppConfig {
   /* UX 补齐：阅读字号 + 上次会话恢复（书架"继续上次编辑"） */
   readerFont?: number;
   lastSession?: { bookDir?: string; book名?: string; workspace?: string; files: { path: string; scroll: number }[]; activeIdx: number; savedAt: string } | null;
+  /* 阅读体验：主题（白/灰/深色）+ 行距档位（默认 2.1） */
+  theme?: 'light' | 'gray' | 'dark';
+  lineHeight?: number;
+  /* 书架：视图（网格/列表，Feature Parity——两种视图下搜索/分组同样生效） */
+  shelfView?: 'grid' | 'list';
+  /* 每本书的阅读进度：chapters=打开过的章节绝对路径（去重），total=全书章节总数 */
+  progress?: Record<string, { chapters: string[]; total?: number; lastChapter?: string; lastAt?: string }>;
 }
 
 export interface RewriteRules {
@@ -55,6 +62,11 @@ export const S = {
   /** 工作区（书目录 _工作区.json，像浏览器标签按版本切换；各工作区可绑定班级定制目标） */
   workspaces: [] as import('./pure.js').Workspace[],
   activeWorkspace: null as string | null,
+  /** 当前书的根目录（进度记账用；openBook/resume 设置，回书架清空） */
+  currentBookDir: null as string | null,
+  /** 书架会话态：搜索词 + 分组过滤（视图切换持久化在 appConfig.shelfView） */
+  shelfQ: '',
+  shelfGroup: null as string | null,
   /** 当前会话合并已知词表（含词句卡） */
   currentKnown: new Set<string>(),
   /** 全局配置（~/.layertext.json） */

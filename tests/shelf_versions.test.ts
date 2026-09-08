@@ -2,7 +2,7 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { buildVersionCards, coverTitlePx, coverVisualWidth } from '../app/src/pure.js';
+import { buildVersionCards, coverTitlePx, coverVisualWidth, filterShelfBooks, progressPct, shelfGroupsOf, toggleParaBookmark } from '../app/src/pure.js';
 
 test('coverVisualWidth：中文全角=1、ASCII≈0.55', () => {
   assert.equal(coverVisualWidth('动物农场'), 4);
@@ -34,4 +34,56 @@ test('buildVersionCards：B/M/A 三版本卡片（章数 + 绑定口径 + 第一
   assert.equal(cards[0].first, '第一章'); // 候选版文件 chip 名取章节目录名
   assert.equal(cards[2].target, '组:A');
   assert.deepEqual(buildVersionCards([]), []);
+});
+
+test('filterShelfBooks：多词 AND + 分组过滤（未分组/精确分组/null=全部）', () => {
+  const books = [
+    { 名: '动物农场', 副标题: '3 个版本 · 30 章', 分组: 'AF课题' },
+    { 名: 'Animal Farm 原版', 目录: '/x/af' },
+    { 名: '红楼梦', 分组: '本学期' },
+  ];
+  assert.equal(filterShelfBooks(books, { q: '', group: null }).length, 3);
+  assert.equal(filterShelfBooks(books, { q: 'farm', group: null }).length, 1); // 大小写不敏感
+  assert.equal(filterShelfBooks(books, { q: '动物 农场', group: null }).length, 1); // 多词 AND
+  assert.equal(filterShelfBooks(books, { q: '动物 原版', group: null }).length, 0);
+  assert.deepEqual(
+    filterShelfBooks(books, { q: '', group: 'AF课题' }).map((b) => b.名),
+    ['动物农场'],
+  );
+  assert.deepEqual(
+    filterShelfBooks(books, { q: '', group: '' }).map((b) => b.名),
+    ['Animal Farm 原版'],
+  ); // ''=未分组
+  assert.equal(filterShelfBooks(books, { q: '红楼梦', group: 'AF课题' }).length, 0); // 搜索+分组叠加
+});
+
+test('shelfGroupsOf：去重，空分组不入列', () => {
+  const out = shelfGroupsOf([{ 分组: '本学期' }, { 分组: 'AF课题' }, {}, { 分组: '本学期 ' }]);
+  assert.equal(out.length, 2); // 重复（含首尾空格差异）与空分组都不入列
+  assert.ok(out.includes('本学期') && out.includes('AF课题'));
+});
+
+test('progressPct：总数缺失为 0，封顶 100', () => {
+  assert.equal(progressPct(3, undefined), 0);
+  assert.equal(progressPct(0, 30), 0);
+  assert.equal(progressPct(3, 30), 10);
+  assert.equal(progressPct(15, 30), 50);
+  assert.equal(progressPct(45, 30), 100);
+});
+
+test('toggleParaBookmark：按段去重切换，追加后按段号排序', () => {
+  const t1 = toggleParaBookmark([], 2, 'The horses worked hard.', 100);
+  assert.equal(t1.added, true);
+  const t2 = toggleParaBookmark(t1.list, 0, 'Mr. Jones owned the farm.', 101);
+  assert.deepEqual(
+    t2.list.map((b) => b.pi),
+    [0, 2],
+  ); // 排序
+  const t3 = toggleParaBookmark(t2.list, 2, 'x', 102);
+  assert.equal(t3.added, false); // 再点同段=移除
+  assert.deepEqual(
+    t3.list.map((b) => b.pi),
+    [0],
+  );
+  assert.ok(t1.list[0].text.length <= 60); // 长文本截断预览
 });

@@ -16,6 +16,48 @@
         --pending: #e8862e;
         --term: #2f6fed;
         --riskbg: #fdecea;
+        /* 按钮底色与书架/工作区强调色（三主题各自取值；accent 系用于书封、工作区条、进度、书签） */
+        --btn-bg: #fff;
+        --accent: #1f5c4d;
+        --accent-hover: #2a7263;
+        --accent-soft: #eef4ee;
+        --accent-ink: #fff;
+        --wsbg: #fafafa;
+        --wsline: #e0e0e0;
+      }
+      [data-theme='gray'] {
+        --bg: #eceef1;
+        --panel: #f7f8fa;
+        --ink: #262b31;
+        --muted: #6d747c;
+        --line: #d8dce1;
+        --riskbg: #f2e0dd;
+        --btn-bg: #fdfdfe;
+        --accent: #35695a;
+        --accent-hover: #407a69;
+        --accent-soft: #e6eee9;
+        --accent-ink: #fff;
+        --wsbg: #f1f3f5;
+        --wsline: #d8dce1;
+      }
+      [data-theme='dark'] {
+        --bg: #15171c;
+        --panel: #1d2026;
+        --ink: #dce0e6;
+        --muted: #9aa2ad;
+        --line: #31353d;
+        --brand: #6b9aff;
+        --oov: #e5726e;
+        --pending: #e8a25e;
+        --term: #6b9aff;
+        --riskbg: #3a2623;
+        --btn-bg: #262a31;
+        --accent: #4da08a;
+        --accent-hover: #5cb39a;
+        --accent-soft: #21302a;
+        --accent-ink: #0f1512;
+        --wsbg: #191b20;
+        --wsline: #2c3038;
       }
       * {
         box-sizing: border-box;
@@ -53,7 +95,7 @@
       }
       button {
         border: 1px solid var(--line);
-        background: #fff;
+        background: var(--btn-bg);
         color: var(--ink);
         border-radius: 8px;
         padding: 6px 12px;
@@ -241,7 +283,7 @@
       }
       .para {
         margin-bottom: 14px;
-        line-height: 2.1;
+        line-height: var(--read-lh, 2.1);
         font-size: 16px;
       }
       .pid {
@@ -1362,8 +1404,8 @@
         gap: 4px;
         align-items: stretch;
         padding: 4px 12px 0;
-        border-bottom: 1px solid #e0e0e0;
-        background: #fafafa;
+        border-bottom: 1px solid var(--wsline);
+        background: var(--wsbg);
         overflow-x: auto;
       }
       .wstabs .ftab.ws {
@@ -1379,15 +1421,15 @@
           color 0.15s;
       }
       .wstabs .ftab.ws:hover {
-        color: #1f5c4d;
-        background: #eef4ee;
+        color: var(--accent);
+        background: var(--accent-soft);
       }
       .wstabs .ftab.ws.active {
-        color: #1f5c4d;
+        color: var(--accent);
         font-weight: 700;
-        background: #eef4ee;
-        border-color: #e0e0e0;
-        box-shadow: inset 0 3px 0 #1f5c4d;
+        background: var(--accent-soft);
+        border-color: var(--wsline);
+        box-shadow: inset 0 3px 0 var(--accent);
       }
       .wstabs .ftab.ws:active {
         transform: translateY(1px);
@@ -1397,14 +1439,14 @@
         gap: 4px;
         margin-left: 10px;
         padding-left: 10px;
-        border-left: 1px solid #ddd;
+        border-left: 1px solid var(--line);
         align-items: center;
       }
       .wschip {
         font-size: 11.5px;
-        color: #444;
+        color: var(--ink);
         padding: 2px 8px;
-        border: 1px solid #d8d8d8;
+        border: 1px solid var(--line);
         border-radius: 10px;
         cursor: pointer;
         white-space: nowrap;
@@ -1413,14 +1455,14 @@
           border-color 0.12s;
       }
       .wschip:hover {
-        background: #eef4ee;
-        border-color: #1f5c4d;
-        color: #1f5c4d;
+        background: var(--accent-soft);
+        border-color: var(--accent);
+        color: var(--accent);
       }
       .wschip.cur {
-        background: #1f5c4d;
-        color: #fff;
-        border-color: #1f5c4d;
+        background: var(--accent);
+        color: var(--accent-ink);
+        border-color: var(--accent);
       }
       /* UX 补齐：toast / 查找条 / 设置 / 命中闪烁 / 继续上次 */
       #toast-box {
@@ -1456,8 +1498,8 @@
         top: 44px;
         right: 12px;
         z-index: 400;
-        background: #fff;
-        border: 1px solid #ccc;
+        background: var(--panel);
+        border: 1px solid var(--line);
         border-radius: 8px;
         padding: 6px 8px;
         display: flex;
@@ -1475,8 +1517,8 @@
         top: 44px;
         right: 12px;
         z-index: 400;
-        background: #fff;
-        border: 1px solid #ccc;
+        background: var(--panel);
+        border: 1px solid var(--line);
         border-radius: 8px;
         padding: 12px 16px;
         box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
@@ -1488,20 +1530,8 @@
         align-items: center;
         gap: 12px;
         padding: 5px 0;
-        border-bottom: 1px dashed #eee;
+        border-bottom: 1px dashed var(--line);
         font-size: 13px;
-      }
-      .shelf-resume {
-        background: #1f5c4d;
-        color: #fff;
-        border-radius: 8px;
-        padding: 8px 14px;
-        font-size: 13.5px;
-        cursor: pointer;
-        margin-bottom: 10px;
-      }
-      .shelf-resume:hover {
-        background: #2a7263;
       }
       /* 书架（首页）：正常书比例书封 + 封面图导入 + 点书先选版本 */
       .shelf {
@@ -1595,16 +1625,16 @@
         padding-left: 14px;
       }
       .shelf-card.add .shelf-cover {
-        border: 2px dashed #c9c9c9;
-        background: #fafafa;
+        border: 2px dashed var(--wsline);
+        background: var(--wsbg);
         box-shadow: none;
-        color: #8a8a8a;
+        color: var(--muted);
         font-size: 15px;
         align-items: center;
       }
       .shelf-card.add:hover .shelf-cover {
-        border-color: #1f5c4d;
-        color: #1f5c4d;
+        border-color: var(--accent);
+        color: var(--accent);
       }
       .shelf-card.demo .shelf-cover::after {
         content: '内置示例';
@@ -1623,21 +1653,21 @@
       }
       .shelf-sub {
         font-size: 12px;
-        color: #444;
+        color: var(--ink);
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
       }
       .shelf-meta {
         font-size: 11px;
-        color: #999;
+        color: var(--muted);
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
       }
       .shelf-resume {
-        background: #1f5c4d;
-        color: #fff;
+        background: var(--accent);
+        color: var(--accent-ink);
         border-radius: 8px;
         padding: 8px 14px;
         font-size: 13.5px;
@@ -1650,7 +1680,7 @@
         white-space: nowrap;
       }
       .shelf-resume:hover {
-        background: #2a7263;
+        background: var(--accent-hover);
       }
       /* 版本选择页（两级导航：点书 → 选版本 → 进工作区） */
       .ver-sel {
@@ -1666,7 +1696,7 @@
         padding: 4px 10px 4px 0;
       }
       .ver-back:hover {
-        color: #1f5c4d;
+        color: var(--accent);
         text-decoration: underline;
       }
       .ver-h {
@@ -1769,6 +1799,361 @@
           gap: 12px;
         }
       }
+
+      /* ---------- 阅读体验：行距/主题（变量由 JS 按档位写入 --read-lh；主题见 [data-theme]） ---------- */
+      .pid {
+        cursor: pointer;
+      }
+      .para.bookmarked {
+        box-shadow: inset 3px 0 0 var(--accent);
+        border-radius: 2px;
+        padding-left: 6px;
+      }
+      .para.bookmarked .pid {
+        color: var(--accent);
+        border-color: var(--accent);
+        font-weight: 700;
+      }
+      /* ---------- 书架管理：搜索 / 视图（网格=挑书 列表=管进度）/ 分组 / 进度 ---------- */
+      .shelf-tools {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 12px;
+        flex-wrap: wrap;
+      }
+      .shelf-tools input[type='search'] {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 6px 10px;
+        font-size: 13px;
+        width: 220px;
+        background: var(--panel);
+        color: var(--ink);
+      }
+      .shelf-tools input[type='search']::placeholder {
+        color: var(--muted);
+      }
+      .viewseg {
+        display: flex;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        overflow: hidden;
+      }
+      .viewseg button,
+      .seg button {
+        border: none;
+        border-radius: 0;
+        padding: 5px 11px;
+        font-size: 12px;
+        background: var(--panel);
+        color: var(--ink);
+      }
+      .viewseg button.cur,
+      .seg button.cur {
+        background: var(--accent);
+        color: var(--accent-ink);
+        font-weight: 600;
+      }
+      .shelf-groups {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+        margin-bottom: 14px;
+      }
+      .gchip {
+        font-size: 12px;
+        padding: 3px 12px;
+        border-radius: 999px;
+        border: 1px solid var(--line);
+        cursor: pointer;
+        color: var(--ink);
+        background: var(--panel);
+      }
+      .gchip.cur {
+        background: var(--accent-soft);
+        color: var(--accent);
+        border-color: var(--accent);
+        font-weight: 600;
+      }
+      .shelf-badge {
+        display: inline-block;
+        font-size: 10.5px;
+        color: var(--accent);
+        background: var(--accent-soft);
+        border-radius: 999px;
+        padding: 0 7px;
+      }
+      .shelf-progress {
+        height: 4px;
+        background: var(--wsline);
+        border-radius: 999px;
+        overflow: hidden;
+      }
+      .shelf-progress i {
+        display: block;
+        height: 100%;
+        background: var(--accent);
+        border-radius: 999px;
+      }
+      .shelf-info .shelf-progress {
+        margin-top: 5px;
+      }
+      .shelf-progress-pct {
+        font-size: 10.5px;
+        color: var(--muted);
+        margin-top: 2px;
+      }
+      /* 列表视图：审校进度清单（行式信息密度） */
+      .shelf-grid.list {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .shelf-row {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 10px 12px;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        cursor: pointer;
+        transition:
+          border-color 0.15s,
+          box-shadow 0.15s;
+      }
+      .shelf-row:hover {
+        border-color: var(--accent);
+        box-shadow: 0 3px 12px rgba(15, 42, 32, 0.08);
+      }
+      .shelf-row .row-cover {
+        width: 34px;
+        height: 46px;
+        border-radius: 2px 4px 4px 2px;
+        background-size: cover;
+        background-position: center;
+        flex-shrink: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #fff;
+        font-size: 10px;
+        font-weight: 700;
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
+      }
+      .shelf-row .row-main {
+        flex: 1;
+        min-width: 0;
+      }
+      .shelf-row .row-name {
+        font-size: 14px;
+        font-weight: 700;
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
+      .shelf-row .row-sub {
+        font-size: 12px;
+        color: var(--muted);
+        margin-top: 2px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .shelf-row .row-progress {
+        width: 230px;
+        flex-shrink: 0;
+      }
+      .shelf-row .row-time {
+        font-size: 11px;
+        color: var(--muted);
+        width: 92px;
+        text-align: right;
+        flex-shrink: 0;
+      }
+      .shelf-row.add-row {
+        border-style: dashed;
+        color: var(--muted);
+        justify-content: center;
+      }
+      /* 书卡右键：分组指派轻量菜单 */
+      .shelf-ctxmenu {
+        position: fixed;
+        z-index: 620;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        box-shadow: 0 8px 24px rgba(15, 23, 42, 0.16);
+        padding: 6px;
+        min-width: 168px;
+        font-size: 13px;
+      }
+      .shelf-ctxmenu .ci {
+        padding: 7px 10px;
+        border-radius: 7px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .shelf-ctxmenu .ci:hover {
+        background: var(--accent-soft);
+        color: var(--accent);
+      }
+      .shelf-ctxmenu .ci.cur::after {
+        content: '\2713';
+        margin-left: auto;
+        color: var(--accent);
+      }
+      .shelf-ctxmenu .sep {
+        height: 1px;
+        background: var(--line);
+        margin: 4px 6px;
+      }
+      .shelf-ctxmenu input {
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        padding: 5px 8px;
+        font-size: 12px;
+        width: 100%;
+        background: var(--panel);
+        color: var(--ink);
+      }
+      /* ---------- 目录侧滑面板（章节 + 审校状态 + 本章书签） ---------- */
+      #toc-mask {
+        position: fixed;
+        inset: 0;
+        z-index: 590;
+        background: rgba(15, 23, 42, 0.35);
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.2s;
+      }
+      #toc-mask.open {
+        opacity: 1;
+        pointer-events: auto;
+      }
+      #toc-panel {
+        position: fixed;
+        left: 0;
+        top: 0;
+        bottom: 0;
+        width: 300px;
+        z-index: 591;
+        background: var(--panel);
+        border-right: 1px solid var(--line);
+        transform: translateX(-102%);
+        transition: transform 0.22s ease;
+        display: flex;
+        flex-direction: column;
+        box-shadow: 4px 0 24px rgba(15, 23, 42, 0.12);
+      }
+      #toc-panel.open {
+        transform: none;
+      }
+      .toc-h {
+        padding: 12px 14px 10px;
+        font-weight: 700;
+        font-size: 14px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        border-bottom: 1px solid var(--line);
+      }
+      .toc-h .dim {
+        font-weight: 400;
+        font-size: 11px;
+        color: var(--muted);
+        flex: 1;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      #toc-close {
+        border: none;
+        background: none;
+        font-size: 16px;
+        color: var(--muted);
+        padding: 0 4px;
+      }
+      .toc-list {
+        flex: 1;
+        overflow-y: auto;
+        padding: 8px;
+      }
+      .toc-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 10px;
+        border-radius: 8px;
+        cursor: pointer;
+        font-size: 13px;
+      }
+      .toc-item:hover {
+        background: var(--accent-soft);
+      }
+      .toc-item.cur {
+        background: var(--accent);
+        color: var(--accent-ink);
+        font-weight: 600;
+      }
+      .toc-item .toc-badge {
+        margin-left: auto;
+        font-size: 10.5px;
+        background: var(--bg);
+        color: var(--muted);
+        border-radius: 999px;
+        padding: 1px 7px;
+        flex-shrink: 0;
+      }
+      .toc-item.cur .toc-badge {
+        background: rgba(255, 255, 255, 0.25);
+        color: inherit;
+      }
+      .toc-bm-h {
+        padding: 10px 14px 6px;
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--muted);
+        border-top: 1px solid var(--line);
+      }
+      .toc-bm {
+        max-height: 180px;
+        overflow-y: auto;
+        padding: 0 8px 10px;
+      }
+      .toc-bm-item {
+        font-size: 12px;
+        padding: 6px 8px;
+        border-radius: 6px;
+        cursor: pointer;
+        color: var(--ink);
+        display: flex;
+        gap: 6px;
+        align-items: baseline;
+      }
+      .toc-bm-item:hover {
+        background: var(--accent-soft);
+      }
+      .toc-bm-item .p {
+        color: var(--accent);
+        font-weight: 700;
+        font-size: 11px;
+        white-space: nowrap;
+      }
+      .toc-bm-item .t {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .toc-bm-empty {
+        font-size: 11.5px;
+        color: var(--muted);
+        padding: 4px 8px 8px;
+        line-height: 1.7;
+      }
     </style>
   </head>
   <body>
@@ -1804,7 +2189,8 @@
         <button id="btn-find" title="查找 / 替换（⌘F）">🔍</button>
         <button id="btn-font-minus" title="字号减小（⌘-）">A－</button>
         <button id="btn-font-plus" title="字号增大（⌘+）">A＋</button>
-        <button id="btn-settings" title="设置：字号/句长/编辑与 AI 开关">⚙</button>
+        <button id="btn-theme" title="主题：白/灰/深色，点击切换">☀</button>
+        <button id="btn-settings" title="设置：字号/行距/主题/句长/编辑与 AI 开关">⚙</button>
       </span>
       <span class="tsep"></span>
       <button id="mode-pill" class="mode-pill" title="点击切换">…</button>
@@ -1826,6 +2212,7 @@
     <div class="workbench">
       <div class="content">
         <div class="viewtabs">
+          <button id="tab-toc" title="全书章节目录与本章书签（再点或 Esc 关闭）">☰ 目录</button>
           <button id="tab-text" class="active">正文审校</button>
           <button id="tab-report">质检报告</button>
           <button id="tab-suggest">修订建议</button>

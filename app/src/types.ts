@@ -26,11 +26,19 @@ export interface QuotaItem {
   done: boolean;
 }
 
+/** 段落书签：双击段号收藏，随 _审校标记.json 落盘（text=段首句前缀，预览与漂移校验用） */
+export interface ParaBookmark {
+  pi: number;
+  text: string;
+  ts: number;
+}
+
 export interface ReviewState {
   file: string;
   marks: Mark[];
   quota: QuotaItem[];
   gate: Record<string, boolean>;
+  bookmarks: ParaBookmark[];
   updatedAt: number;
 }
 
@@ -38,11 +46,11 @@ export interface FileSession {
   md: string;
   fileName: string;
   sourcePath: string | null; // null = 示例模式
-  markPath: string;          // 审校标记自动落盘路径
+  markPath: string; // 审校标记自动落盘路径
   review: ReviewState;
   report: QcResult | null;
   reportSavedPath: string | null;
-  dirty: boolean;            // 有未落盘的标记变更（防抖中）
+  dirty: boolean; // 有未落盘的标记变更（防抖中）
   /* UX 补齐（2026-09-08）：文件级撤销栈 + 滚动位置记忆 */
   undoStack?: string[];
   redoStack?: string[];
@@ -93,7 +101,7 @@ export function typeBadge(t: MarkType): string {
 }
 
 export function newReviewState(fileName: string): ReviewState {
-  return { file: fileName, marks: [], quota: [], gate: {}, updatedAt: 0 };
+  return { file: fileName, marks: [], quota: [], gate: {}, bookmarks: [], updatedAt: 0 };
 }
 
 export function newMarkId(): string {

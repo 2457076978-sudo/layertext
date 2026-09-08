@@ -556,3 +556,41 @@ export function buildVersionCards(ws: Workspace[]): VersionCardInfo[] {
     target: w.定制目标,
   }));
 }
+
+/* ---------- 书架管理（搜索 / 分组 / 进度，Feature Parity：对所有书统一生效） ---------- */
+
+export interface ShelfFilters {
+  q: string;
+  group: string | null;
+}
+
+/** 书架过滤：搜索词按空格切分多词 AND 匹配（书名/副标题/分组，大小写不敏感）；group=null 全部、''=未分组、其他=精确分组 */
+export function filterShelfBooks<T extends { 名: string; 副标题?: string; 分组?: string }>(books: T[], f: ShelfFilters): T[] {
+  const words = f.q.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  return books.filter((b) => {
+    if (f.group !== null) {
+      const g = b.分组?.trim() ?? '';
+      if (f.group === '' ? g !== '' : g !== f.group) return false;
+    }
+    if (!words.length) return true;
+    const hay = `${b.名} ${b.副标题 ?? ''} ${b.分组 ?? ''}`.toLowerCase();
+    return words.every((w) => hay.includes(w));
+  });
+}
+
+/** 书架现有分组清单（去重排序；空分组不入列） */
+export function shelfGroupsOf<T extends { 分组?: string }>(books: T[]): string[] {
+  return [...new Set(books.map((b) => b.分组?.trim() ?? '').filter(Boolean))].sort((a, b) => a.localeCompare(b, 'zh-CN'));
+}
+
+/** 阅读进度百分比（0-100 整数；总数未知或 0 → 0，封顶 100） */
+export function progressPct(read: number, total: number | undefined): number {
+  if (!total || total <= 0 || read <= 0) return 0;
+  return Math.min(100, Math.round((read / total) * 100));
+}
+
+/** 段落书签切换：已有同段书签则移除，否则追加（按 pi 去重排序；返回新数组与是否为"添加"） */
+export function toggleParaBookmark(list: { pi: number; text: string; ts: number }[], pi: number, text: string, ts: number): { list: { pi: number; text: string; ts: number }[]; added: boolean } {
+  if (list.some((b) => b.pi === pi)) return { list: list.filter((b) => b.pi !== pi), added: false };
+  return { list: [...list, { pi, text: text.slice(0, 60), ts }].sort((a, b) => a.pi - b.pi), added: true };
+}
