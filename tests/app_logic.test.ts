@@ -361,3 +361,11 @@ test('filterTargets：按名称或id模糊过滤，空查询全量', () => {
   assert.equal(filterTargets(ts, '焦').length, 1);
   assert.equal(filterTargets(ts, '组:').length, 1);
 });
+
+test('mergeTargets：覆盖目标取最严（max），无目标为 null', () => {
+  const b = T('组:B', 'B层', '组', { 覆盖目标: 98 });
+  const a = T('组:A', 'A层', '组', { 覆盖目标: 95 });
+  const m = mergeTargets([b, a], 16);
+  assert.equal(m.coverageTarget, 98);           // 弱读者从严
+  assert.equal(mergeTargets([T('组:M', 'M', '组')], 16).coverageTarget, null); // 无目标字段→null 用文献带
+});

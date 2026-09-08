@@ -426,6 +426,7 @@ export interface ClassTarget {
   名称: string;          // 显示名，如 "B层(32人)" / "焦佳琪(B)"
   类型: '组' | '人';
   句长上限?: number;     // 缺省用全局简化标准
+  覆盖目标?: number;     // 该目标覆盖目标带下限%（分层个体化：B98/M97/A95，文献95/98群体均值的分层版）
   成员数?: number;
   已学词?: string[];     // 该目标的已学词集（个人/组内合并）
   到期词?: string[];     // 本篇应复现的到期队列
@@ -434,6 +435,7 @@ export interface ClassTarget {
 export interface MergedTargets {
   active: boolean;
   minLen: number;        // 最严句长上限（无选择=全局）
+  coverageTarget: number | null; // 多目标取最严覆盖目标带（max）；无=用文献通用 95/98
   knownInter: string[];  // 已学词交集（只在有个人词集的目标间求交；组词集=全体成员并集，参与交集）
   dueUnion: string[];    // 到期词并集（稳定序：被选次数降序→字母序，上限 8）
   label: string;         // 目标标签（命名/提示用）
@@ -442,9 +444,11 @@ export interface MergedTargets {
 /** 多选合并口径：句长取最严、已学词取交集、到期词取并集（5-8 词/篇的复现预算） */
 export function mergeTargets(selected: ClassTarget[], globalMaxLen: number, dueCap = 8): MergedTargets {
   if (selected.length === 0) {
-    return { active: false, minLen: globalMaxLen, knownInter: [], dueUnion: [], label: '' };
+    return { active: false, minLen: globalMaxLen, coverageTarget: null, knownInter: [], dueUnion: [], label: '' };
   }
   const minLen = Math.min(globalMaxLen, ...selected.map((t) => t.句长上限 ?? globalMaxLen));
+  const covs = selected.map((t) => t.覆盖目标).filter((c): c is number => typeof c === 'number');
+  const coverageTarget = covs.length ? Math.max(...covs) : null;
   // 交集：只在提供了已学词的目标之间求交；目标词集为空数组=“无个人数据”不参与（避免空交吞掉全部）
   const withWords = selected.filter((t) => (t.已学词?.length ?? 0) > 0);
   let knownInter: string[] = [];
@@ -457,7 +461,7 @@ export function mergeTargets(selected: ClassTarget[], globalMaxLen: number, dueC
   for (const t of selected) for (const w of t.到期词 ?? []) freq.set(w, (freq.get(w) ?? 0) + 1);
   const dueUnion = [...freq.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, dueCap).map(([w]) => w);
   const label = selected.map((t) => t.名称).join('+');
-  return { active: true, minLen, knownInter, dueUnion, label: label.length > 28 ? label.slice(0, 27) + '…' : label };
+  return { active: true, minLen, coverageTarget, knownInter, dueUnion, label: label.length > 28 ? label.slice(0, 27) + '…' : label };
 }
 
 /** 个人目标搜索过滤（折叠多选栏的过滤框） */
