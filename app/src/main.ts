@@ -1915,7 +1915,7 @@ function ensureTocDom(): { mask: HTMLElement; panel: HTMLElement } {
     panel.innerHTML = `
       <div class="toc-h"><svg class="ico"><use href="#i-list"/></svg>目录<span class="dim" id="toc-sub"></span><button id="toc-close" title="关闭（Esc）">×</button></div>
       <div class="toc-list" id="toc-list"></div>
-      <div class="toc-bm-h" id="toc-bm-h" style="display:none">★ 本章书签 <span class="cnt" id="toc-bm-cnt"></span><span class="dim" style="font-weight:400;font-size:10.5px">— 双击正文段号收藏</span></div>
+      <div class="toc-bm-h" id="toc-bm-h" style="display:none"><svg class="ico sm"><use href="#i-bookmark"/></svg>本章书签 <span class="cnt" id="toc-bm-cnt"></span><span class="dim" style="font-weight:400;font-size:10.5px">— 双击正文段号收藏</span></div>
       <div class="toc-bm" id="toc-bm"></div>`;
     document.body.appendChild(panel);
     panel.querySelector('#toc-close')?.addEventListener('click', () => closeToc());

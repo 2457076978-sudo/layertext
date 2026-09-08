@@ -2539,13 +2539,21 @@
   </head>
   <body>
     <svg xmlns="http://www.w3.org/2000/svg" style="display: none" aria-hidden="true">
-      <symbol id="i-home" viewBox="0 0 24 24">
-        <path d="M4 11 12 4l8 7" />
-        <path d="M6 10v10h12V10" />
+      <symbol id="i-home" viewBox="0 0 48 48">
+        <g stroke-width="3.6">
+          <path d="M8 40h32" />
+          <rect x="11" y="21" width="6.5" height="19" rx="1" />
+          <path d="M20 15.5h7.5V40H20z" />
+          <path d="M22.5 15.5V7l2.75 3.2L28 7" />
+          <path d="M30.6 40l1-0.25L37.6 21.4l-3.1-0.95-6 18.35z" />
+        </g>
       </symbol>
-      <symbol id="i-search" viewBox="0 0 24 24">
-        <circle cx="11" cy="11" r="6.5" />
-        <path d="M16 16l5 5" />
+      <symbol id="i-search" viewBox="0 0 48 48">
+        <g stroke-width="3.6">
+          <circle cx="21" cy="21" r="11" />
+          <path d="M28.8 28.8 38 38" />
+        </g>
+        <circle cx="21" cy="21" r="2.7" fill="var(--mark-red)" stroke="none" />
       </symbol>
       <symbol id="i-users" viewBox="0 0 24 24">
         <circle cx="9" cy="8" r="3.2" />
@@ -2629,6 +2637,21 @@
       <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></symbol>
       <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18" /></symbol>
       <symbol id="i-wrench" viewBox="0 0 24 24"><path d="M14.5 6.5a4.5 4.5 0 0 0-6 5.6L3 17.6 6.4 21l5.5-5.5a4.5 4.5 0 0 0 5.6-6L14 13l-3-3z" /></symbol>
+      <symbol id="i-bookmark" viewBox="0 0 48 48">
+        <g stroke-width="3.6"><path d="M14 11l10 22 10-22" /></g>
+        <path d="M19 22h10" stroke="var(--mark-red)" stroke-width="3.6" stroke-linecap="round" />
+      </symbol>
+      <symbol id="i-annotate" viewBox="0 0 48 48">
+        <g stroke-width="3.6"><path d="M10 15h28M10 23h28M10 31h17" /></g>
+        <path d="M10 38h12" stroke="var(--mark-red)" stroke-width="3.6" stroke-linecap="round" />
+      </symbol>
+      <symbol id="i-audiobook" viewBox="0 0 48 48">
+        <g stroke-width="3.6">
+          <path d="M8 29.5c6-4 10-2.5 16 .5 6-3 10-4.5 16-.5v7c-6-4-10-2.5-16 .5-6-3-10-4.5-16-.5z" />
+          <path d="M24 30v7.5" />
+        </g>
+        <path d="M33.5 18.5c2.5 1.8 2.5 5.2 0 7M38 15c4.5 3 4.5 10 0 13" stroke-width="3.6" stroke-linecap="round" />
+      </symbol>
     </svg>
     <header data-tauri-drag-region>
       <span class="logo">LayerText 分层读<small>v1.1</small></span>
@@ -2710,7 +2733,9 @@
           </button>
           <button id="tab-text" class="active">正文审校</button>
           <button id="tab-report">质检报告</button>
-          <button id="tab-suggest">修订建议</button>
+          <button id="tab-suggest">
+            <svg class="ico"><use href="#i-annotate" /></svg>修订建议
+          </button>
           <button id="tab-diff">版本对比</button>
           <button id="tab-align" title="基准版（如原文）与当前章行对行核对：左丢什么、右加什么，机器核数字与专名">
             <svg class="ico"><use href="#i-columns" /></svg>逐句对照
