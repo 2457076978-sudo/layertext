@@ -1574,10 +1574,10 @@ async function coverDataUrl(dir: string): Promise<string | null> {
 }
 
 /** 书封 HTML：有图全幅显示（书名落底部渐变条），无图用色块+居中书名（字号按书名长度自适应，极端长名换行4行内可见） */
-function coverHtml(名: string, img: string | null): string {
+function coverHtml(名: string, img: string | null, boxW = 150): string {
   const style = img ? `background-image:url(${img})` : `background:${shelfColor(名)}`;
   return `<div class="shelf-cover${img ? ' has-img' : ''}" style="${style}">
-    <div class="cover-title" style="font-size:${coverTitlePx(名)}px">${esc(名)}</div>
+    <div class="cover-title" style="font-size:${coverTitlePx(名, boxW)}px">${esc(名)}</div>
   </div>`;
 }
 
@@ -1850,13 +1850,13 @@ function renderBookVersions(b: ShelfBook): void {
   const cards = buildVersionCards(S.workspaces);
   void coverDataUrl(b.目录).then((img) => {
     const mini = document.getElementById('ver-cover');
-    if (mini) mini.innerHTML = coverHtml(b.名, img);
+    if (mini) mini.innerHTML = coverHtml(b.名, img, 96);
   });
   el.innerHTML = `
     <div class="ver-sel">
       <div class="ver-back" id="ver-back">← 返回书架</div>
       <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">
-        <div id="ver-cover" style="width:54px;flex-shrink:0"></div>
+        <div id="ver-cover" style="width: 96px; flex-shrink: 0"></div>
         <div class="ver-h">《${esc(b.名)}》<span class="dim">选一个版本进入</span></div>
       </div>
       ${

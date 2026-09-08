@@ -524,14 +524,11 @@ export function coverVisualWidth(title: string): number {
 }
 
 /** 文字封面的书名字号：按视觉宽度分档收缩，保证除极端长名外书名完整可见（长名最多 4 行换行显示） */
-export function coverTitlePx(title: string): number {
+/** 文字封面的书名字号：按视觉宽度分档收缩（基准 150px 宽书封），并随容器宽度等比缩放——小容器里字号不缩，书名逐字断行看着就像乱码 */
+export function coverTitlePx(title: string, boxW = 150): number {
   const w = coverVisualWidth(title);
-  if (w <= 3.5) return 30;
-  if (w <= 5) return 26;
-  if (w <= 7) return 21;
-  if (w <= 10) return 18;
-  if (w <= 14) return 15;
-  return 12.5;
+  const base = w <= 3.5 ? 30 : w <= 5 ? 26 : w <= 7 ? 21 : w <= 10 ? 18 : w <= 14 ? 15 : 12.5;
+  return Math.round(((base * boxW) / 150) * 10) / 10;
 }
 
 export interface VersionCardInfo {
