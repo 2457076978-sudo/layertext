@@ -353,7 +353,7 @@ function renderAll(): void {
   renderFileTabs();
   const s = activeSession();
   if (!s) {
-    $('reader').innerHTML = '<div class="empty"><b>第一步：打开一篇课文</b><br/>点上方「载入示例」先看演示，或「打开章节文件…」选你的书稿</div>';
+    void renderShelf();   // 首页=书架（示例+我的书；点书进入工作区）
     $('pane-report').innerHTML = '<div class="empty"><b>打开课文会自动体检</b><br/>生词率、句长、难句自动数好，报告页每条可勾选处理</div>';
     $('side-review').innerHTML = '<div class="side-empty">这里是你的审校 checklist：<br/>· 要点配额：本章必须保留的情节点，自己添加打勾<br/>· 终审门禁：四项全勾才算审完（点 ? 看每项查什么）<br/>· 标记清单：正文里做的标记都在这，点击跳回原文</div>';
     hidePop();
@@ -1292,6 +1292,109 @@ function activateWorkspace(name: string): void {
     }
   }
   renderWorkspaceBar();
+}
+
+/* ---------- 书架（首页：示例 + 我的书；点书进入工作区） ---------- */
+
+interface ShelfBook { 名: string; 目录: string; 副标题?: string; 最近打开?: string }
+
+async function shelfPath(): Promise<string> {
+  const dir = await invoke<string>('config_dir');
+  return `${dir}/书架.json`;
+}
+
+async function loadShelf(): Promise<ShelfBook[]> {
+  try {
+    const raw = await invoke<string>('read_text_file', { path: await shelfPath() });
+    const j = JSON.parse(raw) as { 书?: ShelfBook[] };
+    return Array.isArray(j.书) ? j.书.filter((b) => b.名 && b.目录) : [];
+  } catch { return []; }
+}
+
+async function saveShelf(books: ShelfBook[]): Promise<void> {
+  await invoke('write_text_file', { path: await shelfPath(), content: JSON.stringify({ 说明: 'LayerText 书架——我的书注册表', 书: books }, null, 1) });
+}
+
+async function renderShelf(): Promise<void> {
+  const el = $('reader');
+  const books = await loadShelf();
+  const cards = books.map((b, i) => {
+    return `<div class="shelf-card" data-shelf="${i}">
+      <div class="shelf-title">${esc(b.名)}</div>
+      <div class="shelf-sub">${esc(b.副标题 ?? '')}</div>
+      <div class="shelf-meta">${esc(b.最近打开 ? '最近打开 ' + b.最近打开 : '')}</div>
+      <button class="shelf-open" data-shelf-open="${i}">打开这本书</button>
+    </div>`;
+  }).join('');
+  el.innerHTML = `
+    <div class="shelf">
+      <div class="shelf-h">📚 我的书架<span class="dim">——点一本书进入工作区（版本标签+章节一键打开）</span></div>
+      <div class="shelf-grid">
+        <div class="shelf-card demo" id="shelf-demo">
+          <div class="shelf-title">龟兔赛跑</div>
+          <div class="shelf-sub">内置示例 · 含示例词库</div>
+          <div class="shelf-meta">随时可用</div>
+          <button class="shelf-open" id="shelf-demo-open">看演示</button>
+        </div>
+        ${cards || ''}
+        <div class="shelf-card add" id="shelf-add">
+          <div class="shelf-title">＋ 添加书稿文件夹</div>
+          <div class="shelf-sub">选一个书稿文件夹（含章节 md 与 _工作区.json/_词库.csv）</div>
+          <div class="shelf-meta">注册到书架，下次打开直接从这进</div>
+        </div>
+      </div>
+      <div class="dim" style="margin-top:14px">也可以继续用上方「打开文件…」直接开单章；「载入示例▾」看内置示例。</div>
+    </div>`;
+  document.getElementById('shelf-demo-open')?.addEventListener('click', () => loadBuiltinDemo());
+  document.getElementById('shelf-add')?.addEventListener('click', () => void addBookToShelf());
+  el.querySelectorAll('[data-shelf-open]').forEach((btn) =>
+    btn.addEventListener('click', () => void openBook(books[Number((btn as HTMLElement).dataset.shelfOpen)])),
+  );
+}
+
+async function addBookToShelf(): Promise<void> {
+  const dir = await openFileDialog({ directory: true });
+  if (typeof dir !== 'string' || !dir) return;
+  try {
+    const files = (await invoke<string[]>('list_dir', { dir })).filter((f) => /\.(md|txt|docx)$/i.test(f));
+    let wsCount = 0, chCount = files.length;
+    try {
+      const ws = parseWorkspaces(await invoke<string>('read_text_file', { path: `${dir}/_工作区.json` }));
+      wsCount = ws.length; chCount = ws.reduce((n, w) => n + w.文件.length, 0);
+    } catch { /* 无工作区配置也可注册 */ }
+    if (chCount === 0) { setStatus('该文件夹没有可打开的章节文件（.md/.txt/.docx）', 'err'); return; }
+    const books = await loadShelf();
+    if (books.some((b) => b.目录 === dir)) { setStatus('这本书已在书架上', 'saved'); return; }
+    const 名 = dir.slice(dir.lastIndexOf('/') + 1) || dir;
+    books.push({ 名, 目录: dir, 副标题: wsCount ? `${wsCount} 个工作区 · ${chCount} 章` : `${chCount} 个文件`, 最近打开: new Date().toLocaleDateString('sv-SE') });
+    await saveShelf(books);
+    await renderShelf();
+    setStatus(`已加入书架：${名}（${wsCount ? wsCount + ' 工作区' : chCount + ' 文件'}）`, 'saved');
+  } catch (e) {
+    setStatus('添加失败：' + e, 'err');
+  }
+}
+
+async function openBook(b: ShelfBook): Promise<void> {
+  try {
+    await loadBookConfig(b.目录);
+    await loadWorkspaces(b.目录);
+    void loadClassGroups();
+    const books = await loadShelf();
+    const i = books.findIndex((x) => x.目录 === b.目录);
+    if (i >= 0) { books[i].最近打开 = new Date().toLocaleDateString('sv-SE'); await saveShelf(books); }
+    if (S.workspaces.length > 0) {
+      activateWorkspace(S.workspaces[0].名);
+      await openPathIntoSession(S.workspaces[0].文件[0]);
+      setStatus(`已进入【${S.workspaces[0].名}】第一章——工作区条在上方，点章节名切换`, 'saved');
+    } else {
+      const files = (await invoke<string[]>('list_dir', { dir: b.目录 })).filter((f) => /\.md$/i.test(f));
+      if (files.length) await openPathIntoSession(files[0]);
+      setStatus(`已打开《${b.名}》第一个章节`, 'saved');
+    }
+  } catch (e) {
+    setStatus('打开书失败：' + e, 'err');
+  }
 }
 
 function renderWorkspaceBar(): void {

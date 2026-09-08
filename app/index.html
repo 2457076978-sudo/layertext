@@ -347,6 +347,17 @@
 .wschip { font-size: 11.5px; color: #444; padding: 1px 7px; border: 1px solid #d8d8d8; border-radius: 10px; cursor: pointer; white-space: nowrap; }
 .wschip:hover { background: #eef4ee; }
 .wschip.cur { background: #1f5c4d; color: #fff; border-color: #1f5c4d; }
+/* 书架（首页） */
+.shelf { padding: 26px 30px; max-width: 900px; }
+.shelf-h { font-size: 17px; font-weight: 700; margin-bottom: 14px; }
+.shelf-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
+.shelf-card { border: 1px solid #ddd; border-radius: 10px; padding: 14px 16px; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.06); display: flex; flex-direction: column; gap: 4px; }
+.shelf-card.demo { background: #f4f9f4; }
+.shelf-card.add { border-style: dashed; background: #fafafa; cursor: pointer; }
+.shelf-title { font-size: 15px; font-weight: 700; }
+.shelf-sub { font-size: 12px; color: #555; }
+.shelf-meta { font-size: 11px; color: #999; flex: 1; }
+.shelf-open { align-self: flex-start; margin-top: 6px; }
 </style>
 </head>
 <body>
