@@ -1562,6 +1562,11 @@
         max-width: 1480px;
         margin: 0 auto;
       }
+      .tri {
+        display: inline-block;
+        transform: translate(1px, 0.5px); /* 三角形光学补偿：重心在几何盒左下，纯居中显得偏左坠 */
+        margin-right: 2px;
+      }
       .tico {
         display: inline-block;
         transform: translateY(1px); /* emoji/表意字符光学基线补偿：与汉字视觉中线对齐 */
@@ -2537,7 +2542,9 @@
         </button></span
       >
       <span class="tsep"></span>
-      <span class="tgroup"><button id="btn-run" class="primary" title="打开课文会自动体检；换了词库或改完正文后，点这里重新算一遍">▶ 质检本章</button></span>
+      <span class="tgroup"
+        ><button id="btn-run" class="primary" title="打开课文会自动体检；换了词库或改完正文后，点这里重新算一遍"><span class="tri">▶</span>质检本章</button></span
+      >
       <span class="tsep"></span>
       <span class="tgroup"
         ><button id="btn-draft" title="整章大改：AI 按当前简化标准把全章重写成简化版（自动体检、原稿不动），适合第一次处理原文；要更简的版本，把简化版再导入再点一次">📖 整章改写…</button>

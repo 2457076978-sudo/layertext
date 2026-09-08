@@ -1601,7 +1601,7 @@ function renderShelfChrome(el: HTMLElement, books: ShelfBook[]): void {
   const ls = S.appConfig.lastSession;
   el.innerHTML = `
     <div class="shelf">
-      ${ls?.files?.length ? `<div class="shelf-resume" id="shelf-resume">▶ 继续上次编辑：${esc(ls.workspace ? ls.workspace + ' · ' : '')}${esc(ls.files[Math.min(ls.activeIdx, ls.files.length - 1)]?.path.split('/').pop() ?? '')} <span class="dim">（${esc(ls.savedAt)}）</span></div>` : ''}
+      ${ls?.files?.length ? `<div class="shelf-resume" id="shelf-resume"><span class="tri">▶</span>继续上次编辑：${esc(ls.workspace ? ls.workspace + ' · ' : '')}${esc(ls.files[Math.min(ls.activeIdx, ls.files.length - 1)]?.path.split('/').pop() ?? '')} <span class="dim">（${esc(ls.savedAt)}）</span></div>` : ''}
       <div class="shelf-h"><span class="tico">📚</span>我的书架<span class="dim">——点一本书，先选版本（如 B/M/A），再进工作区</span></div>
       <div class="shelf-tools">
         <input type="search" id="shelf-q" placeholder="搜索书名 / 分组…" value="${esc(S.shelfQ)}"/>
