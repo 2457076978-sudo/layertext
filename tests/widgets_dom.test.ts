@@ -33,8 +33,8 @@ test('模式胶囊：即改=绿/候选=黄，文案与提示随模式切换', ()
 
 test('视图切换：五组标签/面板互斥，只有目标页 active', () => {
   win.document.body.innerHTML = `
-    <button id="tab-text" class="active"></button><button id="tab-report"></button><button id="tab-suggest"></button><button id="tab-diff"></button><button id="tab-retro"></button>
-    <section id="pane-text" class="active"></section><section id="pane-report"></section><section id="pane-suggest"></section><section id="pane-diff"></section><section id="pane-retro"></section>`;
+    <button id="tab-text" class="active"></button><button id="tab-report"></button><button id="tab-suggest"></button><button id="tab-diff"></button><button id="tab-align"></button><button id="tab-retro"></button>
+    <section id="pane-text" class="active"></section><section id="pane-report"></section><section id="pane-suggest"></section><section id="pane-diff"></section><section id="pane-align"></section><section id="pane-retro"></section>`;
   switchView(win.document as unknown as Document, 'diff');
   assert.ok(win.document.getElementById('tab-diff')!.classList.contains('active'));
   assert.ok(win.document.getElementById('pane-diff')!.classList.contains('active'));
@@ -48,10 +48,16 @@ test('视图切换：五组标签/面板互斥，只有目标页 active', () => 
 test('版本对比：修改段红/绿着色、一致段无色、段落一致计数、两侧版本下拉', () => {
   const pane = win.document.createElement('section');
   win.document.body.appendChild(pane);
-  renderDiffPane(pane as unknown as HTMLElement, [
-    { fileName: '第一章.md', md: CH1 },
-    { fileName: '第一章_简化.md', md: CH1_SIM },
-  ], 0, 1, () => {});
+  renderDiffPane(
+    pane as unknown as HTMLElement,
+    [
+      { fileName: '第一章.md', md: CH1 },
+      { fileName: '第一章_简化.md', md: CH1_SIM },
+    ],
+    0,
+    1,
+    () => {},
+  );
 
   const rows = pane.querySelectorAll('tr');
   // 表头 + 3 个段落行（P03 仅右版本）

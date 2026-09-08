@@ -25,7 +25,9 @@ import {
   findOriginalFlex,
   locateOriginal,
   mergeQuotaTexts,
+  alignSentencePairs,
   filterShelfBooks,
+  lostSignals,
   mergeTargets,
   normalizeAndSplitChapters,
   parseAiJson,
@@ -601,6 +603,7 @@ function renderReader(session: FileSession): void {
     reader.appendChild(div);
   });
   restoreAllMarkDom(session);
+  scheduleHeatRail();
 }
 
 /* ---------- 标记动作 ---------- */
@@ -608,6 +611,7 @@ function renderReader(session: FileSession): void {
 function addMark(session: FileSession, mark: Mark): Mark {
   session.review.marks.push(mark);
   refreshMarkDom(mark);
+  scheduleHeatRail();
   renderSidebar(session, sidebarHandlers);
   scheduleSave(session, (st, detail) => {
     if (st === 'dirty') setStatus('标记待保存…', 'dirty');
@@ -620,6 +624,7 @@ function addMark(session: FileSession, mark: Mark): Mark {
 function removeMark(session: FileSession, m: Mark): void {
   session.review.marks = session.review.marks.filter((x) => x.id !== m.id);
   removeMarkDom(m);
+  scheduleHeatRail();
   renderSidebar(session, sidebarHandlers);
   scheduleSave(session, () => undefined);
 }
@@ -741,7 +746,7 @@ function showWordPanel(session: FileSession, wEl: HTMLElement, x: number, y: num
     <div class="pop-h">${esc(wEl.textContent ?? '')}</div>
     <div class="pop-info">词表状态：${stateLabel}${origin && origin !== tok ? `<br/>词形还原原形：${esc(origin)}` : ''}</div>
     <div class="pop-marks"></div>
-    <div class="pop-btns"><button data-mk="__rewrite" class="primary" title="让 AI 按当前标记意图改写这一句，改写结果直接显示在正文里">✨ AI 改写本句</button>${WORD_TYPES.map((t) => `<button data-mk="${t.key}">${t.label}</button>`).join('')}</div>
+    <div class="pop-btns"><button data-mk="__rewrite" class="primary" title="让 AI 按当前标记意图改写这一句（快捷键 R）">✨ AI 改写本句</button>${WORD_TYPES.map((t, i) => `<button data-mk="${t.key}"><span class="kbd">${i + 1}</span>${t.label}</button>`).join('')}</div>
     <textarea id="pop-note" placeholder="备注（可选，随下一条标记保存）"></textarea>
     <div class="pop-tip">先标记意图再点「AI 改写本句」，改写会直接出现在正文中供采纳</div>`;
   bindTypeButtons(session, 'word', pi, si, wi);
@@ -765,7 +770,7 @@ function showSentPanel(session: FileSession, sentEl: HTMLElement, x: number, y: 
     <div class="pop-h">句子标记（P${String(pi + 1).padStart(2, '0')} · 第${si + 1}句 · ${wc} 词）</div>
     <div class="pop-info">${esc(text.slice(0, 80))}${text.length > 80 ? '…' : ''}<br/>自动检测：${riskBits ? `<span class="warn">${riskBits}</span>` : '<span class="ok">未命中黑名单句法</span>'}${crossSentence ? '<br/>⚠ 跨句选择，仅标记所选末句' : ''}</div>
     <div class="pop-marks"></div>
-    <div class="pop-btns">${SENT_TYPES.map((t) => `<button data-mk="${t.key}">${t.label}</button>`).join('')}</div>
+    <div class="pop-btns">${SENT_TYPES.map((t, i) => `<button data-mk="${t.key}"><span class="kbd">${i + 1}</span>${t.label}</button>`).join('')}</div>
     <textarea id="pop-note" placeholder="备注（可选，随下一条标记保存）"></textarea>`;
   bindTypeButtons(session, 'sent', pi, si);
   refreshPop('open');
@@ -1326,6 +1331,10 @@ $('tab-suggest').addEventListener('click', () => switchView('suggest'));
 $('tab-diff').addEventListener('click', () => {
   renderDiff(0, Math.min(1, S.sessions.length - 1));
   switchView('diff');
+});
+$('tab-align').addEventListener('click', () => {
+  renderAlignPane();
+  switchView('align');
 });
 $('tab-retro').addEventListener('click', () => {
   void renderRetroPane();
@@ -3548,6 +3557,7 @@ function stepReaderFont(d: number): void {
   const n = Math.min(24, Math.max(12, (S.appConfig.readerFont ?? 15) + d));
   S.appConfig.readerFont = n;
   applyReaderFont();
+  scheduleHeatRail();
   void saveConfig();
   toast('字号 ' + n + 'px');
 }
@@ -3618,9 +3628,165 @@ function renderSettings(): void {
   });
 }
 
+/* ================= 键盘审校流（跳难句 / 数字键标记 / 切工作区）与难句热力轨 ================= */
+
+/** F8 / ⌘G：跳到下一处风险句（被/从/完/长），循环滚动 + 闪烁 + 计数 */
+let riskJumpIdx = -1;
+function jumpNextRisk(dir: 1 | -1): void {
+  const risks = [...document.querySelectorAll<HTMLElement>('#reader .sent.risk')];
+  if (!risks.length) {
+    toast('本章没有检测出难句（被/从/完/长）');
+    return;
+  }
+  riskJumpIdx = (riskJumpIdx + dir + risks.length) % risks.length;
+  const el = risks[riskJumpIdx];
+  el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  el.classList.remove('flash');
+  void el.offsetWidth;
+  el.classList.add('flash');
+  const kinds = [...el.querySelectorAll('.badge')].map((b) => b.textContent).join('·');
+  toast(`难句 ${riskJumpIdx + 1}/${risks.length}${kinds ? ' · ' + kinds : ''}`);
+}
+
+/** 标记弹层开着时：数字键 1-9 = 选第 N 类标记，R = AI 改写本句（note 输入框聚焦时不拦截） */
+function popHotkey(k: string): boolean {
+  if (!pop.classList.contains('open')) return false;
+  const ae = document.activeElement;
+  if (ae && (ae.tagName === 'TEXTAREA' || ae.tagName === 'INPUT')) return false; // 正在写备注，别抢键
+  const btns = [...pop.querySelectorAll<HTMLElement>('[data-mk]')];
+  let hit: HTMLElement | null = null;
+  if (k === 'r' || k === 'R') hit = pop.querySelector<HTMLElement>('[data-mk="__rewrite"]');
+  else if (/^[1-9]$/.test(k)) hit = btns.filter((b) => b.dataset.mk !== '__rewrite')[Number(k) - 1] ?? null;
+  if (!hit) return false;
+  hit.click();
+  return true;
+}
+
+/** ⌘1/⌘2/⌘3：切第 N 个工作区（复用工作区条切换逻辑：切版本并自动翻开该版本第一章） */
+function switchWorkspaceAt(i: number): void {
+  const w = S.workspaces[i];
+  if (!w) return;
+  activateWorkspace(w.名);
+  const cur = activeSession()?.sourcePath ?? null;
+  if (!cur || !w.文件.includes(cur)) {
+    openPathIntoSession(w.文件[0])
+      .then(() => setStatus(`已进入【${w.名}】${workspaceChipName(w.文件[0])}`, 'saved'))
+      .catch((e) => setStatus('打开失败：' + e, 'err'));
+  } else {
+    setStatus(`工作区已切换：${w.名}${w.定制目标 ? `（口径 ${w.定制目标}）` : ''}`, 'saved');
+  }
+}
+
+/* ---------- 正文右侧热力轨：风险句红点 / 标记蓝点 / 叠加紫点，点圆点直达 ---------- */
+
+let heatRaf = 0;
+function scheduleHeatRail(): void {
+  cancelAnimationFrame(heatRaf);
+  heatRaf = requestAnimationFrame(buildHeatRail);
+}
+
+/** 内容坐标：元素相对滚动容器内容顶部的 Y（getBoundingClientRect 差 + 已滚过的量） */
+function contentY(el: HTMLElement, pane: HTMLElement): number {
+  return el.getBoundingClientRect().top - pane.getBoundingClientRect().top + pane.scrollTop;
+}
+
+let heatBound = false;
+let heatViewEl: HTMLElement | null = null;
+let heatReaderEl: HTMLElement | null = null;
+let heatPaneEl: HTMLElement | null = null;
+function heatUpdateView(): void {
+  if (!heatViewEl || !heatReaderEl || !heatPaneEl) return;
+  const H = heatReaderEl.offsetHeight || 1;
+  const total = heatReaderEl.scrollHeight || 1;
+  const readerTop = contentY(heatReaderEl, heatPaneEl);
+  const top = Math.max(0, ((heatPaneEl.scrollTop - readerTop) / total) * H);
+  const vh = (heatPaneEl.clientHeight / total) * H;
+  heatViewEl.style.top = top + 'px';
+  heatViewEl.style.height = Math.max(18, Math.min(H, vh)) + 'px';
+}
+
+function buildHeatRail(): void {
+  const reader = $('reader');
+  const pane = reader.closest<HTMLElement>('.pane');
+  if (!pane) return;
+  let rail = reader.querySelector<HTMLElement>('.heat-rail');
+  if (!rail) {
+    rail = document.createElement('div');
+    rail.className = 'heat-rail';
+    reader.appendChild(rail);
+  }
+  if (!heatBound) {
+    heatBound = true;
+    pane.addEventListener('scroll', heatUpdateView, { passive: true });
+    window.addEventListener('resize', scheduleHeatRail);
+  }
+  rail.replaceChildren();
+  const s = activeSession();
+  if (!s || !reader.querySelector('.para')) return; // 书架/版本页不画轨
+  const H = reader.offsetHeight || 1;
+  const total = reader.scrollHeight || 1;
+  const readerTop = contentY(reader, pane);
+  const dot = (el: HTMLElement, cls: string, title: string): void => {
+    const d = document.createElement('div');
+    d.className = 'heat-dot ' + cls;
+    const y = ((contentY(el, pane) - readerTop) / total) * H;
+    d.style.top = Math.max(0, Math.min(H - 6, y)) + 'px';
+    d.title = title;
+    d.addEventListener('click', () => {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      el.classList.remove('flash');
+      void el.offsetWidth;
+      el.classList.add('flash');
+    });
+    rail!.appendChild(d);
+  };
+  // 风险句红点
+  const riskEls = [...document.querySelectorAll<HTMLElement>('#reader .sent.risk')];
+  const riskSet = new Set(riskEls);
+  for (const el of riskEls) dot(el, 'risk', (el.textContent ?? '').slice(0, 50));
+  // 标记蓝点（与风险句同句 → 紫点）
+  const sentByKey = new Map<string, HTMLElement>();
+  document.querySelectorAll<HTMLElement>('#reader .sent').forEach((el) => sentByKey.set(`${el.dataset.pi}:${el.dataset.si}`, el));
+  for (const m of s.review.marks) {
+    const el = sentByKey.get(`${m.pi}:${m.si}`);
+    if (!el) continue;
+    dot(el, riskSet.has(el) ? 'both' : 'mark', (m.level === 'word' ? '词' : '句') + '标记：' + (m.text ?? m.word ?? '').slice(0, 30));
+  }
+  // 视口指示块
+  const view = document.createElement('div');
+  view.className = 'heat-view';
+  rail.appendChild(view);
+  heatViewEl = view;
+  heatReaderEl = reader;
+  heatPaneEl = pane;
+  heatUpdateView();
+}
+
 /* ---- 全局快捷键 ---- */
 document.addEventListener('keydown', (e) => {
   const mod = e.metaKey || e.ctrlKey;
+  // 键盘审校流：弹层数字键选标记 > ⌘数字切工作区 > F8/⌘G 跳难句（⇧⌘G 上一个）
+  if (!mod && popHotkey(e.key)) {
+    e.preventDefault();
+    return;
+  }
+  if (mod && /^[1-9]$/.test(e.key)) {
+    e.preventDefault();
+    switchWorkspaceAt(Number(e.key) - 1);
+    return;
+  }
+  if (e.key === 'F8') {
+    e.preventDefault();
+    jumpNextRisk(1);
+    return;
+  }
+  if (mod && (e.key === 'g' || e.key === 'G')) {
+    e.preventDefault();
+    if ((document.getElementById('findbar')?.style.display ?? 'none') !== 'none')
+      jumpFind(1); // 查找条开着：⌘G=下一个命中
+    else jumpNextRisk(e.shiftKey ? -1 : 1);
+    return;
+  }
   if (mod && (e.key === 'f' || e.key === 'F')) {
     e.preventDefault();
     openFind();
@@ -3834,6 +4000,106 @@ async function exportTts(): Promise<void> {
 
 function renderDiff(lIdx: number, rIdx: number): void {
   renderDiffPane($('pane-diff'), S.sessions, lIdx, rIdx, (l, r) => renderDiff(l, r));
+}
+
+/* ---------- 双栏逐句对照（基准版 vs 当前章：行对行 + 信号丢失机器核对） ---------- */
+
+/** 把章节 md 展开为句序列（带段落/句子索引，与正文标记同坐标系） */
+function chapterSents(md: string): { pi: number; si: number; text: string }[] {
+  try {
+    return extractParas(splitChapter(md).body).flatMap((p, pi) => sentsOf(p, false).map((text, si) => ({ pi, si, text })));
+  } catch {
+    return [];
+  }
+}
+
+function renderAlignPane(): void {
+  const pane = $('pane-align');
+  const s = activeSession();
+  if (!s) {
+    pane.innerHTML = '<div class="empty">先打开当前章，再回来选基准版本对照</div>';
+    return;
+  }
+  const others = S.sessions.filter((x) => x !== s);
+  const base = S.alignBase;
+  const baseSents = base ? chapterSents(base.md) : [];
+  const curSents = chapterSents(s.md);
+  const rows = base && baseSents.length && curSents.length ? alignSentencePairs(baseSents, curSents) : [];
+  const lost = rows.filter((r) => r.kind === 'lost').length;
+  const added = rows.filter((r) => r.kind === 'added').length;
+  const sigN = rows.reduce((n, r) => n + (r.lostSignals?.length ?? 0), 0);
+
+  const rowsHtml = rows
+    .map((r) => {
+      const pos = (x?: { pi: number; si: number }) => `<span class="al-pos">P${String((x?.pi ?? 0) + 1).padStart(2, '0')}·${String((x?.si ?? 0) + 1).padStart(2, '0')}</span>`;
+      if (r.kind === 'match') {
+        return `<div class="align-pair">
+          <div class="al-side base">${pos(r.base)}${esc(r.base?.text ?? '')}</div>
+          <div class="al-side cur${r.lostSignals ? ' warn' : ''}">${pos(r.cur)}${esc(r.cur?.text ?? '')}${r.lostSignals ? `<span class="al-sig">⚠ 基准有此处无：${esc(r.lostSignals.join('、'))}</span>` : ''}</div>
+        </div>`;
+      }
+      if (r.kind === 'lost') {
+        return `<div class="align-pair">
+          <div class="al-side lost">${pos(r.base)}${esc(r.base?.text ?? '')}<span class="al-sig">⚠ 当前章没有对应句（疑似丢信息）</span></div>
+          <div class="al-side none">（无对应句）</div>
+        </div>`;
+      }
+      return `<div class="align-pair">
+        <div class="al-side none">（无对应句）</div>
+        <div class="al-side added">${pos(r.cur)}${esc(r.cur?.text ?? '')}<span class="al-sig">＋ 当前章新增（对照基准）</span></div>
+      </div>`;
+    })
+    .join('');
+
+  pane.innerHTML = `
+    <div class="align-bar">
+      <b>⇄ 逐句对照</b>
+      <span class="dim" style="font-size:12px">基准</span>
+      <select id="align-base">
+        ${others.length ? others.map((x, i) => `<option value="s${i}">${esc(x.fileName)}（已打开）</option>`).join('') : ''}
+        <option value="file">选文件…（默认定位当前章目录）</option>
+        ${base ? `<option value="clear">✕ 关闭对照</option>` : ''}
+      </select>
+      ${rows.length ? `<span class="align-stats">对齐 ${rows.length} 句 · <span style="color:var(--oov)">疑似丢句 ${lost}</span> · <span style="color:#b45309">信号缺失 ${sigN} 处</span> · 新增 ${added}</span>` : ''}
+    </div>
+    ${rows.length ? `<div class="align-grid">${rowsHtml}</div>` : `<div class="empty">${base ? '基准或当前章解析不出句子（需要章节标记格式）' : others.length ? '从上面选一个已打开的版本做基准（建议先打开原文那一章），或选文件' : '先再打开一个版本（如原文）做基准——「打开文件…」选原文章节，然后回来这里下拉选它；或直接「选文件…」'}</div>`}`;
+  const sel = pane.querySelector('#align-base') as HTMLSelectElement | null;
+  sel?.addEventListener('change', async () => {
+    const v = sel.value;
+    if (v === 'clear') {
+      S.alignBase = null;
+      renderAlignPane();
+      return;
+    }
+    if (v === 'file') {
+      const path = await openFileDialog({
+        multiple: false,
+        defaultPath: s.sourcePath ?? undefined,
+        filters: [{ name: '基准章节（Markdown / 文本 / Word）', extensions: ['md', 'txt', 'markdown', 'docx'] }],
+      });
+      if (typeof path !== 'string' || !path) {
+        renderAlignPane();
+        return;
+      }
+      try {
+        const raw = path.toLowerCase().endsWith('.docx') ? docxToText(await invoke<string>('read_file_base64', { path })) : await invoke<string>('read_text_file', { path });
+        const { chapters } = normalizeAndSplitChapters(raw, path.slice(path.lastIndexOf('/') + 1));
+        S.alignBase = { name: path.slice(path.lastIndexOf('/') + 1), md: chapters[0]?.md ?? raw, path };
+        setStatus(`对照基准已设：${S.alignBase.name}`, 'saved');
+      } catch (e) {
+        setStatus('基准文件读取失败：' + e, 'err');
+      }
+      renderAlignPane();
+      return;
+    }
+    if (v.startsWith('s')) {
+      const other = others[Number(v.slice(1))];
+      if (other) {
+        S.alignBase = { name: other.fileName, md: other.md, path: other.sourcePath };
+        renderAlignPane();
+      }
+    }
+  });
 }
 
 /* ---------- 新手导览（coach marks） ---------- */

@@ -2154,6 +2154,134 @@
         padding: 4px 8px 8px;
         line-height: 1.7;
       }
+
+      /* ---------- 键位提示徽标（标记弹层数字键） ---------- */
+      .kbd {
+        display: inline-block;
+        min-width: 15px;
+        text-align: center;
+        border: 1px solid var(--line);
+        border-bottom-width: 2px;
+        border-radius: 4px;
+        background: var(--wsbg);
+        color: var(--muted);
+        font-size: 10px;
+        line-height: 13px;
+        margin-right: 4px;
+        padding: 0 2px;
+      }
+      /* ---------- 正文右侧难句热力轨（问题分布一目了然，点圆点直达） ---------- */
+      #reader {
+        position: relative;
+        padding-right: 16px;
+      }
+      .heat-rail {
+        position: absolute;
+        top: 0;
+        right: 0;
+        bottom: 0;
+        width: 12px;
+        z-index: 3;
+      }
+      .heat-dot {
+        position: absolute;
+        right: 3px;
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        cursor: pointer;
+      }
+      .heat-dot.risk {
+        background: var(--oov);
+      }
+      .heat-dot.mark {
+        background: var(--brand);
+      }
+      .heat-dot.both {
+        background: #7c3aed;
+      }
+      .heat-view {
+        position: absolute;
+        right: 0;
+        width: 12px;
+        background: rgba(128, 128, 128, 0.28);
+        border-radius: 4px;
+        pointer-events: none;
+      }
+      /* ---------- 双栏逐句对照 ---------- */
+      .align-bar {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        flex-wrap: wrap;
+        margin-bottom: 14px;
+      }
+      .align-bar select {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 5px 8px;
+        font-size: 13px;
+        background: var(--panel);
+        color: var(--ink);
+        max-width: 320px;
+      }
+      .align-stats {
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .align-grid {
+        max-width: 1080px;
+      }
+      .align-pair {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0 16px;
+        margin-bottom: 2px;
+      }
+      .al-side {
+        padding: 6px 10px;
+        border-radius: 6px;
+        font-size: 14px;
+        line-height: 1.8;
+      }
+      .al-side .al-pos {
+        font-size: 10px;
+        color: var(--muted);
+        margin-right: 6px;
+        white-space: nowrap;
+      }
+      .al-side.lost {
+        background: #fef2f2;
+      }
+      [data-theme='dark'] .al-side.lost {
+        background: #3a2422;
+      }
+      .al-side.added {
+        background: #fefce8;
+      }
+      [data-theme='dark'] .al-side.added {
+        background: #33291a;
+      }
+      .al-side.none {
+        color: var(--muted);
+        font-size: 12px;
+        font-style: italic;
+      }
+      .al-side.cur.warn {
+        outline: 1px dashed #d97706;
+        outline-offset: -1px;
+      }
+      .al-sig {
+        display: block;
+        color: #b45309;
+        font-size: 11px;
+        margin-top: 2px;
+      }
+      .al-para-sep {
+        grid-column: 1 / -1;
+        border-top: 1px dashed var(--line);
+        margin: 8px 0 6px;
+      }
     </style>
   </head>
   <body>
@@ -2217,6 +2345,7 @@
           <button id="tab-report">质检报告</button>
           <button id="tab-suggest">修订建议</button>
           <button id="tab-diff">版本对比</button>
+          <button id="tab-align" title="基准版（如原文）与当前章行对行核对：左丢什么、右加什么，机器核数字与专名">⇄ 逐句对照</button>
           <button id="tab-retro">复盘</button>
         </div>
         <section id="pane-text" class="pane active">
@@ -2246,7 +2375,12 @@
           </div>
         </section>
         <section id="pane-diff" class="pane">
-          <div class="empty">同时打开两个版本（如原文 + 简化版），这里逐段对比它们<br /><span style="font-size: 12px">红=仅左侧版本 · 绿=已修改/仅右侧版本 · 无色=两版一致</span></div>
+          <div class="empty">同时打开两个版本（如原文 + 简化版），这里逐段对比它们<br /><span style="font-size: 12px">红=仅左侧版本 · 绿=仅修改/仅右侧版本 · 无色=两版一致</span></div>
+        </section>
+        <section id="pane-align" class="pane">
+          <div class="empty">
+            选一个基准版本（如英文原文），与当前章行对行核对：<br /><span style="font-size: 12px">左=基准 · 右=当前章 · 红=基准有此处无（疑似丢信息） · 黄=此处新增 · 橙框=数字/专名与基准对不上</span>
+          </div>
         </section>
         <section id="pane-retro" class="pane">
           <div class="empty">

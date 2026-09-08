@@ -67,6 +67,8 @@ export const S = {
   /** 书架会话态：搜索词 + 分组过滤（视图切换持久化在 appConfig.shelfView） */
   shelfQ: '',
   shelfGroup: null as string | null,
+  /** 逐句对照的基准版本（会话级：切章保留选择自动重对齐） */
+  alignBase: null as { name: string; md: string; path: string | null } | null,
   /** 当前会话合并已知词表（含词句卡） */
   currentKnown: new Set<string>(),
   /** 全局配置（~/.layertext.json） */

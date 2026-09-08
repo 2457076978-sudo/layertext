@@ -11,19 +11,21 @@ import { extractParas, sentsOf, splitChapter } from '../../src/core/textpipe.js'
 export function renderModePill(pill: HTMLElement, autoRewrite: boolean): void {
   pill.className = 'mode-pill ' + (autoRewrite ? 'green' : 'yellow');
   pill.innerHTML = autoRewrite ? '⚡ 即改模式：标记即生效' : '👁 候选模式：等你点 ✓';
-  pill.title = autoRewrite
-    ? '当前：点了标记/建议，AI 改完立即生效（写原稿+日志）。点击切到候选模式'
-    : '当前：AI 只出建议（黄色框），你逐条点 ✓ 才生效。点击切到即改模式';
+  pill.title = autoRewrite ? '当前：点了标记/建议，AI 改完立即生效（写原稿+日志）。点击切到候选模式' : '当前：AI 只出建议（黄色框），你逐条点 ✓ 才生效。点击切到即改模式';
 }
 
-/* ---------- 视图切换（正文/报告/建议/对比/复盘 五个标签页） ---------- */
+/* ---------- 视图切换（正文/报告/建议/对比/对照/复盘 六个标签页） ---------- */
 
 const VIEW_MAP = [
-  ['tab-text', 'pane-text'], ['tab-report', 'pane-report'], ['tab-suggest', 'pane-suggest'],
-  ['tab-diff', 'pane-diff'], ['tab-retro', 'pane-retro'],
+  ['tab-text', 'pane-text'],
+  ['tab-report', 'pane-report'],
+  ['tab-suggest', 'pane-suggest'],
+  ['tab-diff', 'pane-diff'],
+  ['tab-align', 'pane-align'],
+  ['tab-retro', 'pane-retro'],
 ] as const;
 
-export type ViewName = 'text' | 'report' | 'suggest' | 'diff' | 'retro';
+export type ViewName = 'text' | 'report' | 'suggest' | 'diff' | 'align' | 'retro';
 
 export function switchView(root: Document, name: ViewName): void {
   for (const [id, pane] of VIEW_MAP) {
@@ -39,13 +41,7 @@ export interface DiffSessionLike {
   md: string;
 }
 
-export function renderDiffPane(
-  pane: HTMLElement,
-  sessions: DiffSessionLike[],
-  lIdx: number,
-  rIdx: number,
-  onChange: (l: number, r: number) => void,
-): void {
+export function renderDiffPane(pane: HTMLElement, sessions: DiffSessionLike[], lIdx: number, rIdx: number, onChange: (l: number, r: number) => void): void {
   const L = sessions[lIdx];
   const R = sessions[rIdx];
   if (!L || !R) {
