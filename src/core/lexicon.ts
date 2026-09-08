@@ -38,24 +38,36 @@ export function parseCsv(text: string): string[][] {
     const c = t[i];
     if (inQ) {
       if (c === '"') {
-        if (t[i + 1] === '"') { cur += '"'; i++; }
-        else inQ = false;
+        if (t[i + 1] === '"') {
+          cur += '"';
+          i++;
+        } else inQ = false;
       } else cur += c;
     } else if (c === '"') inQ = true;
-    else if (c === ',') { row.push(cur); cur = ''; }
-    else if (c === '\n') { row.push(cur); rows.push(row); row = []; cur = ''; }
-    else if (c === '\r') { /* skip */ }
-    else cur += c;
+    else if (c === ',') {
+      row.push(cur);
+      cur = '';
+    } else if (c === '\n') {
+      row.push(cur);
+      rows.push(row);
+      row = [];
+      cur = '';
+    } else if (c === '\r') {
+      /* skip */
+    } else cur += c;
   }
-  if (cur.length > 0 || row.length > 0) { row.push(cur); rows.push(row); }
+  if (cur.length > 0 || row.length > 0) {
+    row.push(cur);
+    rows.push(row);
+  }
   return rows;
 }
 
 /** 词表行首词提取：兼容「1. word」编号格式与纯文本格式（与 Python 参照版一致） */
 export function firstWordOfLine(line: string): string | null {
-  let m = line.match(/^\d+\.\s+([A-Za-z][A-Za-z'\-]*)/);
+  let m = line.match(/^\d+\.\s+([A-Za-z][A-Za-z'-]*)/);
   if (m) return m[1];
-  m = line.match(/^\s*([A-Za-z][A-Za-z'\-]*)/);
+  m = line.match(/^\s*([A-Za-z][A-Za-z'-]*)/);
   return m ? m[1] : null;
 }
 
@@ -122,7 +134,10 @@ export function parseReinforceText(text: string): string[] {
     if (!line || line === '词' || line.toLowerCase() === 'word' || line.toLowerCase() === 'words') continue;
     if (!/^[A-Za-z][A-Za-z'\- ]*$/.test(line)) continue;
     const w = line.toLowerCase();
-    if (!seen.has(w)) { seen.add(w); out.push(w); }
+    if (!seen.has(w)) {
+      seen.add(w);
+      out.push(w);
+    }
   }
   return out;
 }

@@ -1,0 +1,2 @@
+# 提交前门禁：只对暂存文件跑 ESLint 自动修 + Prettier 格式化（增量，不碰存量排版）
+npx lint-staged

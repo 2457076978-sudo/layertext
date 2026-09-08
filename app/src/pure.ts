@@ -42,7 +42,11 @@ export function remapMarks(marks: Mark[], md: string): void {
     let ok = cur && cur.startsWith(prefix);
     if (!ok) {
       const hits: [number, number][] = [];
-      sents.forEach((ss, pi) => ss.forEach((sent, si) => { if (sent.startsWith(prefix)) hits.push([pi, si]); }));
+      sents.forEach((ss, pi) =>
+        ss.forEach((sent, si) => {
+          if (sent.startsWith(prefix)) hits.push([pi, si]);
+        }),
+      );
       if (hits.length === 1) {
         m.pi = hits[0][0];
         m.si = hits[0][1];
@@ -52,7 +56,7 @@ export function remapMarks(marks: Mark[], md: string): void {
     if (ok && m.level === 'word' && m.word) {
       const sent = sents[m.pi]?.[m.si] ?? '';
       const toks = tokenizeTxt(sent);
-      const raws = sent.match(/[A-Za-z][A-Za-z'\-]*/g) ?? [];
+      const raws = sent.match(/[A-Za-z][A-Za-z'-]*/g) ?? [];
       const wi = raws.findIndex((w, i) => (toks[i] ?? w.toLowerCase()) === m.word!.toLowerCase());
       if (wi >= 0) m.wi = wi;
     }
@@ -248,7 +252,11 @@ export interface DiagConfigInput {
 
 export function buildDiagSummary(cfg: DiagConfigInput, appVersion: string, userAgent: string): Record<string, unknown> {
   let host = cfg.baseUrl ?? '';
-  try { host = new URL(host).host; } catch { if (host) host = '(自定义地址)'; }
+  try {
+    host = new URL(host).host;
+  } catch {
+    if (host) host = '(自定义地址)';
+  }
   return {
     应用版本: appVersion,
     系统: userAgent,
@@ -305,7 +313,9 @@ export function planCompaction(msgs: ChatMsgLike[], opts?: Partial<typeof COMPAC
   const estOf = (m: ChatMsgLike) => estTokens(m.content) + (m.tool_calls ? estTokens(JSON.stringify(m.tool_calls)) : 0);
   const estBefore = msgs.reduce((n, m) => n + estOf(m), 0);
   const userIdx: number[] = [];
-  msgs.forEach((m, i) => { if (m.role === 'user') userIdx.push(i); });
+  msgs.forEach((m, i) => {
+    if (m.role === 'user') userIdx.push(i);
+  });
   const cut = userIdx.length > o.keepUserTurns ? userIdx[userIdx.length - o.keepUserTurns] : -1;
   const need = cut > 0 && (estBefore > o.maxEst || msgs.length > o.maxMsgs);
   const headCount = need ? cut : 0;
@@ -363,26 +373,20 @@ export interface BookReportRow {
 }
 
 /** 书级汇总报告（全书简化报告_日期.md）：各章指标横向表 + 合计 + 人工复查提示 */
-export function buildBookReportMd(
-  rows: BookReportRow[],
-  meta: { book: string; date: string; maxLen: number; instructions?: string; provider?: string },
-): string {
+export function buildBookReportMd(rows: BookReportRow[], meta: { book: string; date: string; maxLen: number; instructions?: string; provider?: string }): string {
   const done = rows.filter((r) => r.status === 'done');
   const sum = (f: (r: BookReportRow) => number): number => done.reduce((n, r) => n + f(r), 0);
   const cell = (r: BookReportRow, f: (x: BookReportRow) => number | string): string => (r.status === 'failed' ? '—' : String(f(r)));
-  const lines: string[] = [
-    `# 全书简化报告 · ${meta.book}`,
-    '',
-    `- 日期：${meta.date}｜简化标准：句长上限 ${meta.maxLen} 词/句｜完成 ${done.length}/${rows.length} 章`,
-  ];
+  const lines: string[] = [`# 全书简化报告 · ${meta.book}`, '', `- 日期：${meta.date}｜简化标准：句长上限 ${meta.maxLen} 词/句｜完成 ${done.length}/${rows.length} 章`];
   if (meta.instructions) lines.push(`- 方向指令：${meta.instructions}`);
   if (meta.provider) lines.push(`- AI 供应商：${meta.provider}`);
   lines.push(
     '',
     '| 章 | 产物 | 段数 | 生词率 | 平均句长 | 最长句 | 被动 | 定从 | 过去完成 | 超长 | 规则残留 | 耗时 | 出tokens |',
     '|---|---|---|---|---|---|---|---|---|---|---|---|---|',
-    ...rows.map((r) =>
-      `| ${r.chapter} | ${r.status === 'failed' ? '（失败）' : r.output} | ${cell(r, (x) => x.segCount)} | ${cell(r, (x) => x.oovRate)} | ${cell(r, (x) => x.avgLen)} | ${cell(r, (x) => x.maxLen)} | ${cell(r, (x) => x.passive)} | ${cell(r, (x) => x.relcl)} | ${cell(r, (x) => x.pastperf)} | ${cell(r, (x) => x.overlong)} | ${cell(r, (x) => x.ruleLeft)} | ${cell(r, (x) => `${(x.elapsedMs / 1000).toFixed(0)}s`)} | ${cell(r, (x) => x.outTokens)} |`,
+    ...rows.map(
+      (r) =>
+        `| ${r.chapter} | ${r.status === 'failed' ? '（失败）' : r.output} | ${cell(r, (x) => x.segCount)} | ${cell(r, (x) => x.oovRate)} | ${cell(r, (x) => x.avgLen)} | ${cell(r, (x) => x.maxLen)} | ${cell(r, (x) => x.passive)} | ${cell(r, (x) => x.relcl)} | ${cell(r, (x) => x.pastperf)} | ${cell(r, (x) => x.overlong)} | ${cell(r, (x) => x.ruleLeft)} | ${cell(r, (x) => `${(x.elapsedMs / 1000).toFixed(0)}s`)} | ${cell(r, (x) => x.outTokens)} |`,
     ),
     `| **合计** | | ${sum((r) => r.segCount)} | | | | ${sum((r) => r.passive)} | ${sum((r) => r.relcl)} | ${sum((r) => r.pastperf)} | ${sum((r) => r.overlong)} | ${sum((r) => r.ruleLeft)} | ${(sum((r) => r.elapsedMs) / 1000).toFixed(0)}s | ${sum((r) => r.outTokens)} |`,
     '',
@@ -394,8 +398,11 @@ export function buildBookReportMd(
       if (r.status === 'failed') lines.push(`- ${r.chapter}：简化失败（${r.error ?? '原因未知'}）——可单独打开该章用「📖 整章改写」处理`);
       else {
         const bits = [
-          r.passive ? `被动 ${r.passive}` : '', r.relcl ? `定从 ${r.relcl}` : '', r.pastperf ? `过去完成 ${r.pastperf}` : '',
-          r.overlong ? `超长 ${r.overlong}` : '', r.ruleLeft ? `替换规则残留 ${r.ruleLeft} 处` : '',
+          r.passive ? `被动 ${r.passive}` : '',
+          r.relcl ? `定从 ${r.relcl}` : '',
+          r.pastperf ? `过去完成 ${r.pastperf}` : '',
+          r.overlong ? `超长 ${r.overlong}` : '',
+          r.ruleLeft ? `替换规则残留 ${r.ruleLeft} 处` : '',
         ].filter(Boolean);
         lines.push(`- ${r.chapter}：${bits.join('、')}——打开产物做标记精修`);
       }
@@ -422,23 +429,23 @@ export function mergeQuotaTexts(existing: string[], incoming: string[]): string[
 /* ---------- 班级多人定制（feature/reinforce）：分组/个人目标合并（纯逻辑，测试全假数据） ---------- */
 
 export interface ClassTarget {
-  id: string;            // 如 "组:B" / "人:焦佳琪"
-  名称: string;          // 显示名，如 "B层(32人)" / "焦佳琪(B)"
+  id: string; // 如 "组:B" / "人:焦佳琪"
+  名称: string; // 显示名，如 "B层(32人)" / "焦佳琪(B)"
   类型: '组' | '人';
-  句长上限?: number;     // 缺省用全局简化标准
-  覆盖目标?: number;     // 该目标覆盖目标带下限%（分层个体化：B98/M97/A95，文献95/98群体均值的分层版）
+  句长上限?: number; // 缺省用全局简化标准
+  覆盖目标?: number; // 该目标覆盖目标带下限%（分层个体化：B98/M97/A95，文献95/98群体均值的分层版）
   成员数?: number;
-  已学词?: string[];     // 该目标的已学词集（个人/组内合并）
-  到期词?: string[];     // 本篇应复现的到期队列
+  已学词?: string[]; // 该目标的已学词集（个人/组内合并）
+  到期词?: string[]; // 本篇应复现的到期队列
 }
 
 export interface MergedTargets {
   active: boolean;
-  minLen: number;        // 最严句长上限（无选择=全局）
+  minLen: number; // 最严句长上限（无选择=全局）
   coverageTarget: number | null; // 多目标取最严覆盖目标带（max）；无=用文献通用 95/98
-  knownInter: string[];  // 已学词交集（只在有个人词集的目标间求交；组词集=全体成员并集，参与交集）
-  dueUnion: string[];    // 到期词并集（稳定序：被选次数降序→字母序，上限 12——"尽量多复现"教师指令）
-  label: string;         // 目标标签（命名/提示用）
+  knownInter: string[]; // 已学词交集（只在有个人词集的目标间求交；组词集=全体成员并集，参与交集）
+  dueUnion: string[]; // 到期词并集（稳定序：被选次数降序→字母序，上限 12——"尽量多复现"教师指令）
+  label: string; // 目标标签（命名/提示用）
 }
 
 /** 多选合并口径：句长取最严、已学词取交集、到期词取并集（5-8 词/篇的复现预算） */
@@ -459,7 +466,10 @@ export function mergeTargets(selected: ClassTarget[], globalMaxLen: number, dueC
   // 并集：按被选目标出现次数降序，同频字母序，截断 dueCap
   const freq = new Map<string, number>();
   for (const t of selected) for (const w of t.到期词 ?? []) freq.set(w, (freq.get(w) ?? 0) + 1);
-  const dueUnion = [...freq.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, dueCap).map(([w]) => w);
+  const dueUnion = [...freq.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .slice(0, dueCap)
+    .map(([w]) => w);
   const label = selected.map((t) => t.名称).join('+');
   return { active: true, minLen, coverageTarget, knownInter, dueUnion, label: label.length > 28 ? label.slice(0, 27) + '…' : label };
 }
@@ -474,15 +484,19 @@ export function filterTargets(targets: ClassTarget[], q: string): ClassTarget[] 
 /* ---------- 工作区（2026-09-08 Wayne 指令：3 层次=3 工作区，像浏览器标签切换） ---------- */
 
 export interface Workspace {
-  名: string;              // 如 "B层工作区"
-  定制目标?: string;       // 绑定的班级定制目标 id（如 "组:B"），激活工作区时自动勾选
-  文件: string[];          // 章节文件绝对路径（按序展示为章节 chips）
+  名: string; // 如 "B层工作区"
+  定制目标?: string; // 绑定的班级定制目标 id（如 "组:B"），激活工作区时自动勾选
+  文件: string[]; // 章节文件绝对路径（按序展示为章节 chips）
 }
 
 /** 解析书目录 _工作区.json（宽容：缺字段/空文件列表跳过；返回 [] 表示无工作区） */
 export function parseWorkspaces(raw: string): Workspace[] {
   let j: { 工作区?: unknown };
-  try { j = JSON.parse(raw) as { 工作区?: unknown }; } catch { return []; }
+  try {
+    j = JSON.parse(raw) as { 工作区?: unknown };
+  } catch {
+    return [];
+  }
   if (!Array.isArray(j.工作区)) return [];
   const out: Workspace[] = [];
   for (const w of j.工作区 as Array<Record<string, unknown>>) {
@@ -499,7 +513,46 @@ export function workspaceChipName(path: string): string {
   const file = path.slice(path.lastIndexOf('/') + 1).replace(/\.(md|txt|markdown|docx)$/i, '');
   if (file.startsWith('候选版')) {
     const dir = path.slice(0, path.lastIndexOf('/')).split('/').pop() ?? '';
-    if (/^第.{1,4}章$|^Chapter/i.test(dir)) return dir;   // 只认章节目录名，避免普通目录名误用
+    if (/^第.{1,4}章$|^Chapter/i.test(dir)) return dir; // 只认章节目录名，避免普通目录名误用
   }
   return file || path;
+}
+
+/* ---------- 书架书封（2026-09-08 Wayne：正常书比例 + 书名当封面字号自适应 + 两级导航） ---------- */
+
+/** 书名视觉宽度（CJK 全角=1、其余≈0.55），用于封面字号分档 */
+export function coverVisualWidth(title: string): number {
+  let w = 0;
+  for (const ch of title) w += /[\u2e80-\u9fff\u3000-\u303f\u30a0-\u30ff\uff00-\uffef]/.test(ch) ? 1 : 0.55;
+  return w;
+}
+
+/** 文字封面的书名字号：按视觉宽度分档收缩，保证除极端长名外书名完整可见（长名最多 4 行换行显示） */
+export function coverTitlePx(title: string): number {
+  const w = coverVisualWidth(title);
+  if (w <= 3.5) return 30;
+  if (w <= 5) return 26;
+  if (w <= 7) return 21;
+  if (w <= 10) return 18;
+  if (w <= 14) return 15;
+  return 12.5;
+}
+
+export interface VersionCardInfo {
+  idx: number;
+  名: string;
+  desc: string;
+  first: string;
+  target?: string;
+}
+
+/** 版本选择页卡片数据（点书 → 先选版本 → 再进工作区）：desc=章数+绑定口径，first=第一章 chip 名 */
+export function buildVersionCards(ws: Workspace[]): VersionCardInfo[] {
+  return ws.map((w, idx) => ({
+    idx,
+    名: w.名,
+    desc: `${w.文件.length} 章${w.定制目标 ? ` · 绑定口径 ${w.定制目标}` : ''}`,
+    first: w.文件.length ? workspaceChipName(w.文件[0]) : '',
+    target: w.定制目标,
+  }));
 }

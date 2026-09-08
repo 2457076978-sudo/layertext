@@ -11,10 +11,54 @@ import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
 import * as XLSX from 'xlsx';
 import { unzipSync, zipSync, strFromU8, strToU8 } from 'fflate';
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, WidthType } from 'docx';
-import { applyRewriteTo, buildBookReportMd, buildDiagSummary, checkRevisedText, chnoFromPath, csvCell, estTokens, filterTargets, findOriginalFlex, locateOriginal, mergeQuotaTexts, mergeTargets, normalizeAndSplitChapters, parseAiJson, parseWorkspaces, pickSentMarkType, planBatchChapters, planCompaction, remapMarks, workspaceChipName, type BatchChapterItem, type BatchProgressFile, type BookReportRow, type ClassTarget } from './pure.js';
+import {
+  applyRewriteTo,
+  buildBookReportMd,
+  buildDiagSummary,
+  buildVersionCards,
+  checkRevisedText,
+  chnoFromPath,
+  coverTitlePx,
+  csvCell,
+  estTokens,
+  filterTargets,
+  findOriginalFlex,
+  locateOriginal,
+  mergeQuotaTexts,
+  mergeTargets,
+  normalizeAndSplitChapters,
+  parseAiJson,
+  parseWorkspaces,
+  pickSentMarkType,
+  planBatchChapters,
+  planCompaction,
+  remapMarks,
+  workspaceChipName,
+  type BatchChapterItem,
+  type BatchProgressFile,
+  type BookReportRow,
+  type ClassTarget,
+  type Workspace,
+} from './pure.js';
 import { renderDiffPane, renderModePill, switchView as switchViewDom, type ViewName } from './widgets.js';
 import { S, setStatus as uiSetStatus, esc } from './state.js';
-import { AI_PROVIDERS, aiErrHuman, buildAssistantPrompt, buildDraftSystemPrompt, buildPlotPointsPrompt, buildRewriteSentencePrompt, buildSystemPrompt, callChat, chatStream, loadConfig, promptSetVersion, reloadPrompts, saveConfig, setAiUi, simplifyMaxLen } from './ai.js';
+import {
+  AI_PROVIDERS,
+  aiErrHuman,
+  buildAssistantPrompt,
+  buildDraftSystemPrompt,
+  buildPlotPointsPrompt,
+  buildRewriteSentencePrompt,
+  buildSystemPrompt,
+  callChat,
+  chatStream,
+  loadConfig,
+  promptSetVersion,
+  reloadPrompts,
+  saveConfig,
+  setAiUi,
+  simplifyMaxLen,
+} from './ai.js';
 import bundledWordlist from '../../assets/wordlists/curriculum_2022_level3_1600.txt?raw';
 import bundledAmendment from '../../assets/wordlists/curriculum_2022_amendment.txt?raw';
 import exampleMd from '../../examples/texts/aesop_tortoise_hare.md?raw';
@@ -25,16 +69,10 @@ import { IRR } from '../../src/core/irregular.js';
 import { runQc, toLegacyReport, type QcResult, type Tier } from '../../src/core/qc.js';
 import { aggregate, diagnose, LEDGER_HEADER, parseLedger, toLedgerLine, type LedgerRow } from '../../src/core/adoption.js';
 import { summarizeCost } from '../../src/core/aiops.js';
-import {
-  extractParas, hitOrigin, hit, pendHit, sentsOf, splitChapter, tokenizeTxt, cardGlossWords,
-} from '../../src/core/textpipe.js';
+import { extractParas, hitOrigin, hit, pendHit, sentsOf, splitChapter, tokenizeTxt, cardGlossWords } from '../../src/core/textpipe.js';
 import { sentenceRisks } from '../../src/core/risks.js';
 import { jumpTo, refreshMarkDom, removeMarkDom, renderSidebar, restoreAllMarkDom, scheduleSave } from './review.js';
-import {
-  CHANGELOG_HEADER, GATES, GATE_HELP, SENT_TYPES, WORD_TYPES,
-  newMarkId, newReviewState, typeLabel,
-  type FileSession, type Mark, type MarkType, type Suggestion,
-} from './types.js';
+import { CHANGELOG_HEADER, GATES, GATE_HELP, SENT_TYPES, WORD_TYPES, newMarkId, newReviewState, typeLabel, type FileSession, type Mark, type MarkType, type Suggestion } from './types.js';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -46,26 +84,28 @@ const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getEleme
 
 /* ---------- 全局配置（~/.layertext.json：AI 设置 + 简化标准 + 首启动标记） ---------- */
 
-
 /** 常见服务商预设（新手只需选服务商 + 贴 Key） */
 function buildLexiconNow(): Lexicon {
   const sel = mergedSelection();
   return buildLexicon({
     vocabCsvTexts: S.vocabCsvText ? [S.vocabCsvText] : [],
-    plainWordlistTexts: [
-      bundledWordlist,
-      bundledAmendment,
-      ...(S.extraWordlistText ? [S.extraWordlistText] : []),
-      ...(sel.active && sel.knownInter.length ? [sel.knownInter.join('\n')] : []),
-    ],
-    terms: S.termsText ? S.termsText.split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#')) : [],
+    plainWordlistTexts: [bundledWordlist, bundledAmendment, ...(S.extraWordlistText ? [S.extraWordlistText] : []), ...(sel.active && sel.knownInter.length ? [sel.knownInter.join('\n')] : [])],
+    terms: S.termsText
+      ? S.termsText
+          .split('\n')
+          .map((l) => l.trim())
+          .filter((l) => l && !l.startsWith('#'))
+      : [],
     properNouns: S.properRows.map((r) => r.toLowerCase()),
   });
 }
 
 /** 班级多人定制：当前选择的合并口径（句长最严/已学词交集/到期词并集） */
 function mergedSelection() {
-  return mergeTargets(S.classTargets.filter((t) => S.selectedIds.includes(t.id)), simplifyMaxLen());
+  return mergeTargets(
+    S.classTargets.filter((t) => S.selectedIds.includes(t.id)),
+    simplifyMaxLen(),
+  );
 }
 
 /** 已学词集（复现队列）：班级定制选择优先，其次示例/书目录 _已学词.csv|.txt；空则 undefined（报告保持旧 schema） */
@@ -104,9 +144,7 @@ async function readVocabAsCsv(path: string): Promise<string> {
   const hasWordCol = header.some((h) => h === '词' || h === 'word' || h === '单词' || h === '词汇');
   if (hasWordCol) return text; // 标准格式，直接使用
   // 无表头：每行取首字段（兼容 CSV/TSV/分号/纯文本），按"单词"类型导入
-  const words = rows
-    .map((r) => (r[0] ?? '').split(/[\t;；,，]/)[0].trim())
-    .filter((w) => /^[A-Za-z][A-Za-z'\- ]*[A-Za-z]$/.test(w));
+  const words = rows.map((r) => (r[0] ?? '').split(/[\t;；,，]/)[0].trim()).filter((w) => /^[A-Za-z][A-Za-z'\- ]*[A-Za-z]$/.test(w));
   return words.map((w) => `${w},单词,,,,,,`).join('\n');
 }
 
@@ -143,7 +181,10 @@ async function importProperFile(): Promise<void> {
   if (typeof path !== 'string') return;
   try {
     const text = await invoke<string>('read_text_file', { path });
-    S.properRows = text.split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
+    S.properRows = text
+      .split('\n')
+      .map((l) => l.trim())
+      .filter((l) => l && !l.startsWith('#'));
     renderAll();
     setStatus(`已导入专名表：${S.properRows.length} 个（⑧专名一致性检查同步启用）`, 'saved');
   } catch (e) {
@@ -173,7 +214,10 @@ async function loadLocalExampleConfig(): Promise<void> {
     if (terms) S.termsText = terms;
     const proper = await readIf('_专名表.txt');
     if (proper) {
-      S.properRows = proper.split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
+      S.properRows = proper
+        .split('\n')
+        .map((l) => l.trim())
+        .filter((l) => l && !l.startsWith('#'));
     }
     const reinforceCsv = await readIf('_已学词.csv');
     const reinforce = reinforceCsv ?? (await readIf('_已学词.txt'));
@@ -197,7 +241,9 @@ async function loadClassGroups(): Promise<void> {
       try {
         const j = JSON.parse(await invoke<string>('read_text_file', { path: f })) as { targets?: ClassTarget[] };
         if (Array.isArray(j.targets)) targets.push(...j.targets);
-      } catch { /* 单个文件损坏跳过 */ }
+      } catch {
+        /* 单个文件损坏跳过 */
+      }
     }
     S.classTargets = targets;
     S.selectedIds = S.selectedIds.filter((id) => targets.some((t) => t.id === id));
@@ -211,7 +257,8 @@ function renderClsPanel(): void {
   if (!panel) {
     panel = document.createElement('div');
     panel.id = 'cls-panel';
-    panel.style.cssText = 'position:fixed;top:44px;right:12px;z-index:300;width:340px;max-height:70vh;overflow:auto;background:#fff;border:1px solid #cfd8dc;border-radius:8px;box-shadow:0 6px 24px rgba(0,0,0,.16);padding:12px;font-size:13px;display:none';
+    panel.style.cssText =
+      'position:fixed;top:44px;right:12px;z-index:300;width:340px;max-height:70vh;overflow:auto;background:#fff;border:1px solid #cfd8dc;border-radius:8px;box-shadow:0 6px 24px rgba(0,0,0,.16);padding:12px;font-size:13px;display:none';
     document.body.appendChild(panel);
   }
   const groups = S.classTargets.filter((t) => t.类型 === '组');
@@ -224,7 +271,8 @@ function renderClsPanel(): void {
     const q = ((document.getElementById('cls-search') as HTMLInputElement | null)?.value ?? '').trim();
     const shown = filterTargets(persons, q);
     const sel = mergedSelection();
-    const ck = (t: ClassTarget) => `<label style="display:inline-block;margin:2px 6px;white-space:nowrap"><input type="checkbox" data-cls-id="${esc(t.id)}" ${S.selectedIds.includes(t.id) ? 'checked' : ''}/> ${esc(t.名称)}${t.句长上限 ? `<span class="dim">≤${t.句长上限}词</span>` : ''}</label>`;
+    const ck = (t: ClassTarget) =>
+      `<label style="display:inline-block;margin:2px 6px;white-space:nowrap"><input type="checkbox" data-cls-id="${esc(t.id)}" ${S.selectedIds.includes(t.id) ? 'checked' : ''}/> ${esc(t.名称)}${t.句长上限 ? `<span class="dim">≤${t.句长上限}词</span>` : ''}</label>`;
     panel.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center"><b>👥 班级定制（${S.classTargets.length} 目标）</b>
         <span><button id="cls-clear" title="清空选择">清空</button> <button id="cls-close">×</button></span></div>
       <div style="margin:6px 0 2px"><b>分组</b></div>
@@ -234,20 +282,38 @@ function renderClsPanel(): void {
         <div style="max-height:200px;overflow:auto;border:1px solid #eceff1;border-radius:4px;padding:4px">${shown.map(ck).join('') || '<span class="dim">无匹配</span>'}</div>
       </details>
       <div style="margin-top:8px;padding:6px 8px;background:${sel.active ? '#e8f5e9' : '#f5f5f5'};border-radius:4px;line-height:1.7">
-        ${sel.active
-          ? `已选 <b>${S.selectedIds.length}</b> 目标【${esc(sel.label)}】<br/>句长 ≤<b>${sel.minLen}</b> 词 ｜ 共同已学词 <b>${sel.knownInter.length}</b> ｜ 本篇复现队列 <b>${sel.dueUnion.length}</b> 词${sel.dueUnion.length ? '：' + esc(sel.dueUnion.slice(0, 6).join(', ')) + (sel.dueUnion.length > 6 ? '…' : '') : ''}<br/><span class="dim">对「▶ 质检本章 / 整章改写 / 全书批处理」生效；简化稿自动带目标标签</span>`
-          : '未选择——质检与简化用全局词库口径。勾选目标后按“句长取最严、复现词取并集”执行。'}
+        ${
+          sel.active
+            ? `已选 <b>${S.selectedIds.length}</b> 目标【${esc(sel.label)}】<br/>句长 ≤<b>${sel.minLen}</b> 词 ｜ 共同已学词 <b>${sel.knownInter.length}</b> ｜ 本篇复现队列 <b>${sel.dueUnion.length}</b> 词${sel.dueUnion.length ? '：' + esc(sel.dueUnion.slice(0, 6).join(', ')) + (sel.dueUnion.length > 6 ? '…' : '') : ''}<br/><span class="dim">对「▶ 质检本章 / 整章改写 / 全书批处理」生效；简化稿自动带目标标签</span>`
+            : '未选择——质检与简化用全局词库口径。勾选目标后按“句长取最严、复现词取并集”执行。'
+        }
       </div>
       <div style="margin-top:6px"><button id="cls-reload">🔄 刷新分组文件</button> <span class="dim">目录：~/Documents/LayerText配置/班级分组/</span></div>`;
     const search = document.getElementById('cls-search') as HTMLInputElement | null;
     search?.addEventListener('input', () => renderClsPanel());
     const keepFocus = q && search;
-    if (keepFocus) { search.focus(); search.setSelectionRange(search.value.length, search.value.length); }
+    if (keepFocus) {
+      search.focus();
+      search.setSelectionRange(search.value.length, search.value.length);
+    }
   }
   const bind = (id: string, fn: () => void) => document.getElementById(id)?.addEventListener('click', fn);
-  bind('cls-close', () => { panel!.style.display = 'none'; });
-  bind('cls-reload', () => void loadClassGroups().then(() => { renderClsPanel(); fileSummary(); }));
-  bind('cls-clear', () => { S.selectedIds = []; renderClsPanel(); fileSummary(); });
+  bind('cls-close', () => {
+    panel!.style.display = 'none';
+  });
+  bind(
+    'cls-reload',
+    () =>
+      void loadClassGroups().then(() => {
+        renderClsPanel();
+        fileSummary();
+      }),
+  );
+  bind('cls-clear', () => {
+    S.selectedIds = [];
+    renderClsPanel();
+    fileSummary();
+  });
   panel.querySelectorAll<HTMLInputElement>('input[data-cls-id]').forEach((el) => {
     el.addEventListener('change', () => {
       const id = el.dataset.clsId!;
@@ -305,7 +371,7 @@ async function addSession(md: string, fileName: string, sourcePath: string | nul
   if (sourcePath) {
     const dir = sourcePath.slice(0, sourcePath.lastIndexOf('/'));
     if (await loadBookConfig(dir)) setStatus('已自动加载本书配置（词库/术语/约定）', 'saved');
-    await loadWorkspaces(dir);   // 工作区：先章目录再书稿根（_工作区.json）
+    await loadWorkspaces(dir); // 工作区：先章目录再书稿根（_工作区.json）
   }
   const markPath = await markPathFor(sourcePath, fileName);
   const review = newReviewState(fileName);
@@ -353,9 +419,10 @@ function renderAll(): void {
   renderFileTabs();
   const s = activeSession();
   if (!s) {
-    void renderShelf();   // 首页=书架（示例+我的书；点书进入工作区）
+    void renderShelf(); // 首页=书架（示例+我的书；点书进入工作区）
     $('pane-report').innerHTML = '<div class="empty"><b>打开课文会自动体检</b><br/>生词率、句长、难句自动数好，报告页每条可勾选处理</div>';
-    $('side-review').innerHTML = '<div class="side-empty">这里是你的审校 checklist：<br/>· 要点配额：本章必须保留的情节点，自己添加打勾<br/>· 终审门禁：四项全勾才算审完（点 ? 看每项查什么）<br/>· 标记清单：正文里做的标记都在这，点击跳回原文</div>';
+    $('side-review').innerHTML =
+      '<div class="side-empty">这里是你的审校 checklist：<br/>· 要点配额：本章必须保留的情节点，自己添加打勾<br/>· 终审门禁：四项全勾才算审完（点 ? 看每项查什么）<br/>· 标记清单：正文里做的标记都在这，点击跳回原文</div>';
     hidePop();
     fileSummary();
     return;
@@ -369,31 +436,35 @@ function renderAll(): void {
 
 function renderFileTabs(): void {
   const el = $('filetabs');
-  el.style.display = S.sessions.length === 0 ? 'none' : 'flex';  // 无文件时整行收起，不占位
+  el.style.display = S.sessions.length === 0 ? 'none' : 'flex'; // 无文件时整行收起，不占位
   if (S.sessions.length === 0) {
     el.innerHTML = '';
+    // 工作区条一并收起（修复：关掉全部章节后 wstabs 残留在页面上）
+    const wsBar = $('wstabs');
+    wsBar.style.display = 'none';
+    wsBar.innerHTML = '';
     return;
   }
   el.innerHTML = S.sessions
-    .map(
-      (s, i) =>
-        `<span class="ftab ${i === S.activeIdx ? 'active' : ''}" data-ftab="${i}">${esc(s.fileName)}<span class="x" data-ftab-close="${i}" title="关闭">×</span></span>`,
-    )
+    .map((s, i) => `<span class="ftab ${i === S.activeIdx ? 'active' : ''}" data-ftab="${i}">${esc(s.fileName)}<span class="x" data-ftab-close="${i}" title="关闭">×</span></span>`)
     .join('');
   el.querySelectorAll('[data-ftab]').forEach((t) =>
     t.addEventListener('click', (e) => {
       const x = (e.target as HTMLElement).closest('[data-ftab-close]');
       if (x) return;
-      const prev = activeSession(); if (prev) prev.scrollTop = scrollNow();
+      const prev = activeSession();
+      if (prev) prev.scrollTop = scrollNow();
       S.activeIdx = Number((t as HTMLElement).dataset.ftab);
       renderAll();
       const cur = activeSession();
-      if (cur?.scrollTop) setTimeout(() => { const sc = scrollEl(); if (sc) sc.scrollTop = cur.scrollTop!; }, 50);
+      if (cur?.scrollTop)
+        setTimeout(() => {
+          const sc = scrollEl();
+          if (sc) sc.scrollTop = cur.scrollTop!;
+        }, 50);
     }),
   );
-  el.querySelectorAll('[data-ftab-close]').forEach((x) =>
-    x.addEventListener('click', () => closeSession(Number((x as HTMLElement).dataset.ftabClose))),
-  );
+  el.querySelectorAll('[data-ftab-close]').forEach((x) => x.addEventListener('click', () => closeSession(Number((x as HTMLElement).dataset.ftabClose))));
   renderWorkspaceBar();
 }
 
@@ -451,7 +522,10 @@ function renderReader(session: FileSession): void {
   const card = splitChapter(session.md).card;
   S.currentKnown = new Set([...lex.known, ...IRR, ...cardGlossWords(card)]);
   const terms = new Set<string>([
-    ...(S.termsText ?? '').split('\n').map((l) => l.trim().toLowerCase()).filter((l) => l && !l.startsWith('#')),
+    ...(S.termsText ?? '')
+      .split('\n')
+      .map((l) => l.trim().toLowerCase())
+      .filter((l) => l && !l.startsWith('#')),
     ...S.properRows.map((r) => r.toLowerCase()),
   ]);
 
@@ -478,7 +552,7 @@ function renderReader(session: FileSession): void {
         if (risk.overlong) s.appendChild(badge('长'));
       }
       const toks = tokenizeTxt(sent);
-      const rawWords = sent.match(/[A-Za-z][A-Za-z'\-]*/g) ?? [];
+      const rawWords = sent.match(/[A-Za-z][A-Za-z'-]*/g) ?? [];
       let rest = sent;
       for (let i = 0; i < rawWords.length; i++) {
         const raw = rawWords[i];
@@ -583,21 +657,14 @@ function placePop(x: number, y: number): void {
 }
 
 function marksAt(session: FileSession, level: 'word' | 'sent', pi: number, si: number, wi?: number): Mark[] {
-  return session.review.marks.filter((m) =>
-    m.level === level && m.pi === pi && m.si === si && (level === 'sent' || m.wi === wi),
-  );
+  return session.review.marks.filter((m) => m.level === level && m.pi === pi && m.si === si && (level === 'sent' || m.wi === wi));
 }
 
 function renderPopMarks(existing: Mark[]): void {
   const box = pop.querySelector('.pop-marks');
   if (!box) return;
   box.innerHTML = existing.length
-    ? existing
-        .map(
-          (m) =>
-            `<span class="mchip">${typeLabel(m.type)}${m.note ? ' ✎' : ''}<button class="x" data-pop-rm="${m.id}" title="删除该标记">×</button></span>`,
-        )
-        .join('')
+    ? existing.map((m) => `<span class="mchip">${typeLabel(m.type)}${m.note ? ' ✎' : ''}<button class="x" data-pop-rm="${m.id}" title="删除该标记">×</button></span>`).join('')
     : '<span style="color:var(--muted);font-size:12px">尚无标记</span>';
   box.querySelectorAll('[data-pop-rm]').forEach((btn) =>
     btn.addEventListener('click', () => {
@@ -613,7 +680,9 @@ function renderPopMarks(existing: Mark[]): void {
 function refreshPop(_why: string): void {
   if (!S.popSession) return;
   const ctx = pop.dataset;
-  const pi = Number(ctx.pi), si = Number(ctx.si), wi = ctx.wi === undefined ? undefined : Number(ctx.wi);
+  const pi = Number(ctx.pi),
+    si = Number(ctx.si),
+    wi = ctx.wi === undefined ? undefined : Number(ctx.wi);
   const level = ctx.level as 'word' | 'sent';
   renderPopMarks(marksAt(S.popSession, level, pi, si, wi));
   // 类型按钮置灰已选项
@@ -633,9 +702,14 @@ function showWordPanel(session: FileSession, wEl: HTMLElement, x: number, y: num
   const tok = wEl.dataset.tok!;
   const state = wEl.dataset.state;
   const origin = hitOrigin(tok, S.currentKnown);
-  const stateLabel = state === 'oov' ? '<span class="warn">词表外（红）</span>'
-    : state === 'pending' ? '<span class="warn">待定词（橙）—暂计已知，风险另计</span>'
-    : state === 'term' ? '术语（蓝）' : '<span class="ok">词表内</span>';
+  const stateLabel =
+    state === 'oov'
+      ? '<span class="warn">词表外（红）</span>'
+      : state === 'pending'
+        ? '<span class="warn">待定词（橙）—暂计已知，风险另计</span>'
+        : state === 'term'
+          ? '术语（蓝）'
+          : '<span class="ok">词表内</span>';
   pop.dataset.level = 'word';
   pop.dataset.pi = String(pi);
   pop.dataset.si = String(si);
@@ -659,10 +733,7 @@ function showSentPanel(session: FileSession, sentEl: HTMLElement, x: number, y: 
   const text = sentsOf(extractParas(splitChapter(session.md).body)[pi], false)[si] ?? '';
   const wc = text.split(/\s+/).filter(Boolean).length;
   const risk = sentenceRisks(text);
-  const riskBits = [
-    risk.passive ? '被动' : '', risk.relcl ? '定从' : '', risk.pastperf ? '过去完成' : '',
-    risk.overlong ? `超长(${wc}词)` : '',
-  ].filter(Boolean).join(' / ');
+  const riskBits = [risk.passive ? '被动' : '', risk.relcl ? '定从' : '', risk.pastperf ? '过去完成' : '', risk.overlong ? `超长(${wc}词)` : ''].filter(Boolean).join(' / ');
   pop.dataset.level = 'sent';
   pop.dataset.pi = String(pi);
   pop.dataset.si = String(si);
@@ -683,7 +754,10 @@ function bindTypeButtons(session: FileSession, level: 'word' | 'sent', pi: numbe
     b.addEventListener('click', () => {
       const type = (b as HTMLElement).dataset.mk as MarkType | '__rewrite';
       if ((type as string) === '__rewrite') {
-        const intent = marksAt(session, 'word', pi, si, wi).map((m) => typeLabel(m.type)).join('、') || '词汇简化';
+        const intent =
+          marksAt(session, 'word', pi, si, wi)
+            .map((m) => typeLabel(m.type))
+            .join('、') || '词汇简化';
         void aiRewriteSentence(pi, si, intent);
         return;
       }
@@ -691,9 +765,15 @@ function bindTypeButtons(session: FileSession, level: 'word' | 'sent', pi: numbe
       if (marksAt(session, level, pi, si, wi).some((m) => m.type === type)) return; // 已有同类型标记
       const sentText = sentsOf(extractParas(splitChapter(session.md).body)[pi], false)[si] ?? '';
       const mark = addMark(session, {
-        id: newMarkId(), level, pi, si, ...(level === 'word' ? { wi } : {}),
+        id: newMarkId(),
+        level,
+        pi,
+        si,
+        ...(level === 'word' ? { wi } : {}),
         ...(level === 'word' ? { word: pop.querySelector('.pop-h')?.textContent ?? '', text: sentText.slice(0, 40) } : { text: sentText.slice(0, 40) }),
-        type: type as MarkType, note, ts: Date.now(),
+        type: type as MarkType,
+        note,
+        ts: Date.now(),
       });
       // 标记即改写：点完标记直接 AI 改写并生效，无需任何后续点击
       if (S.appConfig.autoRewriteOnMark) {
@@ -718,7 +798,10 @@ function tagFromPath(p: string): string {
 
 async function runQcCurrent(opts: { auto?: boolean } = {}): Promise<void> {
   const s = activeSession();
-  if (!s) { setStatus('请先载入文本', 'err'); return; }
+  if (!s) {
+    setStatus('请先载入文本', 'err');
+    return;
+  }
   try {
     s.report = runQc(s.md, buildLexiconNow(), {
       tier: 'M', // 引擎口径固定 M（黑名单全禁）；句长参考用「简化标准」simplifyMaxLen()
@@ -767,7 +850,7 @@ function locateWordFirst(session: FileSession, tok: string): { pi: number; si: n
       const toks = tokenizeTxt(sent);
       const wi = toks.indexOf(tok);
       if (wi >= 0) {
-        const raw = (sent.match(/[A-Za-z][A-Za-z'\-]*/g) ?? [])[wi] ?? tok;
+        const raw = (sent.match(/[A-Za-z][A-Za-z'-]*/g) ?? [])[wi] ?? tok;
         return { pi, si, wi, raw };
       }
     }
@@ -775,7 +858,13 @@ function locateWordFirst(session: FileSession, tok: string): { pi: number; si: n
   return null;
 }
 
-interface RiskSentItem { sent: string; pi: number; si: number; badges: string[]; type: 'syntax' | 'long' }
+interface RiskSentItem {
+  sent: string;
+  pi: number;
+  si: number;
+  badges: string[];
+  type: 'syntax' | 'long';
+}
 
 /** 初步诊断：本章全部黑名单难句（与正文着色同一套检测） */
 function riskSentenceList(s: FileSession): RiskSentItem[] {
@@ -783,9 +872,7 @@ function riskSentenceList(s: FileSession): RiskSentItem[] {
   extractParas(splitChapter(s.md).body).forEach((p, pi) =>
     sentsOf(p, false).forEach((sent, si) => {
       const risk = sentenceRisks(sent);
-      const badges = [
-        risk.passive ? '被' : '', risk.relcl ? '从' : '', risk.pastperf ? '完' : '', risk.overlong ? '长' : '',
-      ].filter(Boolean);
+      const badges = [risk.passive ? '被' : '', risk.relcl ? '从' : '', risk.pastperf ? '完' : '', risk.overlong ? '长' : ''].filter(Boolean);
       if (badges.length) out.push({ sent, pi, si, badges, type: pickSentMarkType(risk) });
     }),
   );
@@ -801,13 +888,11 @@ function renderReportPane(s: FileSession): void {
   const legacy = toLegacyReport(s.report) as Record<string, unknown>;
   // 显示层口径（引擎 legacy 字段不动，只改呈现）："层级/章号"是引擎内部字段不再展示；
   // 指标名里的旧口径字样与硬编码 20 词按当前简化标准改写（O3 补漏）
-  const rows = Object.entries(legacy).filter(
-    ([k, v]) => k !== 'OOV词(去重)' && k !== '层级' && !(k === '章号' && (v === null || String(v) === 'null')),
-  );
+  const rows = Object.entries(legacy).filter(([k, v]) => k !== 'OOV词(去重)' && k !== '层级' && !(k === '章号' && (v === null || String(v) === 'null')));
   const labelMap: Record<string, string> = {
     '①词表覆盖率(注释后口径=含A层术语)': '①词表覆盖率',
     '⑩复现词命中(队列/命中/词次)': '⑩复现词命中（队列/命中/词次）',
-    '复现命中词': '⑩复现命中词（已学词在本篇重现）',
+    复现命中词: '⑩复现命中词（已学词在本篇重现）',
   };
   const oov = [...new Set(s.report.oov)];
   const sel = mergedSelection();
@@ -815,25 +900,31 @@ function renderReportPane(s: FileSession): void {
   const risks = riskSentenceList(s);
 
   /* 生词清单：每个词两个动作——标记简化（进标记清单走 AI）/ 计入已学词（不再标红） */
-  const oovRows = oov.slice(0, 80).map((w) => {
-    const marked = s.review.marks.some((m) => m.level === 'word' && (m.word ?? '').toLowerCase() === w);
-    const learned = S.currentKnown.has(w);
-    return `<tr>
+  const oovRows = oov
+    .slice(0, 80)
+    .map((w) => {
+      const marked = s.review.marks.some((m) => m.level === 'word' && (m.word ?? '').toLowerCase() === w);
+      const learned = S.currentKnown.has(w);
+      return `<tr>
       <td style="font-weight:600">${esc(w)}</td>
       <td>${marked ? '<span class="ok-badge">✓ 已标记简化</span>' : `<button data-oov-simpl="${esc(w)}">✓ 标记要简化</button>`}
           ${learned ? '<span class="ok-badge">✓ 已学</span>' : `<button data-oov-learn="${esc(w)}">✓ 学生已学过</button>`}</td>
     </tr>`;
-  }).join('');
+    })
+    .join('');
 
   /* 难句清单：每句一个动作——标记要改（进标记清单） */
-  const riskRows = risks.slice(0, 40).map((r) => {
-    const marked = s.review.marks.some((m) => m.level === 'sent' && m.pi === r.pi && m.si === r.si);
-    return `<tr>
+  const riskRows = risks
+    .slice(0, 40)
+    .map((r) => {
+      const marked = s.review.marks.some((m) => m.level === 'sent' && m.pi === r.pi && m.si === r.si);
+      return `<tr>
       <td><span class="chip warn-chip">${r.badges.join('')}</span> <span class="dim">P${String(r.pi + 1).padStart(2, '0')}-S${r.si + 1}</span></td>
       <td title="${esc(r.sent)}">${esc(r.sent.slice(0, 70))}${r.sent.length > 70 ? '…' : ''}</td>
       <td>${marked ? '<span class="ok-badge">✓ 已标记</span>' : `<button data-risk-pi="${r.pi}" data-risk-si="${r.si}">✓ 标记要改</button>`}</td>
     </tr>`;
-  }).join('');
+    })
+    .join('');
 
   pane.innerHTML = `
     ${s.reportSavedPath ? `<div class="saved-path">报告已自动保存：${esc(s.reportSavedPath)} <button id="btn-reveal">在访达中显示</button></div>` : ''}
@@ -844,12 +935,20 @@ function renderReportPane(s: FileSession): void {
     </table>
 
     <div class="diag-h">① 生词清单（去重 ${oov.length} 词）<span class="dim">——勾一个动一个：要简化的进标记清单，学生已学过的立即不再标红</span></div>
-    ${oov.length ? `<table class="sgtable"><tr><th style="width:90px">词</th><th>处理（你说了算）</th></tr>${oovRows}</table>
-    ${oov.length > 80 ? `<div class="dim" style="margin-bottom:10px">（只列前 80 词，处理或换词库后点「▶ 重新质检」看剩余）</div>` : ''}` : '<div class="dim" style="margin-bottom:10px">没有词表外生词 🎉</div>'}
+    ${
+      oov.length
+        ? `<table class="sgtable"><tr><th style="width:90px">词</th><th>处理（你说了算）</th></tr>${oovRows}</table>
+    ${oov.length > 80 ? `<div class="dim" style="margin-bottom:10px">（只列前 80 词，处理或换词库后点「▶ 重新质检」看剩余）</div>` : ''}`
+        : '<div class="dim" style="margin-bottom:10px">没有词表外生词 🎉</div>'
+    }
 
     <div class="diag-h">② 句法难句（${risks.length} 句：被=被动 从=定从 完=过去完成 长=超20词·引擎口径）<span class="dim">——勾"要改"的进标记清单，可批量交给 AI</span></div>
-    ${risks.length ? `<table class="sgtable"><tr><th style="width:110px">风险</th><th>句子</th><th style="width:110px">处理</th></tr>${riskRows}</table>
-    ${risks.length > 40 ? `<div class="dim" style="margin-bottom:10px">（只列前 40 句）</div>` : ''}` : '<div class="dim" style="margin-bottom:10px">没有命中黑名单的难句 🎉</div>'}
+    ${
+      risks.length
+        ? `<table class="sgtable"><tr><th style="width:110px">风险</th><th>句子</th><th style="width:110px">处理</th></tr>${riskRows}</table>
+    ${risks.length > 40 ? `<div class="dim" style="margin-bottom:10px">（只列前 40 句）</div>` : ''}`
+        : '<div class="dim" style="margin-bottom:10px">没有命中黑名单的难句 🎉</div>'
+    }
 
     <div class="diag-h">③ 情节要点（AI 摘候选 → 你勾选 → 进右侧"要点配额"）</div>
     <div style="margin-bottom:8px">
@@ -865,11 +964,22 @@ function renderReportPane(s: FileSession): void {
     btn.addEventListener('click', () => {
       const tok = (btn as HTMLElement).dataset.oovSimpl!;
       const loc = locateWordFirst(s, tok);
-      if (!loc) { setStatus(`正文中没找到 "${tok}"（可能已修改，点「▶ 重新质检」）`, 'err'); return; }
+      if (!loc) {
+        setStatus(`正文中没找到 "${tok}"（可能已修改，点「▶ 重新质检」）`, 'err');
+        return;
+      }
       const sent = sentsOf(extractParas(splitChapter(s.md).body)[loc.pi], false)[loc.si];
       addMark(s, {
-        id: newMarkId(), level: 'word', pi: loc.pi, si: loc.si, wi: loc.wi,
-        word: loc.raw, text: sent.slice(0, 40), type: 'simpl', note: '初步诊断：生词', ts: Date.now(),
+        id: newMarkId(),
+        level: 'word',
+        pi: loc.pi,
+        si: loc.si,
+        wi: loc.wi,
+        word: loc.raw,
+        text: sent.slice(0, 40),
+        type: 'simpl',
+        note: '初步诊断：生词',
+        ts: Date.now(),
       });
       renderReportPane(s);
       setStatus(`✓ 已标记简化「${loc.raw}」——处理完一批后点「✨AI 审核建议」批量改`, 'saved');
@@ -893,8 +1003,14 @@ function renderReportPane(s: FileSession): void {
       const item = risks.find((r) => r.pi === pi && r.si === si);
       if (!item) return;
       addMark(s, {
-        id: newMarkId(), level: 'sent', pi, si, text: item.sent.slice(0, 40),
-        type: item.type, note: `初步诊断：${item.badges.join('/')}`, ts: Date.now(),
+        id: newMarkId(),
+        level: 'sent',
+        pi,
+        si,
+        text: item.sent.slice(0, 40),
+        type: item.type,
+        note: `初步诊断：${item.badges.join('/')}`,
+        ts: Date.now(),
       });
       renderReportPane(s);
       setStatus(`✓ 已标记要改（P${pi + 1}-S${si + 1}，${item.badges.join('/')}）——可批量点「✨AI 审核建议」`, 'saved');
@@ -920,7 +1036,10 @@ async function aiPlotPoints(s: FileSession): Promise<void> {
   try {
     const chapter = splitChapter(s.md).body.slice(0, 12000);
     const { raw } = await chatUntilJson([{ role: 'user', content: await buildPlotPointsPrompt(chapter) }], 1500, '情节要点');
-    const items = (raw as unknown[]).filter((x): x is string => typeof x === 'string' && x.trim().length > 1).map((x) => x.trim()).slice(0, 10);
+    const items = (raw as unknown[])
+      .filter((x): x is string => typeof x === 'string' && x.trim().length > 1)
+      .map((x) => x.trim())
+      .slice(0, 10);
     if (items.length === 0) throw new Error('AI 未返回要点');
     out.innerHTML = `
       <div class="dim" style="margin:6px 0">AI 摘出 ${items.length} 条候选——<b>只把你勾的加入配额</b>，不勾的直接丢掉：</div>
@@ -936,7 +1055,10 @@ async function aiPlotPoints(s: FileSession): Promise<void> {
     out.querySelectorAll('[data-plot-idx]').forEach((cb) => cb.addEventListener('change', refreshCnt));
     acceptBtn.addEventListener('click', () => {
       const chosen = [...out.querySelectorAll('[data-plot-idx]:checked')].map((cb) => items[Number((cb as HTMLElement).dataset.plotIdx)]);
-      const fresh = mergeQuotaTexts(s.review.quota.map((q) => q.text), chosen);
+      const fresh = mergeQuotaTexts(
+        s.review.quota.map((q) => q.text),
+        chosen,
+      );
       for (const t of fresh) s.review.quota.push({ text: t, done: false });
       scheduleSave(s, () => undefined);
       renderSidebar(s, sidebarHandlers);
@@ -966,7 +1088,7 @@ async function renderRetroPane(): Promise<void> {
   const pane = $('pane-retro');
   const s = activeSession();
   pane.innerHTML = '<div class="empty">读取台账…</div>';
-  let csv = '';
+  let csv: string;
   try {
     const outDir = s?.sourcePath ? s.sourcePath.slice(0, s.sourcePath.lastIndexOf('/')) : await invoke<string>('reports_dir');
     csv = await invoke<string>('read_text_file', { path: `${outDir}/AI建议台账.csv` });
@@ -992,12 +1114,23 @@ async function renderRetroPane(): Promise<void> {
     const bookName = dir ? dir.slice(dir.lastIndexOf('/') + 1) : '';
     const cs = summarizeCost(costCsv, bookName || undefined);
     if (cs.calls > 0) {
-      costHtml = card('本书 AI 成本', `${cs.promptTokens + cs.completionTokens} tokens`, `${cs.calls} 次调用（入 ${cs.promptTokens} + 出 ${cs.completionTokens}）${cs.failoverCount ? `，备用切换 ${cs.failoverCount} 次` : ''}${cs.errCount ? `，失败 ${cs.errCount} 次` : ''}`);
+      costHtml = card(
+        '本书 AI 成本',
+        `${cs.promptTokens + cs.completionTokens} tokens`,
+        `${cs.calls} 次调用（入 ${cs.promptTokens} + 出 ${cs.completionTokens}）${cs.failoverCount ? `，备用切换 ${cs.failoverCount} 次` : ''}${cs.errCount ? `，失败 ${cs.errCount} 次` : ''}`,
+      );
     }
-  } catch { /* 无成本台账则不显示卡片 */ }
-  const groupRows = (list: typeof a.byMark) => list.map((g) => `<tr>
+  } catch {
+    /* 无成本台账则不显示卡片 */
+  }
+  const groupRows = (list: typeof a.byMark) =>
+    list
+      .map(
+        (g) => `<tr>
       <td>${esc(g.key)}</td><td>${g.total}</td><td>${g.accepted}</td><td>${g.rejected}</td><td>${g.autoApplied}</td>
-      <td>${pct(g.explicitRate)}</td><td>${pct(g.checkWarnRatio)}</td></tr>`).join('');
+      <td>${pct(g.explicitRate)}</td><td>${pct(g.checkWarnRatio)}</td></tr>`,
+      )
+      .join('');
   const cc = a.crossCheck;
   pane.innerHTML = `
     <div class="sg-actions">
@@ -1016,13 +1149,23 @@ async function renderRetroPane(): Promise<void> {
       <tr><th>标记类型</th><th>建议数</th><th>采纳</th><th>拒绝</th><th>直改</th><th>明确采纳率</th><th>复核⚠比</th></tr>
       ${groupRows(a.byMark)}
     </table>
-    ${a.topRejected.length ? `<table class="sgtable"><tr><th>最常被拒 Top${a.topRejected.length}</th><th>被拒次数</th><th>采纳</th><th>复核⚠比</th></tr>
-      ${a.topRejected.map((g) => `<tr><td>${esc(g.key)}</td><td>${g.rejected}</td><td>${g.accepted}</td><td>${pct(g.checkWarnRatio)}</td></tr>`).join('')}</table>` : ''}
-    ${a.byDate.length > 1 ? `<table class="sgtable"><tr><th>日期</th><th>建议数</th><th>接受</th><th>拒绝</th><th>明确采纳率</th></tr>
-      ${a.byDate.map((d) => `<tr><td>${esc(d.date)}</td><td>${d.total}</td><td>${d.accepted + d.autoApplied}</td><td>${d.rejected}</td><td>${pct(d.rate)}</td></tr>`).join('')}</table>` : ''}
+    ${
+      a.topRejected.length
+        ? `<table class="sgtable"><tr><th>最常被拒 Top${a.topRejected.length}</th><th>被拒次数</th><th>采纳</th><th>复核⚠比</th></tr>
+      ${a.topRejected.map((g) => `<tr><td>${esc(g.key)}</td><td>${g.rejected}</td><td>${g.accepted}</td><td>${pct(g.checkWarnRatio)}</td></tr>`).join('')}</table>`
+        : ''
+    }
+    ${
+      a.byDate.length > 1
+        ? `<table class="sgtable"><tr><th>日期</th><th>建议数</th><th>接受</th><th>拒绝</th><th>明确采纳率</th></tr>
+      ${a.byDate.map((d) => `<tr><td>${esc(d.date)}</td><td>${d.total}</td><td>${d.accepted + d.autoApplied}</td><td>${d.rejected}</td><td>${pct(d.rate)}</td></tr>`).join('')}</table>`
+        : ''
+    }
     <div class="retro-verdict">
       <div style="font-weight:600;margin-bottom:6px">判读（自动生成）</div>
-      ${diagnose(a).map((d) => `<div>· ${esc(d)}</div>`).join('')}
+      ${diagnose(a)
+        .map((d) => `<div>· ${esc(d)}</div>`)
+        .join('')}
     </div>`;
   $('retro-refresh').addEventListener('click', () => void renderRetroPane());
 }
@@ -1041,21 +1184,27 @@ async function renderRecentInEmpty(): Promise<void> {
   if (!reader.querySelector('.empty') || !S.appConfig.recentFiles?.length) return;
   const div = document.createElement('div');
   div.style.cssText = 'margin-top:18px;text-align:center';
-  div.innerHTML = `<div style="font-weight:600;margin-bottom:8px">最近编辑</div>` +
-    S.appConfig.recentFiles.map((p) =>
-      `<div class="recent-item" data-path="${esc(p)}" style="cursor:pointer;padding:5px 10px;border-radius:8px;display:inline-block;margin:3px;background:#f8fafc;border:1px solid var(--line);font-size:12px">${esc(p.slice(p.lastIndexOf('/') + 1))}</div>`).join('');
+  div.innerHTML =
+    `<div style="font-weight:600;margin-bottom:8px">最近编辑</div>` +
+    S.appConfig.recentFiles
+      .map(
+        (p) =>
+          `<div class="recent-item" data-path="${esc(p)}" style="cursor:pointer;padding:5px 10px;border-radius:8px;display:inline-block;margin:3px;background:#f8fafc;border:1px solid var(--line);font-size:12px">${esc(p.slice(p.lastIndexOf('/') + 1))}</div>`,
+      )
+      .join('');
   reader.appendChild(div);
   div.querySelectorAll('.recent-item').forEach((el) =>
     el.addEventListener('click', async () => {
       const path = (el as HTMLElement).dataset.path!;
       try {
-        const raw = path.toLowerCase().endsWith('.docx')
-          ? docxToText(await invoke<string>('read_file_base64', { path }))
-          : await invoke<string>('read_text_file', { path });
+        const raw = path.toLowerCase().endsWith('.docx') ? docxToText(await invoke<string>('read_file_base64', { path })) : await invoke<string>('read_text_file', { path });
         const { chapters } = normalizeAndSplitChapters(raw, path.slice(path.lastIndexOf('/') + 1));
         for (const ch of chapters) await addSession(ch.md, chapters.length > 1 ? ch.title : path.slice(path.lastIndexOf('/') + 1), path);
-      } catch (e) { setStatus('打开失败：' + e, 'err'); }
-    }));
+      } catch (e) {
+        setStatus('打开失败：' + e, 'err');
+      }
+    }),
+  );
 }
 
 /* ---------- AI 会话持久化（防抖落盘，重启可恢复） ---------- */
@@ -1063,20 +1212,31 @@ async function renderRecentInEmpty(): Promise<void> {
 let chatSaveTimer: ReturnType<typeof setTimeout> | undefined;
 function scheduleChatSave(): void {
   clearTimeout(chatSaveTimer);
-  chatSaveTimer = setTimeout(() => void (async () => {
-    try {
-      const dir = await invoke<string>('reports_dir');
-      await invoke('write_text_file', { path: `${dir}/AI会话.json`, content: JSON.stringify(S.chatMsgs, null, 1) });
-    } catch { /* 尽力保存 */ }
-  })(), 800);
+  chatSaveTimer = setTimeout(
+    () =>
+      void (async () => {
+        try {
+          const dir = await invoke<string>('reports_dir');
+          await invoke('write_text_file', { path: `${dir}/AI会话.json`, content: JSON.stringify(S.chatMsgs, null, 1) });
+        } catch {
+          /* 尽力保存 */
+        }
+      })(),
+    800,
+  );
 }
 
 async function restoreChat(): Promise<void> {
   try {
     const dir = await invoke<string>('reports_dir');
     const saved = JSON.parse(await invoke<string>('read_text_file', { path: `${dir}/AI会话.json` }));
-    if (Array.isArray(saved) && saved.length) { S.chatMsgs = saved; chatRender(); }
-  } catch { /* 无历史 */ }
+    if (Array.isArray(saved) && saved.length) {
+      S.chatMsgs = saved;
+      chatRender();
+    }
+  } catch {
+    /* 无历史 */
+  }
 }
 
 /* ---------- 诊断包与本地错误日志（W5：零遥测——只写本机，导出自愿） ---------- */
@@ -1105,12 +1265,16 @@ async function exportDiagnostics(): Promise<void> {
     try {
       const log = await invoke<string>('read_error_log');
       if (log.trim()) files['错误日志.log'] = strToU8(log.slice(-128 * 1024)); // 最多带最近 128KB
-    } catch { /* 无日志 */ }
+    } catch {
+      /* 无日志 */
+    }
     try {
       const dir = await invoke<string>('reports_dir');
       const cost = await invoke<string>('read_text_file', { path: `${dir}/AI成本台账.csv` });
       if (cost.trim()) files['AI成本台账.csv'] = strToU8(cost.slice(-64 * 1024));
-    } catch { /* 无台账 */ }
+    } catch {
+      /* 无台账 */
+    }
     const zipped = zipSync(files, { level: 6 });
     const zbuf = zipped.buffer.slice(zipped.byteOffset, zipped.byteOffset + zipped.byteLength) as ArrayBuffer;
     await invoke('write_file_base64', { path: savePath, b64: bufToB64(zbuf) });
@@ -1136,11 +1300,16 @@ function simulateError(): void {
 $('tab-text').addEventListener('click', () => switchView('text'));
 $('tab-report').addEventListener('click', () => switchView('report'));
 $('tab-suggest').addEventListener('click', () => switchView('suggest'));
-$('tab-diff').addEventListener('click', () => { renderDiff(0, Math.min(1, S.sessions.length - 1)); switchView('diff'); });
-$('tab-retro').addEventListener('click', () => { void renderRetroPane(); switchView('retro'); });
+$('tab-diff').addEventListener('click', () => {
+  renderDiff(0, Math.min(1, S.sessions.length - 1));
+  switchView('diff');
+});
+$('tab-retro').addEventListener('click', () => {
+  void renderRetroPane();
+  switchView('retro');
+});
 
 /* ---------- 示例菜单 ---------- */
-
 
 async function openDemoMenu(): Promise<void> {
   const menu = $('demo-menu');
@@ -1242,9 +1411,7 @@ function docxToText(b64: string): string {
 
 async function openPathIntoSession(p: string): Promise<void> {
   const name = p.slice(p.lastIndexOf('/') + 1);
-  const raw = p.toLowerCase().endsWith('.docx')
-    ? docxToText(await invoke<string>('read_file_base64', { path: p }))
-    : await invoke<string>('read_text_file', { path: p });
+  const raw = p.toLowerCase().endsWith('.docx') ? docxToText(await invoke<string>('read_file_base64', { path: p })) : await invoke<string>('read_text_file', { path: p });
   // 智能归一化：已合规直接用；多章标题拆多 tab；无章节结构的文本内存包装直接显示（原文件不动）
   const { chapters } = normalizeAndSplitChapters(raw, name);
   for (const ch of chapters) await addSession(ch.md, chapters.length > 1 ? ch.title : name, p);
@@ -1255,7 +1422,8 @@ async function openChapterFiles(): Promise<void> {
     multiple: true,
     filters: [{ name: '章节文件（Markdown / 文本 / Word）', extensions: ['md', 'txt', 'markdown', 'docx'] }],
   });
-  const list = Array.isArray(paths) ? paths : [paths];
+  if (!paths) return; // 用户取消选择
+  const list = (Array.isArray(paths) ? paths : [paths]).filter((p): p is string => typeof p === 'string');
   for (const p of list) {
     try {
       await openPathIntoSession(p);
@@ -1268,7 +1436,8 @@ async function openChapterFiles(): Promise<void> {
 /* ---------- 工作区（书目录 _工作区.json：3 层次=3 工作区，浏览器标签式切换） ---------- */
 
 async function loadWorkspaces(dir: string): Promise<void> {
-  for (const d of [dir, dir.slice(0, dir.lastIndexOf('/'))]) {   // 先章目录，再书稿根目录
+  for (const d of [dir, dir.slice(0, dir.lastIndexOf('/'))]) {
+    // 先章目录，再书稿根目录
     try {
       const raw = await invoke<string>('read_text_file', { path: `${d}/_工作区.json` });
       const ws = parseWorkspaces(raw);
@@ -1277,7 +1446,9 @@ async function loadWorkspaces(dir: string): Promise<void> {
         if (!S.activeWorkspace || !ws.some((w) => w.名 === S.activeWorkspace)) S.activeWorkspace = null;
         return;
       }
-    } catch { /* 无配置则试上级 */ }
+    } catch {
+      /* 无配置则试上级 */
+    }
   }
   S.workspaces = [];
   S.activeWorkspace = null;
@@ -1291,15 +1462,26 @@ function activateWorkspace(name: string): void {
       S.selectedIds = [w.定制目标];
       fileSummary();
     } else {
-      setStatus(`工作区已切到【${name}】；绑定目标 ${w.定制目标} 尚未加载——点「👥班级定制→刷新」`, 'err');
+      // 分组文件尚未就位：静默补加载一次，成功则自动绑定口径；仍没有就不打扰（不打红色的错）
+      void loadClassGroups().then(() => {
+        if (S.activeWorkspace === name && w.定制目标 && S.classTargets.some((t) => t.id === w.定制目标)) {
+          S.selectedIds = [w.定制目标];
+          fileSummary();
+        }
+      });
     }
   }
   renderWorkspaceBar();
 }
 
-/* ---------- 书架（首页：示例 + 我的书；点书进入工作区） ---------- */
+/* ---------- 书架（首页：示例 + 我的书；点书 → 先选版本 → 再进工作区） ---------- */
 
-interface ShelfBook { 名: string; 目录: string; 副标题?: string; 最近打开?: string }
+interface ShelfBook {
+  名: string;
+  目录: string;
+  副标题?: string;
+  最近打开?: string;
+}
 
 async function shelfPath(): Promise<string> {
   const dir = await invoke<string>('config_dir');
@@ -1311,7 +1493,9 @@ async function loadShelf(): Promise<ShelfBook[]> {
     const raw = await invoke<string>('read_text_file', { path: await shelfPath() });
     const j = JSON.parse(raw) as { 书?: ShelfBook[] };
     return Array.isArray(j.书) ? j.书.filter((b) => b.名 && b.目录) : [];
-  } catch { return []; }
+  } catch {
+    return [];
+  }
 }
 
 async function saveShelf(books: ShelfBook[]): Promise<void> {
@@ -1328,47 +1512,69 @@ async function renderShelf(): Promise<void> {
 }
 
 function shelfColor(name: string): string {
-  let h = 0; for (const c of name) h = (h * 31 + c.charCodeAt(0)) % 360;
+  let h = 0;
+  for (const c of name) h = (h * 31 + c.charCodeAt(0)) % 360;
   return `hsl(${h},45%,45%)`;
+}
+
+/** 封面图：书目录里的 cover/封面.{jpg,jpeg,png,webp}——找到即用；没有就用书名文字封面 */
+async function coverDataUrl(dir: string): Promise<string | null> {
+  try {
+    const imgs = await invoke<string[]>('list_cover_images', { dir });
+    if (!imgs.length) return null;
+    const p = imgs[0].toLowerCase();
+    const mime = p.endsWith('.png') ? 'png' : p.endsWith('.webp') ? 'webp' : 'jpeg';
+    const b64 = await invoke<string>('read_file_base64', { path: imgs[0] });
+    return `data:image/${mime};base64,${b64}`;
+  } catch {
+    return null;
+  }
+}
+
+/** 书封 HTML：有图全幅显示（书名落底部渐变条），无图用色块+居中书名（字号按书名长度自适应，极端长名换行4行内可见） */
+function coverHtml(名: string, img: string | null): string {
+  const style = img ? `background-image:url(${img})` : `background:${shelfColor(名)}`;
+  return `<div class="shelf-cover${img ? ' has-img' : ''}" style="${style}">
+    <div class="cover-title" style="font-size:${coverTitlePx(名)}px">${esc(名)}</div>
+  </div>`;
 }
 
 async function renderShelfInner(el: HTMLElement): Promise<void> {
   const books = await loadShelf();
-  const cards = books.map((b, i) => {
-    return `<div class="shelf-card" data-shelf="${i}" style="border-left:6px solid ${shelfColor(b.名)}">
-      <div class="shelf-title">${esc(b.名)}</div>
+  const covers = await Promise.all(books.map((b) => coverDataUrl(b.目录)));
+  const cards = books
+    .map(
+      (b, i) => `<div class="shelf-card" data-shelf="${i}" title="打开《${esc(b.名)}》">
+    ${coverHtml(b.名, covers[i])}
+    <div class="shelf-info">
       <div class="shelf-sub">${esc(b.副标题 ?? '')}</div>
-      <div class="shelf-meta">${esc(b.最近打开 ? '最近打开 ' + b.最近打开 : '')}</div>
-      <button class="shelf-open" data-shelf-open="${i}">打开这本书</button>
-    </div>`;
-  }).join('');
+      <div class="shelf-meta">${esc(b.最近打开 ? '最近打开 ' + b.最近打开 : '点书选版本')}</div>
+    </div>
+  </div>`,
+    )
+    .join('');
   const ls = S.appConfig.lastSession;
   el.innerHTML = `
     <div class="shelf">
       ${ls?.files?.length ? `<div class="shelf-resume" id="shelf-resume">▶ 继续上次编辑：${esc(ls.workspace ? ls.workspace + ' · ' : '')}${esc(ls.files[Math.min(ls.activeIdx, ls.files.length - 1)]?.path.split('/').pop() ?? '')} <span class="dim">（${esc(ls.savedAt)}）</span></div>` : ''}
-      <div class="shelf-h">📚 我的书架<span class="dim">——点一本书进入工作区（版本标签+章节一键打开）</span></div>
+      <div class="shelf-h">📚 我的书架<span class="dim">——点一本书，先选版本（如 B/M/A），再进工作区</span></div>
       <div class="shelf-grid">
-        <div class="shelf-card demo" id="shelf-demo">
-          <div class="shelf-title">龟兔赛跑</div>
-          <div class="shelf-sub">内置示例 · 含示例词库</div>
-          <div class="shelf-meta">随时可用</div>
-          <button class="shelf-open" id="shelf-demo-open">看演示</button>
+        <div class="shelf-card demo" id="shelf-demo" title="打开内置示例">
+          ${coverHtml('龟兔赛跑', null)}
+          <div class="shelf-info"><div class="shelf-sub">内置示例 · 含示例词库</div><div class="shelf-meta">随时可用</div></div>
         </div>
-        ${cards || ''}
-        <div class="shelf-card add" id="shelf-add">
-          <div class="shelf-title">＋ 添加书稿文件夹</div>
-          <div class="shelf-sub">选一个书稿文件夹（含章节 md 与 _工作区.json/_词库.csv）</div>
-          <div class="shelf-meta">注册到书架，下次打开直接从这进</div>
+        ${cards}
+        <div class="shelf-card add" id="shelf-add" title="把一个书稿文件夹注册到书架">
+          <div class="shelf-cover">＋</div>
+          <div class="shelf-info"><div class="shelf-sub">添加书稿文件夹</div><div class="shelf-meta">含章节 md；可配 _工作区.json / _词库.csv</div></div>
         </div>
       </div>
-      <div class="dim" style="margin-top:14px">也可以继续用上方「打开文件…」直接开单章；「载入示例▾」看内置示例。</div>
+      <div class="dim" style="margin-top:16px">书目录里放一张 cover.jpg 或 封面.png 即可作书封；没有图就用书名当封面。也可以用上方「打开文件…」直接开单章。</div>
     </div>`;
   document.getElementById('shelf-resume')?.addEventListener('click', () => void resumeLastSession());
-  document.getElementById('shelf-demo-open')?.addEventListener('click', () => loadBuiltinDemo());
+  document.getElementById('shelf-demo')?.addEventListener('click', () => loadBuiltinDemo());
   document.getElementById('shelf-add')?.addEventListener('click', () => void addBookToShelf());
-  el.querySelectorAll('[data-shelf-open]').forEach((btn) =>
-    btn.addEventListener('click', () => void openBook(books[Number((btn as HTMLElement).dataset.shelfOpen)])),
-  );
+  el.querySelectorAll('[data-shelf]').forEach((card) => card.addEventListener('click', () => void openBook(books[Number((card as HTMLElement).dataset.shelf)])));
 }
 
 async function addBookToShelf(): Promise<void> {
@@ -1376,69 +1582,168 @@ async function addBookToShelf(): Promise<void> {
   if (typeof dir !== 'string' || !dir) return;
   try {
     const files = (await invoke<string[]>('list_dir', { dir })).filter((f) => /\.(md|txt|docx)$/i.test(f));
-    let wsCount = 0, chCount = files.length;
+    let wsCount = 0,
+      chCount = files.length;
     try {
       const ws = parseWorkspaces(await invoke<string>('read_text_file', { path: `${dir}/_工作区.json` }));
-      wsCount = ws.length; chCount = ws.reduce((n, w) => n + w.文件.length, 0);
-    } catch { /* 无工作区配置也可注册 */ }
-    if (chCount === 0) { setStatus('该文件夹没有可打开的章节文件（.md/.txt/.docx）', 'err'); return; }
+      wsCount = ws.length;
+      chCount = ws.reduce((n, w) => n + w.文件.length, 0);
+    } catch {
+      /* 无工作区配置也可注册 */
+    }
+    if (chCount === 0) {
+      setStatus('该文件夹没有可打开的章节文件（.md/.txt/.docx）', 'err');
+      return;
+    }
     const books = await loadShelf();
-    if (books.some((b) => b.目录 === dir)) { setStatus('这本书已在书架上', 'saved'); return; }
+    if (books.some((b) => b.目录 === dir)) {
+      setStatus('这本书已在书架上', 'saved');
+      return;
+    }
     const 名 = dir.slice(dir.lastIndexOf('/') + 1) || dir;
-    books.push({ 名, 目录: dir, 副标题: wsCount ? `${wsCount} 个工作区 · ${chCount} 章` : `${chCount} 个文件`, 最近打开: new Date().toLocaleDateString('sv-SE') });
+    books.push({ 名, 目录: dir, 副标题: wsCount ? `${wsCount} 个版本 · ${chCount} 章` : `${chCount} 个文件`, 最近打开: new Date().toLocaleDateString('sv-SE') });
     await saveShelf(books);
     await renderShelf();
-    setStatus(`已加入书架：${名}（${wsCount ? wsCount + ' 工作区' : chCount + ' 文件'}）`, 'saved');
+    setStatus(`已加入书架：${名}（${wsCount ? wsCount + ' 个版本' : chCount + ' 个文件'}）——点书选版本`, 'saved');
   } catch (e) {
     setStatus('添加失败：' + e, 'err');
   }
 }
 
+/** 点书：加载配置与工作区 → 停在版本选择页（不直接进第一个工作区） */
 async function openBook(b: ShelfBook): Promise<void> {
   try {
     await loadBookConfig(b.目录);
     await loadWorkspaces(b.目录);
-    if (S.classTargets.length === 0) await loadClassGroups();   // 先就位再绑定，避免"目标未加载"竞态
+    if (S.classTargets.length === 0) await loadClassGroups(); // 提前就位，进版本即可绑定口径
     const books = await loadShelf();
     const i = books.findIndex((x) => x.目录 === b.目录);
-    if (i >= 0) { books[i].最近打开 = new Date().toLocaleDateString('sv-SE'); await saveShelf(books); }
-    S.appConfig.lastSession = { bookDir: b.目录, workspace: undefined, files: [], activeIdx: 0, savedAt: new Date().toLocaleString('zh-CN') };
-    if (S.workspaces.length > 0) {
-      activateWorkspace(S.workspaces[0].名);
-      await openPathIntoSession(S.workspaces[0].文件[0]);
-      setStatus(`已进入【${S.workspaces[0].名}】第一章——工作区条在上方，点章节名切换`, 'saved');
-    } else {
-      const files = (await invoke<string[]>('list_dir', { dir: b.目录 })).filter((f) => /\.md$/i.test(f));
-      if (files.length) await openPathIntoSession(files[0]);
-      setStatus(`已打开《${b.名}》第一个章节`, 'saved');
+    if (i >= 0) {
+      books[i].最近打开 = new Date().toLocaleDateString('sv-SE');
+      await saveShelf(books);
     }
+    S.appConfig.lastSession = { bookDir: b.目录, workspace: undefined, files: [], activeIdx: 0, savedAt: new Date().toLocaleString('zh-CN') };
+    void saveConfig();
+    renderBookVersions(b);
   } catch (e) {
     setStatus('打开书失败：' + e, 'err');
   }
 }
 
+/** 版本选择页（两级导航第二步）：一本书的各版本卡片；点了版本才进工作区 */
+function renderBookVersions(b: ShelfBook): void {
+  const el = $('reader');
+  const cards = buildVersionCards(S.workspaces);
+  void coverDataUrl(b.目录).then((img) => {
+    const mini = document.getElementById('ver-cover');
+    if (mini) mini.innerHTML = coverHtml(b.名, img);
+  });
+  el.innerHTML = `
+    <div class="ver-sel">
+      <div class="ver-back" id="ver-back">← 返回书架</div>
+      <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">
+        <div id="ver-cover" style="width:54px;flex-shrink:0"></div>
+        <div class="ver-h">《${esc(b.名)}》<span class="dim">选一个版本进入——各版本绑定各自的定制口径</span></div>
+      </div>
+      ${
+        cards.length
+          ? `<div class="ver-grid">
+        ${cards
+          .map(
+            (c) => `<div class="ver-card" data-ver="${c.idx}" title="进入【${esc(c.名)}】工作区">
+          <div class="ver-name">${esc(c.名)}</div>
+          <div class="ver-desc">${esc(c.desc)}</div>
+          <div class="ver-first">从「${esc(c.first)}」开始</div>
+          <div class="ver-go">进入工作区 →</div>
+        </div>`,
+          )
+          .join('')}
+      </div>`
+          : `<div class="dim" style="margin-top:14px;line-height:1.9">这本书还没有分层配置（_工作区.json）。<br/>· 直接读：上方「打开文件…」选书稿文件夹里的章节 md 即可（${esc(b.副标题 ?? '')}）。<br/>· 要分 B/M/A 三个版本：在书稿根目录建 _工作区.json（可以让右侧 AI 助手帮你生成，说"帮我写 _工作区.json"即可）。</div>`
+      }
+    </div>`;
+  document.getElementById('ver-back')?.addEventListener('click', () => void backToShelf());
+  el.querySelectorAll('[data-ver]').forEach((card) =>
+    card.addEventListener('click', () => {
+      const w = S.workspaces[Number((card as HTMLElement).dataset.ver)];
+      if (w) void enterWorkspace(w);
+    }),
+  );
+}
+
+/** 点版本：绑定口径 → 翻开该版本第一章 */
+async function enterWorkspace(w: Workspace): Promise<void> {
+  try {
+    if (S.classTargets.length === 0) await loadClassGroups(); // 兜底：版本页已预载，这里再保险一次
+    activateWorkspace(w.名);
+    await openPathIntoSession(w.文件[0]);
+    setStatus(`已进入【${w.名}】${workspaceChipName(w.文件[0])}——上方工作区条可切版本 / 切章节`, 'saved');
+  } catch (e) {
+    setStatus('进入工作区失败：' + e, 'err');
+  }
+}
+
+/** 回书架：关掉全部章节会话（标记与正文改动早已自动落盘），工作区条一并收起 */
+async function backToShelf(): Promise<void> {
+  saveLastSession();
+  S.sessions = [];
+  S.activeIdx = -1;
+  S.workspaces = [];
+  S.activeWorkspace = null;
+  hidePop();
+  renderAll();
+}
+
 function renderWorkspaceBar(): void {
   const el = document.getElementById('wstabs') as HTMLElement | null;
   if (!el) return;
-  if (S.workspaces.length === 0) { el.style.display = 'none'; el.innerHTML = ''; return; }
+  if (S.workspaces.length === 0) {
+    el.style.display = 'none';
+    el.innerHTML = '';
+    return;
+  }
   const active = S.workspaces.find((w) => w.名 === S.activeWorkspace);
   const cur = activeSession()?.sourcePath ?? null;
   el.style.display = 'flex';
   el.innerHTML =
-    S.workspaces.map((w) => `<span class="ftab ws ${w.名 === S.activeWorkspace ? 'active' : ''}" data-ws="${esc(w.名)}" title="${w.定制目标 ? `绑定定制口径 ${w.定制目标}` : ''}">${esc(w.名)}</span>`).join('') +
-    (active ? `<span class="ws-files">${active.文件.map((f) => `<span class="wschip ${f === cur ? 'cur' : ''}" data-wsfile="${esc(f)}" title="${esc(f)}">${esc(workspaceChipName(f))}</span>`).join('')}</span>` : '');
-  el.querySelectorAll('[data-ws]').forEach((t) => t.addEventListener('click', () => activateWorkspace((t as HTMLElement).dataset.ws!)));
+    S.workspaces
+      .map((w) => `<span class="ftab ws ${w.名 === S.activeWorkspace ? 'active' : ''}" data-ws="${esc(w.名)}" title="${w.定制目标 ? `绑定定制口径 ${w.定制目标}` : ''}">${esc(w.名)}</span>`)
+      .join('') +
+    (active
+      ? `<span class="ws-files">${active.文件.map((f) => `<span class="wschip ${f === cur ? 'cur' : ''}" data-wsfile="${esc(f)}" title="${esc(f)}">${esc(workspaceChipName(f))}</span>`).join('')}</span>`
+      : '');
+  el.querySelectorAll('[data-ws]').forEach((t) =>
+    t.addEventListener('click', () => {
+      const name = (t as HTMLElement).dataset.ws!;
+      activateWorkspace(name);
+      const w = S.workspaces.find((x) => x.名 === name);
+      const cur = activeSession()?.sourcePath ?? null;
+      if (w && (!cur || !w.文件.includes(cur))) {
+        // 切版本要有看得见的变化：当前正文不属于该版本时，自动翻开该版本第一章
+        openPathIntoSession(w.文件[0])
+          .then(() => setStatus(`已进入【${name}】${workspaceChipName(w.文件[0])}`, 'saved'))
+          .catch((e) => setStatus('打开失败：' + e, 'err'));
+      } else {
+        setStatus(`工作区已切换：${name}${w?.定制目标 ? `（口径 ${w.定制目标}）` : ''}`, 'saved');
+      }
+    }),
+  );
   el.querySelectorAll('[data-wsfile]').forEach((c) =>
     c.addEventListener('click', () => {
       const f = (c as HTMLElement).dataset.wsfile!;
-      openPathIntoSession(f).then(() => setStatus(`已打开：${workspaceChipName(f)}（工作区【${S.activeWorkspace}】口径）`, 'saved')).catch((e) => setStatus('打开失败：' + e, 'err'));
+      openPathIntoSession(f)
+        .then(() => setStatus(`已打开：${workspaceChipName(f)}（工作区【${S.activeWorkspace}】口径）`, 'saved'))
+        .catch((e) => setStatus('打开失败：' + e, 'err'));
     }),
   );
 }
 
 async function exportMarks(): Promise<void> {
   const s = activeSession();
-  if (!s) { setStatus('请先载入文本', 'err'); return; }
+  if (!s) {
+    setStatus('请先载入文本', 'err');
+    return;
+  }
   const path = await saveFileDialog({
     defaultPath: s.fileName.replace(/\.(md|txt|markdown)$/i, '') + '_审校标记.json',
     filters: [{ name: '审校标记 JSON', extensions: ['json'] }],
@@ -1450,7 +1755,10 @@ async function exportMarks(): Promise<void> {
 
 async function importMarks(): Promise<void> {
   const s = activeSession();
-  if (!s) { setStatus('请先载入文本', 'err'); return; }
+  if (!s) {
+    setStatus('请先载入文本', 'err');
+    return;
+  }
   const path = await openFileDialog({ multiple: false, filters: [{ name: '审校标记 JSON', extensions: ['json'] }] });
   if (typeof path !== 'string') return;
   try {
@@ -1458,7 +1766,11 @@ async function importMarks(): Promise<void> {
     if (!Array.isArray(parsed?.marks)) throw new Error('不是有效的标记文件');
     const ids = new Set(s.review.marks.map((m) => m.id));
     let added = 0;
-    for (const m of parsed.marks) if (!ids.has(m.id)) { s.review.marks.push(m); added++; }
+    for (const m of parsed.marks)
+      if (!ids.has(m.id)) {
+        s.review.marks.push(m);
+        added++;
+      }
     s.review.quota = [...s.review.quota, ...(parsed.quota ?? []).filter((q: { text: string }) => !s.review.quota.some((x) => x.text === q.text))];
     for (const g of GATES) if (parsed.gate?.[g] !== undefined) s.review.gate[g] = parsed.gate[g];
     renderAll();
@@ -1469,6 +1781,7 @@ async function importMarks(): Promise<void> {
   }
 }
 
+$('btn-home').addEventListener('click', () => void backToShelf());
 $('btn-open').addEventListener('click', () => void openChapterFiles());
 $('btn-run').addEventListener('click', () => void runQcCurrent());
 $('btn-undo').addEventListener('click', () => void doUndo());
@@ -1493,32 +1806,83 @@ $('btn-cls').addEventListener('click', () => {
 /* 原生菜单事件分发 */
 void listen<string>('menu-action', (ev) => {
   switch (ev.payload) {
-    case 'file-open': void openChapterFiles(); break;
-    case 'file-demo': S.demoMenuOpen ? closeDemoMenu() : void openDemoMenu(); break;
-    case 'conf-vocab': void importVocabFile(); break;
-    case 'conf-terms': void importTermsFile(); break;
-    case 'conf-proper': void importProperFile(); break;
-    case 'marks-export': void exportMarks(); break;
-    case 'marks-import': void importMarks(); break;
-    case 'qc-run': void runQcCurrent(); break;
-    case 'view-text': switchView('text'); break;
-    case 'view-report': switchView('report'); break;
-    case 'view-retro': void renderRetroPane(); switchView('retro'); break;
-    case 'ai-settings': showAiSettings(); break;
-    case 'ai-suggest': void aiSuggest(); break;
-    case 'draft': showDraftPop(); break;
-    case 'batch': showBatchPop(); break;
-    case 'tier-plan': showStandardPop(); break;
-    case 'book-config': void saveBookConfig(); break;
-    case 'rewrite-rules': showRewritePop(); break;
-    case 'help-key': void invoke('open_help_window', { which: 'key' }); break;
-    case 'export-diag': void exportDiagnostics(); break;
-    case 'diag-test': simulateError(); break;
-    case 'export-docx': void exportDocx(); break;
-    case 'export-tts': void exportTts(); break;
+    case 'file-open':
+      void openChapterFiles();
+      break;
+    case 'file-demo':
+      if (S.demoMenuOpen) closeDemoMenu();
+      else void openDemoMenu();
+      break;
+    case 'conf-vocab':
+      void importVocabFile();
+      break;
+    case 'conf-terms':
+      void importTermsFile();
+      break;
+    case 'conf-proper':
+      void importProperFile();
+      break;
+    case 'marks-export':
+      void exportMarks();
+      break;
+    case 'marks-import':
+      void importMarks();
+      break;
+    case 'qc-run':
+      void runQcCurrent();
+      break;
+    case 'view-text':
+      switchView('text');
+      break;
+    case 'view-report':
+      switchView('report');
+      break;
+    case 'view-retro':
+      void renderRetroPane();
+      switchView('retro');
+      break;
+    case 'ai-settings':
+      showAiSettings();
+      break;
+    case 'ai-suggest':
+      void aiSuggest();
+      break;
+    case 'draft':
+      showDraftPop();
+      break;
+    case 'batch':
+      showBatchPop();
+      break;
+    case 'tier-plan':
+      showStandardPop();
+      break;
+    case 'book-config':
+      void saveBookConfig();
+      break;
+    case 'rewrite-rules':
+      showRewritePop();
+      break;
+    case 'help-key':
+      void invoke('open_help_window', { which: 'key' });
+      break;
+    case 'export-diag':
+      void exportDiagnostics();
+      break;
+    case 'diag-test':
+      simulateError();
+      break;
+    case 'export-docx':
+      void exportDocx();
+      break;
+    case 'export-tts':
+      void exportTts();
+      break;
     case 'view-diff':
       if (S.sessions.length < 2) setStatus('版本对比需要先打开两个版本（如原文与简化版）', 'err');
-      else { renderDiff(0, 1); switchView('diff'); }
+      else {
+        renderDiff(0, 1);
+        switchView('diff');
+      }
       break;
   }
 });
@@ -1591,12 +1955,15 @@ function showAiSettings(): void {
     div.querySelector('.x')!.addEventListener('click', () => div.remove());
     fbRows.appendChild(div);
   };
-  const collectFb = () => [...fbRows.querySelectorAll('.rw-row')].map((r) => ({
-    name: (r.querySelector('.fb-name') as HTMLInputElement).value.trim(),
-    baseUrl: (r.querySelector('.fb-url') as HTMLInputElement).value.trim().replace(/\/+$/, ''),
-    model: (r.querySelector('.fb-model') as HTMLInputElement).value.trim(),
-    key: (r.querySelector('.fb-key') as HTMLInputElement).value.trim(),
-  })).filter((r) => r.baseUrl && r.model);
+  const collectFb = () =>
+    [...fbRows.querySelectorAll('.rw-row')]
+      .map((r) => ({
+        name: (r.querySelector('.fb-name') as HTMLInputElement).value.trim(),
+        baseUrl: (r.querySelector('.fb-url') as HTMLInputElement).value.trim().replace(/\/+$/, ''),
+        model: (r.querySelector('.fb-model') as HTMLInputElement).value.trim(),
+        key: (r.querySelector('.fb-key') as HTMLInputElement).value.trim(),
+      }))
+      .filter((r) => r.baseUrl && r.model);
   $('ai-fb-add').addEventListener('click', () => addFbRow());
   for (const f of S.appConfig.failover ?? []) addFbRow(f.name ?? '', f.baseUrl ?? '', f.model ?? '');
 
@@ -1607,7 +1974,11 @@ function showAiSettings(): void {
     ($('ai-provider') as HTMLSelectElement).value = String(matched >= 0 ? matched : AI_PROVIDERS.length - 1);
     urlEl.value = S.appConfig.baseUrl ?? '';
     if (matched >= 0) applyProvider(matched);
-    else { modelSel.style.display = 'none'; modelEl.style.display = ''; modelEl.value = S.appConfig.model ?? ''; }
+    else {
+      modelSel.style.display = 'none';
+      modelEl.style.display = '';
+      modelEl.value = S.appConfig.model ?? '';
+    }
     cur.value = key ?? '';
     ($('ai-instructions') as HTMLTextAreaElement).value = S.appConfig.instructions ?? '';
     ($('ai-auto') as HTMLInputElement).checked = S.appConfig.autoRewriteOnMark ?? false;
@@ -1649,8 +2020,14 @@ function showAiSettings(): void {
     const url = (urlEl.value.trim() || '').replace(/\/+$/, '');
     const model = currentModel();
     const key = cur.value.trim();
-    if (!key) { out.textContent = '第 ④ 步还没填 Key（一串 sk- 开头的字符）'; return; }
-    if (!url || !model) { out.textContent = '第 ① 步先选服务商，地址和模型会自动填好'; return; }
+    if (!key) {
+      out.textContent = '第 ④ 步还没填 Key（一串 sk- 开头的字符）';
+      return;
+    }
+    if (!url || !model) {
+      out.textContent = '第 ① 步先选服务商，地址和模型会自动填好';
+      return;
+    }
     out.textContent = '连接中…';
     try {
       const resp = await tauriFetch(`${url}/chat/completions`, {
@@ -1685,11 +2062,13 @@ function buildAiUserPrompt(session: FileSession): string {
   const paras = extractParas(body);
   const maxLen = simplifyMaxLen();
   const r = session.report;
-  const marks = session.review.marks.map((m) => {
-    const sent = sentsOf(paras[m.pi] ?? '', false)[m.si] ?? '(未找到句子)';
-    const label = m.level === 'word' ? `词标记：${m.word ?? ''}（${typeLabel(m.type)}${m.note ? '，备注：' + m.note : ''}）` : `句标记（${typeLabel(m.type)}${m.note ? '，备注：' + m.note : ''}）`;
-    return `【${m.id}】${label}\n所在句：${sent}`;
-  }).join('\n\n');
+  const marks = session.review.marks
+    .map((m) => {
+      const sent = sentsOf(paras[m.pi] ?? '', false)[m.si] ?? '(未找到句子)';
+      const label = m.level === 'word' ? `词标记：${m.word ?? ''}（${typeLabel(m.type)}${m.note ? '，备注：' + m.note : ''}）` : `句标记（${typeLabel(m.type)}${m.note ? '，备注：' + m.note : ''}）`;
+      return `【${m.id}】${label}\n所在句：${sent}`;
+    })
+    .join('\n\n');
   return `简化标准：句长上限 ${maxLen} 词/句；被动语态、定语从句禁用，过去完成时一律改写
 ${r ? `本章质检摘要：覆盖率 ${(r.coverage * 100).toFixed(1)}%，平均句长 ${r.avgLenNarrRaw.toFixed(1)} 词，被动 ${r.passive}、定从 ${r.relcl}、过去完成 ${r.pastperf}，超20词句 ${r.over20}` : ''}
 
@@ -1699,8 +2078,14 @@ ${marks || '（无标记）'}`;
 
 async function aiSuggest(instruction?: string): Promise<void> {
   const s = activeSession();
-  if (!s) { setStatus('请先载入文本', 'err'); return; }
-  if (s.review.marks.length === 0 && !instruction) { setStatus('还没有标记——先在正文里点词/拖选句子做标记，AI 才知道往哪改', 'err'); return; }
+  if (!s) {
+    setStatus('请先载入文本', 'err');
+    return;
+  }
+  if (s.review.marks.length === 0 && !instruction) {
+    setStatus('还没有标记——先在正文里点词/拖选句子做标记，AI 才知道往哪改', 'err');
+    return;
+  }
   const key = await invoke<string>('load_api_key');
   if (!key) {
     setStatus('请先配置 AI（菜单 LayerText → AI 设置…）', 'err');
@@ -1719,7 +2104,10 @@ async function aiSuggest(instruction?: string): Promise<void> {
     } else {
       const userMsg = buildAiUserPrompt(s);
       S.aiHistory = [{ role: 'user', content: userMsg }];
-      messages = [{ role: 'system', content: system }, { role: 'user', content: userMsg }];
+      messages = [
+        { role: 'system', content: system },
+        { role: 'user', content: userMsg },
+      ];
     }
     const estIn = messages.reduce((n, m) => n + estTokens(m.content), 0);
     setStatus(`本次请求约 ${estIn} tokens 输入（只含标记相关句子，不发全章原文）…`);
@@ -1746,7 +2134,10 @@ async function aiSuggest(instruction?: string): Promise<void> {
       let applied = 0;
       for (const g of [...S.suggestions]) {
         if (g.check.passive || g.check.relcl || g.check.pastperf || g.check.overlong) warned++;
-        if (g.pi !== undefined) { await acceptSuggestion(g, { scene: '自动直改', outcome: '直改' }); applied++; }
+        if (g.pi !== undefined) {
+          await acceptSuggestion(g, { scene: '自动直改', outcome: '直改' });
+          applied++;
+        }
       }
       setStatus(`AI 直改完成：自动应用 ${applied} 条${warned ? `，其中 ${warned} 条引擎复核⚠（黑名单/超长残留），已留痕变更日志，建议复查` : ''} ${usage}`, 'saved');
       return;
@@ -1756,9 +2147,7 @@ async function aiSuggest(instruction?: string): Promise<void> {
     switchView('suggest');
     setStatus(`AI 返回 ${S.suggestions.length} 条修订候选 ${usage}——建议已标到正文里，点 ✓ 采纳 / ✗ 放弃`, 'saved');
   } catch (e) {
-    const hint = String(e).includes('未找到 JSON')
-      ? '（模型思考太长占满输出上限——建议 AI 设置里换非思考型模型，或减少一次标记的数量分批出）'
-      : '';
+    const hint = String(e).includes('未找到 JSON') ? '（模型思考太长占满输出上限——建议 AI 设置里换非思考型模型，或减少一次标记的数量分批出）' : '';
     setStatus('AI 请求失败：' + e + hint, 'err');
   } finally {
     btn.textContent = '✨ AI 审核建议';
@@ -1789,7 +2178,9 @@ function renderSuggestions(): void {
     </div>
     <table class="sgtable">
       <tr><th></th><th>标记</th><th class="orig">原句</th><th class="rev">AI 建议</th><th>引擎复核</th><th>依据</th></tr>
-      ${S.suggestions.map((g, i) => `
+      ${S.suggestions
+        .map(
+          (g, i) => `
         <tr>
           <td><input type="checkbox" data-sg="${i}" /></td>
           <td style="white-space:nowrap">${esc(g.type)}</td>
@@ -1797,7 +2188,9 @@ function renderSuggestions(): void {
           <td class="rev" title="${esc(g.revised)}${g.alternative ? '&#10;备选：' + esc(g.alternative) : ''}">${esc(g.revised.slice(0, 90))}${g.revised.length > 90 ? '…' : ''}</td>
           <td>${checkLabel(g.check)}</td>
           <td>${esc(g.basis)}</td>
-        </tr>`).join('')}
+        </tr>`,
+        )
+        .join('')}
     </table>`;
   pane.querySelectorAll('[data-sg]').forEach((cb) =>
     cb.addEventListener('change', () => {
@@ -1810,28 +2203,45 @@ function renderSuggestions(): void {
 }
 
 const RULE_BY_TYPE: Record<string, string> = {
-  syntax: 'R03-R06', long: 'R07', ref: 'R05', cut: 'R01', stiff: 'R08',
-  simpl: 'R02', zh: 'R02', oov: 'R02', hard: 'R02', factw: 'R00', others: 'R00', otherw: 'R00', fact: 'R00', goods: 'R11',
+  syntax: 'R03-R06',
+  long: 'R07',
+  ref: 'R05',
+  cut: 'R01',
+  stiff: 'R08',
+  simpl: 'R02',
+  zh: 'R02',
+  oov: 'R02',
+  hard: 'R02',
+  factw: 'R00',
+  others: 'R00',
+  otherw: 'R00',
+  fact: 'R00',
+  goods: 'R11',
 };
 
 /** 读旧追加一行 CSV（无文件则连表头新建；台账与变更日志共用） */
 async function appendCsvLine(path: string, header: readonly string[], line: string): Promise<void> {
   let csv = '';
-  try { csv = await invoke<string>('read_text_file', { path }); } catch { /* 新建 */ }
+  try {
+    csv = await invoke<string>('read_text_file', { path });
+  } catch {
+    /* 新建 */
+  }
   if (!csv.trim()) csv = header.join(',') + '\n';
   await invoke('write_text_file', { path, content: csv + line });
 }
 
 /** AI 建议台账（W2 数据闭环）：每次建议被 采纳/拒绝/直改 落一行，复盘页与分析脚本据此聚合 */
-async function logSuggestion(
-  s: FileSession, g: Suggestion,
-  outcome: '采纳' | '拒绝' | '直改', scene: string, mark?: Mark,
-): Promise<void> {
+async function logSuggestion(s: FileSession, g: Suggestion, outcome: '采纳' | '拒绝' | '直改', scene: string, mark?: Mark): Promise<void> {
   try {
     const outDir = s.sourcePath ? s.sourcePath.slice(0, s.sourcePath.lastIndexOf('/')) : await invoke<string>('reports_dir');
     const bad = g.check.passive || g.check.relcl || g.check.pastperf || g.check.overlong;
     let host = S.appConfig.baseUrl ?? '';
-    try { host = new URL(host).host; } catch { if (host) host = '自定义'; }
+    try {
+      host = new URL(host).host;
+    } catch {
+      if (host) host = '自定义';
+    }
     // 欠账#8：failover 切过供应商时记实际那家（与成本台账同一命名），不再误记主服务商
     const providerUsed = S.lastProvider?.name ?? host;
     const modelUsed = S.lastProvider?.model ?? S.appConfig.model ?? '';
@@ -1839,18 +2249,25 @@ async function logSuggestion(
     const row: LedgerRow = {
       ts: new Date().toLocaleString('sv-SE'),
       book: dir ? dir.slice(dir.lastIndexOf('/') + 1) : s.fileName,
-      chapter: s.fileName, tier: `标准${simplifyMaxLen()}词`, scene,
+      chapter: s.fileName,
+      tier: `标准${simplifyMaxLen()}词`,
+      scene,
       markType: g.type || (mark ? typeLabel(mark.type) : ''),
       rule: mark ? (RULE_BY_TYPE[mark.type] ?? 'R00') : 'R00',
       outcome,
       check: bad ? '⚠' : '通过',
-      provider: providerUsed, model: modelUsed,
+      provider: providerUsed,
+      model: modelUsed,
       promptVer: await promptSetVersion(),
-      original: g.original, revised: g.revised, basis: g.basis,
+      original: g.original,
+      revised: g.revised,
+      basis: g.basis,
       rejectReason: outcome === '拒绝' ? '（点✗放弃，未填原因）' : '',
     };
     await appendCsvLine(`${outDir}/AI建议台账.csv`, LEDGER_HEADER, toLedgerLine(row));
-  } catch { /* 台账尽力而为，不影响主流程 */ }
+  } catch {
+    /* 台账尽力而为，不影响主流程 */
+  }
 }
 
 /** 批量应用（修订建议页）：统一走 acceptSuggestion（工作稿+变更日志），不再另生成 AI修订 文件 */
@@ -1858,7 +2275,10 @@ async function applySuggestions(): Promise<void> {
   const s = activeSession();
   if (!s) return;
   const checked = [...document.querySelectorAll<HTMLInputElement>('#pane-suggest [data-sg]:checked')].map((cb) => Number(cb.dataset.sg));
-  if (checked.length === 0) { setStatus('请先勾选要采用的修订（或在正文里直接点 ✓）', 'err'); return; }
+  if (checked.length === 0) {
+    setStatus('请先勾选要采用的修订（或在正文里直接点 ✓）', 'err');
+    return;
+  }
   for (const i of checked.sort((a, b) => b - a)) {
     const g = S.suggestions[i];
     if (g && g.pi !== undefined) await acceptSuggestion(g, { scene: '批量' });
@@ -1919,7 +2339,8 @@ function renderInlineOne(session: FileSession, g: Suggestion): void {
 
 /** 保存正文改动：默认直接写原稿文件（首次前自动备份原始版）；关闭"直接修改原稿"则写工作稿 */
 async function persistEdit(s: FileSession, newMd: string): Promise<string> {
-  if (newMd !== s.md) {   // 文件级撤销栈（≤50 快照；重做栈清空）
+  if (newMd !== s.md) {
+    // 文件级撤销栈（≤50 快照；重做栈清空）
     (s.undoStack ??= []).push(s.md);
     if (s.undoStack.length > 50) s.undoStack.shift();
     s.redoStack = [];
@@ -1960,15 +2381,25 @@ async function acceptSuggestion(g: Suggestion, opts: { scene?: string; outcome?:
   const cur = sentsOf(paras[g.pi] ?? '', false)[g.si];
   if (cur !== g.original) {
     const loc = locateSent(s, g.original);
-    if (!loc) { setStatus('原句已变化且无法唯一定位，请重新请求建议', 'err'); return; }
-    g.pi = loc.pi; g.si = loc.si;
+    if (!loc) {
+      setStatus('原句已变化且无法唯一定位，请重新请求建议', 'err');
+      return;
+    }
+    g.pi = loc.pi;
+    g.si = loc.si;
   }
   let at = s.md.indexOf(g.original);
   if (at < 0) {
     const flex = findOriginalFlex(s.md, g.original); // 空白差异容忍（欠账#2）
-    if (flex) { at = flex.start; g.original = flex.exact; }
+    if (flex) {
+      at = flex.start;
+      g.original = flex.exact;
+    }
   }
-  if (at < 0) { setStatus('正文中找不到该原句', 'err'); return; }
+  if (at < 0) {
+    setStatus('正文中找不到该原句', 'err');
+    return;
+  }
   s.md = s.md.slice(0, at) + g.revised + s.md.slice(at + g.original.length);
 
   // 标记对齐 + 对应标记清除 + 落盘
@@ -1984,16 +2415,27 @@ async function acceptSuggestion(g: Suggestion, opts: { scene?: string; outcome?:
   try {
     const savedTo = await persistEdit(s, s.md);
     let csv = '';
-    try { csv = await invoke<string>('read_text_file', { path: logPath }); } catch { /* 新建 */ }
+    try {
+      csv = await invoke<string>('read_text_file', { path: logPath });
+    } catch {
+      /* 新建 */
+    }
     if (!csv.trim()) csv = CHANGELOG_HEADER.join(',') + '\n';
-    csv += [
-      'R1', date, `标准${simplifyMaxLen()}词`,
-      `P${String((g.pi ?? 0) + 1).padStart(2, '0')}`,
-      `P${(g.pi ?? 0) + 1}-S${(g.si ?? 0) + 1}`,
-      g.original, g.revised,
-      RULE_BY_TYPE[removed[0]?.type ?? ''] ?? 'R00',
-      g.basis, 'AI候选-行内采纳',
-    ].map(csvCell).join(',') + '\n';
+    csv +=
+      [
+        'R1',
+        date,
+        `标准${simplifyMaxLen()}词`,
+        `P${String((g.pi ?? 0) + 1).padStart(2, '0')}`,
+        `P${(g.pi ?? 0) + 1}-S${(g.si ?? 0) + 1}`,
+        g.original,
+        g.revised,
+        RULE_BY_TYPE[removed[0]?.type ?? ''] ?? 'R00',
+        g.basis,
+        'AI候选-行内采纳',
+      ]
+        .map(csvCell)
+        .join(',') + '\n';
     await invoke('write_text_file', { path: logPath, content: csv });
     await logSuggestion(s, g, outcome, scene, removed[0]);
     scheduleSave(s, () => undefined);
@@ -2014,29 +2456,43 @@ async function aiRewriteSentence(pi: number, si: number, intent: string, autoMar
   const s = activeSession();
   if (!s) return;
   const key = await invoke<string>('load_api_key');
-  if (!key) { showAiSettings(); return; }
+  if (!key) {
+    showAiSettings();
+    return;
+  }
   const paras = extractParas(splitChapter(s.md).body);
   const sent = sentsOf(paras[pi] ?? '', false)[si];
   if (!sent) return;
   const system = await buildSystemPrompt();
   const btn = pop.querySelector('[data-mk="__rewrite"]') as HTMLElement | null;
-  if (btn) { btn.textContent = '⏳ 改写中…'; (btn as HTMLButtonElement).disabled = true; }
+  if (btn) {
+    btn.textContent = '⏳ 改写中…';
+    (btn as HTMLButtonElement).disabled = true;
+  }
   try {
-    const { raw: arrRaw } = await chatUntilJson([
-      { role: 'system', content: system },
-      {
-        role: 'user',
-        content: await buildRewriteSentencePrompt({ maxLen: simplifyMaxLen(), intent, sent }),
-      },
-    ], 4000, '逐句改写');
+    const { raw: arrRaw } = await chatUntilJson(
+      [
+        { role: 'system', content: system },
+        {
+          role: 'user',
+          content: await buildRewriteSentencePrompt({ maxLen: simplifyMaxLen(), intent, sent }),
+        },
+      ],
+      4000,
+      '逐句改写',
+    );
     const arr = arrRaw as { original?: string; revised?: string; basis?: string; alternative?: string }[];
     const one = arr[0];
     if (!one?.revised) throw new Error('AI 未返回改写');
     const risk = checkRev(String(one.revised));
     const g: Suggestion = {
-      markId: autoMarkId ?? 'rw-' + Date.now().toString(36), type: intent || '词改写',
-      original: String(one.original ?? sent), revised: String(one.revised),
-      basis: one.basis ?? '', alternative: one.alternative, status: 'pending',
+      markId: autoMarkId ?? 'rw-' + Date.now().toString(36),
+      type: intent || '词改写',
+      original: String(one.original ?? sent),
+      revised: String(one.revised),
+      basis: one.basis ?? '',
+      alternative: one.alternative,
+      status: 'pending',
       check: { passive: risk.passive, relcl: risk.relcl, pastperf: risk.pastperf, overlong: risk.overlong },
     };
     if (autoMarkId) {
@@ -2049,12 +2505,13 @@ async function aiRewriteSentence(pi: number, si: number, intent: string, autoMar
     attachInlineSuggestions();
     setStatus('AI 已给出本句改写——正文黄色区域内点 ✓ 采纳或 ✗ 放弃', 'saved');
   } catch (e) {
-    const hint = String(e).includes('未找到 JSON')
-      ? '（原因：你的模型把"思考过程"写进了回答，占满了输出上限还没写到 JSON——AI 设置里换非思考型模型如 deepseek-chat 最省心）'
-      : '';
+    const hint = String(e).includes('未找到 JSON') ? '（原因：你的模型把"思考过程"写进了回答，占满了输出上限还没写到 JSON——AI 设置里换非思考型模型如 deepseek-chat 最省心）' : '';
     setStatus('AI 改写失败：' + e + hint, 'err');
   } finally {
-    if (btn) { btn.textContent = '✨ AI 改写本句'; (btn as HTMLButtonElement).disabled = false; }
+    if (btn) {
+      btn.textContent = '✨ AI 改写本句';
+      (btn as HTMLButtonElement).disabled = false;
+    }
   }
 }
 
@@ -2071,7 +2528,10 @@ function simplifyRule(): string {
 
 function showDraftPop(): void {
   const s = activeSession();
-  if (!s) { setStatus('请先打开要简化的章节原文', 'err'); return; }
+  if (!s) {
+    setStatus('请先打开要简化的章节原文', 'err');
+    return;
+  }
   draftPop.innerHTML = `
     <div class="pop-h">AI 简化本章 · 整章逐段改写</div>
     <p style="color:var(--muted);font-size:12px;line-height:1.7;margin:6px 0 10px">
@@ -2089,8 +2549,13 @@ function showDraftPop(): void {
       <div class="bar"><i id="draft-bar"></i></div>
     </div>`;
   draftPop.classList.add('open');
-  $('draft-close').addEventListener('click', () => { S.draftAbort?.abort(); draftPop.classList.remove('open'); });
-  $('draft-cancel').addEventListener('click', () => { S.draftAbort?.abort(); });
+  $('draft-close').addEventListener('click', () => {
+    S.draftAbort?.abort();
+    draftPop.classList.remove('open');
+  });
+  $('draft-cancel').addEventListener('click', () => {
+    S.draftAbort?.abort();
+  });
   $('draft-start').addEventListener('click', () => void generateDraft());
 }
 
@@ -2116,22 +2581,30 @@ async function simplifyChapterCore(
   const system = await buildDraftSystemPrompt({
     tierRule: simplifyRule(),
     chnoNote: '',
-    instructions: (instructions ? `- 教师方向指令（最高优先级）：${instructions}` : '') +
+    instructions:
+      (instructions ? `- 教师方向指令（最高优先级）：${instructions}` : '') +
       (mergedSelection().active ? `\n- 班级定制目标（${mergedSelection().label}）：本篇句长上限取最严 ${mergedSelection().minLen} 词/句` : '') +
-      (reinforceWordsNow() ? `\n- 复现词约束：以下学生已学词请择 8-12 个在本章自然复现（教师指令：尽量多复现）（词形可按语境变化，融入情节，不硬塞不改故事）：${reinforceWordsNow()!.slice(0, 12).join(' / ')}` : ''),
+      (reinforceWordsNow()
+        ? `\n- 复现词约束：以下学生已学词请择 8-12 个在本章自然复现（教师指令：尽量多复现）（词形可按语境变化，融入情节，不硬塞不改故事）：${reinforceWordsNow()!.slice(0, 12).join(' / ')}`
+        : ''),
   });
   const out: string[] = [];
   let tokens = 0;
   for (let i = 0; i < segs.length; i++) {
     onSeg(i, segs.length, segs[i].slice(0, 8).trim());
     const prevTail = out.length ? out[out.length - 1].slice(-500) : '（本章开头）';
-    const { content, usage } = await callChat([
-      { role: 'system', content: system },
-      {
-        role: 'user',
-        content: `前文（已简化，供语气与指代衔接参考）：\n…${prevTail}\n\n请简化以下段落：\n${segs[i].trim()}`,
-      },
-    ], 2500, signal, 'AI 简化本章');
+    const { content, usage } = await callChat(
+      [
+        { role: 'system', content: system },
+        {
+          role: 'user',
+          content: `前文（已简化，供语气与指代衔接参考）：\n…${prevTail}\n\n请简化以下段落：\n${segs[i].trim()}`,
+        },
+      ],
+      2500,
+      signal,
+      'AI 简化本章',
+    );
     tokens += Number(usage.match(/(\d+) 出/)?.[1] ?? 0);
     out.push(applyRewrite(cleanDraftSeg(content, segs[i].match(/\[P\d+\]/)![0])));
   }
@@ -2142,7 +2615,10 @@ async function generateDraft(): Promise<void> {
   const s = activeSession();
   if (!s) return;
   const key = await invoke<string>('load_api_key');
-  if (!key) { showAiSettings(); return; }
+  if (!key) {
+    showAiSettings();
+    return;
+  }
   const instructions = ($('draft-instructions') as HTMLTextAreaElement).value.trim();
 
   S.draftAbort = new AbortController();
@@ -2151,10 +2627,19 @@ async function generateDraft(): Promise<void> {
   ($('draft-cancel') as HTMLElement).style.display = '';
   $('draft-progress').style.display = '';
   try {
-    const { md: newMd, outTokens: tokens, segCount } = await simplifyChapterCore(s.md, instructions, (i, total, head) => {
-      $('draft-step').textContent = `正在简化第 ${i + 1}/${total} 段（${head}…）`;
-      ($('draft-bar') as HTMLElement).style.width = `${(i / total) * 100}%`;
-    }, S.draftAbort!.signal);
+    const {
+      md: newMd,
+      outTokens: tokens,
+      segCount,
+    } = await simplifyChapterCore(
+      s.md,
+      instructions,
+      (i, total, head) => {
+        $('draft-step').textContent = `正在简化第 ${i + 1}/${total} 段（${head}…）`;
+        ($('draft-bar') as HTMLElement).style.width = `${(i / total) * 100}%`;
+      },
+      S.draftAbort!.signal,
+    );
     ($('draft-bar') as HTMLElement).style.width = '100%';
     $('draft-step').textContent = '简化完毕，正在保存并体检…';
 
@@ -2216,16 +2701,19 @@ function showBatchPop(): void {
       <div class="bar"><i id="bt-bar"></i></div>
     </div>`;
   batchPop.classList.add('open');
-  $('bt-close').addEventListener('click', () => { batchAbort?.abort(); batchPop.classList.remove('open'); });
+  $('bt-close').addEventListener('click', () => {
+    batchAbort?.abort();
+    batchPop.classList.remove('open');
+  });
   $('bt-pick').addEventListener('click', () => void pickBatchDir());
   $('bt-start').addEventListener('click', () => void runBatch());
-  $('bt-cancel').addEventListener('click', () => { batchAbort?.abort(); });
+  $('bt-cancel').addEventListener('click', () => {
+    batchAbort?.abort();
+  });
 }
 
 async function readChapterRaw(path: string): Promise<string> {
-  return path.toLowerCase().endsWith('.docx')
-    ? docxToText(await invoke<string>('read_file_base64', { path }))
-    : await invoke<string>('read_text_file', { path });
+  return path.toLowerCase().endsWith('.docx') ? docxToText(await invoke<string>('read_file_base64', { path })) : await invoke<string>('read_text_file', { path });
 }
 
 async function pickBatchDir(): Promise<void> {
@@ -2236,7 +2724,11 @@ async function pickBatchDir(): Promise<void> {
   // 本书配置自动生效（与打开单章同口径）
   if (await loadBookConfig(dir)) setStatus('已自动加载本书配置（词库/术语/约定/规则）——全书批处理将按本书规则执行', 'saved');
   let paths: string[] = [];
-  try { paths = await invoke<string[]>('list_dir', { dir }); } catch { /* 目录不可读 */ }
+  try {
+    paths = await invoke<string[]>('list_dir', { dir });
+  } catch {
+    /* 目录不可读 */
+  }
   if (paths.length === 0) {
     $('bt-list-fld').style.display = '';
     $('bt-list').innerHTML = '<div class="dim" style="padding:6px">这个文件夹里没有可处理的章节文件（.md/.txt/.docx；_ 开头配置与已生成的简化/工作稿产物不算）</div>';
@@ -2245,14 +2737,20 @@ async function pickBatchDir(): Promise<void> {
     return;
   }
   let progress: BatchProgressFile | null = null;
-  try { progress = JSON.parse(await invoke<string>('read_text_file', { path: `${dir}/${BATCH_PROGRESS_FILE}` })) as BatchProgressFile; } catch { /* 无进度文件 */ }
+  try {
+    progress = JSON.parse(await invoke<string>('read_text_file', { path: `${dir}/${BATCH_PROGRESS_FILE}` })) as BatchProgressFile;
+  } catch {
+    /* 无进度文件 */
+  }
   batchItems = [];
   for (const p of paths) {
     const item = planBatchChapters([p], progress)[0];
     try {
       const { chapters } = normalizeAndSplitChapters(await readChapterRaw(p), item.name);
       item.segCount = chapters.reduce((n, ch) => n + (ch.md.match(/\[P\d+\]/g)?.length ?? 0), 0);
-    } catch { /* 读不了的章段数显示为空 */ }
+    } catch {
+      /* 读不了的章段数显示为空 */
+    }
     batchItems.push(item);
   }
   renderBatchList(progress);
@@ -2260,15 +2758,22 @@ async function pickBatchDir(): Promise<void> {
 
 function renderBatchList(progress: BatchProgressFile | null): void {
   const box = $('bt-list');
-  box.innerHTML = batchItems.map((it, i) => `
+  box.innerHTML = batchItems
+    .map(
+      (it, i) => `
     <label style="display:flex;align-items:center;gap:6px;padding:3px 4px;font-size:12px">
       <input type="checkbox" data-bt="${i}" ${it.done ? '' : 'checked'} />
       <span style="flex:1;word-break:break-all">${esc(it.name)}</span>
       <span class="dim" style="white-space:nowrap">${it.segCount ? it.segCount + ' 段' : ''}</span>
       ${it.done ? '<span class="ok-badge" style="white-space:nowrap">✓ 上次已完成（跳过）</span>' : ''}
-    </label>`).join('');
+    </label>`,
+    )
+    .join('');
   if (progress && batchItems.some((x) => x.done)) {
-    box.insertAdjacentHTML('afterbegin', `<div class="dim" style="padding:2px 4px 6px">检测到上次批处理进度：已完成的章默认不勾选——续跑只跑剩下的；想重跑某一章，勾上它即可（产物会覆盖当天同名文件）</div>`);
+    box.insertAdjacentHTML(
+      'afterbegin',
+      `<div class="dim" style="padding:2px 4px 6px">检测到上次批处理进度：已完成的章默认不勾选——续跑只跑剩下的；想重跑某一章，勾上它即可（产物会覆盖当天同名文件）</div>`,
+    );
   }
   $('bt-list-fld').style.display = '';
   $('bt-inst-fld').style.display = '';
@@ -2285,14 +2790,22 @@ function renderBatchList(progress: BatchProgressFile | null): void {
 }
 
 async function saveBatchProgress(progress: BatchProgressFile): Promise<void> {
-  try { await invoke('write_text_file', { path: `${batchDir}/${BATCH_PROGRESS_FILE}`, content: JSON.stringify(progress, null, 1) }); } catch { /* 进度尽力而为 */ }
+  try {
+    await invoke('write_text_file', { path: `${batchDir}/${BATCH_PROGRESS_FILE}`, content: JSON.stringify(progress, null, 1) });
+  } catch {
+    /* 进度尽力而为 */
+  }
 }
 
 /** 书级替换规则残留计数（机器核对，不靠 AI 自觉；与 rewriteCheck 同口径） */
 function countRuleLeft(md: string): number {
   let left = 0;
-  let body = '';
-  try { body = splitChapter(md).body; } catch { return 0; }
+  let body: string;
+  try {
+    body = splitChapter(md).body;
+  } catch {
+    return 0;
+  }
   for (const r of S.rewriteRules.replacements) {
     if (!r.from) continue;
     left += (body.match(new RegExp(`\\b${r.from.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'g')) ?? []).length;
@@ -2305,7 +2818,11 @@ async function runBatch(): Promise<void> {
   const runItems = runIdx.map((i) => batchItems[i]).filter(Boolean);
   if (runItems.length === 0) return;
   const key = await invoke<string>('load_api_key');
-  if (!key) { setStatus('全书简化需要先配置 AI（菜单 LayerText → AI 设置…）', 'err'); showAiSettings(); return; }
+  if (!key) {
+    setStatus('全书简化需要先配置 AI（菜单 LayerText → AI 设置…）', 'err');
+    showAiSettings();
+    return;
+  }
 
   const date = new Date().toLocaleDateString('sv-SE');
   const instructions = ($('bt-instructions') as HTMLTextAreaElement).value.trim();
@@ -2313,7 +2830,9 @@ async function runBatch(): Promise<void> {
   try {
     const old = JSON.parse(await invoke<string>('read_text_file', { path: `${batchDir}/${BATCH_PROGRESS_FILE}` })) as BatchProgressFile;
     for (const [k, v] of Object.entries(old.status ?? {})) if (v === 'done') progress.status[k] = 'done';
-  } catch { /* 全新队列 */ }
+  } catch {
+    /* 全新队列 */
+  }
 
   batchAbort = new AbortController();
   const rows: BookReportRow[] = [];
@@ -2328,7 +2847,9 @@ async function runBatch(): Promise<void> {
   ($('bt-cancel') as HTMLElement).style.display = '';
   $('bt-progress').style.display = '';
 
-  const setStep = (t: string) => { $('bt-step').textContent = t; };
+  const setStep = (t: string) => {
+    $('bt-step').textContent = t;
+  };
   let canceled = false;
 
   for (let ci = 0; ci < runItems.length; ci++) {
@@ -2343,39 +2864,72 @@ async function runBatch(): Promise<void> {
         const tCh = Date.now();
         const base = item.name.replace(/\.(md|txt|markdown|docx)$/i, '');
         const outName = `${chapters.length > 1 ? `${base}_${chi + 1}` : base}_简化_${date}${mergedSelection().active ? `_${mergedSelection().label.replace(/[/\\?%*:|"<>&]/g, '')}` : ''}.md`;
-        const { md: newMd, outTokens: tk, segCount } = await simplifyChapterCore(ch.md, instructions, (i, total) => {
-          doneSegsAll = Math.min(doneSegsAll + 1, totalSegsAll);
-          setStep(`第 ${ci + 1}/${runItems.length} 章 · ${ch.title}：正在简化第 ${i + 1}/${total} 段（全书进度 ${doneSegsAll}/${totalSegsAll} 段）`);
-          ($('bt-bar') as HTMLElement).style.width = `${totalSegsAll ? (doneSegsAll / totalSegsAll) * 100 : 0}%`;
-        }, batchAbort!.signal);
+        const {
+          md: newMd,
+          outTokens: tk,
+          segCount,
+        } = await simplifyChapterCore(
+          ch.md,
+          instructions,
+          (i, total) => {
+            doneSegsAll = Math.min(doneSegsAll + 1, totalSegsAll);
+            setStep(`第 ${ci + 1}/${runItems.length} 章 · ${ch.title}：正在简化第 ${i + 1}/${total} 段（全书进度 ${doneSegsAll}/${totalSegsAll} 段）`);
+            ($('bt-bar') as HTMLElement).style.width = `${totalSegsAll ? (doneSegsAll / totalSegsAll) * 100 : 0}%`;
+          },
+          batchAbort!.signal,
+        );
         fileTokens += tk;
         await invoke('write_text_file', { path: `${batchDir}/${outName}`, content: newMd });
         const report = runQc(newMd, buildLexiconNow(), {
-          tier: 'M', fileName: outName, chno: chnoFromPath(item.path),
+          tier: 'M',
+          fileName: outName,
+          chno: chnoFromPath(item.path),
           tierGates: { passiveFromCh: 0, relclFromCh: 0 },
           ...(S.properRows.length ? { propCheckList: S.properRows } : {}),
           ...(reinforceWordsNow() ? { reinforceWords: reinforceWordsNow()! } : {}),
         });
         rows.push({
           chapter: chapters.length > 1 ? `${item.name} · ${chi + 1}` : item.name,
-          output: outName, segCount,
+          output: outName,
+          segCount,
           oovRate: (report.newWordRate * 100).toFixed(1) + '%',
-          avgLen: report.avgLenNarrRaw.toFixed(1), maxLen: report.maxLen,
-          passive: report.passive, relcl: report.relcl, pastperf: report.pastperf, overlong: report.over20,
+          avgLen: report.avgLenNarrRaw.toFixed(1),
+          maxLen: report.maxLen,
+          passive: report.passive,
+          relcl: report.relcl,
+          pastperf: report.pastperf,
+          overlong: report.over20,
           ruleLeft: countRuleLeft(newMd),
-          elapsedMs: Date.now() - tCh, outTokens: tk, status: 'done',
+          elapsedMs: Date.now() - tCh,
+          outTokens: tk,
+          status: 'done',
         });
       }
       progress.status[item.path] = 'done';
       await saveBatchProgress(progress);
       setStep(`✓ ${item.name} 完成（${((Date.now() - tFile) / 1000).toFixed(0)} 秒）`);
     } catch (e) {
-      if (batchAbort?.signal.aborted) { canceled = true; break; }
+      if (batchAbort?.signal.aborted) {
+        canceled = true;
+        break;
+      }
       progress.status[item.path] = 'failed';
       rows.push({
-        chapter: item.name, output: '', segCount: item.segCount,
-        oovRate: '', avgLen: '', maxLen: 0, passive: 0, relcl: 0, pastperf: 0, overlong: 0, ruleLeft: 0,
-        elapsedMs: Date.now() - tFile, outTokens: 0, status: 'failed', error: String(e).slice(0, 160),
+        chapter: item.name,
+        output: '',
+        segCount: item.segCount,
+        oovRate: '',
+        avgLen: '',
+        maxLen: 0,
+        passive: 0,
+        relcl: 0,
+        pastperf: 0,
+        overlong: 0,
+        ruleLeft: 0,
+        elapsedMs: Date.now() - tFile,
+        outTokens: 0,
+        status: 'failed',
+        error: String(e).slice(0, 160),
       });
       await saveBatchProgress(progress);
       setStep(`✗ ${item.name} 失败：${String(e).slice(0, 80)}——继续下一章`);
@@ -2387,14 +2941,23 @@ async function runBatch(): Promise<void> {
   if (rows.length > 0) {
     const reportPath = `${batchDir}/全书简化报告_${date}.md`;
     try {
-      await invoke('write_text_file', { path: reportPath, content: buildBookReportMd(rows, {
-        book: batchDir.slice(batchDir.lastIndexOf('/') + 1), date, maxLen: simplifyMaxLen(), instructions,
-        provider: S.lastProvider?.name,
-      }) });
+      await invoke('write_text_file', {
+        path: reportPath,
+        content: buildBookReportMd(rows, {
+          book: batchDir.slice(batchDir.lastIndexOf('/') + 1),
+          date,
+          maxLen: simplifyMaxLen(),
+          instructions,
+          provider: S.lastProvider?.name,
+        }),
+      });
       if (canceled) {
         setStatus(`全书批处理已取消：本次完成 ${doneCount}/${runItems.length} 章。产物已保留，书级报告：${reportPath}——重新打开本对话框选同一文件夹可续跑`, 'saved');
       } else {
-        setStatus(`全书批处理完成：成功 ${doneCount}/${runItems.length} 章。书级汇总报告：${reportPath}${rows.some((r) => r.status === 'failed') ? '（有失败章节，报告里列了原因，可单独重跑）' : ''}`, 'saved');
+        setStatus(
+          `全书批处理完成：成功 ${doneCount}/${runItems.length} 章。书级汇总报告：${reportPath}${rows.some((r) => r.status === 'failed') ? '（有失败章节，报告里列了原因，可单独重跑）' : ''}`,
+          'saved',
+        );
         void invoke('reveal_path', { path: reportPath });
       }
     } catch (e) {
@@ -2402,7 +2965,11 @@ async function runBatch(): Promise<void> {
     }
   }
   if (!canceled) {
-    try { await invoke('remove_file', { path: `${batchDir}/${BATCH_PROGRESS_FILE}` }); } catch { /* 删除失败不影响结果 */ }
+    try {
+      await invoke('remove_file', { path: `${batchDir}/${BATCH_PROGRESS_FILE}` });
+    } catch {
+      /* 删除失败不影响结果 */
+    }
   }
   // 恢复对话框为可再次选择状态
   ($('bt-pick') as unknown as HTMLButtonElement).disabled = false;
@@ -2414,7 +2981,10 @@ async function runBatch(): Promise<void> {
 
 $('btn-batch').addEventListener('click', showBatchPop);
 document.addEventListener('mousedown', (e) => {
-  if (batchPop.classList.contains('open') && !(e.target as HTMLElement).closest('#batch-pop')) { batchAbort?.abort(); batchPop.classList.remove('open'); }
+  if (batchPop.classList.contains('open') && !(e.target as HTMLElement).closest('#batch-pop')) {
+    batchAbort?.abort();
+    batchPop.classList.remove('open');
+  }
 });
 
 /* ---------- 修改模式胶囊：一眼可见、一键切换（即改=立即生效 / 候选=点✓生效） ---------- */
@@ -2425,12 +2995,13 @@ $('mode-pill').addEventListener('click', async () => {
   S.appConfig.autoRewriteOnMark = !(S.appConfig.autoRewriteOnMark === true);
   await saveConfig();
   updateModePill();
-  setStatus(S.appConfig.autoRewriteOnMark
-    ? '已切换【即改模式】：点标记/AI建议将立即生效（写原稿+变更日志，首次修改前自动备份）'
-    : '已切换【候选模式】：AI 只出建议，你点 ✓ 才生效', 'saved');
+  setStatus(S.appConfig.autoRewriteOnMark ? '已切换【即改模式】：点标记/AI建议将立即生效（写原稿+变更日志，首次修改前自动备份）' : '已切换【候选模式】：AI 只出建议，你点 ✓ 才生效', 'saved');
 });
 updateModePill();
-$('tier-q').addEventListener('click', (e) => { e.stopPropagation(); showStandardPop(); });
+$('tier-q').addEventListener('click', (e) => {
+  e.stopPropagation();
+  showStandardPop();
+});
 
 /* ---------- 启动序列：配置 → 首启动欢迎 ---------- */
 setAiUi({ onStatus: (s) => setStatus(s, 'dirty') });
@@ -2439,13 +3010,25 @@ setAiUi({ onStatus: (s) => setStatus(s, 'dirty') });
 
 function toast(msg: string, kind: 'ok' | 'err' | 'info' = 'info'): void {
   let box = document.getElementById('toast-box');
-  if (!box) { box = document.createElement('div'); box.id = 'toast-box'; document.body.appendChild(box); }
+  if (!box) {
+    box = document.createElement('div');
+    box.id = 'toast-box';
+    document.body.appendChild(box);
+  }
   const el = document.createElement('div');
-  el.className = 'toast ' + kind; el.textContent = msg; box.appendChild(el);
-  setTimeout(() => { el.classList.add('out'); setTimeout(() => el.remove(), 400); }, kind === 'err' ? 6000 : 2600);
+  el.className = 'toast ' + kind;
+  el.textContent = msg;
+  box.appendChild(el);
+  setTimeout(
+    () => {
+      el.classList.add('out');
+      setTimeout(() => el.remove(), 400);
+    },
+    kind === 'err' ? 6000 : 2600,
+  );
 }
 window.addEventListener('error', (e) => toast('脚本错误：' + e.message, 'err'));
-window.addEventListener('unhandledrejection', (e) => toast('异步错误：' + (((e.reason as Error)?.message) ?? String(e.reason)), 'err'));
+window.addEventListener('unhandledrejection', (e) => toast('异步错误：' + ((e.reason as Error)?.message ?? String(e.reason)), 'err'));
 
 function scrollEl(): HTMLElement | null {
   for (const sel of ['#reader', '.content', 'main']) {
@@ -2454,13 +3037,16 @@ function scrollEl(): HTMLElement | null {
   }
   return document.querySelector<HTMLElement>('#reader');
 }
-function scrollNow(): number { return scrollEl()?.scrollTop ?? 0; }
+function scrollNow(): number {
+  return scrollEl()?.scrollTop ?? 0;
+}
 
 /* ---- 会话恢复：回到上次编辑 ---- */
 let lastSessionTimer: ReturnType<typeof setTimeout> | null = null;
 function saveLastSession(): void {
   if (S.sessions.length === 0) return;
-  const cur = activeSession(); if (cur) cur.scrollTop = scrollNow();
+  const cur = activeSession();
+  if (cur) cur.scrollTop = scrollNow();
   const dir = S.sessions.find((x) => x.sourcePath)?.sourcePath;
   S.appConfig.lastSession = {
     bookDir: dir ? dir.slice(0, dir.lastIndexOf('/')) : undefined,
@@ -2477,19 +3063,33 @@ function scheduleSaveLastSession(): void {
 }
 async function resumeLastSession(): Promise<void> {
   const ls = S.appConfig.lastSession;
-  if (!ls?.files?.length) { toast('没有上次的编辑记录'); return; }
+  if (!ls?.files?.length) {
+    toast('没有上次的编辑记录');
+    return;
+  }
   let opened = 0;
   for (const f of ls.files) {
-    try { await openPathIntoSession(f.path); opened++; } catch { /* 文件可能被移走，跳过 */ }
+    try {
+      await openPathIntoSession(f.path);
+      opened++;
+    } catch {
+      /* 文件可能被移走，跳过 */
+    }
   }
-  if (opened === 0) { toast('上次的文件都打不开了（可能被移动）', 'err'); return; }
-  if (S.classTargets.length === 0) await loadClassGroups();   // 同开书路径：先就位再绑定
+  if (opened === 0) {
+    toast('上次的文件都打不开了（可能被移动）', 'err');
+    return;
+  }
+  if (S.classTargets.length === 0) await loadClassGroups(); // 同开书路径：先就位再绑定
   if (ls.workspace && S.workspaces.some((w) => w.名 === ls.workspace)) activateWorkspace(ls.workspace);
   const idx = Math.min(ls.activeIdx, S.sessions.length - 1);
   S.activeIdx = idx;
   const s = activeSession();
   if (s && (ls.files[idx]?.scroll ?? 0) > 0) {
-    setTimeout(() => { const el = scrollEl(); if (el) el.scrollTop = ls.files[idx].scroll; }, 60);
+    setTimeout(() => {
+      const el = scrollEl();
+      if (el) el.scrollTop = ls.files[idx].scroll;
+    }, 60);
   }
   renderAll();
   toast(`已回到上次：${ls.workspace ? ls.workspace + ' · ' : ''}${s?.fileName ?? ''}（${ls.savedAt}）`, 'ok');
@@ -2505,14 +3105,20 @@ async function applyMdSnapshot(s: FileSession, md: string, label: string): Promi
 }
 async function doUndo(): Promise<void> {
   const s = activeSession();
-  if (!s?.undoStack?.length) { toast('没有可撤销的更改'); return; }
+  if (!s?.undoStack?.length) {
+    toast('没有可撤销的更改');
+    return;
+  }
   const prev = s.undoStack.pop()!;
   (s.redoStack ??= []).push(s.md);
   await applyMdSnapshot(s, prev, '↩︎ 已撤销');
 }
 async function doRedo(): Promise<void> {
   const s = activeSession();
-  if (!s?.redoStack?.length) { toast('没有可重做的更改'); return; }
+  if (!s?.redoStack?.length) {
+    toast('没有可重做的更改');
+    return;
+  }
   const next = s.redoStack.pop()!;
   (s.undoStack ??= []).push(s.md);
   await applyMdSnapshot(s, next, '↪︎ 已重做');
@@ -2522,22 +3128,29 @@ async function doRedo(): Promise<void> {
 let findHits: HTMLElement[] = [];
 let findPos = -1;
 function openFind(): void {
-  const bar = document.getElementById('findbar'); if (!bar) return;
+  const bar = document.getElementById('findbar');
+  if (!bar) return;
   bar.style.display = 'flex';
   const inp = document.getElementById('find-input') as HTMLInputElement | null;
-  inp?.focus(); inp?.select();
+  inp?.focus();
+  inp?.select();
   runFind();
 }
 function closeFind(): void {
-  const bar = document.getElementById('findbar'); if (bar) bar.style.display = 'none';
+  const bar = document.getElementById('findbar');
+  if (bar) bar.style.display = 'none';
   document.querySelectorAll('.flash-hit').forEach((el) => el.classList.remove('flash-hit'));
 }
 function runFind(): void {
   const q = (document.getElementById('find-input') as HTMLInputElement | null)?.value.trim().toLowerCase() ?? '';
   document.querySelectorAll('.flash-hit').forEach((el) => el.classList.remove('flash-hit'));
-  findHits = []; findPos = -1;
+  findHits = [];
+  findPos = -1;
   const cnt = document.getElementById('find-count');
-  if (!q) { if (cnt) cnt.textContent = ''; return; }
+  if (!q) {
+    if (cnt) cnt.textContent = '';
+    return;
+  }
   document.querySelectorAll<HTMLElement>('#reader .sent').forEach((el) => {
     if (el.textContent?.toLowerCase().includes(q)) findHits.push(el);
   });
@@ -2553,12 +3166,22 @@ function jumpFind(dir: 1 | -1): void {
   if (cnt) cnt.textContent = `${findPos + 1}/${findHits.length} 句`;
 }
 async function replaceAllFind(): Promise<void> {
-  const s = activeSession(); if (!s) { toast('先打开章节'); return; }
+  const s = activeSession();
+  if (!s) {
+    toast('先打开章节');
+    return;
+  }
   const q = (document.getElementById('find-input') as HTMLInputElement)?.value ?? '';
   const r = (document.getElementById('replace-input') as HTMLInputElement)?.value ?? '';
-  if (!q) { toast('先输入要查找的内容'); return; }
+  if (!q) {
+    toast('先输入要查找的内容');
+    return;
+  }
   const n = s.md.split(q).length - 1;
-  if (n === 0) { toast('没有可替换的内容'); return; }
+  if (n === 0) {
+    toast('没有可替换的内容');
+    return;
+  }
   if (!confirm(`把「${q}」全部替换为「${r}」？共 ${n} 处（可用 ↩︎ 撤销）`)) return;
   await applyMdSnapshot(s, s.md.split(q).join(r), `已替换 ${n} 处`);
   toast(`已替换 ${n} 处（↩︎ 可撤销）`, 'ok');
@@ -2581,39 +3204,73 @@ function stepReaderFont(d: number): void {
 /* ---- 设置弹层 ---- */
 function toggleSettings(): void {
   let pop = document.getElementById('settings-pop');
-  if (pop) { const show = pop.style.display === 'none'; pop.style.display = show ? 'block' : 'none'; if (show) renderSettings(); return; }
+  if (pop) {
+    const show = pop.style.display === 'none';
+    pop.style.display = show ? 'block' : 'none';
+    if (show) renderSettings();
+    return;
+  }
   pop = document.createElement('div');
-  pop.id = 'settings-pop'; pop.style.display = 'block';
+  pop.id = 'settings-pop';
+  pop.style.display = 'block';
   document.body.appendChild(pop);
   renderSettings();
 }
 function renderSettings(): void {
-  const pop = document.getElementById('settings-pop'); if (!pop) return;
+  const pop = document.getElementById('settings-pop');
+  if (!pop) return;
   const sel = mergedSelection();
   const row = (label: string, ctrl: string) => `<div class="set-row"><span>${label}</span>${ctrl}</div>`;
   pop.innerHTML = `<div class="pop-h">⚙ 设置 <span class="dim" style="font-weight:400;font-size:12px">（改完即存）</span></div>
     ${row('阅读字号', `<button id="set-fm">A－</button> <b id="set-fv">${S.appConfig.readerFont ?? 15}</b>px <button id="set-fp">A＋</button>`)}
     ${row('句长上限（简化标准）', `<button id="set-len">调整（${simplifyMaxLen()} 词）</button>`)}
-    ${row('直接修改原稿（首改自动备份）', `<input type="checkbox" id="set-inplace" ${S.appConfig.inPlaceEdit ?? true ? 'checked' : ''}/>`)}
+    ${row('直接修改原稿（首改自动备份）', `<input type="checkbox" id="set-inplace" ${(S.appConfig.inPlaceEdit ?? true) ? 'checked' : ''}/>`)}
     ${row('AI 改写直接生效', `<input type="checkbox" id="set-autorew" ${S.appConfig.autoRewriteOnMark ? 'checked' : ''}/>`)}
     ${row('当前班级定制口径', `<span class="dim">${sel.active ? `【${sel.label}】句长≤${sel.minLen} · 复现${sel.dueUnion.length}词${sel.coverageTarget ? ' · 覆盖≥' + sel.coverageTarget + '%' : ''}` : '未选择（👥班级定制）'}</span>`)}
     <div class="dim" style="margin-top:8px">LayerText v1.1 · feature/reinforce · 词库以书目录 _词库.csv 为准</div>`;
-  document.getElementById('set-fm')?.addEventListener('click', () => { stepReaderFont(-1); renderSettings(); });
-  document.getElementById('set-fp')?.addEventListener('click', () => { stepReaderFont(1); renderSettings(); });
-  document.getElementById('set-len')?.addEventListener('click', () => { showStandardPop(); });
-  document.getElementById('set-inplace')?.addEventListener('change', (e) => { S.appConfig.inPlaceEdit = (e.target as HTMLInputElement).checked; void saveConfig(); toast('已保存'); });
-  document.getElementById('set-autorew')?.addEventListener('change', (e) => { S.appConfig.autoRewriteOnMark = (e.target as HTMLInputElement).checked; void saveConfig(); toast('已保存'); });
+  document.getElementById('set-fm')?.addEventListener('click', () => {
+    stepReaderFont(-1);
+    renderSettings();
+  });
+  document.getElementById('set-fp')?.addEventListener('click', () => {
+    stepReaderFont(1);
+    renderSettings();
+  });
+  document.getElementById('set-len')?.addEventListener('click', () => {
+    showStandardPop();
+  });
+  document.getElementById('set-inplace')?.addEventListener('change', (e) => {
+    S.appConfig.inPlaceEdit = (e.target as HTMLInputElement).checked;
+    void saveConfig();
+    toast('已保存');
+  });
+  document.getElementById('set-autorew')?.addEventListener('change', (e) => {
+    S.appConfig.autoRewriteOnMark = (e.target as HTMLInputElement).checked;
+    void saveConfig();
+    toast('已保存');
+  });
 }
 
 /* ---- 全局快捷键 ---- */
 document.addEventListener('keydown', (e) => {
   const mod = e.metaKey || e.ctrlKey;
-  if (mod && (e.key === 'f' || e.key === 'F')) { e.preventDefault(); openFind(); }
-  else if (e.key === 'Escape') closeFind();
-  else if (mod && e.altKey && (e.key === 'z' || e.key === 'Z')) { e.preventDefault(); void (e.shiftKey ? doRedo() : doUndo()); }
-  else if (mod && (e.key === '=' || e.key === '+')) { e.preventDefault(); stepReaderFont(1); }
-  else if (mod && e.key === '-') { e.preventDefault(); stepReaderFont(-1); }
-  else if (e.key === 'Enter' && (document.activeElement?.id === 'find-input')) { e.preventDefault(); jumpFind(1); }
+  if (mod && (e.key === 'f' || e.key === 'F')) {
+    e.preventDefault();
+    openFind();
+  } else if (e.key === 'Escape') closeFind();
+  else if (mod && e.altKey && (e.key === 'z' || e.key === 'Z')) {
+    e.preventDefault();
+    void (e.shiftKey ? doRedo() : doUndo());
+  } else if (mod && (e.key === '=' || e.key === '+')) {
+    e.preventDefault();
+    stepReaderFont(1);
+  } else if (mod && e.key === '-') {
+    e.preventDefault();
+    stepReaderFont(-1);
+  } else if (e.key === 'Enter' && document.activeElement?.id === 'find-input') {
+    e.preventDefault();
+    jumpFind(1);
+  }
 });
 document.addEventListener('scroll', () => scheduleSaveLastSession(), true);
 
@@ -2622,8 +3279,8 @@ void (async () => {
   if (!S.appConfig.firstRunSeen) showWelcome();
   await restoreChat();
   applyReaderFont();
-  await renderShelf();   // 首页=书架（示例+我的书；原"最近编辑"空状态升级为书架）
-  setInterval(() => void saveLastSession(), 20000);   // 兜底：上次会话自动保存
+  await renderShelf(); // 首页=书架（示例+我的书；原"最近编辑"空状态升级为书架）
+  setInterval(() => void saveLastSession(), 20000); // 兜底：上次会话自动保存
 })();
 
 /* ================= 简化标准（句长上限，唯一可调项） · 本书配置 · 首启动欢迎 ================= */
@@ -2673,7 +3330,10 @@ const BOOK_CONFIG = '_LayerText项目.json';
 
 async function saveBookConfig(): Promise<void> {
   const s = activeSession();
-  if (!s?.sourcePath) { setStatus('先打开本书的一个章节文件，配置会保存在它旁边', 'err'); return; }
+  if (!s?.sourcePath) {
+    setStatus('先打开本书的一个章节文件，配置会保存在它旁边', 'err');
+    return;
+  }
   const dir = s.sourcePath.slice(0, s.sourcePath.lastIndexOf('/'));
   const cfg = {
     说明: 'LayerText 本书配置——放在书稿文件夹里，打开同文件夹任何章节自动生效',
@@ -2698,11 +3358,15 @@ async function loadBookConfig(dir: string): Promise<boolean> {
   try {
     const raw = await invoke<string>('read_text_file', { path: `${dir}/${BOOK_CONFIG}` });
     const cfg = JSON.parse(raw) as { vocabCsv?: string | null; vocabName?: string; terms?: string | null; proper?: string[] | null; instructions?: string | null; rewrite?: typeof S.rewriteRules };
-    if (cfg.vocabCsv) { S.vocabCsvText = cfg.vocabCsv; S.vocabName = cfg.vocabName ?? '本书词库'; }
+    if (cfg.vocabCsv) {
+      S.vocabCsvText = cfg.vocabCsv;
+      S.vocabName = cfg.vocabName ?? '本书词库';
+    }
     if (cfg.terms) S.termsText = cfg.terms;
     S.properRows = cfg.proper ?? [];
     if (cfg.instructions) S.appConfig.instructions = cfg.instructions;
-    if (cfg.rewrite) S.rewriteRules = { replacements: cfg.rewrite.replacements ?? [], viewpoint: cfg.rewrite.viewpoint ?? 'keep', viewpointName: cfg.rewrite.viewpointName ?? '', extra: cfg.rewrite.extra ?? '' };
+    if (cfg.rewrite)
+      S.rewriteRules = { replacements: cfg.rewrite.replacements ?? [], viewpoint: cfg.rewrite.viewpoint ?? 'keep', viewpointName: cfg.rewrite.viewpointName ?? '', extra: cfg.rewrite.extra ?? '' };
     return Boolean(cfg.vocabCsv || cfg.terms || cfg.proper?.length || cfg.rewrite);
   } catch {
     return false;
@@ -2721,14 +3385,15 @@ function bufToB64(buf: ArrayBuffer): string {
 
 async function exportDocx(): Promise<void> {
   const s = activeSession();
-  if (!s) { setStatus('请先打开要导出的章节', 'err'); return; }
+  if (!s) {
+    setStatus('请先打开要导出的章节', 'err');
+    return;
+  }
   try {
     const body = splitChapter(s.md).body;
     const card = splitChapter(s.md).card;
     const paras = extractParas(body);
-    const children: (Paragraph | Table)[] = [
-      new Paragraph({ text: s.fileName.replace(/\.(md|txt|markdown)$/i, ''), heading: HeadingLevel.HEADING_1 }),
-    ];
+    const children: (Paragraph | Table)[] = [new Paragraph({ text: s.fileName.replace(/\.(md|txt|markdown)$/i, ''), heading: HeadingLevel.HEADING_1 })];
     for (let i = 0; i < paras.length; i++) {
       const text = applyRewrite(sentsOf(paras[i], false).join(' ').replace(/\s+/g, ' ').trim());
       if (text) children.push(new Paragraph({ children: [new TextRun({ text, size: 24, font: 'Georgia' })], spacing: { after: 160 } }));
@@ -2736,15 +3401,21 @@ async function exportDocx(): Promise<void> {
     const rows = card.split('\n').filter((l) => l.trim().startsWith('|') && !/^\|[\s:-]+\|$/.test(l.trim()));
     if (rows.length >= 2) {
       children.push(new Paragraph({ text: '词句卡', heading: HeadingLevel.HEADING_2, pageBreakBefore: true }));
-      children.push(new Table({
-        width: { size: 100, type: WidthType.PERCENTAGE },
-        rows: rows.map((r) => {
-          const cells = r.trim().replace(/^\|+|\|+$/g, '').split('|').map((c) => c.trim());
-          return new TableRow({
-            children: cells.map((c) => new TableCell({ children: [new Paragraph(c)] })),
-          });
+      children.push(
+        new Table({
+          width: { size: 100, type: WidthType.PERCENTAGE },
+          rows: rows.map((r) => {
+            const cells = r
+              .trim()
+              .replace(/^\|+|\|+$/g, '')
+              .split('|')
+              .map((c) => c.trim());
+            return new TableRow({
+              children: cells.map((c) => new TableCell({ children: [new Paragraph(c)] })),
+            });
+          }),
         }),
-      }));
+      );
     }
     const doc = new Document({ sections: [{ children }] });
     const buf = await Packer.toBuffer(doc);
@@ -2763,13 +3434,18 @@ async function exportDocx(): Promise<void> {
 
 async function exportTts(): Promise<void> {
   const s = activeSession();
-  if (!s) { setStatus('请先打开章节', 'err'); return; }
+  if (!s) {
+    setStatus('请先打开章节', 'err');
+    return;
+  }
   try {
-    const text = applyRewrite(extractParas(splitChapter(s.md).body)
-      .map((p) => sentsOf(p, false).join(' '))
-      .join('\n')
-      .replace(/\[[P\d\s]*?\]/g, '')
-      .trim());
+    const text = applyRewrite(
+      extractParas(splitChapter(s.md).body)
+        .map((p) => sentsOf(p, false).join(' '))
+        .join('\n')
+        .replace(/\[[P\d\s]*?\]/g, '')
+        .trim(),
+    );
     if (!text) throw new Error('正文为空');
     const base = s.sourcePath ? s.sourcePath.slice(0, s.sourcePath.lastIndexOf('/')) + '/' + s.fileName.replace(/\.(md|txt|markdown)$/i, '') : (await invoke<string>('reports_dir')) + '/示例朗读';
     const out = base + '.aiff';
@@ -2803,12 +3479,18 @@ function tourShow(i: number): void {
   if (i < 0 || i >= TOUR.length) {
     tip.classList.remove('open');
     $('tour-hl').style.display = 'none';
-    void (async () => { S.appConfig.tourSeen = true; await saveConfig(); })();
+    void (async () => {
+      S.appConfig.tourSeen = true;
+      await saveConfig();
+    })();
     return;
   }
   const step = TOUR[i];
   const el = document.querySelector(step.sel) as HTMLElement | null;
-  if (!el) { tourShow(i + 1); return; }
+  if (!el) {
+    tourShow(i + 1);
+    return;
+  }
   const r = el.getBoundingClientRect();
   const hl = $('tour-hl');
   hl.style.cssText = `display:block;left:${r.left - 6}px;top:${r.top - 6}px;width:${r.width + 12}px;height:${r.height + 12}px`;
@@ -2824,7 +3506,10 @@ function tourShow(i: number): void {
 
 /* ---------- 书级改写规则：确定性替换（机器做，零遗漏） + 视角与全局规则（注入 AI） ---------- */
 
-interface RewriteRule { from: string; to: string; }
+interface RewriteRule {
+  from: string;
+  to: string;
+}
 
 const rewritePop = $('rewrite-pop');
 
@@ -2838,16 +3523,18 @@ function rewriteCheck(): string {
   const s = activeSession();
   if (!s) return '先打开章节';
   const out: string[] = [];
-  let body = '';
-  try { body = splitChapter(s.md).body; } catch { return '正文解析失败'; }
+  let body: string;
+  try {
+    body = splitChapter(s.md).body;
+  } catch {
+    return '正文解析失败';
+  }
   for (const r of S.rewriteRules.replacements) {
     if (!r.from) continue;
     const esc = r.from.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const left = (body.match(new RegExp(`\\b${esc}\\b`, 'g')) ?? []).length;
     const used = (body.match(new RegExp(`\\b${r.to.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'g')) ?? []).length;
-    out.push(left === 0
-      ? `✓ "${r.from}" → "${r.to}"：无残留（新词出现 ${used} 次）`
-      : `✗ "${r.from}" 仍有 ${left} 处未替换（新词 "${r.to}" 出现 ${used} 次）——可点下方"对当前章节执行替换"由机器补齐`);
+    out.push(left === 0 ? `✓ "${r.from}" → "${r.to}"：无残留（新词出现 ${used} 次）` : `✗ "${r.from}" 仍有 ${left} 处未替换（新词 "${r.to}" 出现 ${used} 次）——可点下方"对当前章节执行替换"由机器补齐`);
   }
   if (S.rewriteRules.viewpoint === 'first') {
     const he = (body.match(/\b(he|his|him|she|her)\b/gi) ?? []).length;
@@ -2860,7 +3547,10 @@ function rewriteCheck(): string {
 function saveRewriteToBook(): void {
   void (async () => {
     const s = activeSession();
-    if (!s?.sourcePath) { setStatus('规则随本书保存——先打开本书章节', 'err'); return; }
+    if (!s?.sourcePath) {
+      setStatus('规则随本书保存——先打开本书章节', 'err');
+      return;
+    }
     const dir = s.sourcePath.slice(0, s.sourcePath.lastIndexOf('/'));
     try {
       const raw = await invoke<string>('read_text_file', { path: `${dir}/${BOOK_CONFIG}` });
@@ -2907,10 +3597,12 @@ function showRewritePop(): void {
     rows().appendChild(div);
   };
   const collect = () => {
-    S.rewriteRules.replacements = [...rewritePop.querySelectorAll('.rw-row')].map((r) => ({
-      from: (r.querySelector('.rw-from') as HTMLInputElement).value.trim(),
-      to: (r.querySelector('.rw-to') as HTMLInputElement).value.trim(),
-    })).filter((r) => r.from);
+    S.rewriteRules.replacements = [...rewritePop.querySelectorAll('.rw-row')]
+      .map((r) => ({
+        from: (r.querySelector('.rw-from') as HTMLInputElement).value.trim(),
+        to: (r.querySelector('.rw-to') as HTMLInputElement).value.trim(),
+      }))
+      .filter((r) => r.from);
     S.rewriteRules.viewpoint = ($('rw-view') as HTMLSelectElement).value as 'keep' | 'first';
     S.rewriteRules.viewpointName = ($('rw-name') as HTMLInputElement).value.trim();
     S.rewriteRules.extra = ($('rw-extra') as HTMLTextAreaElement).value.trim();
@@ -2923,15 +3615,24 @@ function showRewritePop(): void {
 
   $('rw-add').addEventListener('click', () => addRow());
   $('rw-close').addEventListener('click', () => rewritePop.classList.remove('open'));
-  $('rw-save').addEventListener('click', () => { collect(); saveRewriteToBook(); });
-  $('rw-check').addEventListener('click', () => { collect(); $('rw-out').textContent = rewriteCheck(); });
+  $('rw-save').addEventListener('click', () => {
+    collect();
+    saveRewriteToBook();
+  });
+  $('rw-check').addEventListener('click', () => {
+    collect();
+    $('rw-out').textContent = rewriteCheck();
+  });
   $('rw-apply').addEventListener('click', () => {
     collect();
     const s = activeSession();
     if (!s) return;
     const before = s.md;
     s.md = applyRewrite(s.md);
-    if (s.md === before) { $('rw-out').textContent = '无可替换内容（或原词已清零）'; return; }
+    if (s.md === before) {
+      $('rw-out').textContent = '无可替换内容（或原词已清零）';
+      return;
+    }
     void (async () => {
       try {
         const savedTo = await persistEdit(s, s.md);
@@ -2997,7 +3698,10 @@ function showWelcome(): void {
       const out = $('w-out') as HTMLElement;
       const p = AI_PROVIDERS[Number(($('w-provider') as HTMLSelectElement).value)];
       const key = ($('w-key') as HTMLInputElement).value.trim();
-      if (!key) { out.textContent = '还没填 Key——填了再保存，或点"跳过"'; return; }
+      if (!key) {
+        out.textContent = '还没填 Key——填了再保存，或点"跳过"';
+        return;
+      }
       out.textContent = '连接中…';
       try {
         const resp = await tauriFetch(`${p.url}/chat/completions`, {
@@ -3050,7 +3754,7 @@ $('btn-ai').addEventListener('click', () => void aiSuggest());
 interface ChatMsg {
   role: 'user' | 'assistant' | 'tool';
   content: string;
-  reasoning_content?: string;  // DeepSeek 工具循环硬性要求回传
+  reasoning_content?: string; // DeepSeek 工具循环硬性要求回传
   tool_calls?: { id: string; type: 'function'; function: { name: string; arguments: string } }[];
   tool_call_id?: string;
 }
@@ -3096,12 +3800,15 @@ const AI_TOOLS = [
     type: 'function',
     function: {
       name: 'apply_edit',
-      description: '【直接编辑】仅当教师开启信任模式且明确要求"直接改"时使用：核对原句后直接替换正文（自动落工作稿与变更日志，原稿不动）。original 需与正文原句一致（空格差异可容忍，句末标点必须带上）',
+      description:
+        '【直接编辑】仅当教师开启信任模式且明确要求"直接改"时使用：核对原句后直接替换正文（自动落工作稿与变更日志，原稿不动）。original 需与正文原句一致（空格差异可容忍，句末标点必须带上）',
       parameters: {
         type: 'object',
         properties: {
-          original: { type: 'string' }, revised: { type: 'string' },
-          basis: { type: 'string' }, markId: { type: 'string' },
+          original: { type: 'string' },
+          revised: { type: 'string' },
+          basis: { type: 'string' },
+          markId: { type: 'string' },
         },
         required: ['original', 'revised', 'basis'],
       },
@@ -3115,8 +3822,10 @@ const AI_TOOLS = [
       parameters: {
         type: 'object',
         properties: {
-          original: { type: 'string' }, revised: { type: 'string' },
-          basis: { type: 'string' }, markId: { type: 'string' },
+          original: { type: 'string' },
+          revised: { type: 'string' },
+          basis: { type: 'string' },
+          markId: { type: 'string' },
         },
         required: ['original', 'revised', 'basis'],
       },
@@ -3128,24 +3837,35 @@ async function executeTool(name: string, argsJson: string): Promise<string> {
   const s = activeSession();
   if (!s) return '错误：当前未打开任何章节';
   let args: Record<string, unknown> = {};
-  try { args = JSON.parse(argsJson || '{}'); } catch { /* 空 */ }
+  try {
+    args = JSON.parse(argsJson || '{}');
+  } catch {
+    /* 空 */
+  }
   try {
     switch (name) {
       case 'list_marks':
         if (s.review.marks.length === 0) return '（无标记）';
-        return s.review.marks
-          .map((m) => `${m.id}｜${m.level === 'word' ? `词「${m.word}」` : `句`}｜${typeLabel(m.type)}｜P${m.pi + 1}-S${m.si + 1}${m.note ? '｜备注：' + m.note : ''}`)
-          .join('\n');
+        return s.review.marks.map((m) => `${m.id}｜${m.level === 'word' ? `词「${m.word}」` : `句`}｜${typeLabel(m.type)}｜P${m.pi + 1}-S${m.si + 1}${m.note ? '｜备注：' + m.note : ''}`).join('\n');
       case 'get_chapter_stats': {
         const r = runQc(s.md, buildLexiconNow(), { tier: 'M', fileName: s.fileName, chno: s.sourcePath ? chnoFromPath(s.sourcePath) : null });
         s.report = r;
         renderReportPane(s);
         return JSON.stringify({
-          句长上限标准: simplifyMaxLen(), 段落数: r.paraCount, 句数: r.sentCount, 词符数: r.tokenCount,
-          覆盖率: (r.coverage * 100).toFixed(1) + '%', 生词率: (r.newWordRate * 100).toFixed(1) + '%',
-          平均句长: Number(r.avgLenNarrRaw.toFixed(1)), 最长句: r.maxLen, 超20词句数: r.over20,
-          被动: r.passive, 定语从句: r.relcl, 过去完成: r.pastperf,
-          待定词命中: r.pendingHits, OOV前20: [...new Set(r.oov)].slice(0, 20),
+          句长上限标准: simplifyMaxLen(),
+          段落数: r.paraCount,
+          句数: r.sentCount,
+          词符数: r.tokenCount,
+          覆盖率: (r.coverage * 100).toFixed(1) + '%',
+          生词率: (r.newWordRate * 100).toFixed(1) + '%',
+          平均句长: Number(r.avgLenNarrRaw.toFixed(1)),
+          最长句: r.maxLen,
+          超20词句数: r.over20,
+          被动: r.passive,
+          定语从句: r.relcl,
+          过去完成: r.pastperf,
+          待定词命中: r.pendingHits,
+          OOV前20: [...new Set(r.oov)].slice(0, 20),
         });
       }
       case 'get_sentence': {
@@ -3181,8 +3901,12 @@ async function executeTool(name: string, argsJson: string): Promise<string> {
         const risk = checkRev(revised);
         const loc = locateSent(s, original);
         const g: Suggestion = {
-          markId: String(args.markId ?? 'edit-' + Date.now().toString(36)), type: '直接编辑',
-          original, revised, basis, status: 'pending',
+          markId: String(args.markId ?? 'edit-' + Date.now().toString(36)),
+          type: '直接编辑',
+          original,
+          revised,
+          basis,
+          status: 'pending',
           check: { passive: risk.passive, relcl: risk.relcl, pastperf: risk.pastperf, overlong: risk.overlong },
           ...(loc ? { pi: loc.pi, si: loc.si } : {}),
         };
@@ -3201,7 +3925,10 @@ async function executeTool(name: string, argsJson: string): Promise<string> {
         const risk = checkRev(revised);
         S.suggestions.push({
           markId: String(args.markId ?? 'chat-' + Date.now().toString(36)),
-          type: '对话建议', original, revised, basis: String(args.basis ?? ''),
+          type: '对话建议',
+          original,
+          revised,
+          basis: String(args.basis ?? ''),
           check: { passive: risk.passive, relcl: risk.relcl, pastperf: risk.pastperf, overlong: risk.overlong },
         });
         renderSuggestions();
@@ -3238,13 +3965,20 @@ function chatRender(): void {
 async function sendChat(): Promise<void> {
   if (S.chatBusy) return;
   const s = activeSession();
-  if (!s) { setStatus('请先打开章节再与 AI 交流', 'err'); return; }
+  if (!s) {
+    setStatus('请先打开章节再与 AI 交流', 'err');
+    return;
+  }
   const input = $('chat-input') as HTMLTextAreaElement;
   const text = input.value.trim();
   if (!text) return;
   input.value = '';
   const key = await invoke<string>('load_api_key');
-  if (!key) { setStatus('请先配置 AI（菜单 LayerText → AI 设置…）', 'err'); showAiSettings(); return; }
+  if (!key) {
+    setStatus('请先配置 AI（菜单 LayerText → AI 设置…）', 'err');
+    showAiSettings();
+    return;
+  }
 
   S.chatBusy = true;
   ($('chat-send') as unknown as HTMLButtonElement).disabled = true;
@@ -3254,13 +3988,15 @@ async function sendChat(): Promise<void> {
   let usageTotal = '';
 
   try {
-    const system = (await buildSystemPrompt()) + (await buildAssistantPrompt({
-      submitRule: S.appConfig.trustEdit
-        ? '信任模式已开启——教师说"直接改/改吧"时用 apply_edit 直接应用（自动落工作稿与变更日志，原稿不动）；教师说"给建议/看看"时仍用 propose_revision'
-        : '教师未开启信任模式，一律用 propose_revision 提交候选，由教师在界面点 ✓ 采纳',
-      fileName: s.fileName,
-      markCount: s.review.marks.length,
-    }));
+    const system =
+      (await buildSystemPrompt()) +
+      (await buildAssistantPrompt({
+        submitRule: S.appConfig.trustEdit
+          ? '信任模式已开启——教师说"直接改/改吧"时用 apply_edit 直接应用（自动落工作稿与变更日志，原稿不动）；教师说"给建议/看看"时仍用 propose_revision'
+          : '教师未开启信任模式，一律用 propose_revision 提交候选，由教师在界面点 ✓ 采纳',
+        fileName: s.fileName,
+        markCount: s.review.marks.length,
+      }));
     for (let round = 0; round < 8; round++) {
       const messages = [{ role: 'system', content: system }, ...S.chatMsgs];
       statusEl.textContent = round === 0 ? '思考中…' : `工具结果已回传，继续（第 ${round + 1} 轮）…`;
@@ -3271,7 +4007,12 @@ async function sendChat(): Promise<void> {
         log.scrollTop = log.scrollHeight;
       });
       usageTotal = usage;
-      S.chatMsgs.push({ role: 'assistant', content, ...(reasoning ? { reasoning_content: reasoning } : {}), tool_calls: toolCalls.length ? toolCalls.map((t) => ({ id: t.id, type: 'function' as const, function: { name: t.name, arguments: t.arguments } })) : undefined });
+      S.chatMsgs.push({
+        role: 'assistant',
+        content,
+        ...(reasoning ? { reasoning_content: reasoning } : {}),
+        tool_calls: toolCalls.length ? toolCalls.map((t) => ({ id: t.id, type: 'function' as const, function: { name: t.name, arguments: t.arguments } })) : undefined,
+      });
       if (toolCalls.length === 0) {
         chatRender();
         break;
@@ -3294,7 +4035,12 @@ async function sendChat(): Promise<void> {
 }
 
 $('chat-send').addEventListener('click', () => void sendChat());
-$('chat-clear').addEventListener('click', () => { S.chatMsgs = []; chatRender(); scheduleChatSave(); setStatus('AI 对话已清空', ''); });
+$('chat-clear').addEventListener('click', () => {
+  S.chatMsgs = [];
+  chatRender();
+  scheduleChatSave();
+  setStatus('AI 对话已清空', '');
+});
 $('chat-input').addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) void sendChat();
 });
@@ -3306,25 +4052,34 @@ async function maybeCompactChat(): Promise<void> {
   if (!plan.need || S.chatBusy) return;
   const snapLen = S.chatMsgs.length;
   try {
-    const transcript = S.chatMsgs.slice(0, plan.keptFrom)
+    const transcript = S.chatMsgs
+      .slice(0, plan.keptFrom)
       .filter((m) => m.role !== 'tool')
       .map((m) => `${m.role === 'user' ? '教师' : 'AI'}：${m.content.slice(0, 500)}`)
       .join('\n');
-    const { content } = await callChat([
-      { role: 'system', content: '你是审校对话记录压缩器。把下面的对话历史压缩成要点摘要，必须保留：教师的每个核心要求、已经做过的修改（哪句改成了什么）、教师否决过什么、关键结论与未完成事项。用中文列点，300 字以内，不要寒暄。' },
-      { role: 'user', content: transcript },
-    ], 700, undefined, '对话压缩');
+    const { content } = await callChat(
+      [
+        {
+          role: 'system',
+          content:
+            '你是审校对话记录压缩器。把下面的对话历史压缩成要点摘要，必须保留：教师的每个核心要求、已经做过的修改（哪句改成了什么）、教师否决过什么、关键结论与未完成事项。用中文列点，300 字以内，不要寒暄。',
+        },
+        { role: 'user', content: transcript },
+      ],
+      700,
+      undefined,
+      '对话压缩',
+    );
     if (S.chatBusy || S.chatMsgs.length !== snapLen) return; // 压缩期间教师又发话，放弃本次（下次再压）
     const userTurns = S.chatMsgs.slice(0, plan.keptFrom).filter((m) => m.role === 'user').length;
-    S.chatMsgs = [
-      { role: 'user', content: `（系统提示：此前 ${userTurns} 轮对话较长，已自动压缩为以下摘要，请基于摘要继续回答：\n${content.trim()}）` },
-      ...S.chatMsgs.slice(plan.keptFrom),
-    ];
+    S.chatMsgs = [{ role: 'user', content: `（系统提示：此前 ${userTurns} 轮对话较长，已自动压缩为以下摘要，请基于摘要继续回答：\n${content.trim()}）` }, ...S.chatMsgs.slice(plan.keptFrom)];
     chatRender();
     scheduleChatSave();
     const estAfter = plan.estTail + estTokens(content) + 80;
     setStatus(`✓ 对话历史已自动压缩：约 ${plan.estBefore} → ${estAfter} tokens（旧轮要点保留在摘要里，不影响回答质量）`, 'saved');
-  } catch { /* 压缩失败不影响使用，留待下次 */ }
+  } catch {
+    /* 压缩失败不影响使用，留待下次 */
+  }
 }
 
 /* 侧栏双页切换 */
@@ -3354,8 +4109,7 @@ function showGateHelp(gate: string, anchor: HTMLElement): void {
     const maxLen = simplifyMaxLen();
     if (s?.report) {
       const r = s.report;
-      const row = (name: string, value: string, ref: string, warn = false) =>
-        `<tr class="${warn ? 'warnrow' : ''}"><td>${name}</td><td>${value}</td><td>${ref}</td></tr>`;
+      const row = (name: string, value: string, ref: string, warn = false) => `<tr class="${warn ? 'warnrow' : ''}"><td>${name}</td><td>${value}</td><td>${ref}</td></tr>`;
       body += `
         <table class="gtable">
           <tr><th>指标</th><th>本章实际</th><th>参考</th></tr>
@@ -3405,11 +4159,11 @@ document.addEventListener('mouseup', (e) => {
   const sel = window.getSelection();
   if (!sel || sel.isCollapsed) return;
   const node = sel.focusNode;
-  const host = (node?.nodeType === 3 ? node.parentElement : (node as HTMLElement | null));
+  const host = node?.nodeType === 3 ? node.parentElement : (node as HTMLElement | null);
   const sentEl = host?.closest('.sent');
   const s = activeSession();
   if (!sentEl || !s) return;
-  const anchorSent = (sel.anchorNode?.nodeType === 3 ? sel.anchorNode.parentElement : sel.anchorNode as HTMLElement | null)?.closest('.sent');
+  const anchorSent = (sel.anchorNode?.nodeType === 3 ? sel.anchorNode.parentElement : (sel.anchorNode as HTMLElement | null))?.closest('.sent');
   const cross = anchorSent !== sentEl;
   const rect = sel.getRangeAt(0).getBoundingClientRect();
   showSentPanel(s, sentEl as HTMLElement, rect.left, rect.bottom + 6, cross);
@@ -3420,4 +4174,3 @@ document.addEventListener('mousedown', (e) => {
   if ((e.target as HTMLElement).closest('#pop')) return;
   if (pop.classList.contains('open')) hidePop();
 });
-

@@ -198,6 +198,32 @@ fn remove_file(path: String) -> Result<(), String> {
     }
 }
 
+/// 书架书封：列出书稿文件夹里的封面图（cover/封面/front 等命名的 jpg/jpeg/png/webp，取第一个用）
+#[tauri::command]
+fn list_cover_images(dir: String) -> Result<Vec<String>, String> {
+    const COVER_STEMS: [&str; 6] = ["cover", "封面", "front", "front-cover", "book-cover", "书封"];
+    let mut out = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(&dir) {
+        for e in entries.flatten() {
+            let p = e.path();
+            if !p.is_file() {
+                continue;
+            }
+            let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("").to_lowercase();
+            let ext = p.extension().and_then(|x| x.to_str()).unwrap_or("").to_lowercase();
+            if !matches!(ext.as_str(), "jpg" | "jpeg" | "png" | "webp") {
+                continue;
+            }
+            let stem = &name[..name.len() - ext.len() - 1];
+            if COVER_STEMS.contains(&stem) {
+                out.push(p.to_string_lossy().to_string());
+            }
+        }
+    }
+    out.sort();
+    Ok(out)
+}
+
 #[tauri::command]
 fn reveal_path(path: String) -> Result<(), String> {
     std::process::Command::new("open")
@@ -488,6 +514,7 @@ fn main() {
         config_dir,
             list_local_examples,
             list_dir,
+            list_cover_images,
             remove_file,
             reveal_path,
             save_api_key,

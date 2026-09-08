@@ -4,6 +4,28 @@
 1.0.0 之前的版本号为开发期里程碑（当时 `package.json` 未同步递增，本文件按里程碑整理，2026-09-06 校准）。
 面向教师的通俗版功能说明见 [README](README.md) 与 [docs/PRD.md](docs/PRD.md)。
 
+## [未发布] - 2026-09-08（feature/reinforce 本地）
+
+### 书架改版 · 两级导航（Wayne 走查反馈：点书没反馈/比例不像书/封面与放大问题）
+
+- **书封化书架**：书卡改为正常书比例竖版封面（3:4），左侧书脊（深色压边+高光），hover 抬起；整卡可点（去掉"打开这本书"按钮）。
+- **封面导入**：书目录放 `cover.jpg`/`封面.png`（jpg/jpeg/png/webp，front/book-cover/书封 均识别）即自动作书封（Rust 新增 `list_cover_images` 命令）；无图用书名当封面——书名字号按视觉宽度分档自适应（中文全角=1、ASCII≈0.55），极端长名换行 4 行内可见不溢出。
+- **两级导航**：点书 → 版本选择页（B/M/A 三张版本卡，各显示章数/绑定口径/起始章）→ 点版本才进工作区（不再一竿子捅进第一个工作区）；版本页可返回书架；工具栏新增「🏠 书架」按钮随时回来（改动早已自动落盘）。
+- **工作区点击有反馈了**：修复工作区条 active 态样式选择器写错（`.filetabs .ftab.active` 不覆盖 `.wstabs` 容器）导致点击零视觉变化的 bug；active 态=浅绿底+顶部深绿条+加粗；切版本时若当前正文不属于该版本，自动翻开该版本第一章（看得见的变化）。
+- **去掉"点刷新"提示**：工作区绑定口径未加载时改为静默补加载分组文件并自动绑定，不再弹红色"点「👥班级定制→刷新」"。
+- **修复工作区条残留**：关闭全部章节后工作区条仍挂在页面的 bug（无会话时一并收起）。
+- **响应式适配**：书架网格 auto-fill 随窗口宽度增减列数（168px 最小书宽）；侧栏 `clamp(250px,24vw,350px)`；pane 内边距 clamp；正文段落与报告表限宽 1080px 保行长可读；900px 以下窄窗侧栏收窄、书架换小列。
+- 纯逻辑 `coverTitlePx`/`coverVisualWidth`/`buildVersionCards` 入 `pure.ts`，新增 3 项测试。
+
+### 前端工程化（Lint + 格式化 + 一键校验 + Git 钩子 + CI 门禁）
+
+- **ESLint**（flat config，typescript-eslint recommended）：覆盖 `app/src`、`src`、`tests`、`tools`；`npm run lint` / `lint:fix`。存量清零：正则多余转义 11 处、无用赋值 4 处、三元做语句 1 处修复；未用变量/any 降为警告不阻塞（18 warnings，`_` 前缀豁免）。
+- **Prettier**：`npm run format`（printWidth 200 贴近现状，不做全仓重排避免巨型 diff）；只对暂存文件增量格式化。
+- **Git 钩子**：husky + lint-staged——commit 时自动对暂存的 ts/mjs 跑 `eslint --fix` + `prettier --write`。
+- **一键校验**：`npm run verify` = typecheck（根 + app 双包）→ lint → 全量测试。
+- **CI 门禁**：`ci.yml` 新增 Lint 步骤（0 error 才过）。
+- 顺带修复：`openChapterFiles` 对话框取消时 `null` 未过滤的存量类型漏洞（app tsc 由 CI 之外首查抓出）；root package.json 重复 `description` 键。
+
 ## [1.1.0] - 2026-09-07
 
 ### 优化阶段 O1–O6（让现有的一切更稳、更快、更顺、更好懂）

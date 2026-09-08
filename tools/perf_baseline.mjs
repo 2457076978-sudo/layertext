@@ -37,17 +37,19 @@ function makeN(md, n) {
 const md3 = makeN(md1, 3);
 
 const lexicon = buildLexicon({
-  plainWordlistTexts: [
-    readFileSync(join(ROOT, 'assets/wordlists/curriculum_2022_level3_1600.txt'), 'utf-8'),
-    readFileSync(join(ROOT, 'assets/wordlists/curriculum_2022_amendment.txt'), 'utf-8'),
-  ],
-  terms: [], properNouns: [],
+  plainWordlistTexts: [readFileSync(join(ROOT, 'assets/wordlists/curriculum_2022_level3_1600.txt'), 'utf-8'), readFileSync(join(ROOT, 'assets/wordlists/curriculum_2022_amendment.txt'), 'utf-8')],
+  terms: [],
+  properNouns: [],
 });
 
 function bench(fn, iters = 15) {
   for (let i = 0; i < 3; i++) fn();
   const ts = [];
-  for (let i = 0; i < iters; i++) { const t0 = performance.now(); fn(); ts.push(performance.now() - t0); }
+  for (let i = 0; i < iters; i++) {
+    const t0 = performance.now();
+    fn();
+    ts.push(performance.now() - t0);
+  }
   ts.sort((a, b) => a - b);
   return { median: ts[Math.floor(iters / 2)], p95: ts[Math.min(iters - 1, Math.ceil(iters * 0.95) - 1)] };
 }
@@ -56,7 +58,11 @@ function bench(fn, iters = 15) {
 function pipeline(md) {
   const body = splitChapter(md).body;
   let words = 0;
-  for (const p of extractParas(body)) for (const sent of sentsOf(p, false)) { words += tokenizeTxt(sent).length; sentenceRisks(sent); }
+  for (const p of extractParas(body))
+    for (const sent of sentsOf(p, false)) {
+      words += tokenizeTxt(sent).length;
+      sentenceRisks(sent);
+    }
   return words;
 }
 
@@ -76,7 +82,7 @@ function renderLikeMain(md) {
     sentsOf(p, false).forEach((sent) => {
       const s = win.document.createElement('span');
       const toks = tokenizeTxt(sent);
-      const raws = sent.match(/[A-Za-z][A-Za-z'\-]*/g) ?? [];
+      const raws = sent.match(/[A-Za-z][A-Za-z'-]*/g) ?? [];
       let rest = sent;
       for (let i = 0; i < raws.length; i++) {
         const at = rest.indexOf(raws[i]);
@@ -96,7 +102,9 @@ function renderLikeMain(md) {
 }
 
 /* ③ QC 体检 */
-function qc(md) { runQc(md, lexicon, { tier: 'M', fileName: 'bench.md' }); }
+function qc(md) {
+  runQc(md, lexicon, { tier: 'M', fileName: 'bench.md' });
+}
 
 /* ④ 版本对比渲染（右侧为"每 3 段改 1 段"的模拟简化版） */
 const diffPane = win.document.createElement('section');
@@ -105,16 +113,33 @@ function diffLike(md) {
   const body = splitChapter(md).body;
   const paras = extractParas(body);
   const sim = paras.map((p, i) => (i % 3 === 0 ? p.replace(/\bvery\b/g, 'really') : p)).join('\n\n');
-  renderDiffPane(diffPane, [
-    { fileName: '原文.md', md },
-    { fileName: '简化版.md', md: `# b\n\n## Chapter One\n\n${sim}\n` },
-  ], 0, 1, () => {});
+  renderDiffPane(
+    diffPane,
+    [
+      { fileName: '原文.md', md },
+      { fileName: '简化版.md', md: `# b\n\n## Chapter One\n\n${sim}\n` },
+    ],
+    0,
+    1,
+    () => {},
+  );
 }
 
-const wc = (md) => (splitChapter(md).body.match(/[A-Za-z][A-Za-z'\-]*/g) ?? []).length;
+const wc = (md) => (splitChapter(md).body.match(/[A-Za-z][A-Za-z'-]*/g) ?? []).length;
 const rows = [];
-for (const [label, md] of [['AF 第一章（1x）', md1], ['同文 3 倍（3x）', md3]]) {
-  rows.push({ label, 词符: wc(md), 段数: extractParas(splitChapter(md).body).length, pipeline: bench(() => pipeline(md)), render: bench(() => renderLikeMain(md), 8), qc: bench(() => qc(md), 8), diff: bench(() => diffLike(md), 8) });
+for (const [label, md] of [
+  ['AF 第一章（1x）', md1],
+  ['同文 3 倍（3x）', md3],
+]) {
+  rows.push({
+    label,
+    词符: wc(md),
+    段数: extractParas(splitChapter(md).body).length,
+    pipeline: bench(() => pipeline(md)),
+    render: bench(() => renderLikeMain(md), 8),
+    qc: bench(() => qc(md), 8),
+    diff: bench(() => diffLike(md), 8),
+  });
 }
 
 /* ⑤ AI 全流程：不自动消耗额度，读本机成本台账的历史真实耗时 */
@@ -123,7 +148,9 @@ const costCsv = join(process.env.HOME, 'Documents/LayerText质检报告/AI成本
 if (existsSync(costCsv)) {
   const lines = readFileSync(costCsv, 'utf-8').trim().split('\n');
   const idx = lines[0].split(',');
-  const iScene = idx.indexOf('场景'), iMs = idx.indexOf('耗时ms'), iOk = idx.indexOf('结果');
+  const iScene = idx.indexOf('场景'),
+    iMs = idx.indexOf('耗时ms'),
+    iOk = idx.indexOf('结果');
   const byScene = {};
   for (const l of lines.slice(1)) {
     const c = l.split(',');
@@ -159,5 +186,8 @@ ${aiNote}。AI 耗时主要由网络与服务商决定（应用内有重试与 f
 - 若未来 3x 以上文本渲染逼近阈值，优先方案：分批 requestAnimationFrame 渲染段落（renderReader 已按段落循环，天然可分批）。
 `;
 
-if (outPath) { writeFileSync(outPath, md); console.log('written:', outPath); }
+if (outPath) {
+  writeFileSync(outPath, md);
+  console.log('written:', outPath);
+}
 console.log(md);

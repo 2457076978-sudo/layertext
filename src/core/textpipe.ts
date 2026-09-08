@@ -56,7 +56,7 @@ export function sentsOf(text: string, song: boolean): string[] {
 
 /** 词符化：提取英文词 → 小写 → 去首尾 ' / - → 去所有格 's */
 export function tokenizeTxt(txt: string): string[] {
-  const raw = txt.match(/[A-Za-z][A-Za-z'\-]*/g) ?? [];
+  const raw = txt.match(/[A-Za-z][A-Za-z'-]*/g) ?? [];
   return raw
     .map((t) =>
       t
@@ -109,7 +109,7 @@ export function cardGlossWords(card: string): Set<string> {
     const r = row.trim();
     if (r.startsWith('|')) {
       const cell = r.replace(/^\|+/, '').replace(/\|+$/, '').split('|')[0].trim();
-      const m = cell.match(/^([A-Za-z][A-Za-z'\-]*(?: [A-Za-z][A-Za-z'\-]*)?)/);
+      const m = cell.match(/^([A-Za-z][A-Za-z'-]*(?: [A-Za-z][A-Za-z'-]*)?)/);
       if (m) for (const w of m[1].split(' ')) gloss.add(w.toLowerCase().replace(/-+$/, ''));
     }
   }

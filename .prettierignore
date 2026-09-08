@@ -1,0 +1,7 @@
+dist/
+node_modules/
+app/dist/
+app/src-tauri/target/
+eval-reports/
+package-lock.json
+app/package-lock.json
