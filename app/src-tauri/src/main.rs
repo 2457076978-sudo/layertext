@@ -25,14 +25,22 @@ fn read_file_base64(path: String) -> Result<String, String> {
 
 fn base64_encode(data: &[u8]) -> String {
     const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::with_capacity((data.len() + 2) / 3 * 4);
+    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
     for c in data.chunks(3) {
         let b = [c[0], *c.get(1).unwrap_or(&0), *c.get(2).unwrap_or(&0)];
         let n = (u32::from(b[0]) << 16) | (u32::from(b[1]) << 8) | u32::from(b[2]);
         out.push(T[(n >> 18) as usize & 63] as char);
         out.push(T[(n >> 12) as usize & 63] as char);
-        out.push(if c.len() > 1 { T[(n >> 6) as usize & 63] as char } else { '=' });
-        out.push(if c.len() > 2 { T[n as usize & 63] as char } else { '=' });
+        out.push(if c.len() > 1 {
+            T[(n >> 6) as usize & 63] as char
+        } else {
+            '='
+        });
+        out.push(if c.len() > 2 {
+            T[n as usize & 63] as char
+        } else {
+            '='
+        });
     }
     out
 }
@@ -57,12 +65,12 @@ fn write_file_base64(path: String, b64: String) -> Result<(), String> {
 
 fn base64_decode(s: &str) -> Result<Vec<u8>, String> {
     const REV: &[i8] = &[
-        -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
-        -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 62, -1, -1, -1, 63, 52,
-        53, 54, 55, 56, 57, 58, 59, 60, 61, -1, -1, -1, -1, -1, -1, -1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9,
-        10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, -1, -1, -1, -1, -1, -1, 26,
-        27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49,
-        50, 51, -1, -1, -1, -1, -1,
+        -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+        -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 62, -1, -1,
+        -1, 63, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, -1, -1, -1, -1, -1, -1, -1, 0, 1, 2, 3, 4,
+        5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, -1, -1, -1,
+        -1, -1, -1, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45,
+        46, 47, 48, 49, 50, 51, -1, -1, -1, -1, -1,
     ];
     let mut out = Vec::with_capacity(s.len() / 4 * 3);
     let mut buf = 0u32;
@@ -89,8 +97,10 @@ fn base64_decode(s: &str) -> Result<Vec<u8>, String> {
 #[tauri::command]
 fn export_tts(text: String, path: String, voice: String) -> Result<(), String> {
     let status = std::process::Command::new("say")
-        .arg("-o").arg(&path)
-        .arg("-v").arg(&voice)
+        .arg("-o")
+        .arg(&path)
+        .arg("-v")
+        .arg(&voice)
         .arg(&text)
         .output()
         .map_err(|e| e.to_string())?;
@@ -146,9 +156,17 @@ fn list_local_examples() -> Result<Vec<String>, String> {
     if let Ok(entries) = std::fs::read_dir(&dir) {
         for e in entries.flatten() {
             let p = e.path();
-            let ext = p.extension().and_then(|x| x.to_str()).unwrap_or("").to_lowercase();
+            let ext = p
+                .extension()
+                .and_then(|x| x.to_str())
+                .unwrap_or("")
+                .to_lowercase();
             if (ext == "md" || ext == "txt")
-                && !p.file_name().and_then(|n| n.to_str()).unwrap_or("").starts_with('_')
+                && !p
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("")
+                    .starts_with('_')
             {
                 out.push(p.to_string_lossy().to_string());
             }
@@ -168,8 +186,16 @@ fn list_dir(dir: String) -> Result<Vec<String>, String> {
             if !p.is_file() {
                 continue;
             }
-            let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
-            let ext = p.extension().and_then(|x| x.to_str()).unwrap_or("").to_lowercase();
+            let name = p
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("")
+                .to_string();
+            let ext = p
+                .extension()
+                .and_then(|x| x.to_str())
+                .unwrap_or("")
+                .to_lowercase();
             if !(ext == "md" || ext == "txt" || ext == "markdown" || ext == "docx") {
                 continue;
             }
@@ -201,7 +227,14 @@ fn remove_file(path: String) -> Result<(), String> {
 /// 书架书封：列出书稿文件夹里的封面图（cover/封面/front 等命名的 jpg/jpeg/png/webp，取第一个用）
 #[tauri::command]
 fn list_cover_images(dir: String) -> Result<Vec<String>, String> {
-    const COVER_STEMS: [&str; 6] = ["cover", "封面", "front", "front-cover", "book-cover", "书封"];
+    const COVER_STEMS: [&str; 6] = [
+        "cover",
+        "封面",
+        "front",
+        "front-cover",
+        "book-cover",
+        "书封",
+    ];
     let mut out = Vec::new();
     if let Ok(entries) = std::fs::read_dir(&dir) {
         for e in entries.flatten() {
@@ -209,13 +242,20 @@ fn list_cover_images(dir: String) -> Result<Vec<String>, String> {
             if !p.is_file() {
                 continue;
             }
-            let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("").to_lowercase();
-            let ext = p.extension().and_then(|x| x.to_str()).unwrap_or("").to_lowercase();
+            let ext = p
+                .extension()
+                .and_then(|x| x.to_str())
+                .unwrap_or("")
+                .to_lowercase();
             if !matches!(ext.as_str(), "jpg" | "jpeg" | "png" | "webp") {
                 continue;
             }
-            let stem = &name[..name.len() - ext.len() - 1];
-            if COVER_STEMS.contains(&stem) {
+            let stem = p
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("")
+                .to_lowercase();
+            if COVER_STEMS.contains(&stem.as_str()) {
                 out.push(p.to_string_lossy().to_string());
             }
         }
@@ -277,7 +317,11 @@ fn append_log_impl(content: &str) -> Result<(), String> {
         }
     }
     use std::io::Write;
-    let mut f = std::fs::OpenOptions::new().create(true).append(true).open(&path).map_err(|e| e.to_string())?;
+    let mut f = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .map_err(|e| e.to_string())?;
     f.write_all(content.as_bytes()).map_err(|e| e.to_string())
 }
 
@@ -297,7 +341,9 @@ fn read_error_log() -> Result<String, String> {
 
 /// 无 chrono 依赖的本地时间戳（诊断用途，格式对齐 sv-SE 即可）
 fn chrono_like_now() -> String {
-    let out = std::process::Command::new("date").arg("+%Y-%m-%d %H:%M:%S").output();
+    let out = std::process::Command::new("date")
+        .arg("+%Y-%m-%d %H:%M:%S")
+        .output();
     match out {
         Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).trim().to_string(),
         _ => String::from("unknown-time"),
@@ -317,7 +363,17 @@ fn save_api_key(key: String, account: Option<String>) -> Result<(), String> {
     let service = key_service(&account);
     // -A：条目允许本机应用读取，避免每次读写都弹钥匙串授权框（个人电脑上的 API Key 场景可接受）
     let st = std::process::Command::new("security")
-        .args(["add-generic-password", "-U", "-A", "-a", "layertext", "-s", &service, "-w", &key])
+        .args([
+            "add-generic-password",
+            "-U",
+            "-A",
+            "-a",
+            "layertext",
+            "-s",
+            &service,
+            "-w",
+            &key,
+        ])
         .output()
         .map_err(|e| e.to_string())?;
     if st.status.success() {
@@ -331,7 +387,14 @@ fn save_api_key(key: String, account: Option<String>) -> Result<(), String> {
 fn load_api_key(account: Option<String>) -> Result<String, String> {
     let service = key_service(&account);
     let out = std::process::Command::new("security")
-        .args(["find-generic-password", "-a", "layertext", "-s", &service, "-w"])
+        .args([
+            "find-generic-password",
+            "-a",
+            "layertext",
+            "-s",
+            &service,
+            "-w",
+        ])
         .output()
         .map_err(|e| e.to_string())?;
     if out.status.success() {
@@ -371,9 +434,30 @@ fn open_help(app: &tauri::AppHandle, label: &str, title: &str, url: &str, w: f64
 #[tauri::command]
 fn open_help_window(app: tauri::AppHandle, which: String) {
     match which.as_str() {
-        "usage" => open_help(&app, "help-usage", "LayerText 使用说明", "/help.html", 760.0, 780.0),
-        "qc" => open_help(&app, "help-qc", "LayerText · QC 指标说明", "/help-qc.html", 760.0, 860.0),
-        _ => open_help(&app, "help-key", "如何获取 AI 的 Key（新手向）", "/help-key.html", 760.0, 720.0),
+        "usage" => open_help(
+            &app,
+            "help-usage",
+            "LayerText 使用说明",
+            "/help.html",
+            760.0,
+            780.0,
+        ),
+        "qc" => open_help(
+            &app,
+            "help-qc",
+            "LayerText · QC 指标说明",
+            "/help-qc.html",
+            760.0,
+            860.0,
+        ),
+        _ => open_help(
+            &app,
+            "help-key",
+            "如何获取 AI 的 Key（新手向）",
+            "/help-key.html",
+            760.0,
+            720.0,
+        ),
     }
 }
 
@@ -530,4 +614,109 @@ fn main() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+/* ================= 单元测试（纯逻辑：base64 编解码、封面过滤、目录清单） ================= */
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn base64_roundtrip() {
+        for s in [
+            "",
+            "a",
+            "ab",
+            "abc",
+            "abcd",
+            "中文内容测试",
+            "The quick brown fox jumps over the lazy dog. 0123456789 !?",
+        ] {
+            let enc = base64_encode(s.as_bytes());
+            assert_eq!(
+                base64_decode(&enc).unwrap(),
+                s.as_bytes(),
+                "roundtrip 失败: {s:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn base64_known_vectors() {
+        // RFC 4648 示例向量
+        assert_eq!(base64_encode(b"foobar"), "Zm9vYmFy");
+        assert_eq!(base64_encode(b"foob"), "Zm9vYg==");
+        assert_eq!(base64_encode(b"foo"), "Zm9v");
+        assert_eq!(base64_decode("Zm9vYmFy").unwrap(), b"foobar");
+        assert_eq!(base64_decode("Zm9vYg==").unwrap(), b"foob");
+        // 含换行的宽松输入（openssl 风格）
+        assert_eq!(base64_decode("Zm9v\nYmFy\r\n").unwrap(), b"foobar");
+        // 非法字符如实报错
+        assert!(base64_decode("Zm9v*").is_err());
+    }
+
+    #[test]
+    fn cover_filter_picks_recognized_names_only() {
+        let dir = std::env::temp_dir().join(format!("lt_cover_test_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        for name in [
+            "cover.jpg",
+            "封面.PNG",
+            "front-cover.webp",
+            "book-cover.jpeg",
+            "书封.png",
+            "trailer.jpg",
+            "cover.pdf",
+            "mycover.png",
+            "cover.txt",
+        ] {
+            std::fs::write(dir.join(name), b"x").unwrap();
+        }
+        let mut got: Vec<String> = list_cover_images(dir.to_string_lossy().to_string())
+            .unwrap()
+            .iter()
+            .map(|p| p.rsplit('/').next().unwrap().to_lowercase())
+            .collect();
+        got.sort();
+        assert_eq!(
+            got,
+            vec![
+                "book-cover.jpeg",
+                "cover.jpg",
+                "front-cover.webp",
+                "书封.png",
+                "封面.png"
+            ]
+        ); // sort()=字节序：ASCII 在前，中文按 UTF-8 码点
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn list_dir_excludes_products_and_config() {
+        let dir = std::env::temp_dir().join(format!("lt_listdir_test_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        for name in [
+            "第一章.md",
+            "notes.txt",
+            "_词库.csv",
+            "_工作区.json",
+            "ch1_简化_2026.md",
+            "ch1_工作稿.md",
+            "ch1_原始备份.md",
+            "质检报告_v01.json",
+            "cover.jpg",
+        ] {
+            std::fs::write(dir.join(name), b"x").unwrap();
+        }
+        let got: Vec<String> = list_dir(dir.to_string_lossy().to_string())
+            .unwrap()
+            .iter()
+            .map(|p| p.rsplit('/').next().unwrap().to_string())
+            .collect();
+        assert_eq!(got, vec!["notes.txt", "第一章.md"]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

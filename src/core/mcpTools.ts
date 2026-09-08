@@ -22,7 +22,7 @@ export function wrapAsChapter(text: string, title = 'MCP text'): string {
   return `# ${title}\n\n## Chapter One\n\n${paras.map((p, i) => `[P${String(i + 1).padStart(2, '0')}] ${p}`).join('\n\n')}\n`;
 }
 
-export interface McqLexiconOptions {
+export interface McpLexiconOptions {
   /** 自定义词库 CSV 文本（教材已学词），可多个 */
   vocabCsvTexts?: string[];
   /** 附加纯文本词表 */
@@ -31,7 +31,7 @@ export interface McqLexiconOptions {
   properNouns?: string[];
 }
 
-export function buildMcpLexicon(opts: McqLexiconOptions, bundledWordlists: string[]): Lexicon {
+export function buildMcpLexicon(opts: McpLexiconOptions, bundledWordlists: string[]): Lexicon {
   return buildLexicon({
     vocabCsvTexts: opts.vocabCsvTexts ?? [],
     plainWordlistTexts: [...bundledWordlists, ...(opts.plainWordlistTexts ?? [])],

@@ -4,6 +4,19 @@
 1.0.0 之前的版本号为开发期里程碑（当时 `package.json` 未同步递增，本文件按里程碑整理，2026-09-06 校准）。
 面向教师的通俗版功能说明见 [README](README.md) 与 [docs/PRD.md](docs/PRD.md)。
 
+## [未发布] - 2026-09-08（feature/reinforce 本地 · 第五批）
+
+### 后端根因重构（前端哲思平移：唯一实现 / 正确工具 / 肯定式 / 门禁前移）
+
+- **TS 核心层去重**（CLI 与 MCP 双入口共用的逻辑收敛到唯一实现）：
+  - `chnoFromPath`/`tagFromPath` 此前在 cli.ts、app/pure.ts、app/main.ts 三处各有一份——收敛到 `core/textpipe`（路径约定解析与章节管线同域，纯函数无 IO），pure 转发导出（App 内 import 路径不变）；
+  - `readWordFile`（cli 与 mcp-server 两份）+ 词表资产路径查找（cli 两个仅常量不同的同构函数）——收敛到新建 `src/core/files.ts`（Node fs 工具唯一存放；core 纯逻辑模块不引 fs 的边界保持）；
+  - cli 的 `propCheckList: proper.length ? proper.concat([]) : []` 拷贝冗余删除（引擎只读该数组）；mcp-server 手写 `dirname`（遮蔽同名 node:path 能力、Windows 分隔符会错）删除；`McqLexiconOptions` 接口拼写修正为 `McpLexiconOptions`。
+- **Rust 主进程**：`list_cover_images` 的字节算术切文件名 stem 改为 `Path::file_stem()`（正确工具替代手写）；`base64_encode` 容量预计算改 `div_ceil()`（clippy 门禁抓出）；`cargo fmt` 全文格式化（修正 handler 列表缩进不一致）。
+- **Rust 测试从 0 到 4**：base64 roundtrip + RFC 4648 已知向量 + 换行宽松输入/非法字符如实报错；封面名过滤（认 cover/封面/front 系、拒 mycover/trailer/非图扩展）；`list_dir` 产物与配置排除规则——全部纯逻辑单测，`cargo test` 0.00s。
+- **门禁前移**：新增 `npm run verify:rust`（cargo fmt --check + clippy -D warnings + test）；Rust 侧从"无任何检查"到 fmt/clippy/test 三闸全清。
+- TS 122/122 全绿；lint 0 error 0 warning；CI 保持 TS 轻链（tauri 全量编译需 webkit 系统依赖，Rust 门禁走本地 verify:rust）。
+
 ## [未发布] - 2026-09-08（feature/reinforce 本地 · 第四批）
 
 ### 根因重构（对前三批全部优化做整体审查：正确逻辑直接覆盖，不打补丁）

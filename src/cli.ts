@@ -22,94 +22,48 @@
 
 import { readFileSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { findAssetPath, readWordFile } from './core/files.js';
 import { buildLexicon, parseReinforceText } from './core/lexicon.js';
 import { runQc, toLegacyReport, type Tier } from './core/qc.js';
+import { chnoFromPath, tagFromPath } from './core/textpipe.js';
 
 const BUNDLED_WORDLIST = 'assets/wordlists/curriculum_2022_level3_1600.txt';
-const AMENDMENT_WORDLIST = 'assets/wordlists/curriculum_2022_amendment.txt';
-
-function repoRoot(): string {
-  // dist/src/cli.js → 仓库根
-  return resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
-}
-
-function defaultWordlistPath(): string | null {
-  const candidates = [join(process.cwd(), BUNDLED_WORDLIST), join(repoRoot(), BUNDLED_WORDLIST)];
-  for (const c of candidates) {
-    try {
-      readFileSync(c, 'utf-8');
-      return c;
-    } catch {
-      /* 尝试下一个 */
-    }
-  }
-  return null;
-}
-
-/** 内置词表 + 补录（数词/星期/月份等存档缺失块，见 amendment 文件头注释） */
-function amendmentWordlistPath(): string | null {
-  const candidates = [join(process.cwd(), AMENDMENT_WORDLIST), join(repoRoot(), AMENDMENT_WORDLIST)];
-  for (const c of candidates) {
-    try {
-      readFileSync(c, 'utf-8');
-      return c;
-    } catch {
-      /* 尝试下一个 */
-    }
-  }
-  return null;
-}
-
-/** 从路径推导章号（第X章），与 Python 版一致 */
-const CH_MAP: Record<string, number> = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10 };
-function chnoFromPath(p: string): number | null {
-  for (const [k, v] of Object.entries(CH_MAP)) if (p.includes(`第${k}章`)) return v;
-  return null;
-}
-
-function tagFromPath(p: string): string {
-  if (p.includes('A层')) return 'A';
-  if (p.includes('v0.2')) return 'v02';
-  return 'v01';
-}
-
-function readWordFile(p: string): string[] {
-  return readFileSync(p, 'utf-8')
-    .split('\n')
-    .map((l) => l.trim())
-    .filter((l) => l && !l.startsWith('#'));
-}
+const AMENDMENT_WORDLIST = 'assets/wordlists/curriculum_2022_amendment.txt'; // 数词/星期/月份等存档缺失块（见文件头注释）
 
 function main(): void {
   const argv = process.argv.slice(2);
   if (argv[0] !== 'qc' || !argv[1] || argv[1].startsWith('--')) {
-    console.error('用法: node dist/src/cli.js qc <候选md> [--tier A|B|M] [--vocab x.csv]... [--reinforce 已学词.txt]... [--wordlist x.txt]... [--terms x.txt] [--proper x.txt] [--anchor "短语"]... [--tag t] [--out file]');
+    console.error(
+      '用法: node dist/src/cli.js qc <候选md> [--tier A|B|M] [--vocab x.csv]... [--reinforce 已学词.txt]... [--wordlist x.txt]... [--terms x.txt] [--proper x.txt] [--anchor "短语"]... [--tag t] [--out file]',
+    );
     process.exit(2);
   }
   const path = argv[1];
   const opts: Record<string, string[]> = {};
   for (let i = 2; i < argv.length; i++) {
     const a = argv[i];
-    if (!a.startsWith('--')) { console.error(`无法识别的参数: ${a}`); process.exit(2); }
+    if (!a.startsWith('--')) {
+      console.error(`无法识别的参数: ${a}`);
+      process.exit(2);
+    }
     const key = a.slice(2);
     const val = argv[i + 1];
-    if (!val || val.startsWith('--')) { console.error(`参数 ${a} 需要值`); process.exit(2); }
+    if (!val || val.startsWith('--')) {
+      console.error(`参数 ${a} 需要值`);
+      process.exit(2);
+    }
     i++;
     (opts[key] ??= []).push(val);
   }
 
-  const tier = ((opts.tier?.[0] as Tier) ?? 'M');
+  const tier = (opts.tier?.[0] as Tier) ?? 'M';
   const vocabPaths = opts.vocab ?? [];
   let wordlistPaths = opts.wordlist ?? [];
   if (wordlistPaths.length === 0) {
-    const d = defaultWordlistPath();
-    if (d) {
-      wordlistPaths = [d];
-      const a = amendmentWordlistPath();
-      if (a) wordlistPaths.push(a);
-    }
-    else console.error('提示：未找到内置课标词表（assets/wordlists/），请先用 tools/convert_wordlist.py 生成或用 --wordlist 指定');
+    const bundled = findAssetPath(BUNDLED_WORDLIST);
+    const amendment = findAssetPath(AMENDMENT_WORDLIST);
+    wordlistPaths = [bundled, amendment].filter((x): x is string => x !== null);
+    if (wordlistPaths.length === 0) console.error('提示：未找到内置课标词表（assets/wordlists/），请先用 tools/convert_wordlist.py 生成或用 --wordlist 指定');
   }
   const terms = opts.terms ? opts.terms.flatMap(readWordFile) : [];
   const proper = opts.proper ? opts.proper.flatMap(readWordFile) : [];
@@ -127,7 +81,7 @@ function main(): void {
     tier,
     chno: chnoFromPath(path),
     anchors: opts.anchor ?? [],
-    propCheckList: proper.length ? proper.concat([]) : [],
+    propCheckList: proper, // 引擎只读（filter），直接传引用
     fileName: basename(path),
     ...(reinforce.length ? { reinforceWords: reinforce } : {}),
   });

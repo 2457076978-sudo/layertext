@@ -7,12 +7,8 @@ import { extractParas, sentsOf, splitChapter } from '../../src/core/textpipe.js'
 import { tokenizeTxt } from '../../src/core/textpipe.js';
 import type { Mark } from './types.js';
 
-/** 章号：从路径识别（第一章→1），与 CLI/原型一致 */
-const CH_MAP: Record<string, number> = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10 };
-export function chnoFromPath(p: string): number | null {
-  for (const [k, v] of Object.entries(CH_MAP)) if (p.includes(`第${k}章`)) return v;
-  return null;
-}
+/** 章号/报告 tag 的路径解析已收敛到 core/textpipe（CLI 与 App 共用唯一实现），此处转发导出 */
+export { chnoFromPath, tagFromPath } from '../../src/core/textpipe.js';
 
 /** CSV 单元格转义（含逗号/引号/换行加双引号，内部引号翻倍） */
 export function csvCell(v: string): string {

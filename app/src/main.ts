@@ -18,6 +18,7 @@ import {
   buildVersionCards,
   checkRevisedText,
   chnoFromPath,
+  tagFromPath,
   coverTitlePx,
   csvCell,
   estTokens,
@@ -826,12 +827,6 @@ function bindTypeButtons(session: FileSession, level: 'word' | 'sent', pi: numbe
 }
 
 /* ---------- 质检 ---------- */
-
-function tagFromPath(p: string): string {
-  if (p.includes('A层')) return 'A';
-  if (p.includes('v0.2')) return 'v02';
-  return 'v01';
-}
 
 async function runQcCurrent(opts: { auto?: boolean } = {}): Promise<void> {
   const s = activeSession();

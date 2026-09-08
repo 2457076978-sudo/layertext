@@ -15,6 +15,7 @@
     "format": "prettier --write app/src src tests tools",
     "typecheck": "tsc -p tsconfig.json && cd app && tsc --noEmit -p tsconfig.json",
     "verify": "npm run typecheck && npm run lint && npm test",
+    "verify:rust": "cd app/src-tauri && cargo fmt --check && cargo clippy -- -D warnings && cargo test",
     "prepare": "husky"
   },
   "lint-staged": {

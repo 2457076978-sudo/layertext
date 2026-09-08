@@ -125,3 +125,17 @@ export function pendHit(tok: string, pending: Set<string>): boolean {
   if (tok.endsWith('ing')) c.push(tok.slice(0, -3), tok.slice(0, -3) + 'e');
   return c.some((x) => pending.has(x));
 }
+
+/** 章号：从路径识别（第一章→1，一~十；识别不到返回 null）。CLI 与 App 共用的唯一实现 */
+const CH_MAP: Record<string, number> = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10 };
+export function chnoFromPath(p: string): number | null {
+  for (const [k, v] of Object.entries(CH_MAP)) if (p.includes(`第${k}章`)) return v;
+  return null;
+}
+
+/** 质检报告 tag：从路径推导（A层→A / v0.2→v02 / 其余 v01）。CLI 与 App 共用的唯一实现 */
+export function tagFromPath(p: string): string {
+  if (p.includes('A层')) return 'A';
+  if (p.includes('v0.2')) return 'v02';
+  return 'v01';
+}
