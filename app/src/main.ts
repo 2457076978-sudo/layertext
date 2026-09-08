@@ -2483,6 +2483,7 @@ async function resumeLastSession(): Promise<void> {
     try { await openPathIntoSession(f.path); opened++; } catch { /* 文件可能被移走，跳过 */ }
   }
   if (opened === 0) { toast('上次的文件都打不开了（可能被移动）', 'err'); return; }
+  if (S.classTargets.length === 0) await loadClassGroups();   // 同开书路径：先就位再绑定
   if (ls.workspace && S.workspaces.some((w) => w.名 === ls.workspace)) activateWorkspace(ls.workspace);
   const idx = Math.min(ls.activeIdx, S.sessions.length - 1);
   S.activeIdx = idx;
