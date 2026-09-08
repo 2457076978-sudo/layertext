@@ -4,6 +4,18 @@
 1.0.0 之前的版本号为开发期里程碑（当时 `package.json` 未同步递增，本文件按里程碑整理，2026-09-06 校准）。
 面向教师的通俗版功能说明见 [README](README.md) 与 [docs/PRD.md](docs/PRD.md)。
 
+## [未发布] - 2026-09-08（feature/reinforce 本地 · 第四批）
+
+### 根因重构（对前三批全部优化做整体审查：正确逻辑直接覆盖，不打补丁）
+
+- **口径加载收敛为唯一入口**：`ensureClassGroups()`（幂等 + 就位缓存，显式刷新才重读盘）；`activateWorkspace` 成为唯一绑定点（自身保证分组就位）。原先散在 openBook 预载 / enterWorkspace 兜底 / resume 预载 / activateWorkspace 静默补载的四处防御性重复全部移除。
+- **工作区切换收敛为唯一闭环**：`switchWorkspace(name)`——工作区条点击、⌘1-3、版本卡进入、会话恢复四个入口共用；顺带消灭 enterWorkspace 与闭环内部的双重打开 bug（同一章被 openPathIntoSession 两次）。
+- **书架渲染分层**：骨架（chrome）进书架渲染一次，正文区（grid/list）随搜索/分组/视图局部刷新——搜索框与输入焦点原地保持，删除"重渲染后找焦点回光标"的补偿代码；书卡以**书目录为唯一主键**（data-shelf=目录，过滤与重渲染后恒指向同一本书），替代易错位的数组下标；右键分组菜单改为参数传递，删除模块级 `loadShelfCached` 全局缓存。
+- **肯定式重写**：`filterShelfBooks` 拆为 `inGroup`/`matchesWords` 两个正向谓词（分组以相等为命中）；`touchProgress` 直接接受 `string | null`（删调用侧 `?? ''` 转译）；`progressPct` 条件精简（`!total` 覆盖未定义与零）；openBook 全书章数单路径计算（工作区总数或目录清点）；openChapterFiles 删冗余类型过滤。
+- **死代码清零（lint 0 error 0 warning）**：renderRecentInEmpty（被书架取代的旧空状态）、normalizeToChapter（由 pure.normalizeAndSplitChapters 承担）、ChatMsg/RewriteRule 孤儿接口、refreshPop 的 `_why` 死参数、fileTokens 从未读的累加器、data 未读赋值、8 处未用 import（lostSignals/uiSetStatus/QcResult/Tier/Workspace/providerNameOf/sentsOf/tokenizeTxt/IRR/parseManifest/cardGlossWords 等）。
+- **小根因**：难句跳转索引随切章复位（旧索引指向已不存在的句子）；resume 全部文件失效时还原书根锚定（防进度记账悬空）；backToShelf 改同步（体内无异步）；`review.bookmarks` 类型恒为数组的不变量成立后删除 `?? []` 双保险（测试数据同步补齐）。
+- 122/122 全绿；本次为纯逻辑重构，无 UI 行为变化。
+
 ## [未发布] - 2026-09-08（feature/reinforce 本地 · 第三批）
 
 ### 审校效率三件套（键盘流 / 热力轨 / 双栏逐句对照）

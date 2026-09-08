@@ -9,10 +9,7 @@ import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
 import { S, type AppConfig } from './state.js';
 import { withRetry } from './pure.js';
 import { DEFAULT_MAX_LEN } from './types.js';
-import {
-  aiErrHuman as aiErrHumanCore, buildTargets, composePrompt, COST_HEADER, parseManifest, providerNameOf, shouldFailover, toCostLine,
-  type ProviderTarget, type PromptManifest,
-} from '../../src/core/aiops.js';
+import { aiErrHuman as aiErrHumanCore, buildTargets, composePrompt, COST_HEADER, parseManifest, shouldFailover, toCostLine, type ProviderTarget, type PromptManifest } from '../../src/core/aiops.js';
 import manifestText from '../../prompts/manifest.json?raw';
 import promptSimplify from '../../prompts/system_simplify.md?raw';
 import promptDraft from '../../prompts/system_draft.md?raw';
@@ -21,7 +18,9 @@ import promptRewriteSentence from '../../prompts/rewrite_sentence.md?raw';
 import promptPlotPoints from '../../prompts/plot_points.md?raw';
 
 let ui: { onStatus?: (s: string) => void } | null = null;
-export function setAiUi(u: { onStatus?: (s: string) => void }): void { ui = u; }
+export function setAiUi(u: { onStatus?: (s: string) => void }): void {
+  ui = u;
+}
 
 export const MANIFEST: PromptManifest = parseManifest(manifestText);
 const BUNDLED_PROMPTS: Record<string, string> = {
@@ -46,13 +45,17 @@ export async function loadPrompt(name: string): Promise<{ version: string; body:
     const dir = await invoke<string>('prompts_dir');
     const custom = (await invoke<string>('read_text_file', { path: `${dir}/${name}.md` })).trim();
     if (custom) out = { version: out.version + '*', body: custom, custom: true };
-  } catch { /* 无自定义则用内置 */ }
+  } catch {
+    /* 无自定义则用内置 */
+  }
   promptCache.set(name, out);
   return out;
 }
 
 /** AI 设置保存后调用：清缓存让下一次请求重新读自定义目录 */
-export function reloadPrompts(): void { promptCache.clear(); }
+export function reloadPrompts(): void {
+  promptCache.clear();
+}
 
 /** 当前整套提示词版本（写入台账；任一提示词被自定义覆盖则加 *） */
 export async function promptSetVersion(): Promise<string> {
@@ -64,7 +67,9 @@ export async function promptSetVersion(): Promise<string> {
 export async function loadConfig(): Promise<AppConfig> {
   try {
     S.appConfig = JSON.parse(await invoke<string>('load_app_config')) as AppConfig;
-  } catch { S.appConfig = {}; }
+  } catch {
+    S.appConfig = {};
+  }
   return S.appConfig;
 }
 
@@ -98,21 +103,18 @@ async function activeTargets(): Promise<ProviderTarget[]> {
   const cfg = S.appConfig;
   const fallbackKeys: Record<number, string> = {};
   for (let i = 0; i < (cfg.failover ?? []).length; i++) {
-    try { fallbackKeys[i] = await invoke<string>('load_api_key', { account: 'fb' + i }); } catch { fallbackKeys[i] = ''; }
+    try {
+      fallbackKeys[i] = await invoke<string>('load_api_key', { account: 'fb' + i });
+    } catch {
+      fallbackKeys[i] = '';
+    }
   }
-  return buildTargets(
-    { baseUrl: (cfg.baseUrl || 'https://api.openai.com/v1').replace(/\/+$/, ''), model: cfg.model || 'gpt-4o-mini', key },
-    cfg.failover,
-    fallbackKeys,
-  );
+  return buildTargets({ baseUrl: (cfg.baseUrl || 'https://api.openai.com/v1').replace(/\/+$/, ''), model: cfg.model || 'gpt-4o-mini', key }, cfg.failover, fallbackKeys);
 }
 
 /* ---------- 成本台账（每次 AI 调用一行，全落 reports_dir） ---------- */
 
-async function logCost(
-  scene: string, t: ProviderTarget, elapsedMs: number, ok: boolean,
-  usage?: { promptTokens?: number; completionTokens?: number }, note?: string,
-): Promise<void> {
+async function logCost(scene: string, t: ProviderTarget, elapsedMs: number, ok: boolean, usage?: { promptTokens?: number; completionTokens?: number }, note?: string): Promise<void> {
   try {
     const s = S.sessions[S.activeIdx];
     const dir = s?.sourcePath ? s.sourcePath.slice(0, s.sourcePath.lastIndexOf('/')) : '';
@@ -120,57 +122,82 @@ async function logCost(
     const dirRep = await invoke<string>('reports_dir');
     let csv = '';
     const path = `${dirRep}/AI成本台账.csv`;
-    try { csv = await invoke<string>('read_text_file', { path }); } catch { /* 新建 */ }
+    try {
+      csv = await invoke<string>('read_text_file', { path });
+    } catch {
+      /* 新建 */
+    }
     if (!csv.trim()) csv = COST_HEADER.join(',') + '\n';
     csv += toCostLine({
-      ts: new Date().toLocaleString('sv-SE'), scene, book, chapter: s?.fileName ?? '',
-      provider: t.name, model: t.model, promptVer: await promptSetVersion(),
-      promptTokens: usage?.promptTokens, completionTokens: usage?.completionTokens,
-      elapsedMs, failover: t.index > 0, ok, note,
+      ts: new Date().toLocaleString('sv-SE'),
+      scene,
+      book,
+      chapter: s?.fileName ?? '',
+      provider: t.name,
+      model: t.model,
+      promptVer: await promptSetVersion(),
+      promptTokens: usage?.promptTokens,
+      completionTokens: usage?.completionTokens,
+      elapsedMs,
+      failover: t.index > 0,
+      ok,
+      note,
     });
     await invoke('write_text_file', { path, content: csv });
-  } catch { /* 成本台账尽力而为 */ }
+  } catch {
+    /* 成本台账尽力而为 */
+  }
 }
 
 /* ---------- 单次请求（含思考模式兼容与自动重试） ---------- */
 
-interface UsageNums { promptTokens?: number; completionTokens?: number }
+interface UsageNums {
+  promptTokens?: number;
+  completionTokens?: number;
+}
 type UsageText = string;
 
 function usageText(u?: UsageNums): UsageText {
   return u ? `（消耗 ${u.promptTokens ?? '?'} 入 + ${u.completionTokens ?? '?'} 出 tokens）` : '';
 }
 
-async function chatOnce(
-  t: ProviderTarget,
-  messages: { role: string; content: string }[],
-  maxTokens: number,
-  externalSignal: AbortSignal | undefined,
-): Promise<{ content: string; usage: UsageNums }> {
+async function chatOnce(t: ProviderTarget, messages: { role: string; content: string }[], maxTokens: number, externalSignal: AbortSignal | undefined): Promise<{ content: string; usage: UsageNums }> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 180000);
   const onAbort = () => ctrl.abort();
   externalSignal?.addEventListener('abort', onAbort);
   try {
-    const mkBody = (withEffort: boolean) => JSON.stringify({
-      model: t.model, temperature: 0.3, max_tokens: maxTokens, messages,
-      ...(withEffort && (S.appConfig.lowThinking !== false)
-        ? { reasoning_effort: 'low', thinking: { type: 'disabled' } }  // DeepSeek：关思考（改写任务无需深度思考）
-        : {}),
-    });
-    let resp = await withRetry(() => tauriFetch(`${t.baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${t.key}` },
-      body: mkBody(true),
-      signal: ctrl.signal,
-    }), (s) => ui?.onStatus?.(s));
+    const mkBody = (withEffort: boolean) =>
+      JSON.stringify({
+        model: t.model,
+        temperature: 0.3,
+        max_tokens: maxTokens,
+        messages,
+        ...(withEffort && S.appConfig.lowThinking !== false
+          ? { reasoning_effort: 'low', thinking: { type: 'disabled' } } // DeepSeek：关思考（改写任务无需深度思考）
+          : {}),
+      });
+    let resp = await withRetry(
+      () =>
+        tauriFetch(`${t.baseUrl}/chat/completions`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${t.key}` },
+          body: mkBody(true),
+          signal: ctrl.signal,
+        }),
+      (s) => ui?.onStatus?.(s),
+    );
     if (!resp.ok && /reasoning_effort|thinking|unknown (field|parameter|argument)/i.test(await resp.text())) {
-      resp = await withRetry(() => tauriFetch(`${t.baseUrl}/chat/completions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${t.key}` },
-        body: mkBody(false),
-        signal: ctrl.signal,
-      }), (s) => ui?.onStatus?.(s));
+      resp = await withRetry(
+        () =>
+          tauriFetch(`${t.baseUrl}/chat/completions`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${t.key}` },
+            body: mkBody(false),
+            signal: ctrl.signal,
+          }),
+        (s) => ui?.onStatus?.(s),
+      );
     }
     if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${(await resp.text()).slice(0, 200)}`);
     const data = (await resp.json()) as {
@@ -214,12 +241,7 @@ async function callWithFailover<T>(
   throw lastErr;
 }
 
-export async function callChat(
-  messages: { role: string; content: string }[],
-  maxTokens: number,
-  externalSignal?: AbortSignal,
-  scene = 'AI 请求',
-): Promise<{ content: string; usage: string }> {
+export async function callChat(messages: { role: string; content: string }[], maxTokens: number, externalSignal?: AbortSignal, scene = 'AI 请求'): Promise<{ content: string; usage: string }> {
   const { result, usage } = await callWithFailover(scene, async (t) => {
     const { content, usage: nums } = await chatOnce(t, messages, maxTokens, externalSignal);
     return { result: content, usage: nums };
@@ -243,7 +265,9 @@ export function rewritePrompt(): string {
     for (const r of S.rewriteRules.replacements) lines.push(`  · "${r.from}" 一律写作 "${r.to}"`);
   }
   if (S.rewriteRules.viewpoint === 'first' && S.rewriteRules.viewpointName) {
-    lines.push(`- 叙事视角：全书以 ${S.rewriteRules.viewpointName} 的第一人称"I"叙述——凡指称 ${S.rewriteRules.viewpointName} 的第三人称（he/she/his/her 或其名）改为 I/my/me（注意动词搭配：he was→I was, he goes→I go）；其他人物对话中提及 ${S.rewriteRules.viewpointName} 时保留其名。`);
+    lines.push(
+      `- 叙事视角：全书以 ${S.rewriteRules.viewpointName} 的第一人称"I"叙述——凡指称 ${S.rewriteRules.viewpointName} 的第三人称（he/she/his/her 或其名）改为 I/my/me（注意动词搭配：he was→I was, he goes→I go）；其他人物对话中提及 ${S.rewriteRules.viewpointName} 时保留其名。`,
+    );
   }
   if (S.rewriteRules.extra) lines.push(`- ${S.rewriteRules.extra}`);
   return '\n\n' + lines.join('\n');
@@ -285,26 +309,38 @@ export async function chatStream(
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 180000);
     try {
-      const mkBody = (withEffort: boolean) => JSON.stringify({
-        model: t.model, temperature: 0.3, max_tokens: 4000, messages, tools,
-        stream: true, stream_options: { include_usage: true },
-        ...(withEffort && (S.appConfig.lowThinking !== false)
-          ? { reasoning_effort: 'low', thinking: { type: 'disabled' } }
-          : {}),
-      });
-      let resp = await withRetry(() => tauriFetch(`${t.baseUrl}/chat/completions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${t.key}` },
-        body: mkBody(true),
-        signal: ctrl.signal,
-      }), (s) => ui?.onStatus?.(s));
+      const mkBody = (withEffort: boolean) =>
+        JSON.stringify({
+          model: t.model,
+          temperature: 0.3,
+          max_tokens: 4000,
+          messages,
+          tools,
+          stream: true,
+          stream_options: { include_usage: true },
+          ...(withEffort && S.appConfig.lowThinking !== false ? { reasoning_effort: 'low', thinking: { type: 'disabled' } } : {}),
+        });
+      let resp = await withRetry(
+        () =>
+          tauriFetch(`${t.baseUrl}/chat/completions`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${t.key}` },
+            body: mkBody(true),
+            signal: ctrl.signal,
+          }),
+        (s) => ui?.onStatus?.(s),
+      );
       if (!resp.ok && /reasoning_effort|thinking|unknown (field|parameter|argument)/i.test(await resp.text())) {
-        resp = await withRetry(() => tauriFetch(`${t.baseUrl}/chat/completions`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${t.key}` },
-          body: mkBody(false),
-          signal: ctrl.signal,
-        }), (s) => ui?.onStatus?.(s));
+        resp = await withRetry(
+          () =>
+            tauriFetch(`${t.baseUrl}/chat/completions`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${t.key}` },
+              body: mkBody(false),
+              signal: ctrl.signal,
+            }),
+          (s) => ui?.onStatus?.(s),
+        );
       }
       if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${(await resp.text()).slice(0, 200)}`);
       const reader = resp.body!.getReader();
@@ -330,8 +366,12 @@ export async function chatStream(
               choices?: { delta?: { content?: string; tool_calls?: { index?: number; id?: string; function?: { name?: string; arguments?: string } }[] } }[];
               usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
             };
-            const d = j.choices?.[0]?.delta as { content?: string; reasoning_content?: string; tool_calls?: { index?: number; id?: string; function?: { name?: string; arguments?: string } }[] } | undefined;
-            if (d?.content) { content += d.content; onDelta(d.content); }
+            const d = j.choices?.[0]?.delta as
+              { content?: string; reasoning_content?: string; tool_calls?: { index?: number; id?: string; function?: { name?: string; arguments?: string } }[] } | undefined;
+            if (d?.content) {
+              content += d.content;
+              onDelta(d.content);
+            }
             if (d?.reasoning_content) reasoning += d.reasoning_content;
             for (const c of d?.tool_calls ?? []) {
               const i = c.index ?? 0;
@@ -341,8 +381,13 @@ export async function chatStream(
               if (c.function?.arguments) cur.arguments += c.function.arguments;
               tc.set(i, cur);
             }
-            if (j.usage) { nums.promptTokens = j.usage.prompt_tokens; nums.completionTokens = j.usage.completion_tokens; }
-          } catch { /* 忽略半行 */ }
+            if (j.usage) {
+              nums.promptTokens = j.usage.prompt_tokens;
+              nums.completionTokens = j.usage.completion_tokens;
+            }
+          } catch {
+            /* 忽略半行 */
+          }
         }
       }
       return { result: { content: content || reasoning, reasoning, toolCalls: [...tc.values()] }, usage: nums };

@@ -7,7 +7,7 @@
  */
 
 import { buildLexicon, type Lexicon } from './lexicon.js';
-import { hit, hitOrigin, pendHit, tokenizeTxt } from './textpipe.js';
+import { hit, hitOrigin, pendHit } from './textpipe.js';
 import { runQc, toLegacyReport } from './qc.js';
 import { sentenceRisks } from './risks.js';
 import { IRR } from './irregular.js';
@@ -44,7 +44,6 @@ export function buildMcpLexicon(opts: McqLexiconOptions, bundledWordlists: strin
 export function toolQcText(text: string, lex: Lexicon, oovLimit = 50, reinforceWords?: string[]): Record<string, unknown> {
   const md = /[P]\d+\]/.test(text) ? `# qc\n\n## Chapter One\n\n${text}` : wrapAsChapter(text);
   const r = runQc(md, lex, { tier: 'M', fileName: 'mcp', ...(reinforceWords ? { reinforceWords } : {}) });
-  const known = new Set([...lex.known, ...IRR]);
   const oovDetail = [...new Set(r.oov)].slice(0, oovLimit).map((w) => ({
     word: w,
     pending: pendHit(w, lex.pending),
@@ -65,10 +64,20 @@ export function toolWordStatus(word: string, lex: Lexicon): Record<string, unkno
   return { word: tok, status, 词形还原原形: hitOrigin(tok, known) ?? null };
 }
 
-export interface RiskDetail { sentence: string; words: number; passive: boolean; relcl: boolean; pastperf: boolean; overlong: boolean }
+export interface RiskDetail {
+  sentence: string;
+  words: number;
+  passive: boolean;
+  relcl: boolean;
+  pastperf: boolean;
+  overlong: boolean;
+}
 
 function splitSentences(t: string): string[] {
-  return t.split(/(?<=[.!?])\s+/).map((s) => s.trim()).filter((s) => /[A-Za-z]/.test(s));
+  return t
+    .split(/(?<=[.!?])\s+/)
+    .map((s) => s.trim())
+    .filter((s) => /[A-Za-z]/.test(s));
 }
 
 /** 工具3 layer_sentence_risks：单句（或多句逐句）句法黑名单检测 */

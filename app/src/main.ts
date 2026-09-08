@@ -27,7 +27,6 @@ import {
   mergeQuotaTexts,
   alignSentencePairs,
   filterShelfBooks,
-  lostSignals,
   mergeTargets,
   normalizeAndSplitChapters,
   parseAiJson,
@@ -44,10 +43,9 @@ import {
   type BatchProgressFile,
   type BookReportRow,
   type ClassTarget,
-  type Workspace,
 } from './pure.js';
 import { renderDiffPane, renderModePill, switchView as switchViewDom, type ViewName } from './widgets.js';
-import { S, setStatus as uiSetStatus, esc } from './state.js';
+import { S, esc } from './state.js';
 import {
   AI_PROVIDERS,
   aiErrHuman,
@@ -72,7 +70,7 @@ import exampleVocab from '../../examples/vocab/sample_teaching_vocab.csv?raw';
 import { parseCsv, parseReinforceText } from '../../src/core/lexicon.js';
 import { buildLexicon, type Lexicon } from '../../src/core/lexicon.js';
 import { IRR } from '../../src/core/irregular.js';
-import { runQc, toLegacyReport, type QcResult, type Tier } from '../../src/core/qc.js';
+import { runQc, toLegacyReport } from '../../src/core/qc.js';
 import { aggregate, diagnose, LEDGER_HEADER, parseLedger, toLedgerLine, type LedgerRow } from '../../src/core/adoption.js';
 import { summarizeCost } from '../../src/core/aiops.js';
 import { extractParas, hitOrigin, hit, pendHit, sentsOf, splitChapter, tokenizeTxt, cardGlossWords } from '../../src/core/textpipe.js';
@@ -258,6 +256,15 @@ async function loadClassGroups(): Promise<void> {
   }
 }
 
+/** 分组就位保证：已加载直接返回；加载一次后记住（目录里确实没有分组文件也算"就位"，避免反复读盘）。
+ *  需要重读盘的场景只有用户显式点「🔄 刷新分组文件」。 */
+let classGroupsReady = false;
+function ensureClassGroups(): Promise<void> {
+  if (classGroupsReady) return Promise.resolve();
+  classGroupsReady = true;
+  return loadClassGroups();
+}
+
 function renderClsPanel(): void {
   let panel = document.getElementById('cls-panel') as HTMLElement | null;
   if (!panel) {
@@ -311,6 +318,7 @@ function renderClsPanel(): void {
     'cls-reload',
     () =>
       void loadClassGroups().then(() => {
+        classGroupsReady = true;
         renderClsPanel();
         fileSummary();
       }),
@@ -395,7 +403,8 @@ async function addSession(md: string, fileName: string, sourcePath: string | nul
   }
   S.sessions.push({ md, fileName, sourcePath, markPath, review, report: null, reportSavedPath: null, dirty: false });
   S.activeIdx = S.sessions.length - 1;
-  touchProgress(sourcePath ?? ''); // 阅读进度记账（书根未锚定则静默跳过）
+  touchProgress(sourcePath); // 阅读进度记账（无书根上下文则跳过）
+  riskJumpIdx = -1; // 难句跳转索引随章复位
   if (tocPanelEl()?.classList.contains('open')) void refreshToc(); // 目录开着时同步高亮/书签区
   // 会话保持（学 harness）：切换文件不清空对话，注入上下文提示让 AI 知道当前章节
   if (S.chatMsgs.length > 0) {
@@ -699,13 +708,13 @@ function renderPopMarks(existing: Mark[]): void {
       const m = S.popSession?.review.marks.find((x) => x.id === (btn as HTMLElement).dataset.popRm);
       if (m && S.popSession) {
         removeMark(S.popSession, m);
-        refreshPop('sent-or-word');
+        refreshPop();
       }
     }),
   );
 }
 
-function refreshPop(_why: string): void {
+function refreshPop(): void {
   if (!S.popSession) return;
   const ctx = pop.dataset;
   const pi = Number(ctx.pi),
@@ -750,7 +759,7 @@ function showWordPanel(session: FileSession, wEl: HTMLElement, x: number, y: num
     <textarea id="pop-note" placeholder="备注（可选，随下一条标记保存）"></textarea>
     <div class="pop-tip">先标记意图再点「AI 改写本句」，改写会直接出现在正文中供采纳</div>`;
   bindTypeButtons(session, 'word', pi, si, wi);
-  refreshPop('open');
+  refreshPop();
   placePop(x, y);
 }
 
@@ -773,7 +782,7 @@ function showSentPanel(session: FileSession, sentEl: HTMLElement, x: number, y: 
     <div class="pop-btns">${SENT_TYPES.map((t, i) => `<button data-mk="${t.key}"><span class="kbd">${i + 1}</span>${t.label}</button>`).join('')}</div>
     <textarea id="pop-note" placeholder="备注（可选，随下一条标记保存）"></textarea>`;
   bindTypeButtons(session, 'sent', pi, si);
-  refreshPop('open');
+  refreshPop();
   placePop(x, y);
 }
 
@@ -811,7 +820,7 @@ function bindTypeButtons(session: FileSession, level: 'word' | 'sent', pi: numbe
       }
       const ta = pop.querySelector('#pop-note') as HTMLTextAreaElement | null;
       if (ta) ta.value = '';
-      refreshPop('marked');
+      refreshPop();
     }),
   );
 }
@@ -1207,34 +1216,6 @@ async function pushRecent(fileName: string, sourcePath: string | null): Promise<
   await saveConfig();
 }
 
-async function renderRecentInEmpty(): Promise<void> {
-  const reader = $('reader');
-  if (!reader.querySelector('.empty') || !S.appConfig.recentFiles?.length) return;
-  const div = document.createElement('div');
-  div.style.cssText = 'margin-top:18px;text-align:center';
-  div.innerHTML =
-    `<div style="font-weight:600;margin-bottom:8px">最近编辑</div>` +
-    S.appConfig.recentFiles
-      .map(
-        (p) =>
-          `<div class="recent-item" data-path="${esc(p)}" style="cursor:pointer;padding:5px 10px;border-radius:8px;display:inline-block;margin:3px;background:#f8fafc;border:1px solid var(--line);font-size:12px">${esc(p.slice(p.lastIndexOf('/') + 1))}</div>`,
-      )
-      .join('');
-  reader.appendChild(div);
-  div.querySelectorAll('.recent-item').forEach((el) =>
-    el.addEventListener('click', async () => {
-      const path = (el as HTMLElement).dataset.path!;
-      try {
-        const raw = path.toLowerCase().endsWith('.docx') ? docxToText(await invoke<string>('read_file_base64', { path })) : await invoke<string>('read_text_file', { path });
-        const { chapters } = normalizeAndSplitChapters(raw, path.slice(path.lastIndexOf('/') + 1));
-        for (const ch of chapters) await addSession(ch.md, chapters.length > 1 ? ch.title : path.slice(path.lastIndexOf('/') + 1), path);
-      } catch (e) {
-        setStatus('打开失败：' + e, 'err');
-      }
-    }),
-  );
-}
-
 /* ---------- AI 会话持久化（防抖落盘，重启可恢复） ---------- */
 
 let chatSaveTimer: ReturnType<typeof setTimeout> | undefined;
@@ -1378,7 +1359,7 @@ async function openDemoMenu(): Promise<void> {
       const path = (el as HTMLElement).dataset.demoPath!;
       try {
         await loadLocalExampleConfig();
-        void loadClassGroups();
+        void ensureClassGroups(); // 就位保证（幂等）
         const md = await invoke<string>('read_text_file', { path });
         const name = path.slice(path.lastIndexOf('/') + 1);
         await addSession(md, name, path);
@@ -1418,15 +1399,6 @@ document.addEventListener('mousedown', (e) => {
 /* ---------- 导入无障碍：任意 txt/docx 自动转章节格式 ---------- */
 
 /** 纯文本/无标记文本 → 章节 md（按空行分段，自动编号 [P01]…） */
-function normalizeToChapter(raw: string, fileName: string): string {
-  const title = fileName.replace(/\.(md|txt|markdown|docx|doc)$/i, '');
-  const paras = raw
-    .replace(/\r\n?/g, '\n')
-    .split(/\n\s*\n/)
-    .map((p) => p.replace(/\s*\n\s*/g, ' ').trim())
-    .filter((p) => /[A-Za-z]/.test(p));
-  return `# ${title}\n\n## Chapter One\n\n${paras.map((p, i) => `[P${String(i + 1).padStart(2, '0')}] ${p}`).join('\n\n')}\n`;
-}
 
 /** docx → 文本（fflate 解压 + w:t 抽取，段落保序） */
 function docxToText(b64: string): string {
@@ -1455,7 +1427,7 @@ async function openChapterFiles(): Promise<void> {
     filters: [{ name: '章节文件（Markdown / 文本 / Word）', extensions: ['md', 'txt', 'markdown', 'docx'] }],
   });
   if (!paths) return; // 用户取消选择
-  const list = (Array.isArray(paths) ? paths : [paths]).filter((p): p is string => typeof p === 'string');
+  const list: string[] = Array.isArray(paths) ? paths : [paths];
   for (const p of list) {
     try {
       await openPathIntoSession(p);
@@ -1486,24 +1458,36 @@ async function loadWorkspaces(dir: string): Promise<void> {
   S.activeWorkspace = null;
 }
 
-function activateWorkspace(name: string): void {
+async function activateWorkspace(name: string): Promise<void> {
   S.activeWorkspace = name;
   const w = S.workspaces.find((x) => x.名 === name);
+  renderWorkspaceBar();
   if (w?.定制目标) {
-    if (S.classTargets.some((t) => t.id === w.定制目标)) {
+    await ensureClassGroups(); // 绑定口径的前提：分组就位（幂等，未就位才读一次盘）
+    if (S.activeWorkspace === name && S.classTargets.some((t) => t.id === w.定制目标)) {
       S.selectedIds = [w.定制目标];
       fileSummary();
-    } else {
-      // 分组文件尚未就位：静默补加载一次，成功则自动绑定口径；仍没有就不打扰（不打红色的错）
-      void loadClassGroups().then(() => {
-        if (S.activeWorkspace === name && w.定制目标 && S.classTargets.some((t) => t.id === w.定制目标)) {
-          S.selectedIds = [w.定制目标];
-          fileSummary();
-        }
-      });
+      renderWorkspaceBar();
+    } else if (S.activeWorkspace === name) {
+      setStatus(`工作区【${name}】绑定的口径 ${w.定制目标} 在分组文件里没找到（👥 班级定制里可查目录位置）`, 'dirty');
     }
   }
-  renderWorkspaceBar();
+}
+
+/** 切工作区的完整闭环（工作区条点击与 ⌘1-3 共用）：绑定口径 → 当前正文属于该版本则就地切换，否则翻开该版本第一章 */
+function switchWorkspace(name: string): void {
+  void activateWorkspace(name);
+  const w = S.workspaces.find((x) => x.名 === name);
+  if (!w) return;
+  const cur = activeSession()?.sourcePath ?? null;
+  const curInWs = cur !== null && w.文件.includes(cur);
+  if (curInWs) {
+    setStatus(`工作区已切换：${name}${w.定制目标 ? `（口径 ${w.定制目标}）` : ''}`, 'saved');
+    return;
+  }
+  openPathIntoSession(w.文件[0])
+    .then(() => setStatus(`已进入【${name}】${workspaceChipName(w.文件[0])}`, 'saved'))
+    .catch((e) => setStatus('打开失败：' + e, 'err'));
 }
 
 /* ---------- 书架（首页：示例 + 我的书；点书 → 先选版本 → 再进工作区） ---------- */
@@ -1574,8 +1558,8 @@ function coverHtml(名: string, img: string | null): string {
 }
 
 /** 阅读进度记账：打开过的章节去重累计 + 最近章/时间；total 缺失时补记全书章数 */
-function touchProgress(path: string): void {
-  if (!path || !S.currentBookDir) return;
+function touchProgress(path: string | null): void {
+  if (path === null || S.currentBookDir === null) return;
   const all = (S.appConfig.progress ??= {});
   const rec = (all[S.currentBookDir] ??= { chapters: [] });
   if (!rec.chapters.includes(path)) rec.chapters.push(path);
@@ -1585,11 +1569,47 @@ function touchProgress(path: string): void {
 
 async function renderShelfInner(el: HTMLElement): Promise<void> {
   const books = await loadShelf();
-  loadShelfCached = books; // 右键分组菜单同帧可用
-  const covers = await Promise.all(books.map((b) => coverDataUrl(b.目录)));
+  const covers = new Map<string, string | null>();
+  await Promise.all(books.map(async (b) => covers.set(b.目录, await coverDataUrl(b.目录))));
+  renderShelfChrome(el, books);
+  renderShelfGrid(el, books, covers);
+  bindShelfChrome(el, books, covers);
+}
+
+/** 书架页骨架（继续上次 / 标题 / 工具行 / 分组条 / 正文容器 / 脚注）——进书架渲染一次 */
+function renderShelfChrome(el: HTMLElement, books: ShelfBook[]): void {
   const groups = shelfGroupsOf(books);
-  const shown = filterShelfBooks(books, { q: S.shelfQ, group: S.shelfGroup });
+  const ls = S.appConfig.lastSession;
+  el.innerHTML = `
+    <div class="shelf">
+      ${ls?.files?.length ? `<div class="shelf-resume" id="shelf-resume">▶ 继续上次编辑：${esc(ls.workspace ? ls.workspace + ' · ' : '')}${esc(ls.files[Math.min(ls.activeIdx, ls.files.length - 1)]?.path.split('/').pop() ?? '')} <span class="dim">（${esc(ls.savedAt)}）</span></div>` : ''}
+      <div class="shelf-h">📚 我的书架<span class="dim">——点一本书，先选版本（如 B/M/A），再进工作区</span></div>
+      <div class="shelf-tools">
+        <input type="search" id="shelf-q" placeholder="搜索书名 / 分组…" value="${esc(S.shelfQ)}"/>
+        <span class="viewseg">
+          <button id="view-grid" title="书封视图——挑书">▦ 书封</button>
+          <button id="view-list" title="清单视图——管审校进度">☰ 进度</button>
+        </span>
+        <span class="dim" id="shelf-count" style="font-size:11px"></span>
+      </div>
+      ${
+        groups.length
+          ? `<div class="shelf-groups" id="shelf-groups">
+        <span class="gchip" data-group="">全部</span>
+        <span class="gchip" data-group="__none__">未分组</span>
+        ${groups.map((g) => `<span class="gchip" data-group="${esc(g)}">${esc(g)}</span>`).join('')}
+      </div>`
+          : ''
+      }
+      <div id="shelf-body"></div>
+      <div class="dim" style="margin-top:16px">书目录里放一张 cover.jpg 或 封面.png 即可作书封；没有图就用书名当封面。也可以用上方「打开文件…」直接开单章。</div>
+    </div>`;
+}
+
+/** 书卡正文区（网格=挑书 / 列表=管审校进度）。搜索、分组、切视图只更新这里——搜索框不动，输入焦点天然保持 */
+function renderShelfGrid(el: HTMLElement, books: ShelfBook[], covers: Map<string, string | null>): void {
   const view = S.appConfig.shelfView ?? 'grid';
+  const shown = filterShelfBooks(books, { q: S.shelfQ, group: S.shelfGroup });
   const prog = S.appConfig.progress ?? {};
   const pctOf = (b: ShelfBook): number => {
     const r = prog[b.目录];
@@ -1600,12 +1620,16 @@ async function renderShelfInner(el: HTMLElement): Promise<void> {
     const pct = pctOf(b);
     return `<div class="shelf-progress" title="审校进度：${pct}%"><i style="width:${pct}%"></i></div><div class="shelf-progress-pct">${pct ? `已审 ${pct}%` : '未开始'}</div>`;
   };
+  const coverStyle = (b: ShelfBook): string => {
+    const img = covers.get(b.目录);
+    return img ? `background-image:url(${img})` : `background:${shelfColor(b.名)}`;
+  };
   const badgeHtml = (b: ShelfBook): string => (b.分组?.trim() ? `<span class="shelf-badge">${esc(b.分组.trim())}</span>` : '');
 
   const gridCards = shown
     .map(
-      (b) => `<div class="shelf-card" data-shelf="${books.indexOf(b)}" title="打开《${esc(b.名)}》${b.分组 ? ' · 分组 ' + esc(b.分组) : '（右键可设分组）'}">
-    ${coverHtml(b.名, covers[books.indexOf(b)])}
+      (b) => `<div class="shelf-card" data-shelf="${esc(b.目录)}" title="打开《${esc(b.名)}》${b.分组 ? ' · 分组 ' + esc(b.分组) : '（右键可设分组）'}">
+    <div class="shelf-cover${covers.get(b.目录) ? ' has-img' : ''}" style="${coverStyle(b)}"><div class="cover-title" style="font-size:${coverTitlePx(b.名)}px">${esc(b.名)}</div></div>
     <div class="shelf-info">
       <div class="shelf-sub">${esc(b.副标题 ?? '')}</div>
       <div class="shelf-meta">${esc(timeOf(b) ? '最近 ' + timeOf(b) : '点书选版本')}</div>
@@ -1616,8 +1640,8 @@ async function renderShelfInner(el: HTMLElement): Promise<void> {
     .join('');
   const rowCards = shown
     .map(
-      (b) => `<div class="shelf-row" data-shelf="${books.indexOf(b)}" title="打开《${esc(b.名)}》（右键可设分组）">
-      <div class="row-cover" style="${covers[books.indexOf(b)] ? `background-image:url(${covers[books.indexOf(b)]})` : `background:${shelfColor(b.名)}`}"></div>
+      (b) => `<div class="shelf-row" data-shelf="${esc(b.目录)}" title="打开《${esc(b.名)}》（右键可设分组）">
+      <div class="row-cover" style="${coverStyle(b)}"></div>
       <div class="row-main">
         <div class="row-name">${esc(b.名)}${badgeHtml(b)}</div>
         <div class="row-sub">${esc(b.副标题 ?? '')}</div>
@@ -1627,111 +1651,105 @@ async function renderShelfInner(el: HTMLElement): Promise<void> {
     </div>`,
     )
     .join('');
-  const ls = S.appConfig.lastSession;
-  el.innerHTML = `
-    <div class="shelf">
-      ${ls?.files?.length ? `<div class="shelf-resume" id="shelf-resume">▶ 继续上次编辑：${esc(ls.workspace ? ls.workspace + ' · ' : '')}${esc(ls.files[Math.min(ls.activeIdx, ls.files.length - 1)]?.path.split('/').pop() ?? '')} <span class="dim">（${esc(ls.savedAt)}）</span></div>` : ''}
-      <div class="shelf-h">📚 我的书架<span class="dim">——点一本书，先选版本（如 B/M/A），再进工作区</span></div>
-      <div class="shelf-tools">
-        <input type="search" id="shelf-q" placeholder="搜索书名 / 分组…" value="${esc(S.shelfQ)}"/>
-        <span class="viewseg">
-          <button id="view-grid" class="${view === 'grid' ? 'cur' : ''}" title="书封视图——挑书">▦ 书封</button>
-          <button id="view-list" class="${view === 'list' ? 'cur' : ''}" title="清单视图——管审校进度">☰ 进度</button>
-        </span>
-        <span class="dim" style="font-size:11px">${shown.length === books.length ? `${books.length} 本` : `${shown.length}/${books.length} 本`} · 右键书卡设分组</span>
-      </div>
-      ${
-        groups.length
-          ? `<div class="shelf-groups">
-        <span class="gchip ${S.shelfGroup === null ? 'cur' : ''}" data-group="">全部</span>
-        <span class="gchip ${S.shelfGroup === '' ? 'cur' : ''}" data-group="__none__">未分组</span>
-        ${groups.map((g) => `<span class="gchip ${S.shelfGroup === g ? 'cur' : ''}" data-group="${esc(g)}">${esc(g)}</span>`).join('')}
-      </div>`
-          : ''
-      }
-      ${
-        view === 'list'
-          ? `<div class="shelf-grid list">${rowCards || '<div class="dim" style="padding:20px 4px">没有匹配的书——换个搜索词，或点分组「全部」</div>'}
+  const emptyHint = '没有匹配的书——换个搜索词，或点分组「全部」';
+  const body = el.querySelector<HTMLElement>('#shelf-body');
+  if (!body) return;
+  body.innerHTML =
+    view === 'list'
+      ? `<div class="shelf-grid list">${rowCards || `<div class="dim" style="padding:20px 4px">${emptyHint}</div>`}
         <div class="shelf-row add-row" id="shelf-add">＋ 添加书稿文件夹（含章节 md；可配 _工作区.json / _词库.csv）</div></div>`
-          : `<div class="shelf-grid">
+      : `<div class="shelf-grid">
         <div class="shelf-card demo" id="shelf-demo" title="打开内置示例">
-          ${coverHtml('龟兔赛跑', null)}
+          <div class="shelf-cover" style="background:${shelfColor('龟兔赛跑')}"><div class="cover-title" style="font-size:${coverTitlePx('龟兔赛跑')}px">龟兔赛跑</div></div>
           <div class="shelf-info"><div class="shelf-sub">内置示例 · 含示例词库</div><div class="shelf-meta">随时可用</div></div>
         </div>
-        ${gridCards || '<div class="dim" style="grid-column:1/-1;padding:16px 4px">没有匹配的书——换个搜索词，或点分组「全部」</div>'}
+        ${gridCards || `<div class="dim" style="grid-column:1/-1;padding:16px 4px">${emptyHint}</div>`}
         <div class="shelf-card add" id="shelf-add" title="把一个书稿文件夹注册到书架">
           <div class="shelf-cover">＋</div>
           <div class="shelf-info"><div class="shelf-sub">添加书稿文件夹</div><div class="shelf-meta">含章节 md；可配 _工作区.json / _词库.csv</div></div>
         </div>
-      </div>`
-      }
-      <div class="dim" style="margin-top:16px">书目录里放一张 cover.jpg 或 封面.png 即可作书封；没有图就用书名当封面。也可以用上方「打开文件…」直接开单章。</div>
-    </div>`;
+      </div>`;
+  const count = el.querySelector<HTMLElement>('#shelf-count');
+  if (count) count.textContent = `${shown.length === books.length ? `${books.length} 本` : `${shown.length}/${books.length} 本`} · 右键书卡设分组`;
+  for (const id of ['view-grid', 'view-list']) {
+    const btn = document.getElementById(id);
+    if (btn) btn.classList.toggle('cur', (id === 'view-grid') === (view === 'grid'));
+  }
+  // 分组条当前项高亮（搜索不改分组，随分组点击同步）
+  el.querySelectorAll<HTMLElement>('[data-group]').forEach((chip) => {
+    const g = chip.dataset.group ?? '';
+    const active = S.shelfGroup === null ? g === '' : S.shelfGroup === '' ? g === '__none__' : g === S.shelfGroup;
+    chip.classList.toggle('cur', active);
+  });
+  bindShelfCards(el, books);
+}
+
+/** 骨架上的固定交互：继续上次 / 示例 / 添加 / 搜索 / 视图 / 分组条 */
+function bindShelfChrome(el: HTMLElement, books: ShelfBook[], covers: Map<string, string | null>): void {
   document.getElementById('shelf-resume')?.addEventListener('click', () => void resumeLastSession());
   document.getElementById('shelf-demo')?.addEventListener('click', () => loadBuiltinDemo());
   document.getElementById('shelf-add')?.addEventListener('click', () => void addBookToShelf());
   const q = document.getElementById('shelf-q') as HTMLInputElement | null;
   q?.addEventListener('input', () => {
     S.shelfQ = q.value;
-    void renderShelf();
-    // 重渲染后焦点回到搜索框并保持光标在末尾（输入连续性）
-    const q2 = document.getElementById('shelf-q') as HTMLInputElement | null;
-    if (q2) {
-      q2.focus();
-      q2.setSelectionRange(q2.value.length, q2.value.length);
-    }
+    renderShelfGrid(el, books, covers); // 局部刷新正文区，搜索框与焦点原地不动
   });
-  document.getElementById('view-grid')?.addEventListener('click', () => setShelfView('grid'));
-  document.getElementById('view-list')?.addEventListener('click', () => setShelfView('list'));
-  el.querySelectorAll('[data-group]').forEach((chip) =>
+  document.getElementById('view-grid')?.addEventListener('click', () => setShelfView('grid', el, books, covers));
+  document.getElementById('view-list')?.addEventListener('click', () => setShelfView('list', el, books, covers));
+  el.querySelectorAll<HTMLElement>('[data-group]').forEach((chip) =>
     chip.addEventListener('click', () => {
-      const g = (chip as HTMLElement).dataset.group!;
+      const g = chip.dataset.group ?? '';
       S.shelfGroup = g === '' ? null : g === '__none__' ? '' : g;
-      void renderShelf();
+      renderShelfGrid(el, books, covers);
     }),
   );
+}
+
+/** 书卡交互（data-shelf=书目录，目录是书的唯一主键——过滤与重渲染后依旧指向同一本） */
+function bindShelfCards(el: HTMLElement, books: ShelfBook[]): void {
   el.querySelectorAll<HTMLElement>('[data-shelf]').forEach((card) => {
-    const b = books[Number(card.dataset.shelf)];
+    const b = books.find((x) => x.目录 === card.dataset.shelf);
+    if (!b) return;
     card.addEventListener('click', () => void openBook(b));
     card.addEventListener('contextmenu', (e) => {
       e.preventDefault();
-      showShelfCtxMenu(b, e.clientX, e.clientY);
+      showShelfCtxMenu(b, books, e.clientX, e.clientY);
     });
   });
 }
 
-/** 视图切换（持久化）：网格=挑书，列表=管进度 */
-function setShelfView(v: 'grid' | 'list'): void {
+/** 视图切换（持久化）：网格=挑书，列表=管进度——只重绘正文区 */
+function setShelfView(v: 'grid' | 'list', el: HTMLElement, books: ShelfBook[], covers: Map<string, string | null>): void {
   S.appConfig.shelfView = v;
   void saveConfig();
-  void renderShelf();
+  renderShelfGrid(el, books, covers);
 }
 
-/** 书卡右键轻量分组菜单：指派到现有分组 / 新建（书多之前不做管理弹层） */
-function showShelfCtxMenu(b: ShelfBook, x: number, y: number): void {
+/** 书卡右键轻量分组菜单：指派到现有分组 / 新建（书多之前保持轻量；保存后整页刷新让分组条同步） */
+function showShelfCtxMenu(b: ShelfBook, books: ShelfBook[], x: number, y: number): void {
   closeShelfCtxMenu();
   const menu = document.createElement('div');
   menu.className = 'shelf-ctxmenu';
   menu.id = 'shelf-ctxmenu';
-  const groups = shelfGroupsOf(loadShelfCached ?? []);
+  const curGroup = b.分组?.trim() ?? '';
+  const groups = shelfGroupsOf(books);
   menu.innerHTML =
-    `<div class="ci ${!b.分组?.trim() ? 'cur' : ''}" data-g="">未分组</div>` +
-    groups.map((g) => `<div class="ci ${b.分组?.trim() === g ? 'cur' : ''}" data-g="${esc(g)}">${esc(g)}</div>`).join('') +
+    `<div class="ci ${curGroup === '' ? 'cur' : ''}" data-g="">未分组</div>` +
+    groups.map((g) => `<div class="ci ${curGroup === g ? 'cur' : ''}" data-g="${esc(g)}">${esc(g)}</div>`).join('') +
     `<div class="sep"></div><input id="ctx-new-group" placeholder="新建分组名，回车确认"/>`;
   menu.style.left = Math.min(x, window.innerWidth - 190) + 'px';
   menu.style.top = Math.min(y, window.innerHeight - 180) + 'px';
   document.body.appendChild(menu);
   const pick = async (g: string): Promise<void> => {
     closeShelfCtxMenu();
-    const books = await loadShelf();
-    const i = books.findIndex((x2) => x2.目录 === b.目录);
-    if (i < 0) return;
-    books[i].分组 = g.trim() || undefined;
-    if (!g.trim()) delete books[i].分组;
-    await saveShelf(books);
-    loadShelfCached = books;
+    const name = g.trim();
+    const fresh = await loadShelf();
+    const target = fresh.find((x) => x.目录 === b.目录);
+    if (!target) return;
+    target.分组 = name || undefined; // undefined 不入 JSON，等于未分组
+    await saveShelf(fresh);
     await renderShelf();
-    setStatus(g.trim() ? `《${b.名}》已移入分组「${g.trim()}」` : `《${b.名}》已设为未分组`, 'saved');
+    setStatus(name ? `《${b.名}》已移入分组「${name}」` : `《${b.名}》已设为未分组`, 'saved');
   };
   menu.querySelectorAll<HTMLElement>('[data-g]').forEach((ci) => ci.addEventListener('click', () => void pick(ci.dataset.g ?? '')));
   const inp = menu.querySelector('#ctx-new-group') as HTMLInputElement | null;
@@ -1744,9 +1762,6 @@ function showShelfCtxMenu(b: ShelfBook, x: number, y: number): void {
 function closeShelfCtxMenu(): void {
   document.getElementById('shelf-ctxmenu')?.remove();
 }
-
-/** renderShelfInner 同帧内右键菜单可用的书架缓存（避免右键时再异步读盘） */
-let loadShelfCached: ShelfBook[] | null = null;
 
 async function addBookToShelf(): Promise<void> {
   const dir = await openFileDialog({ directory: true });
@@ -1786,16 +1801,11 @@ async function openBook(b: ShelfBook): Promise<void> {
   try {
     await loadBookConfig(b.目录);
     await loadWorkspaces(b.目录);
-    if (S.classTargets.length === 0) await loadClassGroups(); // 提前就位，进版本即可绑定口径
     S.currentBookDir = b.目录; // 进度记账锚定书根
-    // 首次打开时补记全书章数（进度百分比分母；之后版本结构不变不再重复算）
-    const total = S.workspaces.length ? S.workspaces.reduce((n, w) => n + w.文件.length, 0) : 0;
+    // 全书章数（进度百分比分母）：有工作区按版本文件总数计，单卷书按目录章文件数计
+    const total = S.workspaces.length > 0 ? S.workspaces.reduce((n, w) => n + w.文件.length, 0) : (await invoke<string[]>('list_dir', { dir: b.目录 })).filter((f) => /\.(md|txt)$/i.test(f)).length;
     const rec = ((S.appConfig.progress ??= {})[b.目录] ??= { chapters: [] });
     if (total > 0) rec.total = total;
-    else if (!rec.total) {
-      const files = (await invoke<string[]>('list_dir', { dir: b.目录 })).filter((f) => /\.(md|txt)$/i.test(f));
-      rec.total = files.length;
-    }
     const books = await loadShelf();
     const i = books.findIndex((x) => x.目录 === b.目录);
     if (i >= 0) {
@@ -1842,29 +1852,18 @@ function renderBookVersions(b: ShelfBook): void {
           : `<div class="dim" style="margin-top:14px;line-height:1.9">这本书还没有分层配置（_工作区.json）。<br/>· 直接读：上方「打开文件…」选书稿文件夹里的章节 md 即可（${esc(b.副标题 ?? '')}）。<br/>· 要分 B/M/A 三个版本：在书稿根目录建 _工作区.json（可以让右侧 AI 助手帮你生成，说"帮我写 _工作区.json"即可）。</div>`
       }
     </div>`;
-  document.getElementById('ver-back')?.addEventListener('click', () => void backToShelf());
+  document.getElementById('ver-back')?.addEventListener('click', () => backToShelf());
   el.querySelectorAll('[data-ver]').forEach((card) =>
     card.addEventListener('click', () => {
       const w = S.workspaces[Number((card as HTMLElement).dataset.ver)];
-      if (w) void enterWorkspace(w);
+      if (w) switchWorkspace(w.名); // 绑定口径 + 翻开该版本第一章的完整闭环
     }),
   );
 }
 
 /** 点版本：绑定口径 → 翻开该版本第一章 */
-async function enterWorkspace(w: Workspace): Promise<void> {
-  try {
-    if (S.classTargets.length === 0) await loadClassGroups(); // 兜底：版本页已预载，这里再保险一次
-    activateWorkspace(w.名);
-    await openPathIntoSession(w.文件[0]);
-    setStatus(`已进入【${w.名}】${workspaceChipName(w.文件[0])}——上方工作区条可切版本 / 切章节`, 'saved');
-  } catch (e) {
-    setStatus('进入工作区失败：' + e, 'err');
-  }
-}
-
 /** 回书架：关掉全部章节会话（标记与正文改动早已自动落盘），工作区条一并收起 */
-async function backToShelf(): Promise<void> {
+function backToShelf(): void {
   saveLastSession();
   S.sessions = [];
   S.activeIdx = -1;
@@ -2069,22 +2068,7 @@ function renderWorkspaceBar(): void {
     (active
       ? `<span class="ws-files">${active.文件.map((f) => `<span class="wschip ${f === cur ? 'cur' : ''}" data-wsfile="${esc(f)}" title="${esc(f)}">${esc(workspaceChipName(f))}</span>`).join('')}</span>`
       : '');
-  el.querySelectorAll('[data-ws]').forEach((t) =>
-    t.addEventListener('click', () => {
-      const name = (t as HTMLElement).dataset.ws!;
-      activateWorkspace(name);
-      const w = S.workspaces.find((x) => x.名 === name);
-      const cur = activeSession()?.sourcePath ?? null;
-      if (w && (!cur || !w.文件.includes(cur))) {
-        // 切版本要有看得见的变化：当前正文不属于该版本时，自动翻开该版本第一章
-        openPathIntoSession(w.文件[0])
-          .then(() => setStatus(`已进入【${name}】${workspaceChipName(w.文件[0])}`, 'saved'))
-          .catch((e) => setStatus('打开失败：' + e, 'err'));
-      } else {
-        setStatus(`工作区已切换：${name}${w?.定制目标 ? `（口径 ${w.定制目标}）` : ''}`, 'saved');
-      }
-    }),
-  );
+  el.querySelectorAll('[data-ws]').forEach((t) => t.addEventListener('click', () => switchWorkspace((t as HTMLElement).dataset.ws!)));
   el.querySelectorAll('[data-wsfile]').forEach((c) =>
     c.addEventListener('click', () => {
       const f = (c as HTMLElement).dataset.wsfile!;
@@ -2138,7 +2122,7 @@ async function importMarks(): Promise<void> {
   }
 }
 
-$('btn-home').addEventListener('click', () => void backToShelf());
+$('btn-home').addEventListener('click', () => backToShelf());
 $('btn-theme').addEventListener('click', stepTheme);
 $('tab-toc').addEventListener('click', toggleToc);
 $('btn-open').addEventListener('click', () => void openChapterFiles());
@@ -2395,7 +2379,6 @@ function showAiSettings(): void {
         body: JSON.stringify({ model, max_tokens: 8, messages: [{ role: 'user', content: '只回复两个字：正常' }] }),
       });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${(await resp.text()).slice(0, 120)}`);
-      const data = (await resp.json()) as { choices?: { message?: { content?: string } }[] };
       out.textContent = '✓ 连接成功——点「保存」就配好了';
     } catch (e) {
       out.textContent = '✗ ' + aiErrHuman(e);
@@ -3217,7 +3200,6 @@ async function runBatch(): Promise<void> {
     const tFile = Date.now();
     try {
       const { chapters } = normalizeAndSplitChapters(await readChapterRaw(item.path), item.name);
-      let fileTokens = 0;
       for (let chi = 0; chi < chapters.length; chi++) {
         const ch = chapters[chi];
         const tCh = Date.now();
@@ -3237,7 +3219,6 @@ async function runBatch(): Promise<void> {
           },
           batchAbort!.signal,
         );
-        fileTokens += tk;
         await invoke('write_text_file', { path: `${batchDir}/${outName}`, content: newMd });
         const report = runQc(newMd, buildLexiconNow(), {
           tier: 'M',
@@ -3437,11 +3418,11 @@ async function resumeLastSession(): Promise<void> {
     }
   }
   if (opened === 0) {
+    S.currentBookDir = null; // 文件全部失效：还原书根锚定，回书架重新选书
     toast('上次的文件都打不开了（可能被移动）', 'err');
     return;
   }
-  if (S.classTargets.length === 0) await loadClassGroups(); // 同开书路径：先就位再绑定
-  if (ls.workspace && S.workspaces.some((w) => w.名 === ls.workspace)) activateWorkspace(ls.workspace);
+  if (ls.workspace && S.workspaces.some((w) => w.名 === ls.workspace)) switchWorkspace(ls.workspace);
   const idx = Math.min(ls.activeIdx, S.sessions.length - 1);
   S.activeIdx = idx;
   const s = activeSession();
@@ -3662,21 +3643,6 @@ function popHotkey(k: string): boolean {
   return true;
 }
 
-/** ⌘1/⌘2/⌘3：切第 N 个工作区（复用工作区条切换逻辑：切版本并自动翻开该版本第一章） */
-function switchWorkspaceAt(i: number): void {
-  const w = S.workspaces[i];
-  if (!w) return;
-  activateWorkspace(w.名);
-  const cur = activeSession()?.sourcePath ?? null;
-  if (!cur || !w.文件.includes(cur)) {
-    openPathIntoSession(w.文件[0])
-      .then(() => setStatus(`已进入【${w.名}】${workspaceChipName(w.文件[0])}`, 'saved'))
-      .catch((e) => setStatus('打开失败：' + e, 'err'));
-  } else {
-    setStatus(`工作区已切换：${w.名}${w.定制目标 ? `（口径 ${w.定制目标}）` : ''}`, 'saved');
-  }
-}
-
 /* ---------- 正文右侧热力轨：风险句红点 / 标记蓝点 / 叠加紫点，点圆点直达 ---------- */
 
 let heatRaf = 0;
@@ -3771,8 +3737,11 @@ document.addEventListener('keydown', (e) => {
     return;
   }
   if (mod && /^[1-9]$/.test(e.key)) {
-    e.preventDefault();
-    switchWorkspaceAt(Number(e.key) - 1);
+    const w = S.workspaces[Number(e.key) - 1];
+    if (w) {
+      e.preventDefault();
+      switchWorkspace(w.名);
+    }
     return;
   }
   if (e.key === 'F8') {
@@ -4144,11 +4113,6 @@ function tourShow(i: number): void {
 
 /* ---------- 书级改写规则：确定性替换（机器做，零遗漏） + 视角与全局规则（注入 AI） ---------- */
 
-interface RewriteRule {
-  from: string;
-  to: string;
-}
-
 const rewritePop = $('rewrite-pop');
 
 function applyRewrite(text: string): string {
@@ -4388,14 +4352,6 @@ async function closeWelcome(): Promise<void> {
 $('btn-ai').addEventListener('click', () => void aiSuggest());
 
 /* ================= AI 助手（右侧对话 · 本应用即 harness：模型可调用本地 QC 工具） ================= */
-
-interface ChatMsg {
-  role: 'user' | 'assistant' | 'tool';
-  content: string;
-  reasoning_content?: string; // DeepSeek 工具循环硬性要求回传
-  tool_calls?: { id: string; type: 'function'; function: { name: string; arguments: string } }[];
-  tool_call_id?: string;
-}
 
 const AI_TOOLS = [
   {

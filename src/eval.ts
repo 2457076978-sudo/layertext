@@ -23,8 +23,7 @@ import { buildLexicon } from './core/lexicon.js';
 import { runQc, type Tier } from './core/qc.js';
 import { extractParas, sentsOf, splitChapter } from './core/textpipe.js';
 import { sentenceRisks } from './core/risks.js';
-import { IRR } from './core/irregular.js';
-import { composePrompt, parseManifest } from './core/aiops.js';
+import { composePrompt } from './core/aiops.js';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const EVALS_DIR = join(ROOT, 'examples', 'evals');
@@ -34,8 +33,7 @@ const BUNDLED_WORDLIST = join(ROOT, 'assets', 'wordlists', 'curriculum_2022_leve
 const AMENDMENT_WORDLIST = join(ROOT, 'assets', 'wordlists', 'curriculum_2022_amendment.txt');
 const PROMPTS_DIR = join(ROOT, 'prompts');
 
-/** 提示词与生产同源（W3）：prompts/ 目录，manifest 管版本 */
-const PROMPT_MANIFEST = parseManifest(readFileSync(join(PROMPTS_DIR, 'manifest.json'), 'utf-8'));
+/** 提示词与生产同源（W3）：prompts/ 目录直接读取 */
 const PROMPT_BODIES: Record<string, string> = {
   system_simplify: readFileSync(join(PROMPTS_DIR, 'system_simplify.md'), 'utf-8'),
   system_draft: readFileSync(join(PROMPTS_DIR, 'system_draft.md'), 'utf-8'),
@@ -46,7 +44,9 @@ function bundledWordlistTexts(): string[] {
   const texts = [readFileSync(BUNDLED_WORDLIST, 'utf-8')];
   try {
     texts.push(readFileSync(AMENDMENT_WORDLIST, 'utf-8'));
-  } catch { /* 无补录文件则只用内置词表 */ }
+  } catch {
+    /* 无补录文件则只用内置词表 */
+  }
   return texts;
 }
 
@@ -70,22 +70,32 @@ interface Golden {
   annotations: Partial<Record<Cat, string[]>>;
   /** 人工核定的 OOV 词型全集（小写去重；相对 内置课标1600 ∪ IRR ∪ proper ∪ 词句卡） */
   oovExpected: string[];
-  targets?: Record<string, {
-    avgLenMax: number;
-    maxLenMax: number;
-    newWordRateMax: number;
-    blacklistZero: boolean;
-    mustKeep?: string[];
-  }>;
+  targets?: Record<
+    string,
+    {
+      avgLenMax: number;
+      maxLenMax: number;
+      newWordRateMax: number;
+      blacklistZero: boolean;
+      mustKeep?: string[];
+    }
+  >;
 }
 
 /** 与 sentsOf 相同的归一化（破折号→空格、空白折叠），金标准句子按此对齐 */
 function normSent(s: string): string {
-  return s.replace(/[>—-]+/g, ' ').split(/\s+/).filter(Boolean).join(' ');
+  return s
+    .replace(/[>—-]+/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean)
+    .join(' ');
 }
 
 function loadWordFile(p: string): string[] {
-  return readFileSync(p, 'utf-8').split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
+  return readFileSync(p, 'utf-8')
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l && !l.startsWith('#'));
 }
 
 interface EvalCase {
@@ -112,9 +122,15 @@ function loadCases(): EvalCase[] {
 
 /* ---------- 引擎金标准对照 ---------- */
 
-interface CatStat { annotated: number; hits: number; misses: string[]; falsePositives: string[] }
+interface CatStat {
+  annotated: number;
+  hits: number;
+  misses: string[];
+  falsePositives: string[];
+}
 interface TextStat {
-  name: string; sentCount: number;
+  name: string;
+  sentCount: number;
   cats: Record<Cat, CatStat>;
   oov: { expected: string[]; actual: string[]; missed: string[]; extra: string[] };
 }
@@ -161,7 +177,8 @@ function evalEngineText(c: EvalCase): TextStat {
     sentCount: sentences.length,
     cats,
     oov: {
-      expected, actual,
+      expected,
+      actual,
       missed: expected.filter((w) => !actual.includes(w)),
       extra: actual.filter((w) => !expected.includes(w)),
     },
@@ -179,14 +196,20 @@ function tierRuleLine(tier: Tier, chno: number): string {
 
 /** 与桌面应用 buildDraftSystemPrompt 同构：system_simplify 规则 + system_draft 任务模板（提示词集 v 见 prompts/manifest.json） */
 function buildDraftSystem(tier: Tier, chno: number): string {
-  return PROMPT_BODIES.system_simplify.trim() + '\n\n' + composePrompt(PROMPT_BODIES.system_draft, {
-    tierRule: tierRuleLine(tier, chno),
-    chnoNote: `（本章章号 ${chno}）`,
-    instructions: '',
-  });
+  return (
+    PROMPT_BODIES.system_simplify.trim() +
+    '\n\n' +
+    composePrompt(PROMPT_BODIES.system_draft, {
+      tierRule: tierRuleLine(tier, chno),
+      chnoNote: `（本章章号 ${chno}）`,
+      instructions: '',
+    })
+  );
 }
 
-interface AiCall { post: (body: unknown) => Promise<{ content: string; promptTokens?: number; completionTokens?: number }> }
+interface AiCall {
+  post: (body: unknown) => Promise<{ content: string; promptTokens?: number; completionTokens?: number }>;
+}
 
 function makeAiCall(): AiCall | null {
   const key = process.env.LAYERTEXT_API_KEY;
@@ -215,7 +238,8 @@ function makeAiCall(): AiCall | null {
 }
 
 interface AiTextResult {
-  name: string; tier: Tier;
+  name: string;
+  tier: Tier;
   metrics: { avgLen: number; maxLen: number; passive: number; relcl: number; pastperf: number; newWordRate: number; mustKeepMissing: string[] };
   checks: Record<string, boolean>;
   allPass: boolean;
@@ -233,15 +257,22 @@ async function evalAiText(c: EvalCase, tier: Tier, ai: AiCall): Promise<AiTextRe
       { role: 'system', content: system },
       { role: 'user', content: `请简化以下段落：\n${seg.trim()}` },
     ]);
-    let t = content.trim().replace(/^```[a-z]*\s*/i, '').replace(/```\s*$/, '');
+    let t = content
+      .trim()
+      .replace(/^```[a-z]*\s*/i, '')
+      .replace(/```\s*$/, '');
     if (!t.includes('[P')) t = (seg.match(/\[P\d+\]/)?.[0] ?? '') + ' ' + t;
     out.push(t.trim());
   }
   const newMd = `# ${c.golden.name}\n\n## Chapter One\n\n${out.join('\n\n')}\n`;
-  const r = runQc(newMd, buildLexicon({
-    plainWordlistTexts: bundledWordlistTexts(),
-    properNouns: proper.map((p) => p.toLowerCase()),
-  }), { tier, chno, fileName: `${c.golden.name}_${tier}` });
+  const r = runQc(
+    newMd,
+    buildLexicon({
+      plainWordlistTexts: bundledWordlistTexts(),
+      properNouns: proper.map((p) => p.toLowerCase()),
+    }),
+    { tier, chno, fileName: `${c.golden.name}_${tier}` },
+  );
 
   const target = c.golden.targets?.[tier];
   const mustKeep = target?.mustKeep ?? [];
@@ -250,33 +281,49 @@ async function evalAiText(c: EvalCase, tier: Tier, ai: AiCall): Promise<AiTextRe
   const metrics = {
     avgLen: Number(r.avgLenNarrRaw.toFixed(1)),
     maxLen: r.maxLen,
-    passive: r.passive, relcl: r.relcl, pastperf: r.pastperf,
+    passive: r.passive,
+    relcl: r.relcl,
+    pastperf: r.pastperf,
     newWordRate: Number((r.newWordRate * 100).toFixed(1)),
     mustKeepMissing,
   };
-  const checks: Record<string, boolean> = target ? {
-    平均句长: metrics.avgLen <= target.avgLenMax,
-    单句最长: metrics.maxLen <= target.maxLenMax,
-    黑名单清零: !target.blacklistZero || (r.passive + r.relcl + r.pastperf === 0),
-    生词率: r.newWordRate <= target.newWordRateMax,
-    情节词保留: mustKeep.length === 0 || mustKeepMissing.length === 0,
-  } : {};
+  const checks: Record<string, boolean> = target
+    ? {
+        平均句长: metrics.avgLen <= target.avgLenMax,
+        单句最长: metrics.maxLen <= target.maxLenMax,
+        黑名单清零: !target.blacklistZero || r.passive + r.relcl + r.pastperf === 0,
+        生词率: r.newWordRate <= target.newWordRateMax,
+        情节词保留: mustKeep.length === 0 || mustKeepMissing.length === 0,
+      }
+    : {};
   return { name: c.golden.name, tier, metrics, checks, allPass: Object.values(checks).every(Boolean) };
 }
 
 /* ---------- 主流程 ---------- */
 
 interface EngineSummary {
-  blacklistAnnotated: number; blacklistHits: number;
-  missCount: number; falsePositiveCount: number;
+  blacklistAnnotated: number;
+  blacklistHits: number;
+  missCount: number;
+  falsePositiveCount: number;
   hitRate: number;
-  oovMissCount: number; oovExtraCount: number; oovExactTexts: number; textCount: number;
+  oovMissCount: number;
+  oovExtraCount: number;
+  oovExactTexts: number;
+  textCount: number;
 }
 
 function summarizeEngine(stats: TextStat[]): EngineSummary {
   const s: EngineSummary = {
-    blacklistAnnotated: 0, blacklistHits: 0, missCount: 0, falsePositiveCount: 0, hitRate: 0,
-    oovMissCount: 0, oovExtraCount: 0, oovExactTexts: 0, textCount: stats.length,
+    blacklistAnnotated: 0,
+    blacklistHits: 0,
+    missCount: 0,
+    falsePositiveCount: 0,
+    hitRate: 0,
+    oovMissCount: 0,
+    oovExtraCount: 0,
+    oovExactTexts: 0,
+    textCount: stats.length,
   };
   for (const t of stats) {
     for (const cat of CATS) {
@@ -298,7 +345,10 @@ async function main(): Promise<void> {
   const calibrate = args.includes('--calibrate');
   const updateBaseline = args.includes('--update-baseline');
   const cases = loadCases();
-  if (cases.length === 0) { console.error('未找到评测集（examples/evals/*/golden.json）'); process.exit(2); }
+  if (cases.length === 0) {
+    console.error('未找到评测集（examples/evals/*/golden.json）');
+    process.exit(2);
+  }
 
   const stats = cases.map(evalEngineText);
 
@@ -355,7 +405,9 @@ async function main(): Promise<void> {
   let baseline: { generatedAt: string; engine: EngineSummary } | null = null;
   try {
     baseline = JSON.parse(readFileSync(BASELINE_PATH, 'utf-8'));
-  } catch { /* 首次运行无基线 */ }
+  } catch {
+    /* 首次运行无基线 */
+  }
 
   console.log('\n========== 评测汇总（QC 引擎 · 金标准对照）==========');
   for (const t of stats) {
@@ -365,13 +417,17 @@ async function main(): Promise<void> {
     }).join('  ');
     console.log(`${t.name}：${catStr}  OOV ${t.oov.actual.length} 词（漏${t.oov.missed.length}/多${t.oov.extra.length}）`);
   }
-  console.log(`黑名单命中率 ${(engine.hitRate * 100).toFixed(1)}%（${engine.blacklistHits}/${engine.blacklistAnnotated}）· 漏报 ${engine.missCount} · 误报 ${engine.falsePositiveCount} · OOV 完全一致 ${engine.oovExactTexts}/${engine.textCount} 篇`);
+  console.log(
+    `黑名单命中率 ${(engine.hitRate * 100).toFixed(1)}%（${engine.blacklistHits}/${engine.blacklistAnnotated}）· 漏报 ${engine.missCount} · 误报 ${engine.falsePositiveCount} · OOV 完全一致 ${engine.oovExactTexts}/${engine.textCount} 篇`,
+  );
 
   if (report.ai) {
     const s = (report.ai as { summary: { total: number; allPass: number } }).summary;
     console.log(`AI 初稿：${s.allPass}/${s.total} 项全达标`);
     for (const r of (report.ai as { perText: AiTextResult[] }).perText) {
-      console.log(`  ${r.name} · ${r.tier}：${r.allPass ? '✓' : '✗'} 平均${r.metrics.avgLen}词/最长${r.metrics.maxLen}/被${r.metrics.passive}从${r.metrics.relcl}完${r.metrics.pastperf}/生词率${r.metrics.newWordRate}%${r.metrics.mustKeepMissing.length ? `/缺情节词:${r.metrics.mustKeepMissing.join(',')}` : ''}`);
+      console.log(
+        `  ${r.name} · ${r.tier}：${r.allPass ? '✓' : '✗'} 平均${r.metrics.avgLen}词/最长${r.metrics.maxLen}/被${r.metrics.passive}从${r.metrics.relcl}完${r.metrics.pastperf}/生词率${r.metrics.newWordRate}%${r.metrics.mustKeepMissing.length ? `/缺情节词:${r.metrics.mustKeepMissing.join(',')}` : ''}`,
+      );
     }
   }
 

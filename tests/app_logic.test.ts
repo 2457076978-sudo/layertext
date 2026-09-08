@@ -18,7 +18,10 @@ test('withRetry：网络错误自动重试后成功', async () => {
 test('withRetry：不可重试错误（401）立即抛出', async () => {
   let calls = 0;
   await assert.rejects(
-    withRetry(async () => { calls++; throw new Error('HTTP 401: unauthorized'); }),
+    withRetry(async () => {
+      calls++;
+      throw new Error('HTTP 401: unauthorized');
+    }),
     /401/,
   );
   assert.equal(calls, 1);
@@ -163,7 +166,7 @@ import { COMPACT_DEFAULTS, estTokens, planCompaction, type ChatMsgLike } from '.
 
 function mkMsgs(n: number, filler = 'word '): ChatMsgLike[] {
   const out: ChatMsgLike[] = [];
-  for (let i = 0; i < n; i++) out.push({ role: i % 2 === 0 ? 'user' : 'assistant', content: (filler).repeat(80) + i });
+  for (let i = 0; i < n; i++) out.push({ role: i % 2 === 0 ? 'user' : 'assistant', content: filler.repeat(80) + i });
   return out;
 }
 
@@ -221,7 +224,10 @@ test('planCompaction：assistant.tool_calls 与其 tool 结果不被拆开（都
   const hasCall = tail.some((m) => m.tool_calls && (m.tool_calls as unknown[]).length);
   if (hasCall) {
     // 尾段出现 tool_calls 时，对应的 tool 结果必须也在尾段（DeepSeek 要求成对回传）
-    assert.ok(tail.some((m) => m.role === 'tool'), 'tool_calls 与 tool 结果未被拆散');
+    assert.ok(
+      tail.some((m) => m.role === 'tool'),
+      'tool_calls 与 tool 结果未被拆散',
+    );
   }
 });
 
@@ -236,7 +242,11 @@ test('planBatchChapters：进度文件里 done 的章标记已完成（续跑跳
     status: { '/book/第一章.md': 'done', '/book/第三章.md': 'failed' },
   };
   const items = planBatchChapters(['/book/第一章.md', '/book/第二章.md', '/book/第三章.md'], progress);
-  assert.deepEqual(items.map((x) => x.done), [true, false, false], '仅 done 标记跳过；failed 需重跑');
+  assert.deepEqual(
+    items.map((x) => x.done),
+    [true, false, false],
+    '仅 done 标记跳过；failed 需重跑',
+  );
   assert.equal(items[0].name, '第一章.md');
 });
 
@@ -247,8 +257,39 @@ test('planBatchChapters：无进度文件全部可跑', () => {
 
 test('buildBookReportMd：横向表 + 合计 + 失败章与残留提示', () => {
   const rows: BookReportRow[] = [
-    { chapter: '第一章.md', output: '第一章_简化_2026-09-07.md', segCount: 10, oovRate: '2.1%', avgLen: '10.5', maxLen: 15, passive: 0, relcl: 1, pastperf: 0, overlong: 0, ruleLeft: 0, elapsedMs: 61000, outTokens: 3000, status: 'done' },
-    { chapter: '第二章.md', output: '', segCount: 8, oovRate: '', avgLen: '', maxLen: 0, passive: 0, relcl: 0, pastperf: 0, overlong: 0, ruleLeft: 0, elapsedMs: 5000, outTokens: 0, status: 'failed', error: 'HTTP 429: rate limit' },
+    {
+      chapter: '第一章.md',
+      output: '第一章_简化_2026-09-07.md',
+      segCount: 10,
+      oovRate: '2.1%',
+      avgLen: '10.5',
+      maxLen: 15,
+      passive: 0,
+      relcl: 1,
+      pastperf: 0,
+      overlong: 0,
+      ruleLeft: 0,
+      elapsedMs: 61000,
+      outTokens: 3000,
+      status: 'done',
+    },
+    {
+      chapter: '第二章.md',
+      output: '',
+      segCount: 8,
+      oovRate: '',
+      avgLen: '',
+      maxLen: 0,
+      passive: 0,
+      relcl: 0,
+      pastperf: 0,
+      overlong: 0,
+      ruleLeft: 0,
+      elapsedMs: 5000,
+      outTokens: 0,
+      status: 'failed',
+      error: 'HTTP 429: rate limit',
+    },
   ];
   const md = buildBookReportMd(rows, { book: '动物农场', date: '2026-09-07', maxLen: 16, instructions: '面向九年级' });
   assert.ok(md.includes('# 全书简化报告 · 动物农场'));
@@ -263,7 +304,22 @@ test('buildBookReportMd：横向表 + 合计 + 失败章与残留提示', () => 
 
 test('buildBookReportMd：全部达标时不出现复查段，给 🎉 判读', () => {
   const rows: BookReportRow[] = [
-    { chapter: '第一章.md', output: 'a_简化_1.md', segCount: 10, oovRate: '1.0%', avgLen: '10.0', maxLen: 14, passive: 0, relcl: 0, pastperf: 0, overlong: 0, ruleLeft: 0, elapsedMs: 60000, outTokens: 3000, status: 'done' },
+    {
+      chapter: '第一章.md',
+      output: 'a_简化_1.md',
+      segCount: 10,
+      oovRate: '1.0%',
+      avgLen: '10.0',
+      maxLen: 14,
+      passive: 0,
+      relcl: 0,
+      pastperf: 0,
+      overlong: 0,
+      ruleLeft: 0,
+      elapsedMs: 60000,
+      outTokens: 3000,
+      status: 'done',
+    },
   ];
   const md = buildBookReportMd(rows, { book: '书', date: '2026-09-07', maxLen: 16 });
   assert.ok(!md.includes('## 建议人工复查'));
@@ -296,7 +352,7 @@ test('locateOriginal：句文本唯一定位；重复句与未命中返回 null'
 });
 
 test('remapMarks：替换句子后标记按句前缀重新对齐，词索引 wi 同步更新', () => {
-  const before = '# t\n\n## Chapter One\n\n[P01] The hare laughed loudly.\n\n[P02] A dog ran.\n';
+  const _before = '# t\n\n## Chapter One\n\n[P01] The hare laughed loudly.\n\n[P02] A dog ran.\n';
   const after = '# t\n\n## Chapter One\n\n[P01] The hare laughed loudly.\n\n[P02] A cat ran very fast.\n';
   const marks: Mark[] = [
     { id: 'm1', level: 'sent', pi: 1, si: 0, text: 'A dog ran', type: 'syntax', ts: 1 },
@@ -308,7 +364,7 @@ test('remapMarks：替换句子后标记按句前缀重新对齐，词索引 wi 
   assert.equal(marks[1].pi, 1);
 
   // 场景二：句首未变（拆句/前文插入导致索引位移）→ 前缀唯一命中新位置
-  const before2 = '# t\n\n## Chapter One\n\n[P01] Hello world.\n\n[P02] A dog ran.\n';
+  const _before2 = '# t\n\n## Chapter One\n\n[P01] Hello world.\n\n[P02] A dog ran.\n';
   const after2 = '# t\n\n## Chapter One\n\n[P01] Hello world.\n\n[P02] New opening line.\n\n[P03] A dog ran.\n';
   const marks2: Mark[] = [
     { id: 'm3', level: 'sent', pi: 1, si: 0, text: 'A dog ran.', type: 'syntax', ts: 3 },
@@ -327,8 +383,10 @@ const T = (id: string, 名称: string, 类型: '组' | '人', o: Partial<ClassTa
 
 test('mergeTargets：未选择=不激活，用全局句长', () => {
   const m = mergeTargets([], 16);
-  assert.equal(m.active, false); assert.equal(m.minLen, 16);
-  assert.deepEqual(m.knownInter, []); assert.deepEqual(m.dueUnion, []);
+  assert.equal(m.active, false);
+  assert.equal(m.minLen, 16);
+  assert.deepEqual(m.knownInter, []);
+  assert.deepEqual(m.dueUnion, []);
 });
 
 test('mergeTargets：句长取最严、到期词并集按共选频次（默认上限12·教师指令尽量多复现）', () => {
@@ -337,9 +395,9 @@ test('mergeTargets：句长取最严、到期词并集按共选频次（默认�
   const m = mergeTargets([g, p1], 16);
   assert.equal(m.active, true);
   assert.equal(m.minLen, 12);
-  assert.equal(m.dueUnion[0], 'enormous');      // 两人都有 → 频次2排最前
+  assert.equal(m.dueUnion[0], 'enormous'); // 两人都有 → 频次2排最前
   assert.ok(m.dueUnion.includes('cynical') && m.dueUnion.includes('majestic'));
-  assert.equal(m.dueUnion.length, 4);  // 并集去重：enormous/cynical/oats/majestic
+  assert.equal(m.dueUnion.length, 4); // 并集去重：enormous/cynical/oats/majestic
 });
 
 test('mergeTargets：已学词只在有词集的目标间求交；空词集目标不吞交', () => {
@@ -366,25 +424,23 @@ test('mergeTargets：覆盖目标取最严（max），无目标为 null', () => 
   const b = T('组:B', 'B层', '组', { 覆盖目标: 98 });
   const a = T('组:A', 'A层', '组', { 覆盖目标: 95 });
   const m = mergeTargets([b, a], 16);
-  assert.equal(m.coverageTarget, 98);           // 弱读者从严
+  assert.equal(m.coverageTarget, 98); // 弱读者从严
   assert.equal(mergeTargets([T('组:M', 'M', '组')], 16).coverageTarget, null); // 无目标字段→null 用文献带
 });
 
 test('mergeTargets：dueCap 显式截断仍生效', () => {
-  const g = T('组:B', 'B层', '组', { 到期词: ['a','b','c','d','e','f','g','h','i','j','k','l','m','n'] });
-  assert.equal(mergeTargets([g], 16).dueUnion.length, 12);          // 默认 12
-  assert.equal(mergeTargets([g], 16, 8).dueUnion.length, 8);        // 显式回 8
+  const g = T('组:B', 'B层', '组', { 到期词: ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n'] });
+  assert.equal(mergeTargets([g], 16).dueUnion.length, 12); // 默认 12
+  assert.equal(mergeTargets([g], 16, 8).dueUnion.length, 8); // 显式回 8
 });
 
 /* ---------- 工作区：parseWorkspaces / workspaceChipName ---------- */
 import { parseWorkspaces, workspaceChipName } from '../app/src/pure.js';
 
 test('parseWorkspaces：正常解析/坏JSON容错/空文件列表剔除', () => {
-  const ws = parseWorkspaces(JSON.stringify({ 工作区: [
-    { 名: 'B层工作区', 定制目标: '组:B', 文件: ['/a/第一章/候选版_v0.1_中梯队.md', '/a/第二章/候选版_v0.1_中梯队.md'] },
-    { 名: '坏行', 文件: [] },
-    { 名: '无文件' },
-  ] }));
+  const ws = parseWorkspaces(
+    JSON.stringify({ 工作区: [{ 名: 'B层工作区', 定制目标: '组:B', 文件: ['/a/第一章/候选版_v0.1_中梯队.md', '/a/第二章/候选版_v0.1_中梯队.md'] }, { 名: '坏行', 文件: [] }, { 名: '无文件' }] }),
+  );
   assert.equal(ws.length, 1);
   assert.equal(ws[0].定制目标, '组:B');
   assert.equal(ws[0].文件.length, 2);
@@ -394,6 +450,6 @@ test('parseWorkspaces：正常解析/坏JSON容错/空文件列表剔除', () =>
 
 test('workspaceChipName：候选版取目录名，普通文件取文件名', () => {
   assert.equal(workspaceChipName('/x/第一章/候选版_v0.1_中梯队.md'), '第一章');
-  assert.equal(workspaceChipName('/x/候选版_v0.1_中梯队.md'), '候选版_v0.1_中梯队');  // 无目录名可用→回退文件名
+  assert.equal(workspaceChipName('/x/候选版_v0.1_中梯队.md'), '候选版_v0.1_中梯队'); // 无目录名可用→回退文件名
   assert.equal(workspaceChipName('/x/ch3.md'), 'ch3');
 });

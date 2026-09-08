@@ -85,7 +85,7 @@ export function refreshBookmarksDom(session: FileSession): void {
     el.classList.remove('bookmarked');
     if (pid?.dataset.orig) pid.textContent = pid.dataset.orig;
   });
-  for (const b of session.review.bookmarks ?? []) {
+  for (const b of session.review.bookmarks) {
     const el = paraEl(b.pi);
     if (!el) continue;
     el.classList.add('bookmarked');

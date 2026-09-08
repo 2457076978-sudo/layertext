@@ -75,7 +75,7 @@ test('删除标记：句级删除不影响词级（原型坑3修复）', () => {
 test('restoreAllMarkDom：重新打开文件后全部标记恢复到 DOM', () => {
   buildReader();
   const marks = [wMark(0, 0, 1, 'zh'), wMark(0, 1, 0, 'hard'), sMark(0, 0, 'cut')];
-  restoreAllMarkDom({ review: { marks } } as never);
+  restoreAllMarkDom({ review: { marks, bookmarks: [] } } as never);
   assert.ok(win.document.querySelector('.w[data-wi="1"]')!.classList.contains('mk-zh'));
   assert.ok(win.document.querySelector('.sent[data-si="1"] .w')!.classList.contains('mk-hard'));
   assert.ok(win.document.querySelector('.sbadge-cut'));
@@ -99,18 +99,15 @@ test('侧栏：配额增删勾、门禁、清单分组渲染与回调', () => {
   review.marks = [wMark(0, 0, 1, 'simpl'), sMark(0, 0, 'syntax'), sMark(0, 0, 'syntax')];
 
   const events: string[] = [];
-  renderSidebar(
-    { review } as never,
-    {
-      onQuotaToggle: (i) => events.push('quota-toggle:' + i),
-      onQuotaRemove: (i) => events.push('quota-remove:' + i),
-      onQuotaAdd: (t) => events.push('quota-add:' + t),
-      onGateToggle: (g) => events.push('gate:' + g),
-      onGateHelp: () => {},
-      onMarkJump: (m) => events.push('jump:' + m.id),
-      onMarkRemove: (m) => events.push('rm:' + m.id),
-    },
-  );
+  renderSidebar({ review } as never, {
+    onQuotaToggle: (i) => events.push('quota-toggle:' + i),
+    onQuotaRemove: (i) => events.push('quota-remove:' + i),
+    onQuotaAdd: (t) => events.push('quota-add:' + t),
+    onGateToggle: (g) => events.push('gate:' + g),
+    onGateHelp: () => {},
+    onMarkJump: (m) => events.push('jump:' + m.id),
+    onMarkRemove: (m) => events.push('rm:' + m.id),
+  });
 
   const side = win.document.getElementById('side-review')!;
   // 配额计数 1/2
@@ -144,8 +141,13 @@ test('侧栏：配额增删勾、门禁、清单分组渲染与回调', () => {
   assert.ok(!side.textContent!.includes('已通过'));
   review.gate = Object.fromEntries(GATES.map((g) => [g, true]));
   renderSidebar({ review } as never, {
-    onQuotaToggle: () => {}, onQuotaRemove: () => {}, onQuotaAdd: () => {},
-    onGateToggle: () => {}, onGateHelp: () => {}, onMarkJump: () => {}, onMarkRemove: () => {},
+    onQuotaToggle: () => {},
+    onQuotaRemove: () => {},
+    onQuotaAdd: () => {},
+    onGateToggle: () => {},
+    onGateHelp: () => {},
+    onMarkJump: () => {},
+    onMarkRemove: () => {},
   });
   assert.ok(win.document.getElementById('side-review')!.textContent!.includes('✅ 已通过'));
 });

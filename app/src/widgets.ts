@@ -4,7 +4,7 @@
  */
 
 import { esc } from './state.js';
-import { extractParas, sentsOf, splitChapter } from '../../src/core/textpipe.js';
+import { extractParas, splitChapter } from '../../src/core/textpipe.js';
 
 /* ---------- 修改模式胶囊：一眼可见、一键切换（即改=立即生效 / 候选=点✓生效） ---------- */
 

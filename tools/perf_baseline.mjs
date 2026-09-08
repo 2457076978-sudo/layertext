@@ -12,7 +12,7 @@ import { Window } from 'happy-dom';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const mod = (p) => import(join(ROOT, p));
-const { extractParas, sentsOf, splitChapter, tokenizeTxt, cardGlossWords } = await mod('dist/src/core/textpipe.js');
+const { extractParas, sentsOf, splitChapter, tokenizeTxt } = await mod('dist/src/core/textpipe.js');
 const { runQc } = await mod('dist/src/core/qc.js');
 const { buildLexicon } = await mod('dist/src/core/lexicon.js');
 const { sentenceRisks } = await mod('dist/src/core/risks.js');

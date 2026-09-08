@@ -564,18 +564,23 @@ export interface ShelfFilters {
   group: string | null;
 }
 
-/** 书架过滤：搜索词按空格切分多词 AND 匹配（书名/副标题/分组，大小写不敏感）；group=null 全部、''=未分组、其他=精确分组 */
+/** 命中分组：null=全部；''=未分组；其他=精确分组（书架分组以相等为命中） */
+function inGroup(b: { 分组?: string }, want: string | null): boolean {
+  if (want === null) return true;
+  return (b.分组 ?? '').trim() === want;
+}
+
+/** 命中搜索：多词 AND，匹配书名/副标题/分组（大小写不敏感） */
+function matchesWords(b: { 名: string; 副标题?: string; 分组?: string }, words: string[]): boolean {
+  if (words.length === 0) return true;
+  const hay = `${b.名} ${b.副标题 ?? ''} ${b.分组 ?? ''}`.toLowerCase();
+  return words.every((w) => hay.includes(w));
+}
+
+/** 书架过滤 = 命中分组 且 命中搜索词 */
 export function filterShelfBooks<T extends { 名: string; 副标题?: string; 分组?: string }>(books: T[], f: ShelfFilters): T[] {
   const words = f.q.trim().toLowerCase().split(/\s+/).filter(Boolean);
-  return books.filter((b) => {
-    if (f.group !== null) {
-      const g = b.分组?.trim() ?? '';
-      if (f.group === '' ? g !== '' : g !== f.group) return false;
-    }
-    if (!words.length) return true;
-    const hay = `${b.名} ${b.副标题 ?? ''} ${b.分组 ?? ''}`.toLowerCase();
-    return words.every((w) => hay.includes(w));
-  });
+  return books.filter((b) => inGroup(b, f.group) && matchesWords(b, words));
 }
 
 /** 书架现有分组清单（去重排序；空分组不入列） */
@@ -583,9 +588,9 @@ export function shelfGroupsOf<T extends { 分组?: string }>(books: T[]): string
   return [...new Set(books.map((b) => b.分组?.trim() ?? '').filter(Boolean))].sort((a, b) => a.localeCompare(b, 'zh-CN'));
 }
 
-/** 阅读进度百分比（0-100 整数；总数未知或 0 → 0，封顶 100） */
+/** 阅读进度百分比（0-100 整数；总数缺失或未开卷 → 0，封顶 100） */
 export function progressPct(read: number, total: number | undefined): number {
-  if (!total || total <= 0 || read <= 0) return 0;
+  if (!total || read <= 0) return 0;
   return Math.min(100, Math.round((read / total) * 100));
 }
 
