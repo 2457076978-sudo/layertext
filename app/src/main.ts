@@ -1544,6 +1544,7 @@ async function saveShelf(books: ShelfBook[]): Promise<void> {
 }
 
 async function renderShelf(): Promise<void> {
+  syncChrome(); // 书架=无章节上下文：进书架即收起章节级界面（不依赖调用方先走 renderAll）
   const el = $('reader');
   try {
     await renderShelfInner(el);
@@ -1844,6 +1845,7 @@ async function openBook(b: ShelfBook): Promise<void> {
 
 /** 版本选择页（两级导航第二步）：一本书的各版本卡片；点了版本才进工作区 */
 function renderBookVersions(b: ShelfBook): void {
+  syncChrome(); // 版本页=书级页面：章节工具与视图行按无会话上下文收起
   const el = $('reader');
   const cards = buildVersionCards(S.workspaces);
   void coverDataUrl(b.目录).then((img) => {
