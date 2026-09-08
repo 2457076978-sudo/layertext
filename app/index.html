@@ -301,12 +301,16 @@
         vertical-align: 1px;
       }
       .para {
-        margin-bottom: 14px;
+        margin-bottom: 0.85em; /* 段间距制（与首行缩进二选一）；em 随字号缩放 */
         line-height: var(--read-lh, 2.1);
-        font-size: 16px;
+        font-size: var(--read-fs, 17px); /* 英文正文须大于界面字级：x-height 小，同步加大灰度才与中文界面协调 */
+        font-kerning: normal;
+        text-rendering: optimizeLegibility;
       }
       .pid {
         display: inline-block;
+        min-width: 3.2em; /* 定宽：P02 与书签 ★02 起点一致（★ 全角最宽，以它为基准） */
+        text-align: center;
         font-size: 11px;
         color: var(--muted);
         border: 1px solid var(--line);
@@ -892,8 +896,8 @@
         border-radius: 8px;
         background: #f0fdf4;
         border: 1px solid #bbf7d0;
-        font-size: 15px;
-        line-height: 1.9;
+        font-size: var(--read-fs, 17px);
+        line-height: var(--read-lh, 2.1);
       }
       .inline-sug .rev-text {
         color: #14532d;
@@ -1557,6 +1561,11 @@
         padding: clamp(18px, 3vw, 36px) clamp(18px, 3.5vw, 44px);
         max-width: 1480px;
         margin: 0 auto;
+      }
+      .tico {
+        display: inline-block;
+        transform: translateY(1px); /* emoji/表意字符光学基线补偿：与汉字视觉中线对齐 */
+        margin-right: 7px;
       }
       .shelf-h {
         font-size: 17px;

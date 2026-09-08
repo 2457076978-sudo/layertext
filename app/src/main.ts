@@ -1602,7 +1602,7 @@ function renderShelfChrome(el: HTMLElement, books: ShelfBook[]): void {
   el.innerHTML = `
     <div class="shelf">
       ${ls?.files?.length ? `<div class="shelf-resume" id="shelf-resume">▶ 继续上次编辑：${esc(ls.workspace ? ls.workspace + ' · ' : '')}${esc(ls.files[Math.min(ls.activeIdx, ls.files.length - 1)]?.path.split('/').pop() ?? '')} <span class="dim">（${esc(ls.savedAt)}）</span></div>` : ''}
-      <div class="shelf-h">📚 我的书架<span class="dim">——点一本书，先选版本（如 B/M/A），再进工作区</span></div>
+      <div class="shelf-h"><span class="tico">📚</span>我的书架<span class="dim">——点一本书，先选版本（如 B/M/A），再进工作区</span></div>
       <div class="shelf-tools">
         <input type="search" id="shelf-q" placeholder="搜索书名 / 分组…" value="${esc(S.shelfQ)}"/>
         <span class="viewseg">
@@ -1913,7 +1913,7 @@ function ensureTocDom(): { mask: HTMLElement; panel: HTMLElement } {
     panel = document.createElement('aside');
     panel.id = 'toc-panel';
     panel.innerHTML = `
-      <div class="toc-h">☰ 目录<span class="dim" id="toc-sub"></span><button id="toc-close" title="关闭（Esc）">×</button></div>
+      <div class="toc-h"><span class="tico">☰</span>目录<span class="dim" id="toc-sub"></span><button id="toc-close" title="关闭（Esc）">×</button></div>
       <div class="toc-list" id="toc-list"></div>
       <div class="toc-bm-h" id="toc-bm-h" style="display:none">★ 本章书签 <span class="cnt" id="toc-bm-cnt"></span><span class="dim" style="font-weight:400;font-size:10.5px">— 双击正文段号收藏</span></div>
       <div class="toc-bm" id="toc-bm"></div>`;
@@ -3548,13 +3548,12 @@ async function replaceAllFind(): Promise<void> {
 }
 
 /* ---- 阅读字号 ---- */
+/** 正文字号：写 CSS 变量 --read-fs（正文/行内建议统一跟随；英文正文默认 17——x-height 小，须大于界面字级） */
 function applyReaderFont(): void {
-  const n = S.appConfig.readerFont ?? 15;
-  const el = document.getElementById('reader');
-  if (el) el.style.fontSize = n + 'px';
+  document.documentElement.style.setProperty('--read-fs', String(S.appConfig.readerFont ?? 17) + 'px');
 }
 function stepReaderFont(d: number): void {
-  const n = Math.min(24, Math.max(12, (S.appConfig.readerFont ?? 15) + d));
+  const n = Math.min(26, Math.max(13, (S.appConfig.readerFont ?? 17) + d));
   S.appConfig.readerFont = n;
   applyReaderFont();
   scheduleHeatRail();
@@ -3583,7 +3582,7 @@ function renderSettings(): void {
   const sel = mergedSelection();
   const row = (label: string, ctrl: string) => `<div class="set-row"><span>${label}</span>${ctrl}</div>`;
   pop.innerHTML = `<div class="pop-h">⚙ 设置 <span class="dim" style="font-weight:400;font-size:12px">（改完即存）</span></div>
-    ${row('阅读字号', `<button id="set-fm">A－</button> <b id="set-fv">${S.appConfig.readerFont ?? 15}</b>px <button id="set-fp">A＋</button>`)}
+    ${row('阅读字号', `<button id="set-fm">A－</button> <b id="set-fv">${S.appConfig.readerFont ?? 17}</b>px <button id="set-fp">A＋</button>`)}
     ${row('行间距', `<span class="seg">${LINE_HEIGHTS.map((h) => `<button class="${(S.appConfig.lineHeight ?? 2.1) === h ? 'cur' : ''}" data-lh="${h}">${h}</button>`).join('')}</span>`)}
     ${row('主题', `<span class="seg">${THEMES.map((t) => `<button class="${(S.appConfig.theme ?? 'light') === t.key ? 'cur' : ''}" data-theme="${t.key}">${t.label}</button>`).join('')}</span>`)}
     ${row('句长上限（简化标准）', `<button id="set-len">调整（${simplifyMaxLen()} 词）</button>`)}
