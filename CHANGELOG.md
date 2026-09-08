@@ -4,6 +4,15 @@
 1.0.0 之前的版本号为开发期里程碑（当时 `package.json` 未同步递增，本文件按里程碑整理，2026-09-06 校准）。
 面向教师的通俗版功能说明见 [README](README.md) 与 [docs/PRD.md](docs/PRD.md)。
 
+## [未发布] - 2026-09-08（feature/reinforce 本地 · 第七批）
+
+### 三大功能：审校过程档案（论文素材成卷）· 书级审校看板 · EPUB 导入
+
+- **📄 审校档案**（新视图页，`tab-dossier`）：当前章一键成卷——指标对照（基准 vs 当前：生词率/句长/黑名单句）、逐句对照摘要（丢句/信号缺失明细）、AI 决策记录（台账本章行）、标记分类与终审门禁。导出两档：本章 `审校档案/审校档案_第N章_日期.md`；全书合成（头部汇总：门禁通过 x/y、平均生词率、总标记、采纳率 + 各章明细串卷），落盘即 reveal。基准复用对照页的 alignBase（一个基准两处用）；无基准时降级为无对照列。`buildChapterDossierMd/dossierFileName/DossierData` 纯函数化 + 6 项测试。
+- **📊 书级审校看板**（新视图页，`tab-board`）：四张汇总卡（门禁通过 x/y、平均生词率、未结标记总数、AI 建议采纳率）+ 逐章表（门禁进度/标记/书签/生词率/建议采纳，行点击直达该章，当前章描边高亮）。数据=各章 `_审校标记.json` + 台账 + 当前稿现算 QC；`boardSummary` 纯函数 + 测试。
+- **EPUB 导入**：「打开文件…」支持 .epub——zip→container.xml→OPF manifest/spine→逐文档抽段（p/blockquote 入正文，标题块只做章名 fallback 不重复入段），实体解码（含数字实体），整书拆章进会话（原文件不动，入库仍走"添加书稿文件夹"）。`parseEpubChapters/epubChapterMd` 纯函数 + 3 项测试（mini epub 由 fflate zipSync 构造）。
+- 测试 122 → **129 项全绿**；lint 0/0；看板/档案页截图评审通过；tsc/vite build 过。
+
 ## [未发布] - 2026-09-08（feature/reinforce 本地 · 第六批）
 
 ### 整体 UI 对齐 Apple 设计语言（Liquid Glass 成熟形态，检索 2025 发布 / WWDC26 回调后）

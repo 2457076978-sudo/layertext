@@ -27,6 +27,11 @@ import {
   locateOriginal,
   mergeQuotaTexts,
   alignSentencePairs,
+  boardSummary,
+  buildChapterDossierMd,
+  dossierFileName,
+  epubChapterMd,
+  parseEpubChapters,
   filterShelfBooks,
   mergeTargets,
   normalizeAndSplitChapters,
@@ -44,6 +49,8 @@ import {
   type BatchProgressFile,
   type BookReportRow,
   type ClassTarget,
+  type DossierData,
+  type QcSummaryLite,
 } from './pure.js';
 import { renderDiffPane, renderModePill, switchView as switchViewDom, type ViewName } from './widgets.js';
 import { S, esc } from './state.js';
@@ -1312,6 +1319,14 @@ $('tab-align').addEventListener('click', () => {
   renderAlignPane();
   switchView('align');
 });
+$('tab-board').addEventListener('click', () => {
+  void renderBoardPane();
+  switchView('board');
+});
+$('tab-dossier').addEventListener('click', () => {
+  void renderDossierPane();
+  switchView('dossier');
+});
 $('tab-retro').addEventListener('click', () => {
   void renderRetroPane();
   switchView('retro');
@@ -1410,6 +1425,15 @@ function docxToText(b64: string): string {
 
 async function openPathIntoSession(p: string): Promise<void> {
   const name = p.slice(p.lastIndexOf('/') + 1);
+  if (p.toLowerCase().endsWith('.epub')) {
+    // epub 整书导入：解析拆章，每章一个会话（原文件不动；想入库走「添加书稿文件夹」）
+    const bin = Uint8Array.from(atob(await invoke<string>('read_file_base64', { path: p })), (c) => c.charCodeAt(0));
+    const { bookTitle, chapters } = parseEpubChapters(bin);
+    for (const ch of chapters) await addSession(epubChapterMd(bookTitle, ch), `${bookTitle} — ${ch.title}`, p, { noAutoQc: true });
+    void runQcCurrent({ auto: true });
+    setStatus(`已从 epub 导入《${bookTitle}》${chapters.length} 章（原文件未改动）`, 'saved');
+    return;
+  }
   const raw = p.toLowerCase().endsWith('.docx') ? docxToText(await invoke<string>('read_file_base64', { path: p })) : await invoke<string>('read_text_file', { path: p });
   // 智能归一化：已合规直接用；多章标题拆多 tab；无章节结构的文本内存包装直接显示（原文件不动）
   const { chapters } = normalizeAndSplitChapters(raw, name);
@@ -1419,7 +1443,7 @@ async function openPathIntoSession(p: string): Promise<void> {
 async function openChapterFiles(): Promise<void> {
   const paths = await openFileDialog({
     multiple: true,
-    filters: [{ name: '章节文件（Markdown / 文本 / Word）', extensions: ['md', 'txt', 'markdown', 'docx'] }],
+    filters: [{ name: '章节文件（Markdown / 文本 / Word / EPUB）', extensions: ['md', 'txt', 'markdown', 'docx', 'epub'] }],
   });
   if (!paths) return; // 用户取消选择
   const list: string[] = Array.isArray(paths) ? paths : [paths];
@@ -4064,6 +4088,254 @@ function renderAlignPane(): void {
       }
     }
   });
+}
+
+/* ================= 书级审校看板（一张表看懂还剩多少活） ================= */
+
+/** 读一章的审校标记 JSON（无文件返回 null——未审不报错） */
+async function readReviewJson(chapterPath: string): Promise<{ marks?: unknown[]; bookmarks?: unknown[]; gate?: Record<string, boolean> } | null> {
+  try {
+    const base = chapterPath.slice(chapterPath.lastIndexOf('/') + 1).replace(/\.(md|txt|markdown|docx)$/i, '');
+    const j = JSON.parse(await invoke<string>('read_text_file', { path: `${chapterPath.slice(0, chapterPath.lastIndexOf('/'))}/${base}_审校标记.json` }));
+    return j as { marks?: unknown[]; bookmarks?: unknown[]; gate?: Record<string, boolean> };
+  } catch {
+    return null;
+  }
+}
+
+/** 本章台账行（宽松匹配：章名互相包含或路径包含） */
+function ledgerOf(ledger: LedgerRow[], 章: string, path: string): LedgerRow[] {
+  return ledger.filter((r) => r.chapter && (章.includes(r.chapter) || r.chapter.includes(章) || path.includes(r.chapter)));
+}
+
+async function renderBoardPane(): Promise<void> {
+  const pane = $('pane-board');
+  const s = activeSession();
+  const chapters = await tocChapters();
+  if (chapters.length === 0) {
+    pane.innerHTML = '<div class="empty">从书架进入一本书，这里显示全书审校看板</div>';
+    return;
+  }
+  const ledger = await readLedger();
+  const cur = s?.sourcePath ?? null;
+  const rows: { path: string; 章: string; 门禁勾选: number; 门禁总数: number; 标记数: number; 书签数: number; 生词率: number | null; 建议数: number; 采纳数: number; 当前: boolean }[] = [];
+  for (const f of chapters) {
+    const r = await readReviewJson(f);
+    const gates = r?.gate ? Object.values(r.gate).filter(Boolean).length : 0;
+    let rate: number | null = null;
+    if (f === cur && s?.report) rate = s.report.newWordRate;
+    else {
+      try {
+        rate = runQc(await invoke<string>('read_text_file', { path: f }), buildLexiconNow(), { tier: 'M', fileName: '' }).newWordRate;
+      } catch {
+        /* 文件读不了留空 */
+      }
+    }
+    const mine = ledgerOf(ledger, workspaceChipName(f), f);
+    rows.push({
+      path: f,
+      章: workspaceChipName(f),
+      门禁勾选: gates,
+      门禁总数: GATES.length,
+      标记数: r?.marks?.length ?? 0,
+      书签数: r?.bookmarks?.length ?? 0,
+      生词率: rate,
+      建议数: mine.length,
+      采纳数: mine.filter((x) => x.outcome === '采纳' || x.outcome === '直改').length,
+      当前: f === cur,
+    });
+  }
+  const sum = boardSummary(rows);
+  pane.innerHTML = `
+    <div class="retro-cards">
+      <div class="retro-card"><div class="retro-num">${esc(sum.过门禁)}</div><div class="retro-label">终审门禁通过</div><div class="retro-hint">四项全勾才算过</div></div>
+      <div class="retro-card"><div class="retro-num">${esc(sum.平均生词率)}</div><div class="retro-label">平均生词率</div><div class="retro-hint">全书各章当前稿</div></div>
+      <div class="retro-card"><div class="retro-num">${sum.总标记}</div><div class="retro-label">未结标记总数</div><div class="retro-hint">正文点词/划句所做</div></div>
+      <div class="retro-card"><div class="retro-num">${esc(sum.采纳率)}</div><div class="retro-label">AI 建议采纳率</div><div class="retro-hint">台账统计（采纳+直改）</div></div>
+    </div>
+    <table class="sgtable">
+      <tr><th>章</th><th>门禁</th><th>标记</th><th>书签</th><th>生词率</th><th>建议（采纳）</th></tr>
+      ${rows
+        .map(
+          (r) => `<tr class="board-row" data-bpath="${esc(r.path)}" style="cursor:pointer;${r.当前 ? 'outline:1px solid var(--accent);outline-offset:-1px' : ''}">
+        <td>${esc(r.章)}${r.当前 ? ' <span class="shelf-badge">当前</span>' : ''}</td>
+        <td>${r.门禁勾选 === r.门禁总数 && r.门禁总数 > 0 ? '<span style="color:#16a34a">✓ 通过</span>' : `${r.门禁勾选}/${r.门禁总数}`}</td>
+        <td>${r.标记数}</td>
+        <td>${r.书签数}</td>
+        <td>${r.生词率 === null ? '—' : (r.生词率 * 100).toFixed(1) + '%'}</td>
+        <td>${r.建议数 ? `${r.建议数}（${r.采纳数}）` : '—'}</td>
+      </tr>`,
+        )
+        .join('')}
+    </table>`;
+  pane.querySelectorAll<HTMLElement>('[data-bpath]').forEach((tr) =>
+    tr.addEventListener('click', () => {
+      const f = tr.dataset.bpath!;
+      openPathIntoSession(f)
+        .then(() => setStatus(`已打开：${workspaceChipName(f)}`, 'saved'))
+        .catch((e) => setStatus('打开失败：' + e, 'err'));
+    }),
+  );
+}
+
+/** 书目录台账（AI建议台账.csv；无则空表） */
+async function readLedger(): Promise<LedgerRow[]> {
+  if (!S.currentBookDir) return [];
+  try {
+    return parseLedger(await invoke<string>('read_text_file', { path: `${S.currentBookDir}/AI建议台账.csv` }));
+  } catch {
+    return [];
+  }
+}
+
+/* ================= 审校过程档案（论文素材自动成卷） ================= */
+
+/** 当前章档案数据（基准=对照页所选 alignBase；无基准跳过对照节） */
+async function buildCurrentDossier(): Promise<DossierData | null> {
+  const s = activeSession();
+  if (!s?.sourcePath) return null;
+  const qcLite = (md: string): QcSummaryLite => {
+    const r = runQc(md, buildLexiconNow(), { tier: 'M', fileName: s.fileName });
+    return { newWordRate: r.newWordRate, avgLen: r.avgLenNarrRaw, sentCount: r.sentCount, passive: r.passive, relcl: r.relcl, pastperf: r.pastperf, oovCount: new Set(r.oov).size };
+  };
+  const ledger = (await readLedger()).filter((x) => x.chapter && (s.fileName.includes(x.chapter) || x.chapter.includes(workspaceChipName(s.sourcePath!)) || s.sourcePath!.includes(x.chapter)));
+  const byType = new Map<string, number>();
+  for (const m of s.review.marks) byType.set(typeLabel(m.type), (byType.get(typeLabel(m.type)) ?? 0) + 1);
+  const data: DossierData = {
+    书名: S.currentBookDir?.split('/').pop() ?? '未命名书',
+    章名: workspaceChipName(s.sourcePath),
+    版本: S.activeWorkspace ?? '',
+    生成时间: new Date().toLocaleString('zh-CN'),
+    句长上限: simplifyMaxLen(),
+    当前摘要: qcLite(s.md),
+    台账: ledger.map((x) => ({ ts: x.ts, markType: x.markType, outcome: x.outcome, original: x.original, revised: x.revised, basis: x.basis })),
+    标记: [...byType.entries()].map(([label, n]) => ({ label, n })).sort((a, b) => b.n - a.n),
+    门禁: Object.fromEntries(GATES.map((g) => [g, s.review.gate[g] === true])),
+  };
+  if (S.alignBase) {
+    const baseSents = chapterSents(S.alignBase.md);
+    const curSents = chapterSents(s.md);
+    if (baseSents.length && curSents.length) {
+      const rows = alignSentencePairs(baseSents, curSents);
+      data.基准摘要 = qcLite(S.alignBase.md);
+      data.对照 = {
+        对齐: rows.filter((r) => r.kind === 'match').length,
+        丢句: rows
+          .filter((r) => r.kind === 'lost')
+          .map((r) => ({ pos: `P${String((r.base?.pi ?? 0) + 1).padStart(2, '0')}·${String((r.base?.si ?? 0) + 1).padStart(2, '0')}`, base: r.base?.text ?? '', lost: r.lostSignals ?? [] })),
+        信号缺失: rows
+          .filter((r) => r.kind === 'match' && r.lostSignals?.length)
+          .map((r) => ({ pos: `P${String((r.cur?.pi ?? 0) + 1).padStart(2, '0')}·${String((r.cur?.si ?? 0) + 1).padStart(2, '0')}`, cur: r.cur?.text ?? '', lost: r.lostSignals ?? [] })),
+        新增: rows.filter((r) => r.kind === 'added').map((r) => r.cur?.text ?? ''),
+      };
+    }
+  }
+  return data;
+}
+
+async function renderDossierPane(): Promise<void> {
+  const pane = $('pane-dossier');
+  const s = activeSession();
+  if (!s) {
+    pane.innerHTML = '<div class="empty">先打开一章，这里汇总它的审校过程并导出档案</div>';
+    return;
+  }
+  const d = await buildCurrentDossier();
+  if (!d) {
+    pane.innerHTML = '<div class="empty">当前为示例章节（无书目录上下文），档案只对书稿章节生成</div>';
+    return;
+  }
+  const pct = (v: number): string => (v * 100).toFixed(1) + '%';
+  const hasBase = d.基准摘要 !== undefined;
+  pane.innerHTML = `
+    <div class="align-bar">
+      <b>📄 审校档案</b>
+      <span class="dim" style="font-size:12px">${esc(d.书名)} · ${esc(d.章名)}${d.版本 ? ' · ' + esc(d.版本) : ''}${hasBase ? ' · 基准已选（对照与指标含基准列）' : ' · <span style="color:var(--pending)">未选基准：去「⇄ 逐句对照」选一个基准版本，档案会多出指标对照与丢句明细</span>'}</span>
+      <span style="flex:1"></span>
+      <button id="dos-export-ch" class="primary">📄 导出本章档案</button>
+      <button id="dos-export-book">📚 导出全书档案</button>
+    </div>
+    <table class="sgtable">
+      <tr><th>指标</th>${hasBase ? '<th>基准版</th>' : ''}<th>当前版</th></tr>
+      <tr><td>② 生词率</td>${hasBase ? `<td>${pct(d.基准摘要!.newWordRate)}</td>` : ''}<td>${pct(d.当前摘要.newWordRate)}</td></tr>
+      <tr><td>③ 平均句长</td>${hasBase ? `<td>${d.基准摘要!.avgLen.toFixed(1)}</td>` : ''}<td>${d.当前摘要.avgLen.toFixed(1)}</td></tr>
+      <tr><td>⑤ 被动句</td>${hasBase ? `<td>${d.基准摘要!.passive}</td>` : ''}<td>${d.当前摘要.passive}</td></tr>
+      <tr><td>⑥ 定语从句</td>${hasBase ? `<td>${d.基准摘要!.relcl}</td>` : ''}<td>${d.当前摘要.relcl}</td></tr>
+      <tr><td>⑦ 过去完成</td>${hasBase ? `<td>${d.基准摘要!.pastperf}</td>` : ''}<td>${d.当前摘要.pastperf}</td></tr>
+    </table>
+    ${d.对照 ? `<p class="dim" style="margin:10px 0 4px;font-size:12.5px">逐句对照：对齐 ${d.对照.对齐} 句 · <span style="color:var(--oov)">疑似丢句 ${d.对照.丢句.length}</span> · <span style="color:#b45309">信号缺失 ${d.对照.信号缺失.length} 处</span> · 新增 ${d.对照.新增.length}（明细见导出的 md）</p>` : ''}
+    <p class="dim" style="margin:6px 0;font-size:12.5px">决策记录（台账）：${d.台账.length} 条${d.台账.length ? '（采纳 ' + d.台账.filter((x) => x.outcome === '采纳' || x.outcome === '直改').length + '）' : ''} ｜ 标记 ${d.标记.reduce((n, x) => n + x.n, 0)} 处 ｜ 门禁 ${Object.values(d.门禁).filter(Boolean).length}/${GATES.length}</p>`;
+  pane.querySelector('#dos-export-ch')?.addEventListener('click', () => void exportChapterDossier(d));
+  pane.querySelector('#dos-export-book')?.addEventListener('click', () => void exportBookDossier());
+}
+
+async function exportChapterDossier(d: DossierData): Promise<void> {
+  if (!S.currentBookDir) return;
+  try {
+    const dir = `${S.currentBookDir}/审校档案`;
+    const path = `${dir}/${dossierFileName(d.章名, new Date().toLocaleDateString('sv-SE'))}`;
+    await invoke('write_text_file', { path, content: buildChapterDossierMd(d) });
+    void invoke('reveal_path', { path });
+    setStatus(`本章档案已导出：${path}`, 'saved');
+  } catch (e) {
+    setStatus('档案导出失败：' + e, 'err');
+  }
+}
+
+/** 全书档案：各章（指标+台账+标记+门禁）串卷 + 头部汇总（对照节仅章档案有，全书不逐章对齐） */
+async function exportBookDossier(): Promise<void> {
+  if (!S.currentBookDir) return;
+  try {
+    const chapters = await tocChapters();
+    if (chapters.length === 0) {
+      setStatus('没有书上下文，无法生成全书档案', 'err');
+      return;
+    }
+    const ledger = await readLedger();
+    const parts: string[] = [];
+    const boardRows: { path: string; 章: string; 门禁勾选: number; 门禁总数: number; 标记数: number; 书签数: number; 生词率: number | null; 建议数: number; 采纳数: number; 当前: boolean }[] = [];
+    for (const f of chapters) {
+      const md = await invoke<string>('read_text_file', { path: f });
+      const r = runQc(md, buildLexiconNow(), { tier: 'M', fileName: f.slice(f.lastIndexOf('/') + 1) });
+      const rv = await readReviewJson(f);
+      const mine = ledgerOf(ledger, workspaceChipName(f), f);
+      boardRows.push({
+        path: f,
+        章: workspaceChipName(f),
+        门禁勾选: Object.values(rv?.gate ?? {}).filter(Boolean).length,
+        门禁总数: GATES.length,
+        标记数: rv?.marks?.length ?? 0,
+        书签数: rv?.bookmarks?.length ?? 0,
+        生词率: r.newWordRate,
+        建议数: mine.length,
+        采纳数: mine.filter((x) => x.outcome === '采纳' || x.outcome === '直改').length,
+        当前: f === activeSession()?.sourcePath,
+      });
+      const byType = new Map<string, number>();
+      for (const m of (rv?.marks as { type: string }[]) ?? []) byType.set(m.type, (byType.get(m.type) ?? 0) + 1);
+      parts.push(
+        buildChapterDossierMd({
+          书名: S.currentBookDir!.split('/').pop() ?? '',
+          章名: workspaceChipName(f),
+          版本: S.activeWorkspace ?? '',
+          生成时间: new Date().toLocaleString('zh-CN'),
+          句长上限: simplifyMaxLen(),
+          当前摘要: { newWordRate: r.newWordRate, avgLen: r.avgLenNarrRaw, sentCount: r.sentCount, passive: r.passive, relcl: r.relcl, pastperf: r.pastperf, oovCount: new Set(r.oov).size },
+          台账: mine.map((x) => ({ ts: x.ts, markType: x.markType, outcome: x.outcome, original: x.original, revised: x.revised, basis: x.basis })),
+          标记: [...byType.entries()].map(([label, n]) => ({ label, n })).sort((a, b) => b.n - a.n),
+          门禁: Object.fromEntries(GATES.map((g) => [g, (rv?.gate?.[g] ?? false) === true])),
+        }),
+      );
+    }
+    const sum = boardSummary(boardRows);
+    const head = `# 审校档案 · 全书 ·《${S.currentBookDir.split('/').pop() ?? ''}》\n\n生成：${new Date().toLocaleString('zh-CN')} ｜ 工具：LayerText 分层读\n\n**全书汇总**：终审门禁通过 ${sum.过门禁} 章 ｜ 平均生词率 ${sum.平均生词率} ｜ 标记 ${sum.总标记} 处 ｜ AI 建议采纳率 ${sum.采纳率}\n\n---\n\n`;
+    const path = `${S.currentBookDir}/审校档案/审校档案_全书_${new Date().toLocaleDateString('sv-SE')}.md`;
+    await invoke('write_text_file', { path, content: head + parts.join('\n\n---\n\n') });
+    void invoke('reveal_path', { path });
+    setStatus(`全书档案已导出（${chapters.length} 章）：${path}`, 'saved');
+  } catch (e) {
+    setStatus('全书档案导出失败：' + e, 'err');
+  }
 }
 
 /* ---------- 新手导览（coach marks） ---------- */

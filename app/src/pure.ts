@@ -3,7 +3,7 @@
  * AI 返回解析容错 · 书级替换 · 章节识别与导入归一化 · 定位与标记重排（O4 自 main.ts 抽出）
  */
 
-import { extractParas, sentsOf, splitChapter } from '../../src/core/textpipe.js';
+import { chnoFromPath, extractParas, sentsOf, splitChapter } from '../../src/core/textpipe.js';
 import { tokenizeTxt } from '../../src/core/textpipe.js';
 import type { Mark } from './types.js';
 
@@ -873,4 +873,202 @@ export function alignSentencePairs(base: AlignSentRef[], cur: AlignSentRef[]): A
     }
   }
   return rows;
+}
+
+/* ================= EPUB 导入（拖一本书直接进管线：zip→spine→段落） ================= */
+
+import { unzipSync, strFromU8 } from 'fflate';
+
+export interface EpubChapter {
+  title: string;
+  paragraphs: string[];
+}
+
+function xmlAttr(tag: string, name: string): string | undefined {
+  return tag.match(new RegExp(`${name}="([^"]*)"`))?.[1];
+}
+
+function decodeEntities(s: string): string {
+  return s
+    .replace(/&(amp|lt|gt|quot|apos|nbsp);/g, (_, e: string) => ({ amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' })[e]!)
+    .replace(/&#(\d+);/g, (_, n: string) => String.fromCharCode(Number(n)));
+}
+
+/** epub（zip 字节）→ 阅读顺序的章列表：container.xml → OPF（书名/manifest/spine）→ 各文档的段落。
+ *  环节缺失如实抛错，由调用方提示"不是有效的 epub 文件"。 */
+export function parseEpubChapters(bin: Uint8Array): { bookTitle: string; chapters: EpubChapter[] } {
+  const files = unzipSync(bin);
+  const read = (p: string): string => {
+    const f = files[p] ?? files[p.replace(/^\//, '')];
+    if (!f) throw new Error(`epub 缺少文件：${p}`);
+    return strFromU8(f);
+  };
+  const opfPath = read('META-INF/container.xml').match(/full-path="([^"]+)"/)?.[1];
+  if (!opfPath) throw new Error('container.xml 里找不到 OPF 路径');
+  const opfDir = opfPath.includes('/') ? opfPath.slice(0, opfPath.lastIndexOf('/') + 1) : '';
+  const opf = read(opfPath);
+  const bookTitle = decodeEntities(opf.match(/<dc:title[^>]*>([^<]*)<\/dc:title>/)?.[1] ?? '') || '未命名书';
+  const manifest = new Map<string, string>();
+  for (const m of opf.matchAll(/<item\b[^>]*>/g)) {
+    const id = xmlAttr(m[0], 'id');
+    const href = xmlAttr(m[0], 'href');
+    if (id && href) manifest.set(id, href);
+  }
+  const chapters: EpubChapter[] = [];
+  for (const m of opf.matchAll(/<itemref\b[^>]*idref="([^"]+)"/g)) {
+    const href = manifest.get(m[1]!);
+    if (!href || !/\.x?html?$/i.test(href)) continue;
+    const html = read(opfDir + decodeURIComponent(href));
+    // 章标题：<title> 优先，缺省取第一个标题块；标题块不进正文段落（与 <title> 重复）
+    const title =
+      decodeEntities(html.match(/<title[^>]*>([^<]*)<\/title>/)?.[1] ?? '') ||
+      decodeEntities(
+        html
+          .match(/<h[1-6]\b[^>]*>([\s\S]*?)<\/h[1-6]>/i)?.[1]
+          ?.replace(/<[^>]+>/g, ' ')
+          .replace(/\s+/g, ' ')
+          .trim() ?? '',
+      );
+    const paragraphs = [...html.matchAll(/<(?:p|blockquote)\b[^>]*>([\s\S]*?)<\/(?:p|blockquote)>/gi)]
+      .map((x) =>
+        decodeEntities(
+          x[1]!
+            .replace(/<[^>]+>/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim(),
+        ),
+      )
+      .filter((t) => /[A-Za-z]/.test(t));
+    if (paragraphs.length > 0) chapters.push({ title: title || `第 ${chapters.length + 1} 节`, paragraphs });
+  }
+  if (chapters.length === 0) throw new Error('epub 未解析出任何英文段落（spine 为空或内容为扫描图）');
+  return { bookTitle, chapters };
+}
+
+/** epub 章节包装成会话章节 md（与导入归一化同款格式：## Chapter One + [P01] 段标） */
+export function epubChapterMd(bookTitle: string, ch: EpubChapter): string {
+  return `# ${bookTitle} — ${ch.title}\n\n## Chapter One\n\n${ch.paragraphs.map((p, i) => `[P${String(i + 1).padStart(2, '0')}] ${p}`).join('\n\n')}\n`;
+}
+
+/* ================= 审校过程档案（论文素材自动成卷） ================= */
+
+export interface QcSummaryLite {
+  newWordRate: number; // ② 生词率
+  avgLen: number; // ③ 平均句长
+  sentCount: number;
+  passive: number; // ⑤
+  relcl: number; // ⑥
+  pastperf: number; // ⑦
+  oovCount: number;
+}
+
+export interface DossierData {
+  书名: string;
+  章名: string;
+  版本: string;
+  生成时间: string;
+  句长上限: number;
+  基准摘要?: QcSummaryLite;
+  当前摘要: QcSummaryLite;
+  对照?: { 对齐: number; 丢句: { pos: string; base: string; lost: string[] }[]; 信号缺失: { pos: string; cur: string; lost: string[] }[]; 新增: string[] };
+  台账: { ts: string; markType: string; outcome: string; original: string; revised: string; basis: string }[];
+  标记: { label: string; n: number }[];
+  门禁: Record<string, boolean>;
+}
+
+const clip = (s: string, n: number): string => (s.length > n ? s.slice(0, n) + '…' : s);
+
+/** 章审校档案 → Markdown（论文素材：指标对照 + 逐句对照摘要 + 决策记录 + 标记/门禁） */
+export function buildChapterDossierMd(d: DossierData): string {
+  const pct = (v: number): string => (v * 100).toFixed(1) + '%';
+  const L: string[] = [];
+  L.push(`# 审校档案 ·《${d.书名}》${d.章名}${d.版本 ? `（${d.版本}）` : ''}`);
+  L.push('');
+  L.push(`生成：${d.生成时间} ｜ 简化标准：句长上限 ${d.句长上限} 词/句 ｜ 工具：LayerText 分层读`);
+  L.push('');
+  L.push('## 一、指标对照');
+  L.push('');
+  L.push('| 指标 |' + (d.基准摘要 ? ' 基准版 |' : '') + ' 当前版 |');
+  L.push('|---|' + (d.基准摘要 ? '---|' : '') + '---|');
+  const row = (label: string, f: (s: QcSummaryLite) => string): void => {
+    L.push(`| ${label} |` + (d.基准摘要 ? ` ${f(d.基准摘要)} |` : '') + ` ${f(d.当前摘要)} |`);
+  };
+  row('② 生词率', (s) => pct(s.newWordRate));
+  row('③ 平均句长（词）', (s) => s.avgLen.toFixed(1));
+  row('句数', (s) => String(s.sentCount));
+  row('⑤ 被动句', (s) => String(s.passive));
+  row('⑥ 定语从句', (s) => String(s.relcl));
+  row('⑦ 过去完成', (s) => String(s.pastperf));
+  row('OOV 词种', (s) => String(s.oovCount));
+  L.push('');
+  if (d.对照) {
+    L.push('## 二、逐句对照摘要');
+    L.push('');
+    L.push(`对齐 ${d.对照.对齐} 句 ｜ 疑似丢句 ${d.对照.丢句.length} ｜ 信号缺失 ${d.对照.信号缺失.length} 处 ｜ 新增 ${d.对照.新增.length}`);
+    if (d.对照.丢句.length) {
+      L.push('');
+      L.push('### 疑似丢句（基准有、当前无）');
+      for (const x of d.对照.丢句) L.push(`- ${x.pos}：${clip(x.base, 80)}${x.lost.length ? `（丢：${x.lost.join('、')}）` : ''}`);
+    }
+    if (d.对照.信号缺失.length) {
+      L.push('');
+      L.push('### 信号缺失（配对成功但数字/专名对不上）');
+      for (const x of d.对照.信号缺失) L.push(`- ${x.pos}：${clip(x.cur, 80)}（缺：${x.lost.join('、')}）`);
+    }
+    L.push('');
+  }
+  L.push('## ' + (d.对照 ? '三' : '二') + '、决策记录（AI 建议台账·本章）');
+  L.push('');
+  if (d.台账.length) {
+    L.push('| 时间 | 标记类型 | 结果 | 原句 | 建议句 | 依据 |');
+    L.push('|---|---|---|---|---|---|');
+    for (const r of d.台账) L.push(`| ${r.ts} | ${r.markType} | ${r.outcome} | ${clip(r.original, 40)} | ${clip(r.revised, 40)} | ${clip(r.basis, 50)} |`);
+  } else {
+    L.push('（本章暂无 AI 建议记录）');
+  }
+  L.push('');
+  L.push('## ' + (d.对照 ? '四' : '三') + '、标记与终审门禁');
+  L.push('');
+  L.push(d.标记.length ? `标记 ${d.标记.reduce((n, x) => n + x.n, 0)} 处：` + d.标记.map((x) => `${x.label} ${x.n}`).join('／') : '本章无标记');
+  const gates = Object.entries(d.门禁).map(([g, ok]) => `${g}${ok ? ' ✓' : ' ✗'}`);
+  L.push('');
+  L.push(`终审门禁：${gates.join('　')}`);
+  L.push('');
+  return L.join('\n');
+}
+
+/** 档案文件名：审校档案_第N章_YYYY-MM-DD.md（无章号用章名） */
+export function dossierFileName(章名: string, date: string): string {
+  const ch = chnoFromPath(章名) ? `第${'一二三四五六七八九十'[chnoFromPath(章名)! - 1]}章` : 章名.replace(/\.(md|txt|markdown|docx)$/i, '');
+  return `审校档案_${ch}_${date}.md`;
+}
+
+/* ================= 书级审校看板（一张表看懂还剩多少活） ================= */
+
+export interface BoardRow {
+  path: string;
+  章: string;
+  门禁勾选: number;
+  门禁总数: number;
+  标记数: number;
+  书签数: number;
+  生词率: number | null;
+  建议数: number;
+  采纳数: number;
+  当前: boolean;
+}
+
+/** 看板汇总头部：过门禁 x/y 章、平均生词率、总标记、建议采纳率 */
+export function boardSummary(rows: BoardRow[]): { 过门禁: string; 平均生词率: string; 总标记: number; 采纳率: string } {
+  const gated = rows.filter((r) => r.门禁总数 > 0 && r.门禁勾选 === r.门禁总数).length;
+  const rates = rows.map((r) => r.生词率).filter((x): x is number => x !== null);
+  const avgRate = rates.length ? (rates.reduce((a, b) => a + b, 0) / rates.length) * 100 : null;
+  const 建议总数 = rows.reduce((n, r) => n + r.建议数, 0);
+  const 采纳总数 = rows.reduce((n, r) => n + r.采纳数, 0);
+  return {
+    过门禁: `${gated}/${rows.length}`,
+    平均生词率: avgRate === null ? '—' : avgRate.toFixed(1) + '%',
+    总标记: rows.reduce((n, r) => n + r.标记数, 0),
+    采纳率: 建议总数 ? `${Math.round((采纳总数 / 建议总数) * 100)}%（${采纳总数}/${建议总数}）` : '—',
+  };
 }

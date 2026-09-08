@@ -22,10 +22,12 @@ const VIEW_MAP = [
   ['tab-suggest', 'pane-suggest'],
   ['tab-diff', 'pane-diff'],
   ['tab-align', 'pane-align'],
+  ['tab-board', 'pane-board'],
+  ['tab-dossier', 'pane-dossier'],
   ['tab-retro', 'pane-retro'],
 ] as const;
 
-export type ViewName = 'text' | 'report' | 'suggest' | 'diff' | 'align' | 'retro';
+export type ViewName = 'text' | 'report' | 'suggest' | 'diff' | 'align' | 'board' | 'dossier' | 'retro';
 
 export function switchView(root: Document, name: ViewName): void {
   for (const [id, pane] of VIEW_MAP) {

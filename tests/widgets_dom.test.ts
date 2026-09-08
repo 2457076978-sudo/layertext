@@ -33,8 +33,8 @@ test('模式胶囊：即改=绿/候选=黄，文案与提示随模式切换', ()
 
 test('视图切换：五组标签/面板互斥，只有目标页 active', () => {
   win.document.body.innerHTML = `
-    <button id="tab-text" class="active"></button><button id="tab-report"></button><button id="tab-suggest"></button><button id="tab-diff"></button><button id="tab-align"></button><button id="tab-retro"></button>
-    <section id="pane-text" class="active"></section><section id="pane-report"></section><section id="pane-suggest"></section><section id="pane-diff"></section><section id="pane-align"></section><section id="pane-retro"></section>`;
+    <button id="tab-text" class="active"></button><button id="tab-report"></button><button id="tab-suggest"></button><button id="tab-diff"></button><button id="tab-align"></button><button id="tab-board"></button><button id="tab-dossier"></button><button id="tab-retro"></button>
+    <section id="pane-text" class="active"></section><section id="pane-report"></section><section id="pane-suggest"></section><section id="pane-diff"></section><section id="pane-align"></section><section id="pane-board"></section><section id="pane-dossier"></section><section id="pane-retro"></section>`;
   switchView(win.document as unknown as Document, 'diff');
   assert.ok(win.document.getElementById('tab-diff')!.classList.contains('active'));
   assert.ok(win.document.getElementById('pane-diff')!.classList.contains('active'));
