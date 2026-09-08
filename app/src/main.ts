@@ -2403,7 +2403,7 @@ void (async () => {
   await loadConfig();
   if (!S.appConfig.firstRunSeen) showWelcome();
   await restoreChat();
-  await renderRecentInEmpty();
+  await renderShelf();   // 首页=书架（示例+我的书；原"最近编辑"空状态升级为书架）
 })();
 
 /* ================= 简化标准（句长上限，唯一可调项） · 本书配置 · 首启动欢迎 ================= */
