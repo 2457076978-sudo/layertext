@@ -2180,6 +2180,21 @@ function toggleClsPanel(): void {
   p.style.display = show ? 'block' : 'none';
 }
 
+/* 弹层外点收回：点在弹层与触发控件之外即收起（设置/班级定制/整章改写）——弹层不该挂着不下去 */
+document.addEventListener('mousedown', (e) => {
+  const t = e.target as HTMLElement;
+  const outside = (sel: string) => !t.closest(sel);
+  if (outside('#settings-pop') && outside('#btn-settings')) {
+    const p = document.getElementById('settings-pop');
+    if (p?.style.display === 'block') p.style.display = 'none';
+  }
+  if (outside('#cls-panel')) {
+    const p = document.getElementById('cls-panel');
+    if (p?.style.display === 'block') p.style.display = 'none';
+  }
+  if (outside('#draft-pop') && draftPop.classList.contains('open')) draftPop.classList.remove('open');
+});
+
 /* 原生菜单事件分发 */
 void listen<string>('menu-action', (ev) => {
   switch (ev.payload) {
@@ -2914,7 +2929,7 @@ function showDraftPop(): void {
   draftPop.innerHTML = `
     <div class="pop-h">AI 简化本章 · 整章逐段改写</div>
     <p style="color:var(--muted);font-size:12px;line-height:1.7;margin:6px 0 10px">
-      对「${esc(s.fileName)}」按<b>当前简化标准（句长上限 ${simplifyMaxLen()} 词，点工具栏 ⓘ 可调）</b>逐段生成简化版（保留段落结构与全部情节），完成后自动质检、开新 tab——原稿不动，之后进入标记精修。<br/>
+      对「${esc(s.fileName)}」按<b>当前简化标准（句长上限 ${simplifyMaxLen()} 词，菜单 LayerText → 简化标准… 可调）</b>逐段生成简化版（保留段落结构与全部情节），完成后自动质检、开新 tab——原稿不动，之后进入标记精修。<br/>
       需要<b>更简的版本</b>？把生成的简化版再导入、再点一次这里即可（词库不变，句子更短更浅）。</p>
     <div class="fld"><label>方向指令（写你的整体要求，AI 全程遵守）</label>
       <textarea id="draft-instructions" placeholder="例如：面向九年级；歌篇原样保留不改写；人名保留原文；第 3 段 Major 的演讲要压缩到一半"></textarea></div>
