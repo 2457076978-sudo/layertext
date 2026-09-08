@@ -16,8 +16,15 @@
         --pending: #e8862e;
         --term: #2f6fed;
         --riskbg: #fdecea;
+        /* Liquid Glass（对齐 Apple 2026 设计语言）：渐变底 + 玻璃面板 + 镜面亮线 + 分段控件槽 */
+        --bg-g2: #edeff3;
+        --panel-glass: rgba(255, 255, 255, 0.66);
+        --glass-line: rgba(15, 23, 42, 0.09);
+        --glass-hi: rgba(255, 255, 255, 0.62);
+        --glass-shadow: 0 10px 34px rgba(15, 23, 42, 0.1);
+        --seg-slot: rgba(116, 124, 137, 0.17);
         /* 按钮底色与书架/工作区强调色（三主题各自取值；accent 系用于书封、工作区条、进度、书签） */
-        --btn-bg: #fff;
+        --btn-bg: rgba(255, 255, 255, 0.82);
         --accent: #1f5c4d;
         --accent-hover: #2a7263;
         --accent-soft: #eef4ee;
@@ -32,7 +39,13 @@
         --muted: #6d747c;
         --line: #d8dce1;
         --riskbg: #f2e0dd;
-        --btn-bg: #fdfdfe;
+        --bg-g2: #dfe3e9;
+        --panel-glass: rgba(247, 248, 250, 0.7);
+        --glass-line: rgba(15, 23, 42, 0.1);
+        --glass-hi: rgba(255, 255, 255, 0.58);
+        --glass-shadow: 0 10px 34px rgba(15, 23, 42, 0.12);
+        --seg-slot: rgba(116, 124, 137, 0.2);
+        --btn-bg: rgba(253, 253, 254, 0.82);
         --accent: #35695a;
         --accent-hover: #407a69;
         --accent-soft: #e6eee9;
@@ -51,7 +64,13 @@
         --pending: #e8a25e;
         --term: #6b9aff;
         --riskbg: #3a2623;
-        --btn-bg: #262a31;
+        --bg-g2: #101216;
+        --panel-glass: rgba(28, 31, 37, 0.62);
+        --glass-line: rgba(255, 255, 255, 0.09);
+        --glass-hi: rgba(255, 255, 255, 0.1);
+        --glass-shadow: 0 12px 38px rgba(0, 0, 0, 0.42);
+        --seg-slot: rgba(255, 255, 255, 0.1);
+        --btn-bg: rgba(44, 48, 56, 0.72);
         --accent: #4da08a;
         --accent-hover: #5cb39a;
         --accent-soft: #21302a;
@@ -1594,6 +1613,16 @@
           inset 5px 0 9px -4px rgba(0, 0, 0, 0.38),
           inset -2px 0 6px -3px rgba(0, 0, 0, 0.25);
       }
+      /* 书封顶面镜面高光：左上柔光，玻璃打磨工艺感 */
+      .shelf-cover::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        border-radius: inherit;
+        pointer-events: none;
+        z-index: 1;
+        background: radial-gradient(120% 70% at 28% 8%, rgba(255, 255, 255, 0.34), rgba(255, 255, 255, 0.06) 46%, transparent 62%);
+      }
       .cover-title {
         color: #fff;
         font-weight: 700;
@@ -1834,26 +1863,32 @@
       .shelf-tools input[type='search']::placeholder {
         color: var(--muted);
       }
-      .viewseg {
-        display: flex;
-        border: 1px solid var(--line);
-        border-radius: 8px;
-        overflow: hidden;
+      .viewseg,
+      .seg {
+        display: inline-flex;
+        gap: 2px;
+        background: var(--seg-slot);
+        border-radius: 9px;
+        padding: 2px;
       }
       .viewseg button,
       .seg button {
         border: none;
-        border-radius: 0;
-        padding: 5px 11px;
+        border-radius: 7px;
+        padding: 4px 11px;
         font-size: 12px;
-        background: var(--panel);
-        color: var(--ink);
+        background: transparent;
+        color: var(--muted);
+        box-shadow: none;
       }
       .viewseg button.cur,
       .seg button.cur {
-        background: var(--accent);
-        color: var(--accent-ink);
+        background: var(--panel);
+        color: var(--ink);
         font-weight: 600;
+        box-shadow:
+          0 1px 4px rgba(15, 23, 42, 0.16),
+          inset 0 1px 0 var(--glass-hi);
       }
       .shelf-groups {
         display: flex;
@@ -2282,10 +2317,200 @@
         border-top: 1px dashed var(--line);
         margin: 8px 0 6px;
       }
+
+      /* ============================================================
+         Liquid Glass 层（2026-09-08 对齐 Apple 设计语言成熟形态：
+         半透明漫射玻璃 + 大圆角 + 镜面边缘亮线；正文纸面保持实体保可读）
+         ============================================================ */
+      body {
+        background: linear-gradient(170deg, var(--bg), var(--bg-g2));
+        background-attachment: fixed;
+      }
+      /* 顶栏：玻璃延伸到窗口顶（标题栏 Overlay，交通灯浮在玻璃上；左侧避让 84px） */
+      header {
+        background: var(--panel-glass);
+        -webkit-backdrop-filter: blur(28px) saturate(180%);
+        backdrop-filter: blur(28px) saturate(180%);
+        box-shadow: 0 1px 10px rgba(15, 23, 42, 0.04);
+        padding: 12px 16px 10px 84px;
+        position: relative;
+        z-index: 30;
+      }
+      header button {
+        box-shadow: inset 0 1px 0 var(--glass-hi);
+      }
+      header button.primary {
+        background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 88%, white), var(--accent));
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.26),
+          0 1px 3px rgba(21, 62, 50, 0.28);
+      }
+      /* 文件条与工作区条：与顶栏连成一整片玻璃，细分隔线造层次 */
+      .filetabs,
+      .wstabs {
+        background: var(--panel-glass);
+        -webkit-backdrop-filter: blur(24px) saturate(170%);
+        backdrop-filter: blur(24px) saturate(170%);
+      }
+      .filetabs {
+        border-bottom: 1px solid var(--glass-line);
+      }
+      .wstabs {
+        border-bottom: 1px solid var(--glass-line);
+      }
+      /* 侧栏：玻璃浮层 + 左缘亮线 */
+      #sidebar {
+        background: var(--panel-glass);
+        -webkit-backdrop-filter: blur(24px) saturate(170%);
+        backdrop-filter: blur(24px) saturate(170%);
+        border-left: 1px solid var(--glass-line);
+        box-shadow: inset 1px 0 0 var(--glass-hi);
+      }
+      /* 正文纸面：实体保可读，圆角放大 + 镜面边 */
+      .pane {
+        border-radius: 16px;
+        border: 1px solid var(--glass-line);
+        box-shadow:
+          var(--glass-shadow),
+          inset 0 1px 0 var(--glass-hi);
+      }
+      /* 视图切换：macOS 分段控件（灰槽 + 白浮块选中） */
+      .viewtabs {
+        display: inline-flex;
+        gap: 2px;
+        background: var(--seg-slot);
+        border-radius: 10px;
+        padding: 2px;
+        margin-bottom: 10px;
+        max-width: 100%;
+        overflow-x: auto;
+      }
+      .viewtabs button {
+        border: none;
+        background: transparent;
+        box-shadow: none;
+        border-radius: 8px;
+        color: var(--muted);
+        padding: 5px 13px;
+        transition:
+          color 0.15s,
+          background 0.15s;
+      }
+      .viewtabs button:hover {
+        color: var(--ink);
+        background: rgba(127, 137, 150, 0.12);
+      }
+      .viewtabs button.active {
+        background: var(--panel);
+        color: var(--ink);
+        font-weight: 600;
+        box-shadow:
+          0 1px 4px rgba(15, 23, 42, 0.16),
+          inset 0 1px 0 var(--glass-hi);
+      }
+      .side-tabs {
+        display: inline-flex;
+        gap: 2px;
+        background: var(--seg-slot);
+        border-radius: 10px;
+        padding: 2px;
+      }
+      .side-tabs button {
+        border: none;
+        background: transparent;
+        border-radius: 8px;
+        color: var(--muted);
+        box-shadow: none;
+      }
+      .side-tabs button.active {
+        background: var(--panel);
+        color: var(--ink);
+        font-weight: 600;
+        box-shadow:
+          0 1px 4px rgba(15, 23, 42, 0.16),
+          inset 0 1px 0 var(--glass-hi);
+      }
+      /* 全部浮层弹窗：玻璃 + 镜面边 + 大圆角 */
+      #pop,
+      #gate-pop,
+      #ai-pop,
+      #draft-pop,
+      #batch-pop,
+      #tier-pop,
+      #rewrite-pop,
+      #welcome-pop,
+      #settings-pop,
+      #findbar,
+      #demo-menu,
+      .shelf-ctxmenu,
+      #toc-panel {
+        background: var(--panel-glass);
+        -webkit-backdrop-filter: blur(28px) saturate(175%);
+        backdrop-filter: blur(28px) saturate(175%);
+        border: 1px solid var(--glass-line);
+        box-shadow:
+          var(--glass-shadow),
+          inset 0 1px 0 var(--glass-hi);
+      }
+      #toc-panel {
+        border-top: none;
+        border-bottom: none;
+        border-left: none;
+      }
+      .toast {
+        background: rgba(38, 42, 48, 0.74);
+        -webkit-backdrop-filter: blur(22px) saturate(160%);
+        backdrop-filter: blur(22px) saturate(160%);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        box-shadow: 0 8px 28px rgba(0, 0, 0, 0.3);
+      }
+      /* 按钮：玻璃质感（顶亮线 + 按压回弹） */
+      button {
+        box-shadow: inset 0 1px 0 var(--glass-hi);
+        transition:
+          background 0.15s,
+          border-color 0.15s,
+          transform 0.08s;
+      }
+      button:active {
+        transform: scale(0.97);
+      }
+      .qmark {
+        box-shadow: inset 0 1px 0 var(--glass-hi);
+      }
+      /* 书卡/版本卡：玻璃容器浮起，阴影更柔更长 */
+      .shelf-card:hover .shelf-cover {
+        box-shadow:
+          0 14px 30px rgba(15, 42, 32, 0.24),
+          inset 0 0 0 1px rgba(255, 255, 255, 0.1);
+      }
+      .ver-card {
+        background: var(--panel-glass);
+        -webkit-backdrop-filter: blur(20px) saturate(160%);
+        backdrop-filter: blur(20px) saturate(160%);
+      }
+      .shelf-row {
+        background: var(--panel-glass);
+        -webkit-backdrop-filter: blur(18px) saturate(160%);
+        backdrop-filter: blur(18px) saturate(160%);
+      }
+      /* 查找条/设置弹层圆角统一 */
+      #findbar,
+      #settings-pop {
+        border-radius: 14px;
+      }
+      /* 导览高亮圈随玻璃层 */
+      #tour-pop {
+        background: var(--panel-glass);
+        -webkit-backdrop-filter: blur(26px) saturate(170%);
+        backdrop-filter: blur(26px) saturate(170%);
+        border: 1px solid var(--glass-line);
+        box-shadow: var(--glass-shadow);
+      }
     </style>
   </head>
   <body>
-    <header>
+    <header data-tauri-drag-region>
       <span class="logo">LayerText 分层读<small>v1.1</small></span>
       <span class="tgroup"
         ><button id="btn-home" title="回到书架（当前章节自动保存，随时回来）">🏠 书架</button>

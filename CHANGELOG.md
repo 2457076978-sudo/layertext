@@ -4,6 +4,18 @@
 1.0.0 之前的版本号为开发期里程碑（当时 `package.json` 未同步递增，本文件按里程碑整理，2026-09-06 校准）。
 面向教师的通俗版功能说明见 [README](README.md) 与 [docs/PRD.md](docs/PRD.md)。
 
+## [未发布] - 2026-09-08（feature/reinforce 本地 · 第六批）
+
+### 整体 UI 对齐 Apple 设计语言（Liquid Glass 成熟形态，检索 2025 发布 / WWDC26 回调后）
+
+- **依据**：iOS 26 / macOS Tahoe 26（2025.9）发布 Liquid Glass（自 iOS 7 以来最大改版）；WWDC26 的 iOS 27 / macOS 27 回调聚焦可读性（漫射更柔、修 macOS 圆角与侧栏）——落地取成熟形态：半透明漫射玻璃 + 大圆角 + 镜面边缘亮线 + **文字可读性优先**。
+- **玻璃令牌体系**：三主题各配 `--panel-glass / --glass-line / --glass-hi / --glass-shadow / --seg-slot / --bg-g2`（渐变底）；应用全部浮层——顶栏、文件/工作区条、侧栏、12 类弹层、目录面板、右键菜单、toast、导览气泡（`backdrop-filter: blur(24-28px) saturate(170-180%)` + 1px 镜面亮线）。
+- **macOS 原生窗口感**：标题栏 Overlay（`titleBarStyle: Overlay` + `hiddenTitle` + `macOSPrivateApi` feature）——内容延伸到红绿灯下方，顶栏玻璃化后交通灯浮于玻璃上；header 加 `data-tauri-drag-region`（整条可拖动窗口）、左避让 84px。
+- **分段控件统一 macOS 化**：视图切换（正文/报告/建议/对比/对照/复盘）、侧栏页签、书架视图切换、设置面板主题/行距——灰槽 + 白浮块选中 + 顶亮线（原绿色实心选中态全部收敛）；分组 chips 保留 accent 高亮（过滤语义）。
+- **正文纸面保持实体**（iOS 27 可读性回调的教训）：`--panel` 实底 + 16px 圆角 + 玻璃边光线；书封加顶面镜面高光；primary 按钮柔和渐变；按钮统一按压回弹（scale 0.97）与玻璃顶亮线。
+- 视觉复核：浅/深两主题截图评审通过（深色全项 ✅；浅色修正分段控件统一与玻璃连体两处后过）。
+- TS 122/122 + Rust fmt/clippy/4 测全清；`cargo check` 验证窗口配置。
+
 ## [未发布] - 2026-09-08（feature/reinforce 本地 · 第五批）
 
 ### 后端根因重构（前端哲思平移：唯一实现 / 正确工具 / 肯定式 / 门禁前移）
