@@ -834,6 +834,7 @@ function bindTypeButtons(session: FileSession, level: 'word' | 'sent', pi: numbe
       if (S.appConfig.autoRewriteOnMark) {
         hidePop();
         if (mark.type === 'zh' && mark.word) void applyZhAnnotations(session, [mark]);
+        else if (mark.type === 'simpl' && mark.word) void applyWordSimplifications(session, [mark]);
         else void aiRewriteSentence(pi, si, typeLabel(mark.type), mark.id);
         return;
       }
@@ -2461,7 +2462,7 @@ function buildAiUserPrompt(session: FileSession): string {
   const maxLen = simplifyMaxLen();
   const r = session.report;
   const marks = session.review.marks
-    .filter((m) => m.type !== 'zh') // 加中文标注走确定性管线（applyZhAnnotations），不进句子改写
+    .filter((m) => m.type !== 'zh' && !(m.type === 'simpl' && m.level === 'word')) // 词级操作（加注/换词）走确定性管线，不进句子改写
     .map((m) => {
       const sent = sentsOf(paras[m.pi] ?? '', false)[m.si] ?? '(未找到句子)';
       const label = m.level === 'word' ? `词标记：${m.word ?? ''}（${typeLabel(m.type)}${m.note ? '，备注：' + m.note : ''}）` : `句标记（${typeLabel(m.type)}${m.note ? '，备注：' + m.note : ''}）`;
@@ -2556,6 +2557,93 @@ async function applyZhAnnotations(s: FileSession, marks: Mark[]): Promise<void> 
   setStatus(`已加中文标注 ${done.length} 处（原句未动）：${done.slice(0, 6).join('、')}${done.length > 6 ? '…' : ''}`, 'saved');
 }
 
+/** 「词汇简化」管线：词级操作不重构句子——AI 只出 原词→简单词 映射（课标1600内、
+ *  保词性与语境形态），机器在该词的词边界处替换，句子其余部分逐字不动 */
+async function applyWordSimplifications(s: FileSession, marks: Mark[]): Promise<void> {
+  const uniq = [...new Map(marks.map((m) => [m.word!, m])).values()];
+  setStatus(`正在为 ${uniq.length} 个词找课标内简单词（不重构句子）…`);
+  const paras = extractParas(splitChapter(s.md).body);
+  const gloss: Record<string, string> = {};
+  try {
+    const { raw } = await chatUntilJson(
+      [
+        {
+          role: 'system',
+          content:
+            '你是词汇简化器。把每个超纲英文词换成中国《义务教育英语课程标准》三级（约1600词）内的同义简单词：保持词性一致，按所在句的语境给正确形态（时态/单复数）。只输出一个 JSON 对象（{"原词":"简单词"}），不要任何其他文字。',
+        },
+        { role: 'user', content: uniq.map((m) => `${m.word}\n${(paras[m.pi] ?? '').slice(0, 120)}`).join('\n\n') },
+      ],
+      2000,
+      '词汇简化',
+    );
+    Object.assign(gloss, raw as unknown as Record<string, string>);
+  } catch (e) {
+    setStatus('词汇简化获取失败：' + e, 'err');
+    return;
+  }
+  const done: string[] = [];
+  for (const m of uniq) {
+    const w = m.word!;
+    const simple = gloss[w] ?? gloss[w.toLowerCase()] ?? gloss[w.replace(/\s+/g, ' ')];
+    if (!simple || simple.toLowerCase() === w.toLowerCase()) continue;
+    const esc = w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp(`\\b${esc}\\b`, 'i');
+    const para = paras[m.pi] ?? '';
+    const hit = re.exec(para);
+    let at = -1;
+    let matched = '';
+    if (hit) {
+      const pAt = s.md.indexOf(para);
+      if (pAt >= 0) {
+        at = pAt + hit.index;
+        matched = s.md.slice(at, at + hit[0].length);
+      }
+    }
+    if (at < 0) {
+      const h2 = re.exec(s.md);
+      if (h2) {
+        at = h2.index;
+        matched = h2[0];
+      }
+    }
+    if (at < 0) continue;
+    let repl = simple;
+    if (/^[A-Z]/.test(matched)) repl = repl.charAt(0).toUpperCase() + repl.slice(1); // 保首字母大写形态
+    s.md = s.md.slice(0, at) + repl + s.md.slice(at + matched.length);
+    s.review.marks = s.review.marks.filter((x) => x.id !== m.id);
+    s.review.marks = s.review.marks.filter((x) => !(x.level === 'word' && x.word && x.word.toLowerCase() === w.toLowerCase())); // 同词其余标记一并完成
+    remapMarks(s.review.marks, s.md);
+    done.push(`${matched}→${repl}`);
+  }
+  if (!done.length) {
+    setStatus('没有可替换的词（词已不在正文中或 AI 未给出更简单的词）', 'err');
+    return;
+  }
+  scheduleSave(s, () => undefined);
+  renderReader(s);
+  renderSidebar(s, sidebarHandlers);
+  const date = new Date().toLocaleDateString('sv-SE');
+  const outDir = s.sourcePath ? s.sourcePath.slice(0, s.sourcePath.lastIndexOf('/')) : await invoke<string>('reports_dir');
+  const logPath = `${outDir}/变更日志_AI审核.csv`;
+  try {
+    let csv = '';
+    try {
+      csv = await invoke<string>('read_text_file', { path: logPath });
+    } catch {
+      /* 新建 */
+    }
+    if (!csv.trim()) csv = CHANGELOG_HEADER.join(',') + '\n';
+    for (const d of done)
+      csv += ['R1', date, `标准${simplifyMaxLen()}词`, '', '', d.split('→')[0], d.split('→')[1], 'R14', '词汇简化（机器词级替换，句子不动）', 'AI直改-换词'].map(csvCell).join(',') + '\n';
+    await invoke('write_text_file', { path: logPath, content: csv });
+  } catch {
+    /* 日志失败不阻塞 */
+  }
+  flashApplied(done[done.length - 1].split('→')[1]);
+  setStatus(`已换 ${done.length} 个词（句子未动）：${done.slice(0, 6).join('、')}${done.length > 6 ? '…' : ''}`, 'saved');
+}
+
 async function aiSuggest(instruction?: string): Promise<void> {
   const s = activeSession();
   if (!s) {
@@ -2586,13 +2674,13 @@ async function aiSuggest(instruction?: string): Promise<void> {
     // 「加中文标注」是确定性操作，不走句子改写管线（曾致 AI 顺手简化整句）：
     // AI 只出 词→中文 映射，原句逐字保留、机器插入（词（中文））
     const zhMarks = s.review.marks.filter((m) => m.type === 'zh' && m.word);
-    if (zhMarks.length) {
-      await applyZhAnnotations(s, zhMarks);
-      if (s.review.marks.length === 0 && !instruction) {
-        btn.textContent = '按标记修改';
-        btn.disabled = false;
-        return;
-      }
+    if (zhMarks.length) await applyZhAnnotations(s, zhMarks);
+    const simplWordMarks = s.review.marks.filter((m) => m.type === 'simpl' && m.level === 'word' && m.word);
+    if (simplWordMarks.length) await applyWordSimplifications(s, simplWordMarks);
+    if ((zhMarks.length || simplWordMarks.length) && s.review.marks.length === 0 && !instruction) {
+      btn.textContent = '按标记修改';
+      btn.disabled = false;
+      return;
     }
     const system = await buildSystemPrompt();
     let messages: { role: string; content: string }[];
