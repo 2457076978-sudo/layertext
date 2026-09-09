@@ -63,6 +63,7 @@ import { renderDiffPane, renderModePill, switchView as switchViewDom, type ViewN
 import { S, esc } from './state.js';
 import { $, setStatus, toast, pop, hidePop, placePop, showSummaryPop } from './uikit.js';
 import { applyZhAnnotations, applyWordSimplifications, showSentenceEditor, showSyncMarksDialog, showVocabEditor, syncPop, hideSyncPop } from './pipew.js';
+import { aiSuggest, aiRewriteSentence, renderSuggestions, attachInlineSuggestions, logSuggestion, focusNextSuggestion, suggestionByEl, acceptSuggestion, checkRev, locateSent } from './aiflow.js';
 import {
   AI_PROVIDERS,
   aiErrHuman,
@@ -520,14 +521,6 @@ function renderFileTabs(): void {
   );
   el.querySelectorAll('[data-ftab-close]').forEach((x) => x.addEventListener('click', () => closeSession(Number((x as HTMLElement).dataset.ftabClose))));
   renderWorkspaceBar();
-}
-
-/** 改写文本复核（多句拆分逐句检测，超长=最长一句超限） */
-function checkRev(revised: string): Suggestion['check'] {
-  return checkRevisedText(revised, simplifyMaxLen(), (sent, m) => {
-    const r = sentenceRisks(sent, m);
-    return { passive: r.passive, relcl: r.relcl, pastperf: r.pastperf, overlong: r.overlong };
-  });
 }
 
 /** 改写生效的视觉反馈：新句子绿色高亮一闪 */
@@ -1201,7 +1194,7 @@ async function aiPlotPoints(s: FileSession): Promise<void> {
 
 /* ---------- 视图切换（实现在 widgets.ts，可 DOM 级测试） ---------- */
 
-function switchView(name: ViewName): void {
+export function switchView(name: ViewName): void {
   switchViewDom(document, name);
   syncChrome();
 }
@@ -2376,7 +2369,7 @@ void listen<string>('menu-action', (ev) => {
 /** 当前 AI 会话历史（同章节内"按指令调整"时携带；应用修订或切换会话后清空） */
 const aiPop = $('ai-pop');
 
-function showAiSettings(): void {
+export function showAiSettings(): void {
   aiPop.innerHTML = `
     <div class="pop-h">AI 设置（第一次配置，照着做即可）</div>
     <div class="fld"><label>① 选择 AI 服务商（选一个你有账号的）</label>
@@ -2535,243 +2528,7 @@ document.addEventListener('mousedown', (e) => {
 /** 内置提示词模板：词库边界 + 句法黑名单 + 句长上限 + 方法论约束 */
 /** 估算 token 的 estTokens 已抽至 pure.ts（对话压缩与请求预估共用口径） */
 
-/**
- * 请求 AI 修订候选。
- * instruction 传入 = 会话式追问（携带 S.aiHistory，AI 知道上一轮建议过什么、你否决了什么）；
- * 不传 = 全新请求（上下文来自本地文件：标记清单+当前文本句子），并重建 S.aiHistory。
- */
-function buildAiUserPrompt(session: FileSession, subset?: Mark[]): string {
-  const body = splitChapter(session.md).body;
-  const paras = extractParas(body);
-  const maxLen = simplifyMaxLen();
-  const r = session.report;
-  const marks = (subset ?? session.review.marks)
-    .filter((m) => m.type !== 'zh' && m.type !== 'anchor' && !(m.type === 'simpl' && m.level !== 'sent')) // 加注/换词走确定性管线、复现锚点是记录型——都不进句子改写
-    .map((m) => {
-      const sent = sentsOf(paras[m.pi] ?? '', false)[m.si] ?? '(未找到句子)';
-      const label =
-        m.level === 'word'
-          ? `词标记：${m.word ?? ''}（${typeLabel(m.type)}${m.note ? '，备注：' + m.note : ''}）`
-          : m.level === 'phrase'
-            ? `短语标记：${m.word ?? ''}（${typeLabel(m.type)}${m.note ? '，备注：' + m.note : ''}）`
-            : `句标记（${typeLabel(m.type)}${m.note ? '，备注：' + m.note : ''}）`;
-      return `【${m.id}】${label}\n所在句：${sent}`;
-    })
-    .join('\n\n');
-  return `简化标准：句长上限 ${maxLen} 词/句；被动语态、定语从句禁用，过去完成时一律改写
-${r ? `本章质检摘要：覆盖率 ${(r.coverage * 100).toFixed(1)}%，平均句长 ${r.avgLenNarrRaw.toFixed(1)} 词，被动 ${r.passive}、定从 ${r.relcl}、过去完成 ${r.pastperf}，超20词句 ${r.over20}` : ''}
-
-教师标记清单（逐条给修订建议）：
-${marks || '（无标记）'}`;
-}
-
-async function aiSuggest(instruction?: string): Promise<void> {
-  const s = activeSession();
-  if (!s) {
-    setStatus('请先载入文本', 'err');
-    return;
-  }
-  // 幽灵标记卫生（词/短语级）：词已在之前修订中消失的标记不再发给 AI（曾诱导 AI 凭原著旧句作答、定位失败）
-  const ghosts = s.review.marks.filter((m) => m.level !== 'sent' && m.word && !s.md.includes(m.word));
-  if (ghosts.length) {
-    s.review.marks = s.review.marks.filter((m) => !ghosts.includes(m));
-    renderSidebar(s, sidebarHandlers);
-    toast(`已清除 ${ghosts.length} 条过期标记（词已在之前修订中处理）：${ghosts.map((m) => m.word).join('、')}`, 'info');
-  }
-  if (s.review.marks.length === 0 && !instruction) {
-    setStatus('还没有标记——先在正文里点词/拖选句子做标记，AI 才知道往哪改', 'err');
-    return;
-  }
-  const key = await invoke<string>('load_api_key');
-  if (!key) {
-    setStatus('请先配置 AI（菜单 LayerText → AI 设置…）', 'err');
-    showAiSettings();
-    return;
-  }
-  const btn = $('btn-ai') as unknown as HTMLButtonElement;
-  btn.textContent = '⏳ AI 请求中…';
-  btn.disabled = true;
-  try {
-    // 「加中文标注」是确定性操作，不走句子改写管线（曾致 AI 顺手简化整句）：
-    // AI 只出 词→中文 映射，原句逐字保留、机器插入（词（中文））——词级与短语级共用（短语=系统词典短语查询）
-    const zhMarks = s.review.marks.filter((m) => m.type === 'zh' && m.word);
-    if (zhMarks.length) await applyZhAnnotations(s, zhMarks);
-    const simplWordMarks = s.review.marks.filter((m) => m.type === 'simpl' && m.level !== 'sent' && m.word);
-    if (simplWordMarks.length) await applyWordSimplifications(s, simplWordMarks);
-    if ((zhMarks.length || simplWordMarks.length) && s.review.marks.length === 0 && !instruction) {
-      btn.textContent = '按标记修改';
-      btn.disabled = false;
-      updateMarkBadge();
-      return;
-    }
-    const system = await buildSystemPrompt();
-    let raw: { id: string; type?: string; original?: string; revised?: string; basis?: string; alternative?: string }[] = [];
-    let usage = '';
-    if (instruction && S.aiHistory.length > 0) {
-      S.aiHistory.push({ role: 'user', content: instruction + '\n\n请基于我们之前的对话重新输出完整的 JSON 数组（含未改动条目，original 用当前正文原句）。' });
-      const messages = [{ role: 'system', content: system }, ...S.aiHistory];
-      const estIn = messages.reduce((n, m) => n + estTokens(m.content), 0);
-      setStatus(`本次请求约 ${estIn} tokens 输入（只含标记相关句子，不发全章原文）…`);
-      const r1 = await chatUntilJson(messages, 6000, '审核建议');
-      raw = r1.raw as typeof raw;
-      usage = r1.usage;
-    } else {
-      const sentMarks = s.review.marks.filter((m) => m.type !== 'zh' && m.type !== 'anchor' && !(m.type === 'simpl' && m.level !== 'sent'));
-      const BATCH = 10;
-      if (sentMarks.length > BATCH) {
-        // 大批量分批：单次 6000 token 输出上限曾被思考型模型占满截断——每批 10 条标记独立请求，进度可见
-        const batches: Mark[][] = [];
-        for (let i = 0; i < sentMarks.length; i += BATCH) batches.push(sentMarks.slice(i, i + BATCH));
-        for (let bi = 0; bi < batches.length; bi++) {
-          setStatus(`AI 批量修订：第 ${bi + 1}/${batches.length} 批（共 ${sentMarks.length} 条标记，分批防输出截断）…`);
-          const userMsg = buildAiUserPrompt(s, batches[bi]);
-          const rb = await chatUntilJson(
-            [
-              { role: 'system', content: system },
-              { role: 'user', content: userMsg },
-            ],
-            6000,
-            `审核建议 ${bi + 1}/${batches.length}`,
-          );
-          raw = raw.concat(rb.raw as typeof raw);
-          usage = rb.usage;
-        }
-        S.aiHistory = [{ role: 'user', content: buildAiUserPrompt(s, sentMarks.slice(0, BATCH)) }];
-      } else {
-        const userMsg = buildAiUserPrompt(s);
-        S.aiHistory = [{ role: 'user', content: userMsg }];
-        const estIn = estTokens(system) + estTokens(userMsg);
-        setStatus(`本次请求约 ${estIn} tokens 输入（只含标记相关句子，不发全章原文）…`);
-        const r2 = await chatUntilJson(
-          [
-            { role: 'system', content: system },
-            { role: 'user', content: userMsg },
-          ],
-          6000,
-          '审核建议',
-        );
-        raw = r2.raw as typeof raw;
-        usage = r2.usage;
-      }
-    }
-    S.aiHistory.push({ role: 'assistant', content: JSON.stringify(raw) });
-    S.suggestions = raw
-      .filter((x) => x.revised)
-      .map((x) => {
-        // AI 边界 #16：AI 偶在 revised/original 里混 Markdown 记号（**加粗**等）——归一化剥离后再进管线（形态枚举表）
-        const risk = checkRev(stripMarkdownNoise(String(x.revised)));
-        return {
-          markId: String(x.id),
-          type: x.type ?? '',
-          original: stripMarkdownNoise(String(x.original ?? '')),
-          revised: stripMarkdownNoise(String(x.revised)),
-          basis: x.basis ?? '',
-          alternative: x.alternative ? stripMarkdownNoise(x.alternative) : undefined,
-          check: { passive: risk.passive, relcl: risk.relcl, pastperf: risk.pastperf, overlong: risk.overlong },
-        };
-      });
-    if (S.appConfig.autoRewriteOnMark && S.suggestions.length > 0) {
-      // 全局直改：能定位的建议直接生效（写工作稿+日志；⚠︎ 复核项计数提醒复查）；
-      // 定位失败的自动落入「修订建议」页逐条待人工采纳——建议不因直改失败而丢失
-      let warned = 0;
-      let applied = 0;
-      let cnBlocked = 0;
-      // 组撤销：批量 N 条合并为一条基线快照（此前撤一批要点 N 次 ↩︎ 且 50 条栈会滚掉早期记录）
-      const undoBaseline = s.md;
-      const undoLen = s.undoStack?.length ?? 0;
-      for (const g of [...S.suggestions]) {
-        if (g.check.passive || g.check.relcl || g.check.pastperf || g.check.overlong) warned++;
-        if (hasProseChinese(g.revised)) {
-          cnBlocked++; // AI 输出了中文说明/翻译（如"（标注：…）"）——拒写正文，留在建议页人工看
-          continue;
-        }
-        if (await acceptSuggestion(g, { scene: '自动直改', outcome: '直改' })) applied++;
-      }
-      if (applied > 1 && s.undoStack && s.undoStack.length > undoLen) {
-        s.undoStack.length = undoLen;
-        s.undoStack.push(undoBaseline);
-        if (s.undoStack.length > 50) s.undoStack.shift();
-      }
-      const leftover = S.suggestions.length;
-      if (leftover > 0) renderSuggestions();
-      setStatus(`AI 直改完成：应用 ${applied} 条${warned ? ` · ⚠${warned} 条需复核` : ''} ${usage}`, 'saved');
-      showSummaryPop(`
-        <div class="pop-h">批量执行总结</div>
-        <table class="gtable">
-          <tr><td>已应用（写入正文）</td><td><b>${applied}</b> 条</td></tr>
-          ${warned ? `<tr class="warnrow"><td>⚠ 引擎复核残留（黑名单/超长，已留痕建议复查）</td><td><b>${warned}</b> 条</td></tr>` : ''}
-          ${cnBlocked ? `<tr class="warnrow"><td>拦下（含中文说明文字，未写正文）</td><td><b>${cnBlocked}</b> 条</td></tr>` : ''}
-          ${leftover ? `<tr><td>未应用（定位失败等）→ 已放「修订建议」页</td><td><b>${leftover}</b> 条</td></tr>` : ''}
-          <tr><td>token 用量</td><td>${esc(usage)}</td></tr>
-        </table>
-        <div class="pop-btns" style="margin-top:10px">
-          ${leftover || cnBlocked ? '<button id="sum-suggest" class="primary">打开「修订建议」页</button>' : ''}
-          <button id="sum-close">关闭</button>
-        </div>`);
-      return;
-    }
-    renderSuggestions();
-    attachInlineSuggestions();
-    switchView('suggest');
-    setStatus(`AI 返回 ${S.suggestions.length} 条修订候选 ${usage}——建议已标到正文里，点 ✓ 采纳 / ✗ 放弃`, 'saved');
-  } catch (e) {
-    const hint = String(e).includes('未找到 JSON') ? '（模型思考太长占满输出上限——建议 AI 设置里换非思考型模型，或减少一次标记的数量分批出）' : '';
-    setStatus('AI 请求失败：' + e + hint, 'err');
-  } finally {
-    btn.textContent = '<svg class="ico"><use href="#i-sparkle"/></svg>AI 审核建议';
-    btn.disabled = false;
-    updateMarkBadge();
-  }
-}
-
-function checkLabel(c: Suggestion['check']): string {
-  const bad: string[] = [];
-  if (c.passive) bad.push('被动');
-  if (c.relcl) bad.push('定从');
-  if (c.pastperf) bad.push('过去完成');
-  if (c.overlong) bad.push('超长');
-  return bad.length ? `<span class="warn-badge">⚠︎ 仍含${bad.join('/')}</span>` : '<span class="ok-badge">✓ 复核通过</span>';
-}
-
-function renderSuggestions(): void {
-  const pane = $('pane-suggest');
-  if (S.suggestions.length === 0) {
-    pane.innerHTML = '<div class="empty">暂无修订建议——点「AI 审核建议」生成</div>';
-    return;
-  }
-  pane.innerHTML = `
-    <div class="sg-actions">
-      <button id="sg-apply" class="primary">应用已勾选（0）→ 生成新版本 + 变更日志</button>
-      <button id="sg-refresh">重新请求 AI</button>
-      <span style="color:var(--muted);font-size:12px">默认全不勾；引擎复核 ⚠︎ 的条目请人工确认后再勾</span>
-    </div>
-    <table class="sgtable">
-      <tr><th></th><th>标记</th><th class="orig">原句</th><th class="rev">AI 建议</th><th>引擎复核</th><th>依据</th></tr>
-      ${S.suggestions
-        .map(
-          (g, i) => `
-        <tr>
-          <td><input type="checkbox" data-sg="${i}" /></td>
-          <td style="white-space:nowrap">${esc(g.type)}</td>
-          <td class="orig" title="${esc(g.original)}">${esc(g.original.slice(0, 90))}${g.original.length > 90 ? '…' : ''}</td>
-          <td class="rev" title="${esc(g.revised)}${g.alternative ? '&#10;备选：' + esc(g.alternative) : ''}">${esc(g.revised.slice(0, 90))}${g.revised.length > 90 ? '…' : ''}</td>
-          <td>${checkLabel(g.check)}</td>
-          <td>${esc(g.basis)}</td>
-        </tr>`,
-        )
-        .join('')}
-    </table>`;
-  pane.querySelectorAll('[data-sg]').forEach((cb) =>
-    cb.addEventListener('change', () => {
-      const n = pane.querySelectorAll('[data-sg]:checked').length;
-      ($('sg-apply') as HTMLElement as unknown as HTMLButtonElement).textContent = `应用已勾选（${n}）→ 生成新版本 + 变更日志`;
-    }),
-  );
-  $('sg-refresh').addEventListener('click', () => void aiSuggest());
-  $('sg-apply').addEventListener('click', () => void applySuggestions());
-}
-
-const RULE_BY_TYPE: Record<string, string> = {
+export const RULE_BY_TYPE: Record<string, string> = {
   syntax: 'R03-R06',
   long: 'R07',
   ref: 'R05',
@@ -2789,7 +2546,7 @@ const RULE_BY_TYPE: Record<string, string> = {
 };
 
 /** 读旧追加一行 CSV（无文件则连表头新建；台账与变更日志共用） */
-async function appendCsvLine(path: string, header: readonly string[], line: string): Promise<void> {
+export async function appendCsvLine(path: string, header: readonly string[], line: string): Promise<void> {
   let csv = '';
   try {
     csv = await invoke<string>('read_text_file', { path });
@@ -2800,114 +2557,7 @@ async function appendCsvLine(path: string, header: readonly string[], line: stri
   await invoke('write_text_file', { path, content: csv + line });
 }
 
-/** AI 建议台账（W2 数据闭环）：每次建议被 采纳/拒绝/直改 落一行，复盘页与分析脚本据此聚合 */
-async function logSuggestion(s: FileSession, g: Suggestion, outcome: '采纳' | '拒绝' | '直改', scene: string, mark?: Mark): Promise<void> {
-  try {
-    const outDir = s.sourcePath ? s.sourcePath.slice(0, s.sourcePath.lastIndexOf('/')) : await invoke<string>('reports_dir');
-    const bad = g.check.passive || g.check.relcl || g.check.pastperf || g.check.overlong;
-    let host = S.appConfig.baseUrl ?? '';
-    try {
-      host = new URL(host).host;
-    } catch {
-      if (host) host = '自定义';
-    }
-    // 欠账#8：failover 切过供应商时记实际那家（与成本台账同一命名），不再误记主服务商
-    const providerUsed = S.lastProvider?.name ?? host;
-    const modelUsed = S.lastProvider?.model ?? S.appConfig.model ?? '';
-    const dir = s.sourcePath ? s.sourcePath.slice(0, s.sourcePath.lastIndexOf('/')) : '';
-    const row: LedgerRow = {
-      ts: new Date().toLocaleString('sv-SE'),
-      book: dir ? dir.slice(dir.lastIndexOf('/') + 1) : s.fileName,
-      chapter: s.fileName,
-      tier: `标准${simplifyMaxLen()}词`,
-      scene,
-      markType: g.type || (mark ? typeLabel(mark.type) : ''),
-      rule: mark ? (RULE_BY_TYPE[mark.type] ?? 'R00') : 'R00',
-      outcome,
-      check: bad ? '⚠︎' : '通过',
-      provider: providerUsed,
-      model: modelUsed,
-      promptVer: await promptSetVersion(),
-      original: g.original,
-      revised: g.revised,
-      basis: g.basis,
-      rejectReason: outcome === '拒绝' ? '（点✗放弃，未填原因）' : '',
-    };
-    await appendCsvLine(`${outDir}/AI建议台账.csv`, LEDGER_HEADER, toLedgerLine(row));
-  } catch {
-    /* 台账尽力而为，不影响主流程 */
-  }
-}
-
-/** 批量应用（修订建议页）：统一走 acceptSuggestion（工作稿+变更日志），不再另生成 AI修订 文件 */
-async function applySuggestions(): Promise<void> {
-  const s = activeSession();
-  if (!s) return;
-  const checked = [...document.querySelectorAll<HTMLInputElement>('#pane-suggest [data-sg]:checked')].map((cb) => Number(cb.dataset.sg));
-  if (checked.length === 0) {
-    setStatus('请先勾选要采用的修订（或在正文里直接点 ✓）', 'err');
-    return;
-  }
-  for (const i of checked.sort((a, b) => b - a)) {
-    const g = S.suggestions[i];
-    if (g && g.pi !== undefined) await acceptSuggestion(g, { scene: '批量' });
-  }
-}
-
 /* ---------- 行内修订对照（左栏所见即所得） ---------- */
-
-/** 在正文中唯一定位原句（实现已抽至 pure.ts locateOriginal，此处按会话包装） */
-function locateSent(session: FileSession, original: string): { pi: number; si: number } | null {
-  return locateOriginal(session.md, original);
-}
-
-/** 为 pending 建议挂行内（不唯一匹配的只进修订建议表） */
-function attachInlineSuggestions(): void {
-  const s = activeSession();
-  if (!s) return;
-  for (const g of S.suggestions) {
-    if (g.status && g.status !== 'pending') continue;
-    g.status = 'pending';
-    if (g.pi === undefined) {
-      const loc = locateSent(s, g.original);
-      if (!loc) continue;
-      g.pi = loc.pi;
-      g.si = loc.si;
-    }
-    renderInlineOne(s, g);
-  }
-}
-
-function renderInlineOne(session: FileSession, g: Suggestion): void {
-  if (g.pi === undefined || g.si === undefined) return;
-  const sentEl = document.querySelector(`.sent[data-pi="${g.pi}"][data-si="${g.si}"]`);
-  if (!sentEl || sentEl.nextElementSibling?.classList.contains('inline-sug')) return;
-  sentEl.classList.add('sug-pending');
-  // 自解释（交互标准 A1/A4）：黄句+绿字必须自己说明"这是建议、还没改正文、怎么处理"——不靠猜
-  (sentEl as HTMLElement).title = '黄色=这句有 AI 修改建议（正文还没改）——看下方绿字，点 ✓ 采纳或 ✗ 放弃';
-  const bad = g.check.passive || g.check.relcl || g.check.pastperf || g.check.overlong;
-  const div = document.createElement('span');
-  div.className = 'inline-sug';
-  div.dataset.markId = g.markId;
-  div.innerHTML = `
-    <span class="sug-tag">AI 修改建议（未改正文，等你确认）</span>
-    <span class="rev-text">${esc(g.revised)}</span>
-    ${bad ? `<span class="sug-warn">⚠︎ 引擎复核：仍含${[g.check.passive ? '被动' : '', g.check.relcl ? '定从' : '', g.check.pastperf ? '过去完成' : '', g.check.overlong ? '超长' : ''].filter(Boolean).join('/')}</span>` : ''}
-    <span class="sug-basis">${esc(g.basis)}${g.alternative ? '｜备选：' + esc(g.alternative) : ''}</span>
-    <button class="btn-ok" title="用上面的绿字替换黄句（写入正文+变更日志，首改前自动备份，↩︎ 可撤销）">✓ 采纳（写入正文，可撤销）</button>
-    <button class="btn-no" title="不要这条建议，黄色消失，正文不动">✗ 放弃</button>`;
-  div.querySelector('.btn-ok')!.addEventListener('click', () => void acceptSuggestion(g));
-  div.querySelector('.btn-no')!.addEventListener('click', () => {
-    g.status = 'rejected';
-    div.remove();
-    sentEl.classList.remove('sug-pending');
-    S.suggestions = S.suggestions.filter((x) => x !== g);
-    const s = activeSession();
-    if (s) void logSuggestion(s, g, '拒绝', '行内');
-    renderSuggestions();
-  });
-  sentEl.after(div);
-}
 
 /** 保存正文改动：默认直接写原稿文件（首次前自动备份原始版）；关闭"直接修改原稿"则写工作稿 */
 export async function persistEdit(s: FileSession, newMd: string): Promise<string> {
@@ -2944,167 +2594,7 @@ function workPath(s: FileSession): string {
 
 /* 标记重排 remapMarks(marks, md) 已抽至 pure.ts（O4，行为不变） */
 
-async function acceptSuggestion(g: Suggestion, opts: { scene?: string; outcome?: '采纳' | '直改' } = {}): Promise<boolean> {
-  const scene = opts.scene ?? '行内';
-  const outcome = opts.outcome ?? '采纳';
-  const s = activeSession();
-  if (!s) return false;
-  // 句级坐标（日志定位与漂移重挂）：尽力而为，拿不到不阻塞——替换成败由下面的宽容匹配决定
-  if (g.pi === undefined || g.si === undefined) {
-    const loc = locateSent(s, g.original);
-    if (loc) {
-      g.pi = loc.pi;
-      g.si = loc.si;
-    }
-  } else {
-    const paras = extractParas(splitChapter(s.md).body);
-    const cur = sentsOf(paras[g.pi] ?? '', false)[g.si];
-    if (cur !== g.original) {
-      const loc = locateSent(s, g.original);
-      if (loc) {
-        g.pi = loc.pi;
-        g.si = loc.si;
-      }
-    }
-  }
-  let at = s.md.indexOf(g.original);
-  if (at < 0) {
-    const flex = findOriginalFlex(s.md, g.original); // 空白/连字符差异容忍
-    if (flex) {
-      at = flex.start;
-      g.original = flex.exact;
-    }
-  }
-  if (at < 0) {
-    setStatus(`正文中找不到该原句，已跳过：${g.original.slice(0, 24)}…`, 'err');
-    return false;
-  }
-  g.revised = normalizeZhNotes(g.revised); // 生词注释统一全角紧贴（word（中文））
-  s.md = s.md.slice(0, at) + g.revised + s.md.slice(at + g.original.length);
-
-  // 标记对齐 + 对应标记清除 + 落盘
-  const removed = s.review.marks.filter((m) => m.id === g.markId);
-  s.review.marks = s.review.marks.filter((m) => m.id !== g.markId);
-  // 词被本次改写替换掉的词标记一并完成（如 bleated→made soft sounds 后，bleated 标记不再残留成幽灵）
-  s.review.marks = s.review.marks.filter((m) => !(m.level === 'word' && m.word && g.original.includes(m.word) && !g.revised.includes(m.word)));
-  remapMarks(s.review.marks, s.md);
-  g.status = 'accepted';
-  S.suggestions = S.suggestions.filter((x) => x !== g);
-
-  const date = new Date().toLocaleDateString('sv-SE');
-  const outDir = s.sourcePath ? s.sourcePath.slice(0, s.sourcePath.lastIndexOf('/')) : await invoke<string>('reports_dir');
-  const logPath = `${outDir}/变更日志_AI审核.csv`;
-  try {
-    const savedTo = await persistEdit(s, s.md);
-    let csv = '';
-    try {
-      csv = await invoke<string>('read_text_file', { path: logPath });
-    } catch {
-      /* 新建 */
-    }
-    if (!csv.trim()) csv = CHANGELOG_HEADER.join(',') + '\n';
-    csv +=
-      [
-        'R1',
-        date,
-        `标准${simplifyMaxLen()}词`,
-        `P${String((g.pi ?? 0) + 1).padStart(2, '0')}`,
-        `P${(g.pi ?? 0) + 1}-S${(g.si ?? 0) + 1}`,
-        g.original,
-        g.revised,
-        RULE_BY_TYPE[removed[0]?.type ?? ''] ?? 'R00',
-        g.basis,
-        'AI候选-行内采纳',
-      ]
-        .map(csvCell)
-        .join(',') + '\n';
-    await invoke('write_text_file', { path: logPath, content: csv });
-    await logSuggestion(s, g, outcome, scene, removed[0]);
-    scheduleSave(s, () => undefined);
-    renderReader(s);
-    attachInlineSuggestions();
-    renderSidebar(s, sidebarHandlers);
-    renderSuggestions();
-    setStatus(`✓ 正文已改好并写入原稿文件${savedTo === s.sourcePath ? '（首改前已备份原始版）' : ''}；变更日志同步留痕、可回溯`, 'saved');
-    const stillBad = [
-      g.check.passive ? '被动' : '',
-      g.check.relcl ? '定从' : '',
-      g.check.pastperf ? '过去完成' : '',
-      g.check.overlong ? `超长(${g.revised.split(/\s+/).filter(Boolean).length}词)` : '',
-    ].filter(Boolean);
-    if (stillBad.length) toast(`⚠ 新句仍含${stillBad.join('/')}——正文已按建议写入，建议复核（↩︎ 可撤销）`, 'info');
-    flashApplied(g.revised);
-    return true;
-  } catch (e) {
-    setStatus('落盘失败：' + e, 'err');
-    return false;
-  }
-}
-
 /* ---------- 词面板：AI 改写本句 ---------- */
-
-async function aiRewriteSentence(pi: number, si: number, intent: string, autoMarkId?: string): Promise<void> {
-  const s = activeSession();
-  if (!s) return;
-  const key = await invoke<string>('load_api_key');
-  if (!key) {
-    showAiSettings();
-    return;
-  }
-  const paras = extractParas(splitChapter(s.md).body);
-  const sent = sentsOf(paras[pi] ?? '', false)[si];
-  if (!sent) return;
-  const system = await buildSystemPrompt();
-  const btn = pop.querySelector('[data-mk="__rewrite"]') as HTMLElement | null;
-  if (btn) {
-    btn.textContent = '⏳ 改写中…';
-    (btn as HTMLButtonElement).disabled = true;
-  }
-  try {
-    const { raw: arrRaw } = await chatUntilJson(
-      [
-        { role: 'system', content: system },
-        {
-          role: 'user',
-          content: await buildRewriteSentencePrompt({ maxLen: simplifyMaxLen(), intent, sent }),
-        },
-      ],
-      4000,
-      '逐句改写',
-    );
-    const arr = arrRaw as { original?: string; revised?: string; basis?: string; alternative?: string }[];
-    const one = arr[0];
-    if (!one?.revised) throw new Error('AI 未返回改写');
-    const risk = checkRev(String(one.revised));
-    const g: Suggestion = {
-      markId: autoMarkId ?? 'rw-' + Date.now().toString(36),
-      type: intent || '词改写',
-      original: String(one.original ?? sent),
-      revised: String(one.revised),
-      basis: one.basis ?? '',
-      alternative: one.alternative,
-      status: 'pending',
-      check: { passive: risk.passive, relcl: risk.relcl, pastperf: risk.pastperf, overlong: risk.overlong },
-    };
-    if (autoMarkId) {
-      hidePop();
-      await acceptSuggestion(g, { scene: '标记即改写', outcome: '直改' });
-      return;
-    }
-    S.suggestions.push(g);
-    hidePop();
-    attachInlineSuggestions();
-    setStatus('AI 已给出本句改写——正文黄色区域内点 ✓ 采纳或 ✗ 放弃', 'saved');
-  } catch (e) {
-    const hint = String(e).includes('未找到 JSON') ? '（原因：你的模型把"思考过程"写进了回答，占满了输出上限还没写到 JSON——AI 设置里换非思考型模型如 deepseek-chat 最省心）' : '';
-    setStatus('AI 改写失败：' + e + hint, 'err');
-  } finally {
-    if (btn) {
-      btn.textContent = '<svg class="ico"><use href="#i-sparkle"/></svg>AI 改写本句';
-      (btn as HTMLButtonElement).disabled = false;
-    }
-  }
-}
 
 $('btn-ai').addEventListener('click', () => void aiSuggest());
 
@@ -3987,23 +3477,6 @@ function buildHeatRail(): void {
 }
 
 /* ---- 建议键盘流：N 下一条 / Enter 采纳 / X 放弃（逐条过建议不碰鼠标） ---- */
-let sugFocusIdx = -1;
-function focusNextSuggestion(step: number): void {
-  const all = [...document.querySelectorAll<HTMLElement>('#reader .inline-sug')];
-  if (!all.length) {
-    toast('当前没有待确认的建议（行内绿字块）');
-    return;
-  }
-  all.forEach((el) => el.classList.remove('focused'));
-  sugFocusIdx = (sugFocusIdx + step + all.length) % all.length;
-  const el = all[sugFocusIdx]!;
-  el.classList.add('focused');
-  el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  toast(`建议 ${sugFocusIdx + 1}/${all.length} — Enter 采纳 · X 放弃 · N 下一条`);
-}
-function suggestionByEl(el: HTMLElement): Suggestion | undefined {
-  return S.suggestions.find((x) => String(x.markId) === el.dataset.markId);
-}
 
 /* uikit 解耦桥：总结面板"打开修订建议页"（uikit 不反向依赖 main） */
 window.addEventListener('layertext:open-suggest', () => switchView('suggest'));
