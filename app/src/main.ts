@@ -830,9 +830,11 @@ function bindTypeButtons(session: FileSession, level: 'word' | 'sent', pi: numbe
         ts: Date.now(),
       });
       // 标记即改写：点完标记直接 AI 改写并生效，无需任何后续点击
+      // 加中文标注例外——它是确定性操作，走词义映射+机器插入（原句逐字不动，不让 AI 改写句子）
       if (S.appConfig.autoRewriteOnMark) {
         hidePop();
-        void aiRewriteSentence(pi, si, typeLabel(mark.type), mark.id);
+        if (mark.type === 'zh' && mark.word) void applyZhAnnotations(session, [mark]);
+        else void aiRewriteSentence(pi, si, typeLabel(mark.type), mark.id);
         return;
       }
       const ta = pop.querySelector('#pop-note') as HTMLTextAreaElement | null;
