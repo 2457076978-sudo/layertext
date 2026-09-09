@@ -46,6 +46,7 @@ import {
   planCompaction,
   progressPct,
   remapMarks,
+  marksSurvivingManualEdit,
   routeSelection,
   syncMarksToMd,
   type SyncPlan,
@@ -816,7 +817,7 @@ function showWordPanel(session: FileSession, wEl: HTMLElement, x: number, y: num
     <div class="pop-h">${esc(wEl.textContent ?? '')}</div>
     <div class="pop-info">词表状态：${stateLabel}${origin && origin !== tok ? `<br/>词形还原原形：${esc(origin)}` : ''}</div>
     <div class="pop-marks"></div>
-    <div class="pop-btns"><button data-mk="__rewrite" class="primary" title="让 AI 按当前标记意图改写这一句（快捷键 R）"><svg class="ico"><use href="#i-sparkle"/></svg>AI 改写本句</button>${WORD_TYPES.map((t, i) => `<button data-mk="${t.key}" title="标记为「${t.label}」${t.key === 'anchor' ? '——记录该词为本篇复现锚点（保留并计入复现，不改正文）' : S.appConfig.autoRewriteOnMark ? '——即改模式下点完立即执行（写原稿+日志）' : '——点「AI 改写本句」或批量时按此意图处理'}"><span class="kbd">${i + 1}</span>${t.label}</button>`).join('')}</div>
+    <div class="pop-btns"><button data-mk="__rewrite" class="primary" title="让 AI 按当前标记意图改写这一句（快捷键 R）"><svg class="ico"><use href="#i-sparkle"/></svg>AI 改写本句</button><button data-mk="__edit" title="亲手修改这一句（快捷键 E）——直接写入正文，可撤销，不经引擎复核（你是定稿人）">✎ 手动改这句</button>${WORD_TYPES.map((t, i) => `<button data-mk="${t.key}" title="标记为「${t.label}」${t.key === 'anchor' ? '——记录该词为本篇复现锚点（保留并计入复现，不改正文）' : S.appConfig.autoRewriteOnMark ? '——即改模式下点完立即执行（写原稿+日志）' : '——点「AI 改写本句」或批量时按此意图处理'}"><span class="kbd">${i + 1}</span>${t.label}</button>`).join('')}</div>
     <textarea id="pop-note" placeholder="备注（可选，随下一条标记保存）"></textarea>
     <div class="pop-tip">${S.appConfig.autoRewriteOnMark ? '当前为即改模式：点任一标记立即执行（如「加中文标注」插入注释、「词汇简化」换课标内简单词），改动写原稿并记日志，首改前自动备份' : '先标记意图再点「AI 改写本句」，改写会直接出现在正文中供采纳'}</div>`;
   bindTypeButtons(session, 'word', pi, si, wi);
@@ -840,11 +841,110 @@ function showSentPanel(session: FileSession, sentEl: HTMLElement, x: number, y: 
     <div class="pop-h">句子标记（P${String(pi + 1).padStart(2, '0')} · 第${si + 1}句 · ${wc} 词）</div>
     <div class="pop-info">${esc(text.slice(0, 80))}${text.length > 80 ? '…' : ''}<br/>自动检测：${riskBits ? `<span class="warn">${riskBits}</span>` : '<span class="ok">未命中黑名单句法</span>'}${crossSentence ? '<br/>⚠︎ 跨句选择，仅标记所选末句' : ''}</div>
     <div class="pop-marks"></div>
-    <div class="pop-btns">${SENT_TYPES.map((t, i) => `<button data-mk="${t.key}"><span class="kbd">${i + 1}</span>${t.label}</button>`).join('')}</div>
+    <div class="pop-btns"><button data-mk="__edit" title="亲手修改这一句（快捷键 E）——直接写入正文，可撤销，不经引擎复核（你是定稿人）">✎ 手动改这句</button>${SENT_TYPES.map((t, i) => `<button data-mk="${t.key}"><span class="kbd">${i + 1}</span>${t.label}</button>`).join('')}</div>
     <textarea id="pop-note" placeholder="备注（可选，随下一条标记保存）"></textarea>`;
   bindTypeButtons(session, 'sent', pi, si);
   refreshPop();
   placePop(x, y);
+}
+
+/* ---------- 手动改这句（人工矫正兜底）：AI 改不好时教师亲手改；教师是定稿人，不经引擎复核 ---------- */
+
+function showSentenceEditor(pi: number, si: number): void {
+  const s = activeSession();
+  if (!s) return;
+  const sent = sentsOf(extractParas(splitChapter(s.md).body)[pi] ?? '', false)[si] ?? '';
+  if (!sent) return;
+  const r0 = pop.getBoundingClientRect();
+  pop.dataset.level = 'edit';
+  pop.innerHTML = `
+    <div class="pop-h">手动改这句（P${String(pi + 1).padStart(2, '0')} · 第${si + 1}句 · 定稿权在你）</div>
+    <div class="pop-info">改动直接写入正文（首改自动备份、↩︎ 可撤销、变更日志记"人工修订"），<b>不经引擎复核</b>。保存后会自动重新体检。</div>
+    <textarea id="edit-sent" rows="4" style="width:100%;font-size:13px;line-height:1.7;border:1px solid var(--line);border-radius:8px;padding:6px 8px;box-sizing:border-box">${esc(sent.trim())}</textarea>
+    <div class="pop-btns" style="margin-top:8px">
+      <button id="edit-save" class="primary">保存修改（写入正文）</button>
+      <button id="edit-cancel">取消</button>
+    </div>`;
+  placePop(r0.left, r0.top);
+  const ta = pop.querySelector('#edit-sent') as HTMLTextAreaElement | null;
+  ta?.focus();
+  pop.querySelector('#edit-cancel')?.addEventListener('click', hidePop);
+  pop.querySelector('#edit-save')?.addEventListener('click', () => void applyManualSentenceEdit(pi, si));
+  ta?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) void applyManualSentenceEdit(pi, si);
+  });
+}
+
+async function applyManualSentenceEdit(pi: number, si: number): Promise<void> {
+  const s = activeSession();
+  if (!s) return;
+  const ta = pop.querySelector('#edit-sent') as HTMLTextAreaElement | null;
+  const revised = (ta?.value ?? '').replace(/\s+/g, ' ').trim();
+  const sent = sentsOf(extractParas(splitChapter(s.md).body)[pi] ?? '', false)[si] ?? '';
+  if (!ta || !revised) {
+    toast('内容为空，未修改');
+    return;
+  }
+  if (revised === sent.trim()) {
+    hidePop();
+    toast('没有变化，正文未动');
+    return;
+  }
+  // 定位原句（与 AI 建议采纳同款：先唯一精确，再空白/连字符宽容匹配）
+  let exact: string | null = null;
+  const at0 = s.md.indexOf(sent);
+  if (at0 >= 0 && s.md.indexOf(sent, at0 + 1) < 0) exact = sent;
+  else {
+    const flex = findOriginalFlex(s.md, sent);
+    if (flex) exact = flex.exact;
+  }
+  if (!exact) {
+    setStatus('正文中定位不到该句（可能刚被其他修改改过）——请重新打开这句再改', 'err');
+    return;
+  }
+  const atExact = s.md.indexOf(exact);
+  s.md = s.md.slice(0, atExact) + revised + s.md.slice(atExact + exact.length);
+  // 标记存留：该句句级标记随人工修订完成；被改掉的词不再留幽灵标记；其余 remap 重定位
+  s.review.marks = marksSurvivingManualEdit(s.review.marks, { pi, si }, exact, revised);
+  remapMarks(s.review.marks, s.md);
+  hidePop();
+  const date = new Date().toLocaleDateString('sv-SE');
+  const outDir = s.sourcePath ? s.sourcePath.slice(0, s.sourcePath.lastIndexOf('/')) : await invoke<string>('reports_dir');
+  const logPath = `${outDir}/变更日志_AI审核.csv`;
+  try {
+    const savedTo = await persistEdit(s, s.md);
+    let csv = '';
+    try {
+      csv = await invoke<string>('read_text_file', { path: logPath });
+    } catch {
+      /* 新建 */
+    }
+    if (!csv.trim()) csv = CHANGELOG_HEADER.join(',') + '\n';
+    csv +=
+      [
+        'R1',
+        date,
+        `标准${simplifyMaxLen()}词`,
+        `P${String(pi + 1).padStart(2, '0')}`,
+        `P${pi + 1}-S${si + 1}`,
+        exact.trim(),
+        revised,
+        'R15',
+        '教师手动修订（定稿权，不经引擎复核）',
+        '人工矫正-手动改句',
+      ]
+        .map(csvCell)
+        .join(',') + '\n';
+    await invoke('write_text_file', { path: logPath, content: csv });
+    renderAll();
+    flashApplied(revised);
+    toast(`正文已改好并写入${savedTo === s.sourcePath ? '原稿' : '工作稿'}（↩︎ 可撤销，日志已记"人工修订"）`, 'ok');
+  } catch (e) {
+    setStatus('写入失败：' + e, 'err');
+    return;
+  }
+  scheduleSave(s, () => undefined);
+  void runQcCurrent({ auto: true }); // 改完自动重检，报告不滞后
 }
 
 /* 短语面板（三级粒度之短语级）：拖选短语 → 直线下划线标记，类型色沿用词级色板；
@@ -870,7 +970,7 @@ function showPhrasePanel(session: FileSession, sentEl: HTMLElement, range: Range
     <div class="pop-h">短语标记（P${String(pi + 1).padStart(2, '0')} · 第${si + 1}句 · ${wl} 词）</div>
     <div class="pop-info">选区：${esc(shown)}<br/>选什么划什么——短语整体处理（词典释义 / 换简单说法 / 标记保留），句内其余文字不动</div>
     <div class="pop-marks"></div>
-    <div class="pop-btns"><button data-mk="__rewrite" class="primary" title="让 AI 按当前标记意图改写这一句（快捷键 R）"><svg class="ico"><use href="#i-sparkle"/></svg>AI 改写本句</button>${WORD_TYPES.map((t, i) => `<button data-mk="${t.key}" title="标记为「${t.label}」——${t.key === 'anchor' ? '记录整个短语为复现锚点（不改正文）' : `将对整个短语生效（下划线范围）${S.appConfig.autoRewriteOnMark ? '；即改模式下点完立即执行（写原稿+日志）' : ''}`}"><span class="kbd">${i + 1}</span>${t.label}</button>`).join('')}</div>
+    <div class="pop-btns"><button data-mk="__rewrite" class="primary" title="让 AI 按当前标记意图改写这一句（快捷键 R）"><svg class="ico"><use href="#i-sparkle"/></svg>AI 改写本句</button><button data-mk="__edit" title="亲手修改这一句（快捷键 E）——直接写入正文，可撤销，不经引擎复核（你是定稿人）">✎ 手动改这句</button>${WORD_TYPES.map((t, i) => `<button data-mk="${t.key}" title="标记为「${t.label}」——${t.key === 'anchor' ? '记录整个短语为复现锚点（不改正文）' : `将对整个短语生效（下划线范围）${S.appConfig.autoRewriteOnMark ? '；即改模式下点完立即执行（写原稿+日志）' : ''}`}"><span class="kbd">${i + 1}</span>${t.label}</button>`).join('')}</div>
     <textarea id="pop-note" placeholder="备注（可选，随下一条标记保存）"></textarea>
     <div class="pop-tip">${S.appConfig.autoRewriteOnMark ? '当前为即改模式：点任一标记立即对整个短语执行，改动写原稿并记日志' : '选什么划什么——标记后可点「AI 改写本句」处理整个短语'}</div>`;
   bindTypeButtons(session, 'phrase', pi, si, wi, wl);
@@ -881,7 +981,11 @@ function showPhrasePanel(session: FileSession, sentEl: HTMLElement, range: Range
 function bindTypeButtons(session: FileSession, level: MarkLevel, pi: number, si: number, wi?: number, wl?: number): void {
   pop.querySelectorAll('[data-mk]').forEach((b) =>
     b.addEventListener('click', () => {
-      const type = (b as HTMLElement).dataset.mk as MarkType | '__rewrite';
+      const type = (b as HTMLElement).dataset.mk as MarkType | '__rewrite' | '__edit';
+      if ((type as string) === '__edit') {
+        showSentenceEditor(pi, si);
+        return;
+      }
       if ((type as string) === '__rewrite') {
         const intent = [...marksAt(session, 'word', pi, si, wi), ...marksAt(session, 'phrase', pi, si, wi)].map((m) => typeLabel(m.type)).join('、') || '词汇简化';
         void aiRewriteSentence(pi, si, intent);
@@ -3816,6 +3920,8 @@ async function resumeLastSession(): Promise<void> {
 async function applyMdSnapshot(s: FileSession, md: string, label: string): Promise<void> {
   await persistEdit(s, md);
   s.md = md;
+  remapMarks(s.review.marks, s.md); // 正文变了标记跟着重对齐（撤销/查找替换曾是欠账：标记错位不修）
+  scheduleSave(s, () => undefined);
   renderAll();
   setStatus(label + '（文件已同步保存）', 'saved');
   scheduleSaveLastSession();
@@ -3902,6 +4008,23 @@ async function replaceAllFind(): Promise<void> {
   if (!confirm(`把「${q}」全部替换为「${r}」？共 ${n} 处（可用 ↩︎ 撤销）`)) return;
   await applyMdSnapshot(s, s.md.split(q).join(r), `已替换 ${n} 处`);
   toast(`已替换 ${n} 处（↩︎ 可撤销）`, 'ok');
+  // 人工矫正可审计：手动替换同样进变更日志（此前只有 AI 修改留痕）
+  try {
+    const date = new Date().toLocaleDateString('sv-SE');
+    const outDir = s.sourcePath ? s.sourcePath.slice(0, s.sourcePath.lastIndexOf('/')) : await invoke<string>('reports_dir');
+    const logPath = `${outDir}/变更日志_AI审核.csv`;
+    let csv = '';
+    try {
+      csv = await invoke<string>('read_text_file', { path: logPath });
+    } catch {
+      /* 新建 */
+    }
+    if (!csv.trim()) csv = CHANGELOG_HEADER.join(',') + '\n';
+    csv += ['R1', date, `标准${simplifyMaxLen()}词`, '', '', q, r, 'R15', `教师查找替换（${n} 处，可撤销）`, '人工矫正-查找替换'].map(csvCell).join(',') + '\n';
+    await invoke('write_text_file', { path: logPath, content: csv });
+  } catch {
+    /* 日志失败不阻塞替换 */
+  }
 }
 
 /* ---- 阅读字号 ---- */
@@ -4010,7 +4133,7 @@ function jumpNextRisk(dir: 1 | -1): void {
   toast(`难句 ${riskJumpIdx + 1}/${risks.length}${kinds ? ' · ' + kinds : ''}`);
 }
 
-/** 标记弹层开着时：数字键 1-9 = 选第 N 类标记，R = AI 改写本句（note 输入框聚焦时不拦截） */
+/** 标记弹层开着时：数字键 1-9 = 选第 N 类标记，R = AI 改写本句，E = 手动改这句（note 输入框聚焦时不拦截） */
 function popHotkey(k: string): boolean {
   if (!pop.classList.contains('open')) return false;
   const ae = document.activeElement;
@@ -4018,7 +4141,8 @@ function popHotkey(k: string): boolean {
   const btns = [...pop.querySelectorAll<HTMLElement>('[data-mk]')];
   let hit: HTMLElement | null = null;
   if (k === 'r' || k === 'R') hit = pop.querySelector<HTMLElement>('[data-mk="__rewrite"]');
-  else if (/^[1-9]$/.test(k)) hit = btns.filter((b) => b.dataset.mk !== '__rewrite')[Number(k) - 1] ?? null;
+  else if (k === 'e' || k === 'E') hit = pop.querySelector<HTMLElement>('[data-mk="__edit"]');
+  else if (/^[1-9]$/.test(k)) hit = btns.filter((b) => !b.dataset.mk!.startsWith('__'))[Number(k) - 1] ?? null;
   if (!hit) return false;
   hit.click();
   return true;

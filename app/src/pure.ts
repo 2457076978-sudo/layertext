@@ -102,6 +102,25 @@ export function routeSelection(selText: string, sentText: string): 'sent' | 'phr
   return words.length >= 2 ? 'phrase' : 'word';
 }
 
+/* ---------- 手动改这句（人工矫正兜底）：教师亲手改句后的标记存留规则 ---------- */
+
+/** 手动修订一句后哪些标记存留：
+ *  ① 该句的句级标记全部完成（教师手改=对它们的人工响应）；② 该句（仅该句）的词/短语级标记中，
+ *  原句里有、新句里没有的词=被改掉，连带完成（防幽灵标记）——别句同词标记不动；其余存留（remap 另行重定位） */
+export function marksSurvivingManualEdit(marks: Mark[], at: { pi: number; si: number }, before: string, after: string): Mark[] {
+  const b = before.toLowerCase();
+  const a = after.toLowerCase();
+  const onThisSent = (m: Mark): boolean => m.pi === at.pi && m.si === at.si;
+  return marks.filter((m) => {
+    if (onThisSent(m) && m.level === 'sent') return false;
+    if (onThisSent(m) && m.level !== 'sent' && m.word) {
+      const w = m.word.toLowerCase();
+      if (b.includes(w) && !a.includes(w)) return false;
+    }
+    return true;
+  });
+}
+
 /* ---------- 跨版本标记同步（同一章多版本文件：词/短语级审校意图广播） ---------- */
 
 export interface SyncPlanItem {
