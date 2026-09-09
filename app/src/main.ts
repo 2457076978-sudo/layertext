@@ -2664,12 +2664,12 @@ document.addEventListener('mousedown', (e) => {
  * instruction 传入 = 会话式追问（携带 S.aiHistory，AI 知道上一轮建议过什么、你否决了什么）；
  * 不传 = 全新请求（上下文来自本地文件：标记清单+当前文本句子），并重建 S.aiHistory。
  */
-function buildAiUserPrompt(session: FileSession): string {
+function buildAiUserPrompt(session: FileSession, subset?: Mark[]): string {
   const body = splitChapter(session.md).body;
   const paras = extractParas(body);
   const maxLen = simplifyMaxLen();
   const r = session.report;
-  const marks = session.review.marks
+  const marks = (subset ?? session.review.marks)
     .filter((m) => m.type !== 'zh' && m.type !== 'anchor' && !(m.type === 'simpl' && m.level !== 'sent')) // 加注/换词走确定性管线、复现锚点是记录型——都不进句子改写
     .map((m) => {
       const sent = sentsOf(paras[m.pi] ?? '', false)[m.si] ?? '(未找到句子)';
@@ -2847,34 +2847,47 @@ async function applyWordSimplifications(s: FileSession, marks: Mark[]): Promise<
     const simple = found?.simple;
     if (!simple || simple.toLowerCase() === w.toLowerCase()) continue;
     const esc = w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const re = new RegExp(`\\b${esc}\\b`, 'i');
+    // 换词语义=同词全部出现处都换（注释才是只标首现——教学惯例各异）；段内收集全部命中，段定位失败退全章首现
     const para = paras[m.pi] ?? '';
-    const hit = re.exec(para);
-    let at = -1;
-    let matched = '';
-    if (hit) {
-      const pAt = s.md.indexOf(para);
-      if (pAt >= 0) {
-        at = pAt + hit.index;
-        matched = s.md.slice(at, at + hit[0].length);
-      }
-    }
-    if (at < 0) {
-      const h2 = re.exec(s.md);
+    let base = -1;
+    const hits: { at: number; matched: string }[] = [];
+    const reG = new RegExp(`\\b${esc}\\b`, 'gi');
+    let mm: RegExpExecArray | null;
+    while ((mm = reG.exec(para)) !== null) hits.push({ at: mm.index, matched: mm[0] });
+    if (hits.length) base = s.md.indexOf(para);
+    if (base < 0) {
+      const h2 = new RegExp(`\\b${esc}\\b`, 'i').exec(s.md);
       if (h2) {
-        at = h2.index;
-        matched = h2[0];
+        hits.length = 0;
+        hits.push({ at: h2.index, matched: h2[0] });
+        base = 0;
       }
     }
-    if (at < 0) continue;
+    if (!hits.length || base < 0) continue;
     let repl = simple;
-    if (/^[A-Z]/.test(matched)) repl = repl.charAt(0).toUpperCase() + repl.slice(1); // 保首字母大写形态
-    if (morphMismatch(matched, repl)) morphWarn.push(`${matched}→${repl}`); // AI 边界 #17：词尾形态类不一致，提示复核不拦截
-    s.md = s.md.slice(0, at) + repl + s.md.slice(at + matched.length);
+    let n = 0;
+    let firstReplaced = '';
+    // 倒序替换（防位移）；已带中文注释的出现处跳过（教师已处理，别让注释悬空）
+    for (let i = hits.length - 1; i >= 0; i--) {
+      const at = base + hits[i].at;
+      const matched = hits[i].matched;
+      if (s.md.slice(at + matched.length, at + matched.length + 1) === '（') continue;
+      let r = repl;
+      if (/^[A-Z]/.test(matched)) r = r.charAt(0).toUpperCase() + r.slice(1); // 保首字母大写形态
+      if (morphMismatch(matched, r)) morphWarn.push(`${matched}→${r}`); // AI 边界 #17：词尾形态类不一致，提示复核不拦截
+      s.md = s.md.slice(0, at) + r + s.md.slice(at + matched.length);
+      if (!firstReplaced) {
+        repl = r;
+        firstReplaced = matched;
+      }
+      n++;
+    }
+    if (n === 0) continue;
+    const matched0 = firstReplaced;
     s.review.marks = s.review.marks.filter((x) => x.id !== m.id);
     s.review.marks = s.review.marks.filter((x) => !(x.level !== 'sent' && x.word && x.word.toLowerCase() === w.toLowerCase())); // 同词（词/短语级）其余标记一并完成
     remapMarks(s.review.marks, s.md);
-    done.push(`${matched}→${repl}${found?.via === 'subset' ? '（整短语）' : ''}`);
+    done.push(`${matched0}→${repl}${n > 1 ? `（共${n}处）` : ''}${found?.via === 'subset' ? '（整短语）' : ''}`);
   }
   // 整体思想：目标是学生读得懂——换不出更简单的词，就自动降级加中文标注
   const restMarks = marks.filter((m) => s.review.marks.some((x) => x.id === m.id));
@@ -2953,22 +2966,55 @@ async function aiSuggest(instruction?: string): Promise<void> {
       return;
     }
     const system = await buildSystemPrompt();
-    let messages: { role: string; content: string }[];
+    let raw: { id: string; type?: string; original?: string; revised?: string; basis?: string; alternative?: string }[] = [];
+    let usage = '';
     if (instruction && S.aiHistory.length > 0) {
       S.aiHistory.push({ role: 'user', content: instruction + '\n\n请基于我们之前的对话重新输出完整的 JSON 数组（含未改动条目，original 用当前正文原句）。' });
-      messages = [{ role: 'system', content: system }, ...S.aiHistory];
+      const messages = [{ role: 'system', content: system }, ...S.aiHistory];
+      const estIn = messages.reduce((n, m) => n + estTokens(m.content), 0);
+      setStatus(`本次请求约 ${estIn} tokens 输入（只含标记相关句子，不发全章原文）…`);
+      const r1 = await chatUntilJson(messages, 6000, '审核建议');
+      raw = r1.raw as typeof raw;
+      usage = r1.usage;
     } else {
-      const userMsg = buildAiUserPrompt(s);
-      S.aiHistory = [{ role: 'user', content: userMsg }];
-      messages = [
-        { role: 'system', content: system },
-        { role: 'user', content: userMsg },
-      ];
+      const sentMarks = s.review.marks.filter((m) => m.type !== 'zh' && m.type !== 'anchor' && !(m.type === 'simpl' && m.level !== 'sent'));
+      const BATCH = 10;
+      if (sentMarks.length > BATCH) {
+        // 大批量分批：单次 6000 token 输出上限曾被思考型模型占满截断——每批 10 条标记独立请求，进度可见
+        const batches: Mark[][] = [];
+        for (let i = 0; i < sentMarks.length; i += BATCH) batches.push(sentMarks.slice(i, i + BATCH));
+        for (let bi = 0; bi < batches.length; bi++) {
+          setStatus(`AI 批量修订：第 ${bi + 1}/${batches.length} 批（共 ${sentMarks.length} 条标记，分批防输出截断）…`);
+          const userMsg = buildAiUserPrompt(s, batches[bi]);
+          const rb = await chatUntilJson(
+            [
+              { role: 'system', content: system },
+              { role: 'user', content: userMsg },
+            ],
+            6000,
+            `审核建议 ${bi + 1}/${batches.length}`,
+          );
+          raw = raw.concat(rb.raw as typeof raw);
+          usage = rb.usage;
+        }
+        S.aiHistory = [{ role: 'user', content: buildAiUserPrompt(s, sentMarks.slice(0, BATCH)) }];
+      } else {
+        const userMsg = buildAiUserPrompt(s);
+        S.aiHistory = [{ role: 'user', content: userMsg }];
+        const estIn = estTokens(system) + estTokens(userMsg);
+        setStatus(`本次请求约 ${estIn} tokens 输入（只含标记相关句子，不发全章原文）…`);
+        const r2 = await chatUntilJson(
+          [
+            { role: 'system', content: system },
+            { role: 'user', content: userMsg },
+          ],
+          6000,
+          '审核建议',
+        );
+        raw = r2.raw as typeof raw;
+        usage = r2.usage;
+      }
     }
-    const estIn = messages.reduce((n, m) => n + estTokens(m.content), 0);
-    setStatus(`本次请求约 ${estIn} tokens 输入（只含标记相关句子，不发全章原文）…`);
-    const { raw: rawUnknown, usage } = await chatUntilJson(messages, 6000, '审核建议');
-    const raw = rawUnknown as { id: string; type?: string; original?: string; revised?: string; basis?: string; alternative?: string }[];
     S.aiHistory.push({ role: 'assistant', content: JSON.stringify(raw) });
     S.suggestions = raw
       .filter((x) => x.revised)
@@ -2991,6 +3037,9 @@ async function aiSuggest(instruction?: string): Promise<void> {
       let warned = 0;
       let applied = 0;
       let cnBlocked = 0;
+      // 组撤销：批量 N 条合并为一条基线快照（此前撤一批要点 N 次 ↩︎ 且 50 条栈会滚掉早期记录）
+      const undoBaseline = s.md;
+      const undoLen = s.undoStack?.length ?? 0;
       for (const g of [...S.suggestions]) {
         if (g.check.passive || g.check.relcl || g.check.pastperf || g.check.overlong) warned++;
         if (hasProseChinese(g.revised)) {
@@ -2998,6 +3047,11 @@ async function aiSuggest(instruction?: string): Promise<void> {
           continue;
         }
         if (await acceptSuggestion(g, { scene: '自动直改', outcome: '直改' })) applied++;
+      }
+      if (applied > 1 && s.undoStack && s.undoStack.length > undoLen) {
+        s.undoStack.length = undoLen;
+        s.undoStack.push(undoBaseline);
+        if (s.undoStack.length > 50) s.undoStack.shift();
       }
       const leftover = S.suggestions.length;
       if (leftover > 0) renderSuggestions();
