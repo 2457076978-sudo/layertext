@@ -17,6 +17,8 @@ export default tseslint.config(
       '@typescript-eslint/no-explicit-any': 'warn',
       // catch {} 静默容错是本项目的既有惯例（文件不存在则跳过），放行
       'no-empty': ['error', { allowEmptyCatch: true }],
+      // WP-F 巨石防线：单文件 ≤1000 行（跳过空行与注释计数）——main.ts 巨石债清零后启用，防止回潮
+      'max-lines': ['error', { max: 1000, skipBlankLines: true, skipComments: true }],
     },
   },
 );
