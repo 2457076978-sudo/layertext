@@ -97,6 +97,7 @@ export async function applyZhAnnotations(s: FileSession, marks: Mark[]): Promise
     );
   const paras = extractParas(splitChapter(s.md).body);
   const done: string[] = [];
+  const corrPairs: { word: string; type: 'zh'; result: string }[] = [];
   for (const m of marks) {
     const w = m.word!;
     const zh = gloss[w] ?? gloss[w.toLowerCase()] ?? gloss[w.replace(/\s+/g, ' ')];
@@ -128,6 +129,7 @@ export async function applyZhAnnotations(s: FileSession, marks: Mark[]): Promise
     s.review.marks = s.review.marks.filter((x) => x.id !== m.id);
     remapMarks(s.review.marks, s.md);
     done.push(`${matched}（${zh}）`);
+    corrPairs.push({ word: matched, type: 'zh', result: zh });
   }
   if (!done.length) {
     setStatus('没有可插入的中文标注（词已不在正文中或释义缺失）', 'err');
@@ -156,6 +158,7 @@ export async function applyZhAnnotations(s: FileSession, marks: Mark[]): Promise
   flashApplied(done[done.length - 1]);
   setStatus(`已加中文标注 ${done.length} 处（原句未动）：${done.slice(0, 6).join('、')}${done.length > 6 ? '…' : ''}`, 'saved');
   toast(`已加中文标注 ${done.length} 处（原句未动）`, 'ok');
+  void propagateCorrection(s, corrPairs);
   return done.length;
 }
 
@@ -194,6 +197,7 @@ export async function applyWordSimplifications(s: FileSession, marks: Mark[]): P
   }
   const done: string[] = [];
   const morphWarn: string[] = [];
+  const corrPairs2: { word: string; type: 'simpl'; result: string }[] = [];
   for (const m of uniq) {
     const w = m.word!;
     // #23：AI 常把短语键答成子词（"Seven Commandments"→键只给 "Commandments"）——
@@ -243,6 +247,7 @@ export async function applyWordSimplifications(s: FileSession, marks: Mark[]): P
     s.review.marks = s.review.marks.filter((x) => !(x.level !== 'sent' && x.word && x.word.toLowerCase() === w.toLowerCase())); // 同词（词/短语级）其余标记一并完成
     remapMarks(s.review.marks, s.md);
     done.push(`${matched0}→${repl}${n > 1 ? `（共${n}处）` : ''}${found?.via === 'subset' ? '（整短语）' : ''}`);
+    corrPairs2.push({ word: w, type: 'simpl', result: repl });
   }
   // 整体思想：目标是学生读得懂——换不出更简单的词，就自动降级加中文标注
   const restMarks = marks.filter((m) => s.review.marks.some((x) => x.id === m.id));
@@ -279,6 +284,7 @@ export async function applyWordSimplifications(s: FileSession, marks: Mark[]): P
     (morphWarn.length ? `；⚠ ${morphWarn.length} 处词形可能与语境不符（${morphWarn.slice(0, 3).join('、')}），建议复核` : '');
   setStatus(summary, 'saved');
   toast(morphWarn.length ? `已换 ${done.length} 个词；⚠ ${morphWarn.length} 处词形建议复核（详见状态行）` : `已换 ${done.length} 个词（句子未动）`, morphWarn.length ? 'info' : 'ok');
+  void propagateCorrection(s, corrPairs2);
 }
 
 export function showSentenceEditor(pi: number, si: number): void {
@@ -397,6 +403,109 @@ interface SyncTargetPlan {
   plan: SyncPlan;
 }
 
+/** 写入同步计划：已打开会话即时刷新，未打开直接写 _审校标记.json；返回（写盘数, 刷新数） */
+export async function applySyncPlans(plans: SyncTargetPlan[]): Promise<{ wrote: number; refreshed: number }> {
+  let wrote = 0;
+  let refreshed = 0;
+  for (const p of plans) {
+    if (!p.plan.totalCreated) continue;
+    const created = p.plan.items.flatMap((i) => i.created);
+    const sess = S.sessions.find((x) => x.sourcePath === p.path);
+    if (sess) {
+      sess.review.marks.push(...created);
+      sess.review.updatedAt = Date.now();
+      scheduleSave(sess, () => undefined);
+      if (S.sessions[S.activeIdx] === sess) {
+        renderSidebar(sess, sidebarHandlers);
+        restoreAllMarkDom(sess);
+        scheduleHeatRail();
+        updateMarkBadge();
+      }
+      refreshed++;
+    } else {
+      const markPath = await markPathFor(p.path, p.name);
+      const base = { file: p.name, marks: [] as Mark[], quota: [], gate: {}, bookmarks: [], updatedAt: Date.now() };
+      let review = base;
+      try {
+        review = { ...base, ...(JSON.parse(await invoke<string>('read_text_file', { path: markPath })) as typeof base) };
+      } catch {
+        /* 新建标记文件 */
+      }
+      review.marks = [...(review.marks ?? []), ...created];
+      review.updatedAt = Date.now();
+      await invoke('write_text_file', { path: markPath, content: JSON.stringify(review, null, 1) });
+      wrote++;
+    }
+  }
+  return { wrote, refreshed };
+}
+
+/** 同目录其他版本 md 文件（同 showSyncMarksDialog 的过滤口径，供传播复用） */
+export async function siblingVersionFiles(sourcePath: string): Promise<{ name: string; path: string }[]> {
+  const dir = sourcePath.slice(0, sourcePath.lastIndexOf('/'));
+  let names: string[];
+  try {
+    names = await invoke<string[]>('list_dir', { dir });
+  } catch {
+    return [];
+  }
+  return names
+    .filter((n) => /\.md$/i.test(n) && `${dir}/${n}` !== sourcePath)
+    .filter((n) => !/质检报告|审校档案|全书简化|基准|AI修订|分层初稿|工作稿|原始备份|词句卡/.test(n))
+    .map((n) => ({ name: n, path: `${dir}/${n}` }));
+}
+
+/**
+ * 校正成果跨版本传播（Wayne 09-10："高层次的人工校正改动会更新影响低层次的词库，但仅限于此"）：
+ * 高层版本词级校正（换词/加注）定案后，自动把同词同类型标记建到同目录低层版本（幂等），
+ * 并沉淀书级 `_校正知识.csv`——**只建标记（待办）+知识留痕，低层正文一律不动**；
+ * 低层打开后按自己的口径执行（或忽略）。
+ */
+async function propagateCorrection(s: FileSession, done: { word: string; type: 'simpl' | 'zh'; result: string }[]): Promise<void> {
+  if (!s.sourcePath || !done.length) return;
+  try {
+    const targets = await siblingVersionFiles(s.sourcePath);
+    if (!targets.length) return;
+    const date = new Date().toLocaleDateString('sv-SE');
+    const srcName = s.fileName.replace(/\.md$/i, '');
+    // ① 知识沉淀（书目录 _校正知识.csv）
+    const dir = s.sourcePath.slice(0, s.sourcePath.lastIndexOf('/'));
+    const kPath = `${dir}/_校正知识.csv`;
+    let kcsv = '';
+    try {
+      kcsv = await invoke<string>('read_text_file', { path: kPath });
+    } catch {
+      /* 新建 */
+    }
+    if (!kcsv.trim()) kcsv = '版本,日期,词,处理,结果,传播到\n';
+    // ② 每个版本建标记（幂等：已有同词同类型跳过）
+    const plans: SyncTargetPlan[] = [];
+    for (const tg of targets) {
+      let md = '';
+      let existing: Mark[] = [];
+      try {
+        md = await readTextSmart(tg.path);
+        const saved = await invoke<string>('read_text_file', { path: await markPathFor(tg.path, tg.name) });
+        const parsed = JSON.parse(saved) as { marks?: Mark[] };
+        if (Array.isArray(parsed.marks)) existing = parsed.marks;
+      } catch {
+        /* 无标记文件 */
+      }
+      const srcMarks: Mark[] = done.map((d) => ({ id: 'k' + d.word + d.type, level: 'word', pi: 0, si: 0, wi: 0, word: d.word, text: '', type: d.type, ts: Date.now() }));
+      const plan = syncMarksToMd(srcMarks, md, existing, newMarkId);
+      if (plan.totalCreated > 0) plans.push({ name: tg.name, path: tg.path, plan });
+      kcsv += [srcName, date, done.map((d) => d.word).join('、'), done[0]!.type === 'simpl' ? '换词' : '加注', done.map((d) => d.result).join('、'), tg.name].map(csvCell).join(',') + '\n';
+    }
+    await invoke('write_text_file', { path: kPath, content: kcsv });
+    if (!plans.length) return;
+    const r = await applySyncPlans(plans);
+    toast(`高层次校正已传播：${plans.map((p) => `${p.name.replace(/\.md$/i, '')} 建 ${p.plan.totalCreated} 条标记`).join('、')}（仅标记，正文不动）`, 'ok');
+    setStatus(`校正知识已沉淀到 _校正知识.csv 并传播到低层版本待办（${r.wrote + r.refreshed} 个文件）`, 'saved');
+  } catch {
+    /* 传播失败不影响本版校正 */
+  }
+}
+
 /** 同步弹层：先给后果预告（每个版本建多少/跳过多少及原因），确认才写盘——正文不动，只同步"待办" */
 export async function showSyncMarksDialog(): Promise<void> {
   const s = activeSession();
@@ -464,40 +573,9 @@ export async function showSyncMarksDialog(): Promise<void> {
   syncPop.style.top = Math.max(8, (window.innerHeight - r.height) / 2) + 'px';
   $('sync-cancel').addEventListener('click', hideSyncPop);
   $('sync-go').addEventListener('click', async () => {
-    let wrote = 0;
-    let refreshed = 0;
-    for (const p of plans) {
-      if (!p.plan.totalCreated) continue;
-      const created = p.plan.items.flatMap((i) => i.created);
-      const sess = S.sessions.find((x) => x.sourcePath === p.path);
-      if (sess) {
-        sess.review.marks.push(...created);
-        sess.review.updatedAt = Date.now();
-        scheduleSave(sess, () => undefined);
-        if (S.sessions[S.activeIdx] === sess) {
-          renderSidebar(sess, sidebarHandlers);
-          restoreAllMarkDom(sess);
-          scheduleHeatRail();
-          updateMarkBadge();
-        }
-        refreshed++;
-      } else {
-        const markPath = await markPathFor(p.path, p.name);
-        const base = { file: p.name, marks: [] as Mark[], quota: [], gate: {}, bookmarks: [], updatedAt: Date.now() };
-        let review = base;
-        try {
-          review = { ...base, ...(JSON.parse(await invoke<string>('read_text_file', { path: markPath })) as typeof base) };
-        } catch {
-          /* 新建标记文件 */
-        }
-        review.marks = [...(review.marks ?? []), ...created];
-        review.updatedAt = Date.now();
-        await invoke('write_text_file', { path: markPath, content: JSON.stringify(review, null, 1) });
-        wrote++;
-      }
-    }
+    const r2 = await applySyncPlans(plans);
     hideSyncPop();
-    toast(`已同步：${wrote} 个版本文件写入、${refreshed} 个已打开版本即时刷新`, 'ok');
+    toast(`已同步：${r2.wrote} 个版本文件写入、${r2.refreshed} 个已打开版本即时刷新`, 'ok');
     setStatus(`标记已同步（正文未动）——在各版本打开后点「按标记修改」按该版本口径执行`, 'saved');
   });
 }
@@ -531,7 +609,7 @@ export function showVocabEditor(): void {
         .join('') || '<span class="dim">（无匹配词条）</span>';
     popEl!.innerHTML = `
       <div class="pop-h">编辑教师词库 <span class="dim" style="font-weight:400;font-size:12px">（内置课标 1600 不在此层，不动）</span></div>
-      <div class="pop-info">当前 ${rows.length} 条${q ? ` · 搜索命中 ${filtered.length}` : ''}。保存到书目录 <b>_词库.csv</b> 并立即生效（重新着色+重跑体检）。</div>
+      <div class="pop-info">当前 ${rows.length} 条（增删即时保存生效）${q ? ` · 搜索命中 ${filtered.length}` : ''}。保存到书目录 <b>_词库.csv</b> 并立即生效（重新着色+重跑体检）。</div>
       <div style="display:flex;gap:6px;margin:8px 0">
         <input id="vq" placeholder="搜词条…" value="${esc(q)}" style="flex:1" />
         <input id="vadd" placeholder="添加词条（回车或点＋）…" style="flex:1" />
@@ -539,7 +617,7 @@ export function showVocabEditor(): void {
       </div>
       <div class="pop-marks" style="max-height:260px;overflow-y:auto;display:flex;flex-wrap:wrap;gap:4px">${chips}</div>
       <div class="pop-btns" style="margin-top:10px">
-        <button id="vsave" class="primary">保存并生效（写 _词库.csv）</button>
+        <button id="vsave" class="primary">完成</button>
         <button id="vclose">取消</button>
       </div>`;
     popEl!.querySelector('#vq')?.addEventListener('input', (ev) => {
@@ -550,6 +628,28 @@ export function showVocabEditor(): void {
     popEl!.querySelector('#vadd')?.addEventListener('keydown', (ev) => {
       if ((ev as KeyboardEvent).key === 'Enter') add();
     });
+    /** 增删即时保存（Wayne"自动保存？"）：silent=不关弹层（编辑中每次变更即写盘生效） */
+    const saveVocab = (silent = false): Promise<void> =>
+      (async () => {
+        const s = activeSession();
+        const text = rows.join('\n') + '\n';
+        const dir = s?.sourcePath ? s.sourcePath.slice(0, s.sourcePath.lastIndexOf('/')) : await invoke<string>('examples_dir');
+        const path = `${dir}/_词库.csv`;
+        try {
+          await invoke('write_text_file', { path, content: text });
+          S.vocabCsvText = text;
+          S.vocabName = '_词库.csv';
+          renderAll(); // 重新着色（renderReader 会按新词库重算三态）
+          if (!silent) {
+            popEl!.remove();
+            void runQcCurrent({ auto: true });
+            toast(`词库已保存并生效：${rows.length} 条 → ${path}`, 'ok');
+          }
+        } catch (e) {
+          setStatus('词库保存失败：' + e, 'err');
+        }
+      })();
+
     const add = (): void => {
       const inp = popEl!.querySelector('#vadd') as HTMLInputElement | null;
       const w = inp?.value.trim().toLowerCase() ?? '';
@@ -561,36 +661,18 @@ export function showVocabEditor(): void {
       rows.push(w);
       inp!.value = '';
       render();
+      void saveVocab(true);
     };
     popEl!.querySelector('#vadd-btn')?.addEventListener('click', add);
     popEl!.querySelectorAll('[data-vr]').forEach((b) =>
       b.addEventListener('click', () => {
         rows = rows.filter((_, i) => i !== Number((b as HTMLElement).dataset.vr));
         render();
+        void saveVocab(true);
       }),
     );
     popEl!.querySelector('#vclose')?.addEventListener('click', () => popEl!.remove());
-    popEl!.querySelector('#vsave')?.addEventListener(
-      'click',
-      () =>
-        void (async () => {
-          const s = activeSession();
-          const text = rows.join('\n') + '\n';
-          const dir = s?.sourcePath ? s.sourcePath.slice(0, s.sourcePath.lastIndexOf('/')) : await invoke<string>('examples_dir');
-          const path = `${dir}/_词库.csv`;
-          try {
-            await invoke('write_text_file', { path, content: text });
-            S.vocabCsvText = text;
-            S.vocabName = '_词库.csv';
-            popEl!.remove();
-            renderAll(); // 重新着色（renderReader 会按新词库重算三态）
-            void runQcCurrent({ auto: true });
-            toast(`词库已保存并生效：${rows.length} 条 → ${path}`, 'ok');
-          } catch (e) {
-            setStatus('词库保存失败：' + e, 'err');
-          }
-        })(),
-    );
+    popEl!.querySelector('#vsave')?.addEventListener('click', () => void saveVocab(false));
   };
   render();
   (popEl.querySelector('#vq') as HTMLInputElement | null)?.focus();
