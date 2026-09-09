@@ -68,6 +68,7 @@ import {
 } from './pure.js';
 import { renderDiffPane, renderModePill, switchView as switchViewDom, type ViewName } from './widgets.js';
 import { S, esc } from './state.js';
+import { $, setStatus, toast, pop, hidePop, placePop, showSummaryPop } from './uikit.js';
 import {
   AI_PROVIDERS,
   aiErrHuman,
@@ -115,8 +116,6 @@ import {
   type MarkType,
   type Suggestion,
 } from './types.js';
-
-const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 
 /* ---------- 全局状态 ---------- */
 
@@ -375,10 +374,6 @@ function renderClsPanel(): void {
       fileSummary();
     });
   });
-}
-
-function setStatus(msg: string, cls = ''): void {
-  $('status').innerHTML = msg ? `<span class="${cls}">${esc(msg)}</span>` : '';
 }
 
 function activeSession(): FileSession | null {
@@ -744,28 +739,12 @@ const sidebarHandlers = {
 
 /* ---------- 弹层面板 ---------- */
 
-const pop = $('pop');
-
 /** CEFR 等级行（显示用辅助维度；判定锚=课标1600+教师词库，CEFR 只加细粒度难度显示） */
 let cefrMap: Map<string, CefrLevel> | null = null;
 function cefrLine(tok: string): string {
   cefrMap ??= parseCefrLevels(bundledCefr);
   const lv = cefrOf(tok, cefrMap);
   return lv ? `CEFR：${lv}（${CEFR_DESC[lv]}）· CEFR-J 词表` : 'CEFR：未收（CEFR-J 词表无此词）';
-}
-
-function hidePop(): void {
-  pop.classList.remove('open');
-  S.popSession = null;
-}
-
-function placePop(x: number, y: number): void {
-  pop.classList.add('open');
-  const rect = pop.getBoundingClientRect();
-  const px = Math.min(Math.max(8, x), window.innerWidth - rect.width - 8);
-  const py = Math.min(Math.max(8, y), window.innerHeight - rect.height - 8);
-  pop.style.left = px + 'px';
-  pop.style.top = py + 'px';
 }
 
 function marksAt(session: FileSession, level: MarkLevel, pi: number, si: number, wi?: number): Mark[] {
@@ -3969,28 +3948,6 @@ setAiUi({ onStatus: (s) => setStatus(s, 'dirty') });
 
 /* ================= UX 补齐（2026-09-08 Wayne：文本软件该有的东西） ================= */
 
-function toast(msg: string, kind: 'ok' | 'err' | 'info' = 'info'): void {
-  let box = document.getElementById('toast-box');
-  if (!box) {
-    box = document.createElement('div');
-    box.id = 'toast-box';
-    document.body.appendChild(box);
-  }
-  const el = document.createElement('div');
-  el.className = 'toast ' + kind;
-  el.textContent = msg;
-  box.appendChild(el);
-  setTimeout(
-    () => {
-      el.classList.add('out');
-      setTimeout(() => el.remove(), 400);
-    },
-    kind === 'err' ? 6000 : 2600,
-  );
-}
-window.addEventListener('error', (e) => toast('脚本错误：' + e.message, 'err'));
-window.addEventListener('unhandledrejection', (e) => toast('异步错误：' + ((e.reason as Error)?.message ?? String(e.reason)), 'err'));
-
 function scrollEl(): HTMLElement | null {
   for (const sel of ['#reader', '.content', 'main']) {
     const el = document.querySelector<HTMLElement>(sel);
@@ -4491,6 +4448,9 @@ function focusNextSuggestion(step: number): void {
 function suggestionByEl(el: HTMLElement): Suggestion | undefined {
   return S.suggestions.find((x) => String(x.markId) === el.dataset.markId);
 }
+
+/* uikit 解耦桥：总结面板"打开修订建议页"（uikit 不反向依赖 main） */
+window.addEventListener('layertext:open-suggest', () => switchView('suggest'));
 
 /* ---- 全局快捷键 ---- */
 document.addEventListener('keydown', (e) => {
@@ -5803,23 +5763,6 @@ const syncPop = $('sync-pop');
 
 function hideSyncPop(): void {
   syncPop.classList.remove('open');
-}
-
-/** 批量执行总结面板（右下角浮层）：应用/⚠/拦下/落建议页 一张表看清，可直达建议页 */
-function showSummaryPop(html: string): void {
-  let el = document.getElementById('summary-pop');
-  if (!el) {
-    el = document.createElement('div');
-    el.id = 'summary-pop';
-    document.body.appendChild(el);
-  }
-  el.innerHTML = html;
-  el.classList.add('open');
-  el.querySelector('#sum-close')?.addEventListener('click', () => el!.classList.remove('open'));
-  el.querySelector('#sum-suggest')?.addEventListener('click', () => {
-    el!.classList.remove('open');
-    switchView('suggest');
-  });
 }
 
 interface SyncTargetPlan {
