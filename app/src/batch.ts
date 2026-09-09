@@ -10,16 +10,15 @@ import { $, setStatus } from './uikit.js';
 import {
   activeSession,
   addSession,
-  applyRewrite,
   buildLexiconNow,
   docxToText,
-  loadBookConfig,
   mergedSelection,
   reinforceWordsNow,
   readTextSmart,
   runQcCurrent,
 } from './main.js';
 import { showAiSettings } from './settings.js';
+import { applyRewrite, loadBookConfig } from './bookio.js';
 import {
   buildBookReportMd,
   chnoFromPath,

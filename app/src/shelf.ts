@@ -10,15 +10,14 @@ import { $, setStatus, toast, hidePop } from './uikit.js';
 import {
   activeSession,
   fileSummary,
-  loadBookConfig,
   loadBuiltinDemo,
   openPathIntoSession,
   renderAll,
-  scrollEl,
-  scrollNow,
   syncChrome,
 } from './main.js';
 import { ensureClassGroups } from './settings.js';
+import { loadBookConfig } from './bookio.js';
+import { scrollEl, scrollNow } from './edit.js';
 import { saveConfig } from './ai.js';
 import { jumpToBookmark } from './review.js';
 import {

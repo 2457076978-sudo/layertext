@@ -15,9 +15,9 @@ import {
   readTextSmart,
   chatUntilJson,
   flashApplied,
-  scheduleHeatRail,
 } from './main.js';
 import { renderReader, sidebarHandlers, updateMarkBadge } from './reader.js';
+import { scheduleHeatRail } from './edit.js';
 import { restoreAllMarkDom, renderSidebar, scheduleSave } from './review.js';
 import { CHANGELOG_HEADER, newMarkId, type FileSession, type Mark } from './types.js';
 import { S as _S } from './state.js';

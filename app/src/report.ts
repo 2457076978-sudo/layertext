@@ -12,7 +12,6 @@ import { $, setStatus } from './uikit.js';
 import {
   activeSession,
   buildLexiconNow,
-  bufToB64,
   chatUntilJson,
   docxToText,
   mergedSelection,
@@ -42,6 +41,7 @@ import { runQc, toLegacyReport } from '../../src/core/qc.js';
 import { aggregate, diagnose, parseLedger, type LedgerRow } from '../../src/core/adoption.js';
 import { summarizeCost } from '../../src/core/aiops.js';
 import { showAiSettings } from './settings.js';
+import { bufToB64 } from './bookio.js';
 import { buildPlotPointsPrompt, simplifyMaxLen } from './ai.js';
 import { extractParas, sentsOf, splitChapter, tokenizeTxt } from '../../src/core/textpipe.js';
 import { sentenceRisks } from '../../src/core/risks.js';

@@ -13,10 +13,10 @@ import {
   mergedSelection,
   renderAll,
   reinforceWordsNow,
-  scheduleHeatRail,
   updateModePill,
 } from './main.js';
 import { showVocabEditor } from './pipew.js';
+import { scheduleHeatRail } from './edit.js';
 import {
   AI_PROVIDERS,
   aiErrHuman,
@@ -467,4 +467,140 @@ export function showStandardPop(): void {
     const v = Number(($('std-maxlen') as HTMLInputElement).value);
     void apply(v >= 8 && v <= 30 ? v : undefined);
   });
+}
+
+/* ---------- 新手导览（coach marks） ---------- */
+
+const TOUR = [
+  { sel: '#btn-open', title: '① 打开课文', text: '点「打开…」选你的书稿（Word 也可以，会自动转换）；菜单 文件 → 载入示例 可先看演示。打开后会<b>自动体检</b>。' },
+  { sel: '#btn-run', title: '② 看体检结果', text: '体检报告里生词、难句一条条列着，<b>每条都能勾选处理</b>：生词勾"要简化/已学过"，难句勾"要改"。换了词库点这里重新算。' },
+  { sel: '#reader', title: '③ 边读边标', text: '红色下划线是生词、淡红底是难句。点一个词、或拖选一句话，就能做标记。' },
+  { sel: '#sidebar', title: '④ 收尾把关', text: '右侧是审校清单：要点配额（可让 AI 摘情节要点）、终审门禁、标记清单。四项门禁全勾，这一章就算审完。' },
+];
+
+export function tourShow(i: number): void {
+  S.tourIdx = i;
+  const tip = $('tour-pop');
+  if (i < 0 || i >= TOUR.length) {
+    tip.classList.remove('open');
+    $('tour-hl').style.display = 'none';
+    void (async () => {
+      S.appConfig.tourSeen = true;
+      await saveConfig();
+    })();
+    return;
+  }
+  const step = TOUR[i];
+  const el = document.querySelector(step.sel) as HTMLElement | null;
+  if (!el) {
+    tourShow(i + 1);
+    return;
+  }
+  const r = el.getBoundingClientRect();
+  const hl = $('tour-hl');
+  hl.style.cssText = `display:block;left:${r.left - 6}px;top:${r.top - 6}px;width:${r.width + 12}px;height:${r.height + 12}px`;
+  tip.innerHTML = `<div class="pop-h">${step.title}</div><p style="line-height:1.8">${step.text}</p>
+    <div class="row-btns"><button id="tour-next" class="primary">${i === TOUR.length - 1 ? '完成' : '下一步'}</button><button id="tour-skip">跳过导览</button></div>`;
+  tip.classList.add('open');
+  const tr = tip.getBoundingClientRect();
+  tip.style.left = Math.min(Math.max(8, r.left), window.innerWidth - tr.width - 12) + 'px';
+  tip.style.top = (r.bottom + 10 + tr.height > window.innerHeight ? Math.max(8, r.top - tr.height - 10) : r.bottom + 10) + 'px';
+  $('tour-next').addEventListener('click', () => tourShow(i + 1));
+  $('tour-skip').addEventListener('click', () => tourShow(-1));
+}
+
+/* ---------- 首启动欢迎（三步式：欢迎 → 配 AI → 语言 → 导览） ---------- */
+
+export function showWelcome(): void {
+  const wp = $('welcome-pop');
+  wp.classList.add('open');
+  const stepWelcome = () => {
+    wp.innerHTML = `
+      <div class="pop-h" style="font-size:17px">欢迎使用 LayerText 分层读</div>
+      <p style="margin:8px 0 4px;line-height:1.8">这是帮你把英文原著<strong>简化成学生能读的版本</strong>的工具（简化到什么程度由你的词库决定）。先花一分钟完成初始设置：</p>
+      <div class="w-steps">
+        <div class="w-step"><b>① 连接 AI</b>（可跳过，不连也能用质检与标记）</div>
+        <div class="w-step"><b>② 确认语言</b>（界面语言与要简化的文本语言）</div>
+        <div class="w-step"><b>③ 开始使用</b>（打开课文后自动进入四步导览）</div>
+      </div>
+      <div class="row-btns">
+        <button id="w-next" class="primary">开始设置</button>
+        <button id="w-later">跳过，直接用</button>
+      </div>`;
+    $('w-next').addEventListener('click', stepAi);
+    $('w-later').addEventListener('click', () => void closeWelcome());
+  };
+
+  const stepAi = () => {
+    wp.innerHTML = `
+      <div class="pop-h">① 连接 AI（第 1/2 步）</div>
+      <p class="dim">AI 负责"帮改写"：整章改写、按标记修改、对话助手。没 Key？点菜单 帮助 → 如何获取 AI 的 Key（教程 2 分钟）。也可以现在跳过，以后在菜单 LayerText → AI 设置 配。</p>
+      <div class="fld" style="margin-top:8px"><label style="display:block;color:var(--muted);font-size:12px;margin-bottom:4px">选择服务商</label>
+        <select id="w-provider">${AI_PROVIDERS.map((p, i) => `<option value="${i}">${p.name}</option>`).join('')}</select></div>
+      <div class="fld"><label style="display:block;color:var(--muted);font-size:12px;margin-bottom:4px">API Key（sk-…，只存本机）</label>
+        <input id="w-key" type="password" placeholder="粘贴你的 Key" style="width:100%" /></div>
+      <div class="row-btns">
+        <button id="w-save" class="primary">保存并下一步</button>
+        <button id="w-skip">暂不配置，跳过</button>
+      </div>
+      <div class="dim" id="w-out" style="margin-top:6px;min-height:16px"></div>`;
+    const applyProvider = (i: number) => {
+      const p = AI_PROVIDERS[i];
+      (wp.querySelector('#w-out') as HTMLElement).dataset.url = p.url;
+      (wp.querySelector('#w-out') as HTMLElement).dataset.tip = p.keyTip;
+    };
+    applyProvider(0);
+    $('w-provider').addEventListener('change', () => applyProvider(Number(($('w-provider') as HTMLSelectElement).value)));
+    $('w-skip').addEventListener('click', stepLang);
+    $('w-save').addEventListener('click', async () => {
+      const out = $('w-out') as HTMLElement;
+      const p = AI_PROVIDERS[Number(($('w-provider') as HTMLSelectElement).value)];
+      const key = ($('w-key') as HTMLInputElement).value.trim();
+      if (!key) {
+        out.textContent = '还没填 Key——填了再保存，或点"跳过"';
+        return;
+      }
+      out.textContent = '连接中…';
+      try {
+        const resp = await tauriFetch(`${p.url}/chat/completions`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+          body: JSON.stringify({ model: p.models[0] ?? 'gpt-4o-mini', max_tokens: 8, messages: [{ role: 'user', content: 'ping' }] }),
+        });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        S.appConfig.baseUrl = p.url;
+        S.appConfig.model = p.models[0] ?? 'gpt-4o-mini';
+        await saveConfig();
+        await invoke('save_api_key', { key });
+        out.textContent = '✓ 连接成功，已保存';
+        setTimeout(stepLang, 600);
+      } catch (e) {
+        out.textContent = '✗ ' + aiErrHuman(e) + '（可跳过稍后再配）';
+      }
+    });
+  };
+
+  const stepLang = () => {
+    wp.innerHTML = `
+      <div class="pop-h">② 语言确认（第 2/2 步）</div>
+      <div class="fld" style="margin-top:8px"><label style="display:block;color:var(--muted);font-size:12px;margin-bottom:4px">软件界面语言</label>
+        <select id="w-ui-lang"><option selected>中文</option><option disabled>English（即将支持）</option></select></div>
+      <div class="fld"><label style="display:block;color:var(--muted);font-size:12px;margin-bottom:4px">要简化的文本语言</label>
+        <select id="w-text-lang"><option selected>英语（当前版本支持）</option><option disabled>其他语言（即将支持）</option></select>
+        <div class="dim" style="margin-top:4px">词库与句法质检引擎基于中国课标英语词汇开发，当前针对英语文本。</div></div>
+      <div class="row-btns">
+        <button id="w-finish" class="primary">完成，开始使用</button>
+      </div>`;
+    $('w-finish').addEventListener('click', () => {
+      void closeWelcome();
+      setStatus('设置完成！从书架选一本书，或点「打开…」开始', 'saved');
+    });
+  };
+
+  stepWelcome();
+}
+async function closeWelcome(): Promise<void> {
+  $('welcome-pop').classList.remove('open');
+  S.appConfig.firstRunSeen = true;
+  await saveConfig();
 }
