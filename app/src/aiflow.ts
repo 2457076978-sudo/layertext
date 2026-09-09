@@ -10,7 +10,7 @@ import { activeSession, flashApplied, persistEdit, chatUntilJson, switchView } f
 import { renderReader, sidebarHandlers, updateMarkBadge } from './reader.js';
 import { renderSidebar, scheduleSave } from './review.js';
 import { CHANGELOG_HEADER, typeLabel, type FileSession, type Mark, type Suggestion } from './types.js';
-import { csvCell, estTokens, findOriginalFlex, hasProseChinese, locateOriginal, normalizeZhNotes, stripMarkdownNoise, remapMarks } from './pure.js';
+import { csvCell, estTokens, findOriginalFlex, hasProseChinese, locateOriginal, normalizeZhNotes, pickSingleRewrite, resolveSuggestionTarget, stripMarkdownNoise, remapMarks, validSuggestionText } from './pure.js';
 import { extractParas, sentsOf, splitChapter } from '../../src/core/textpipe.js';
 import { checkRevisedText } from './pure.js';
 import type { LedgerRow } from '../../src/core/adoption.js';
@@ -169,8 +169,16 @@ export async function aiSuggest(instruction?: string): Promise<void> {
       }
     }
     S.aiHistory.push({ role: 'assistant', content: JSON.stringify(raw) });
+    // AI 边界 #21：revised/original 必须是单一非空字符串——数组（多条变体）/对象/空串一律拒收并明示
+    let schemaRejected = 0;
     S.suggestions = raw
-      .filter((x) => x.revised)
+      .filter((x) => {
+        if (!validSuggestionText(x.revised) || !validSuggestionText(x.original)) {
+          schemaRejected++;
+          return false;
+        }
+        return true;
+      })
       .map((x) => {
         // AI 边界 #16：AI 偶在 revised/original 里混 Markdown 记号（**加粗**等）——归一化剥离后再进管线（形态枚举表）
         const risk = checkRev(stripMarkdownNoise(String(x.revised)));
@@ -184,6 +192,10 @@ export async function aiSuggest(instruction?: string): Promise<void> {
           check: { passive: risk.passive, relcl: risk.relcl, pastperf: risk.pastperf, overlong: risk.overlong },
         };
       });
+    if (schemaRejected > 0) {
+      setStatus(`已拒收 ${schemaRejected} 条不合规建议（AI 返回了多条变体或非文本字段，schema 约定为单条）——其余正常处理，可点「重新请求 AI」重试`, 'err');
+      toast(`已拒收 ${schemaRejected} 条不合规建议（多条变体/非文本）`, 'info');
+    }
     if (S.appConfig.autoRewriteOnMark && S.suggestions.length > 0) {
       // 全局直改：能定位的建议直接生效（写工作稿+日志；⚠︎ 复核项计数提醒复查）；
       // 定位失败的自动落入「修订建议」页逐条待人工采纳——建议不因直改失败而丢失
@@ -243,38 +255,18 @@ export async function acceptSuggestion(g: Suggestion, opts: { scene?: string; ou
   const outcome = opts.outcome ?? '采纳';
   const s = activeSession();
   if (!s) return false;
-  // 句级坐标（日志定位与漂移重挂）：尽力而为，拿不到不阻塞——替换成败由下面的宽容匹配决定
-  if (g.pi === undefined || g.si === undefined) {
-    const loc = locateSent(s, g.original);
-    if (loc) {
-      g.pi = loc.pi;
-      g.si = loc.si;
-    }
-  } else {
-    const paras = extractParas(splitChapter(s.md).body);
-    const cur = sentsOf(paras[g.pi] ?? '', false)[g.si];
-    if (cur !== g.original) {
-      const loc = locateSent(s, g.original);
-      if (loc) {
-        g.pi = loc.pi;
-        g.si = loc.si;
-      }
-    }
-  }
-  let at = s.md.indexOf(g.original);
-  if (at < 0) {
-    const flex = findOriginalFlex(s.md, g.original); // 空白/连字符差异容忍
-    if (flex) {
-      at = flex.start;
-      g.original = flex.exact;
-    }
-  }
-  if (at < 0) {
-    setStatus(`正文中找不到该原句，已跳过：${g.original.slice(0, 24)}…`, 'err');
+  // AI 边界 #18：每条建议独立定位（同句多条互不依赖——第一条改完后第二条按自己 original 重新定位，
+  // 失败落「修订建议」页，绝不写错位置），决策逻辑在 pure.resolveSuggestionTarget（有显式测试锁定）
+  const target = resolveSuggestionTarget(s.md, { pi: g.pi, si: g.si, original: g.original });
+  if (!target) {
+    setStatus(`正文中找不到该原句，已跳过（留在「修订建议」页）：${g.original.slice(0, 24)}…`, 'err');
     return false;
   }
+  g.pi = target.pi;
+  g.si = target.si;
+  g.original = target.original;
   g.revised = normalizeZhNotes(g.revised); // 生词注释统一全角紧贴（word（中文））
-  s.md = s.md.slice(0, at) + g.revised + s.md.slice(at + g.original.length);
+  s.md = s.md.slice(0, target.at) + g.revised + s.md.slice(target.at + g.original.length);
 
   // 标记对齐 + 对应标记清除 + 落盘
   const removed = s.review.marks.filter((m) => m.id === g.markId);
@@ -459,15 +451,19 @@ export async function aiRewriteSentence(pi: number, si: number, intent: string, 
       4000,
       '逐句改写',
     );
-    const arr = arrRaw as { original?: string; revised?: string; basis?: string; alternative?: string }[];
-    const one = arr[0];
-    if (!one?.revised) throw new Error('AI 未返回改写');
-    const risk = checkRev(String(one.revised));
+    // AI 边界 #21：schema 约定单对象——AI 擅自返回多条变体让用户选＝拒收（此前静默取第一条）
+    const picked = pickSingleRewrite(arrRaw);
+    if (!picked.ok) {
+      const why = picked.reason === 'multi' ? 'AI 返回了多条变体（应为单条），已拒收' : picked.reason === 'empty' ? 'AI 未返回改写' : 'AI 返回的改写字段不是单一文本（多条变体/对象），已拒收';
+      throw new Error(why + '——请重试');
+    }
+    const one = picked;
+    const risk = checkRev(one.revised);
     const g: Suggestion = {
       markId: autoMarkId ?? 'rw-' + Date.now().toString(36),
       type: intent || '词改写',
-      original: String(one.original ?? sent),
-      revised: String(one.revised),
+      original: one.original ?? sent,
+      revised: one.revised,
       basis: one.basis ?? '',
       alternative: one.alternative,
       status: 'pending',

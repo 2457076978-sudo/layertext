@@ -15,13 +15,16 @@ export function csvCell(v: string): string {
   return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
 }
 
-/** 在正文中唯一定位原句（句文本精确匹配；多处或未找到返回 null）——行内建议挂载用 */
+/** 在正文中唯一定位原句（归一化比对：sentsOf 输出带尾随空格、连字符被拆成空格——精确比对曾致
+ *  #18 重定位恒失败；多处或未找到返回 null）——行内建议挂载与建议重定位共用 */
 export function locateOriginal(md: string, original: string): { pi: number; si: number } | null {
+  if (!original.trim()) return null;
+  const target = normWs(original);
   const paras = extractParas(splitChapter(md).body);
   const hits: { pi: number; si: number }[] = [];
   paras.forEach((p, pi) =>
     sentsOf(p, false).forEach((sent, si) => {
-      if (sent === original) hits.push({ pi, si });
+      if (normWs(sent) === target) hits.push({ pi, si });
     }),
   );
   return hits.length === 1 ? hits[0] : null;
@@ -266,6 +269,70 @@ export function findOriginalFlex(md: string, original: string): { start: number;
   const start = map[h];
   const end = map[h + target.length - 1] + 1;
   return { start, exact: md.slice(start, end) };
+}
+
+/** AI 边界 #18：建议定位三段决策（每条独立定位，同句多条互不依赖）——
+ *  ① 缺坐标或坐标句已变 → locateSent 重定位（尽力而为，只影响日志）；
+ *  ② indexOf 精确匹配；③ findOriginalFlex 宽容匹配（空白/连字符差异，命中回写正文原句形态）。
+ *  返回 null = 定位失败：建议留在「修订建议」页人工处理，绝不写错位置（UI 归宿②）。 */
+export function resolveSuggestionTarget(
+  md: string,
+  g: { pi?: number; si?: number; original: string },
+): { pi?: number; si?: number; at: number; original: string } | null {
+  if (!g.original.trim()) return null; // 空 original：indexOf("") 恒返 0，会把建议写进文首——直接定位失败
+  let { pi, si } = g;
+  const original0 = g.original;
+  if (pi === undefined || si === undefined) {
+    const loc = locateOriginal(md, original0);
+    if (loc) {
+      pi = loc.pi;
+      si = loc.si;
+    }
+  } else {
+    const paras = extractParas(splitChapter(md).body);
+    const cur = sentsOf(paras[pi] ?? '', false)[si];
+    if (cur !== original0) {
+      const loc = locateOriginal(md, original0);
+      if (loc) {
+        pi = loc.pi;
+        si = loc.si;
+      }
+    }
+  }
+  let at = md.indexOf(original0);
+  let original = original0;
+  if (at < 0) {
+    const flex = findOriginalFlex(md, original0);
+    if (flex) {
+      at = flex.start;
+      original = flex.exact;
+    }
+  }
+  if (at < 0) return null;
+  return { pi, si, at, original };
+}
+
+/** AI 边界 #21：建议字段 schema 校验——revised/original 必须是单一非空字符串。
+ *  数组（多条变体）、对象（字段包装）、空串一律 false（拒收+明示，UI 归宿③）。 */
+export function validSuggestionText(v: unknown): v is string {
+  return typeof v === 'string' && v.trim().length > 0;
+}
+
+/** AI 边界 #21：单句改写的响应裁决——schema 约定"单对象"，多条=AI 擅自给变体让用户选，拒收 */
+export function pickSingleRewrite(
+  arr: unknown[],
+): { ok: true; original?: string; revised: string; basis?: string; alternative?: string } | { ok: false; reason: 'multi' | 'empty' | 'bad-shape' } {
+  if (arr.length > 1) return { ok: false, reason: 'multi' };
+  const one = arr[0] as { original?: unknown; revised?: unknown; basis?: unknown; alternative?: unknown } | undefined;
+  if (!one) return { ok: false, reason: 'empty' };
+  if (!validSuggestionText(one.revised) || !validSuggestionText(one.original)) return { ok: false, reason: 'bad-shape' };
+  return {
+    ok: true,
+    original: one.original,
+    revised: one.revised,
+    basis: typeof one.basis === 'string' ? one.basis : undefined,
+    alternative: typeof one.alternative === 'string' ? one.alternative : undefined,
+  };
 }
 
 /** 生词注释规整：AI 偶用半角括号加空格（word (中文)），统一为全角紧贴（word（中文））——只动"英文词+(纯中文)"模式 */

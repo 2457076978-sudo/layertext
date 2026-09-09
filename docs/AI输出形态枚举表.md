@@ -31,10 +31,10 @@
 |---|---|---|---|---|
 | 16 | revised 混入 Markdown 记号（`**加粗**`、`*斜体*`） | **已防（09-09）**：stripMarkdownNoise 归一化剥离（建议构建+词汇简化映射值两处），测试 phrase_mark.test.ts | ④ | 已防 |
 | 17 | 词汇简化映射回传原形，标记处是屈折形态（过去式/复数） | **已防（09-09）**：morphMismatch 词尾形态类比对（ed/ing/s/原形），不一致→状态行 ⚠ 提示复核不拦截（B3） | ③+提示 | 已防 |
-| 18 | 同句多条建议顺序依赖（应用第一条后第二条 original 失配） | 每条独立定位+失败落建议页（架构已支持，无显式测试） | ② | 待验证 P2 |
+| 18 | 同句多条建议顺序依赖（应用第一条后第二条 original 失配） | **已防（09-10）**：定位决策抽纯函数 resolveSuggestionTarget（坐标重定位→精确→宽容三段，失败 null 落建议页），acceptSuggestion 改走它；顺根修 locateOriginal 精确比对缺陷（sentsOf 输出带尾随空格/连字符拆空格，重定位曾恒失败→归一化比对）+空 original 守卫（indexOf("") 恒返 0 会写进文首）；测试 suggest_order_schema.test.ts（同句两条/正倒序一致/坐标漂移/连字符形态） | ② | 已防 |
 | 19 | 缩写（Mr./Dr./U.S.）导致句边界漂移 | **已防（09-09）**：sentsOf 缩写合并表（TS+Python 同步）；实现时 eval 门禁当场抓住正则未锚定 bug（`storms.` 被 `Ms.$` 尾部命中整句误并）——评测门禁价值的实证 | ④ | 已防 |
 | 20 | 段落前导空格形态差 | **已验证（09-09）**：sentsOf 归一化天然覆盖；回归测试锁定 | ④ | 已防 |
-| 21 | AI 不按 schema 返回多条变体让用户选 | schema 校验拒收 | ③ | 待验证 P2 |
+| 21 | AI 不按 schema 返回多条变体让用户选 | **已防（09-10）**：validSuggestionText（revised/original 必须单一非空字符串——数组=多条变体、对象=字段包装、空串一律拒收+状态行/toast 明示）+ pickSingleRewrite（单句改写多条变体拒收，此前静默取第一条）；顺关闭空 original 建议写进文首的潜在事故；测试 suggest_order_schema.test.ts | ③ | 已防 |
 | 22 | **键值对映射的数组包装**：AI 老实输出映射对象 {"词":"替换"}，但 parseAiJson 恒返数组（单对象自动包一层）——Object.assign(gloss, 数组) 得 {0:{…}} 恒空，AI 给的替换全丢、全部误判"换不出"降级加注（真事故 09-09 夜 Wayne 实测"词汇简化最后都变成标中文"） | **已防**：normalizeGlossMap 归一化（纯映射对象/字段对对象 word+simple 等字段名变体全兼容）+提示词给输出示例；真 key 重演实证修复（AI 原话→旧法 miss→新法命中）；测试 gloss_map.test.ts | ④ | 已防 |
 | 23 | **短语键被答成子词**：标记"Seven Commandments"，AI 键只给 "Commandments"（它认为 Seven 不超纲）——按完整短语查恒 miss，误判"换不出"（真事故 09-09 夜 Wayne 实测短语简化失灵） | **已防**：glossLookup 子集匹配——键词 ⊆ 标记词 且剩余词全部已知 → 值替换整个短语（the Seven Commandments→the rules；剩余词未知不整换防语义破坏）；真 key 重演实证 | ④ | 已防 |
 | 24 | 映射值是中文（如"七诫"，AI 把"简单词"答成中文）——hasProseChinese ≥4 字防线漏过短中文 | **已防**：hasAnyChinese 单汉字即拒（值过滤+查找双重）；测试 gloss_map.test.ts | ③④ | 已防 |
