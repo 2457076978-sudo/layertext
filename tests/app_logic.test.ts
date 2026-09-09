@@ -2,7 +2,7 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { applyRewriteTo, findOriginalFlex, normalizeAndSplitChapters, normWs, parseAiJson, withRetry } from '../app/src/pure.js';
+import { applyRewriteTo, findOriginalFlex, hasProseChinese, normalizeAndSplitChapters, normWs, parseAiJson, withRetry } from '../app/src/pure.js';
 
 test('withRetry：网络错误自动重试后成功', async () => {
   let calls = 0;
@@ -466,4 +466,11 @@ test('findOriginalFlex：歌篇引用块前缀互认（md 行首 > 被引擎拆�
   const r = findOriginalFlex(md, 'Beasts of England, beasts of Ireland, Beasts of every land and clime, Listen to my joyful news');
   assert.ok(r, '应定位成功');
   assert.ok(r!.exact.includes('\n'), 'exact 取正文原文切片（含换行引用块）');
+});
+
+test('hasProseChinese：合法生词注释放行，成句中文说明拒收', () => {
+  assert.equal(hasProseChinese('Tyrant Man（暴君） shall be thrown down.'), false);
+  assert.equal(hasProseChinese('They sang it five times in a row（连续）.'), false);
+  assert.equal(hasProseChinese('Cruel whips no more shall crack. (标注：这是歌曲中的诗句，保留原样以体现韵律)'), true);
+  assert.equal(hasProseChinese('任何动物都不能住在房子里。'), true);
 });

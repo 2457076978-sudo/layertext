@@ -25,6 +25,7 @@ import {
   estTokens,
   filterTargets,
   findOriginalFlex,
+  hasProseChinese,
   locateOriginal,
   mergeQuotaTexts,
   alignSentencePairs,
@@ -2476,6 +2477,13 @@ async function aiSuggest(instruction?: string): Promise<void> {
     setStatus('请先载入文本', 'err');
     return;
   }
+  // 幽灵词标记卫生：词已在之前修订中消失的标记不再发给 AI（曾诱导 AI 凭原著旧句作答、定位失败）
+  const ghosts = s.review.marks.filter((m) => m.level === 'word' && m.word && !s.md.includes(m.word));
+  if (ghosts.length) {
+    s.review.marks = s.review.marks.filter((m) => !ghosts.includes(m));
+    renderSidebar(s, sidebarHandlers);
+    toast(`已清除 ${ghosts.length} 条过期标记（词已在之前修订中处理）：${ghosts.map((m) => m.word).join('、')}`, 'info');
+  }
   if (s.review.marks.length === 0 && !instruction) {
     setStatus('还没有标记——先在正文里点词/拖选句子做标记，AI 才知道往哪改', 'err');
     return;
@@ -2527,14 +2535,19 @@ async function aiSuggest(instruction?: string): Promise<void> {
       // 定位失败的自动落入「修订建议」页逐条待人工采纳——建议不因直改失败而丢失
       let warned = 0;
       let applied = 0;
+      let cnBlocked = 0;
       for (const g of [...S.suggestions]) {
         if (g.check.passive || g.check.relcl || g.check.pastperf || g.check.overlong) warned++;
+        if (hasProseChinese(g.revised)) {
+          cnBlocked++; // AI 输出了中文说明/翻译（如"（标注：…）"）——拒写正文，留在建议页人工看
+          continue;
+        }
         if (await acceptSuggestion(g, { scene: '自动直改', outcome: '直改' })) applied++;
       }
       const leftover = S.suggestions.length;
       if (leftover > 0) renderSuggestions();
       setStatus(
-        `AI 直改完成：自动应用 ${applied} 条${warned ? `，其中 ${warned} 条引擎复核⚠︎（黑名单/超长残留），已留痕变更日志，建议复查` : ''}${leftover ? `；未应用的 ${leftover} 条已放入「修订建议」页（原句定位失败，可逐条手动采纳）` : ''} ${usage}`,
+        `AI 直改完成：自动应用 ${applied} 条${warned ? `，其中 ${warned} 条引擎复核⚠︎（黑名单/超长残留），已留痕变更日志，建议复查` : ''}${cnBlocked ? `；拦下 ${cnBlocked} 条含中文说明文字的建议（见「修订建议」页）` : ''}${leftover ? `；未应用的 ${leftover} 条已放入「修订建议」页` : ''} ${usage}`,
         'saved',
       );
       return;
@@ -2809,6 +2822,8 @@ async function acceptSuggestion(g: Suggestion, opts: { scene?: string; outcome?:
   // 标记对齐 + 对应标记清除 + 落盘
   const removed = s.review.marks.filter((m) => m.id === g.markId);
   s.review.marks = s.review.marks.filter((m) => m.id !== g.markId);
+  // 词被本次改写替换掉的词标记一并完成（如 bleated→made soft sounds 后，bleated 标记不再残留成幽灵）
+  s.review.marks = s.review.marks.filter((m) => !(m.level === 'word' && m.word && g.original.includes(m.word) && !g.revised.includes(m.word)));
   remapMarks(s.review.marks, s.md);
   g.status = 'accepted';
   S.suggestions = S.suggestions.filter((x) => x !== g);

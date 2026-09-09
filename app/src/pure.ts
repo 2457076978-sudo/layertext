@@ -144,6 +144,13 @@ export function findOriginalFlex(md: string, original: string): { start: number;
   return { start, exact: md.slice(start, end) };
 }
 
+/** revised 中文防线：剔除「英文词（中文）」生词注释后仍含成句中文（≥4 连续汉字）
+ *  = AI 输出了说明文字/翻译（如"（标注：这是歌曲中的诗句…）"），拒用 */
+export function hasProseChinese(text: string): boolean {
+  const stripped = text.replace(/[A-Za-z\u0027-]+\s*（[^）]*）/g, ' ');
+  return /[\u4e00-\u9fff]{4,}/.test(stripped);
+}
+
 /** 书级替换：词边界确定性替换（机器执行，零遗漏） */
 export function applyRewriteTo(text: string, rules: { from: string; to: string }[]): string {
   let t = text;
