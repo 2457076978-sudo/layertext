@@ -2459,6 +2459,7 @@ function buildAiUserPrompt(session: FileSession): string {
   const maxLen = simplifyMaxLen();
   const r = session.report;
   const marks = session.review.marks
+    .filter((m) => m.type !== 'zh') // 加中文标注走确定性管线（applyZhAnnotations），不进句子改写
     .map((m) => {
       const sent = sentsOf(paras[m.pi] ?? '', false)[m.si] ?? '(未找到句子)';
       const label = m.level === 'word' ? `词标记：${m.word ?? ''}（${typeLabel(m.type)}${m.note ? '，备注：' + m.note : ''}）` : `句标记（${typeLabel(m.type)}${m.note ? '，备注：' + m.note : ''}）`;
@@ -2470,6 +2471,87 @@ ${r ? `本章质检摘要：覆盖率 ${(r.coverage * 100).toFixed(1)}%，平均
 
 教师标记清单（逐条给修订建议）：
 ${marks || '（无标记）'}`;
+}
+
+/** 「加中文标注」管线：AI 只出 词→中文 映射（一次小调用，零改写风险），
+ *  原句逐字保留，机器在标记所在段对该词的词边界出现处插入 词（中文） */
+async function applyZhAnnotations(s: FileSession, marks: Mark[]): Promise<void> {
+  const words = [...new Set(marks.map((m) => m.word!).filter(Boolean))];
+  const gloss: Record<string, string> = {};
+  setStatus(`正在获取 ${words.length} 个词的中文释义（不改写句子）…`);
+  try {
+    const { raw } = await chatUntilJson(
+      [
+        { role: 'system', content: '你是英汉词典。把英文单词/短语译成适合初中生的简短中文释义（2-6 个字）。只输出一个 JSON 对象（{"词":"释义"}），不要任何其他文字。' },
+        { role: 'user', content: words.join('\n') },
+      ],
+      2000,
+      '词义',
+    );
+    Object.assign(gloss, raw as unknown as Record<string, string>);
+  } catch (e) {
+    setStatus('词义获取失败：' + e, 'err');
+    return;
+  }
+  const paras = extractParas(splitChapter(s.md).body);
+  const done: string[] = [];
+  for (const m of marks) {
+    const w = m.word!;
+    const zh = gloss[w] ?? gloss[w.toLowerCase()] ?? gloss[w.replace(/\s+/g, ' ')];
+    if (!zh) continue;
+    const esc = w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp(`\\b${esc}\\b`, 'i');
+    let at = -1;
+    let matched = '';
+    const para = paras[m.pi] ?? '';
+    const hit = re.exec(para);
+    if (hit) {
+      const pAt = s.md.indexOf(para);
+      if (pAt >= 0) {
+        at = pAt + hit.index;
+        matched = s.md.slice(at, at + hit[0].length);
+      }
+    }
+    if (at < 0) {
+      const h2 = re.exec(s.md);
+      if (h2) {
+        at = h2.index;
+        matched = h2[0];
+      }
+    }
+    if (at < 0) continue;
+    const after = s.md.slice(at + matched.length, at + matched.length + 1);
+    if (after === '（') continue; // 已带注释，跳过
+    s.md = s.md.slice(0, at + matched.length) + `（${zh}）` + s.md.slice(at + matched.length);
+    s.review.marks = s.review.marks.filter((x) => x.id !== m.id);
+    remapMarks(s.review.marks, s.md);
+    done.push(`${matched}（${zh}）`);
+  }
+  if (!done.length) {
+    setStatus('没有可插入的中文标注（词已不在正文中或释义缺失）', 'err');
+    return;
+  }
+  scheduleSave(s, () => undefined);
+  renderReader(s);
+  renderSidebar(s, sidebarHandlers);
+  const date = new Date().toLocaleDateString('sv-SE');
+  const outDir = s.sourcePath ? s.sourcePath.slice(0, s.sourcePath.lastIndexOf('/')) : await invoke<string>('reports_dir');
+  const logPath = `${outDir}/变更日志_AI审核.csv`;
+  try {
+    let csv = '';
+    try {
+      csv = await invoke<string>('read_text_file', { path: logPath });
+    } catch {
+      /* 新建 */
+    }
+    if (!csv.trim()) csv = CHANGELOG_HEADER.join(',') + '\n';
+    for (const d of done) csv += ['R1', date, `标准${simplifyMaxLen()}词`, '', '', d, d, 'R13', '加中文标注（机器插入，原句不动）', 'AI直改-加注'].map(csvCell).join(',') + '\n';
+    await invoke('write_text_file', { path: logPath, content: csv });
+  } catch {
+    /* 日志失败不阻塞 */
+  }
+  flashApplied(done[done.length - 1]);
+  setStatus(`已加中文标注 ${done.length} 处（原句未动）：${done.slice(0, 6).join('、')}${done.length > 6 ? '…' : ''}`, 'saved');
 }
 
 async function aiSuggest(instruction?: string): Promise<void> {
@@ -2499,6 +2581,17 @@ async function aiSuggest(instruction?: string): Promise<void> {
   btn.textContent = '⏳ AI 请求中…';
   btn.disabled = true;
   try {
+    // 「加中文标注」是确定性操作，不走句子改写管线（曾致 AI 顺手简化整句）：
+    // AI 只出 词→中文 映射，原句逐字保留、机器插入（词（中文））
+    const zhMarks = s.review.marks.filter((m) => m.type === 'zh' && m.word);
+    if (zhMarks.length) {
+      await applyZhAnnotations(s, zhMarks);
+      if (s.review.marks.length === 0 && !instruction) {
+        btn.textContent = '按标记修改';
+        btn.disabled = false;
+        return;
+      }
+    }
     const system = await buildSystemPrompt();
     let messages: { role: string; content: string }[];
     if (instruction && S.aiHistory.length > 0) {
