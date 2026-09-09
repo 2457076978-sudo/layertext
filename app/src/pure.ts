@@ -302,6 +302,37 @@ export function morphMismatch(from: string, to: string): boolean {
   return cls(from) !== cls(to);
 }
 
+/** AI 边界 #24：映射值含任何汉字（哪怕 1 个，如"七诫"）＝AI 把"简单词"答成了中文——拒用（曾漏过 ≥4 字防线） */
+export function hasAnyChinese(s: string): boolean {
+  return /[\u4e00-\u9fff]/.test(s);
+}
+
+/** AI 边界 #23（真事故：短语简化恒 miss）：AI 常把短语的键答成子词（"Seven Commandments"→键只给 "Commandments"）。
+ *  查找升级：精确 → 小写 → 词集子集匹配——键词集 ⊆ 标记词集 且标记中剩余词全部已知（known）时，
+ *  用键的值替换**整个短语**（the Seven Commandments→the rules 成立；tired of 的 tired 子集匹配若 of 未知则不整换，防语义破坏）。 */
+export function glossLookup(gloss: Record<string, string>, word: string, known?: Set<string>): { simple: string; via: 'exact' | 'subset' } | null {
+  const keys = [word, word.toLowerCase(), word.replace(/\s+/g, ' ')];
+  for (const k of keys) {
+    if (gloss[k] && !hasAnyChinese(gloss[k]) && gloss[k].toLowerCase() !== word.toLowerCase()) return { simple: gloss[k], via: 'exact' };
+  }
+  if (!known) return null;
+  const wordsOf = (s: string): string[] => s.toLowerCase().match(/[a-z][a-z'-]*/g) ?? [];
+  const target = wordsOf(word);
+  if (target.length < 2) return null; // 子集匹配只对多词短语有意义
+  for (const [k, v] of Object.entries(gloss)) {
+    if (hasAnyChinese(v)) continue;
+    const kw = wordsOf(k);
+    if (!kw.length || kw.length >= target.length) continue; // 键必须是标记的严格子集
+    const kwSet = new Set(kw);
+    if (!kw.every((x) => target.includes(x))) continue; // 键词全在标记里
+    const rest = target.filter((x) => !kwSet.has(x));
+    if (!rest.every((x) => known.has(x))) continue; // 剩余词全已知，整块替换才不破坏语义
+    if (v.toLowerCase() === word.toLowerCase()) continue;
+    return { simple: v, via: 'subset' };
+  }
+  return null;
+}
+
 /** AI 边界 #22（真事故 09-09：词汇简化映射恒空，全部误降级加注）：
  *  chatUntilJson/parseAiJson 恒返回数组（单对象自动包数组），Object.assign(gloss, 数组) 只会得到 {0:{…}}。
  *  归一化 AI 的"词→替换"映射，兼容真实世界全部形态：纯映射对象（含被包数组）/字段对对象数组

@@ -4,6 +4,13 @@
 1.0.0 之前的版本号为开发期里程碑（当时 `package.json` 未同步递增，本文件按里程碑整理，2026-09-06 校准）。
 面向教师的通俗版功能说明见 [README](README.md) 与 [docs/PRD.md](docs/PRD.md)。
 
+## [未发布] - 2026-09-09（main · 第十三批附 2：#23/#24 短语简化失灵根修——"七条戒律这种应该可以加备注，或者简化为单词"）
+
+- **#23 子词键**：AI 常把短语键答成子词（Seven Commandments→键只给 "Commandments"）→ 完整短语查恒 miss。根修=glossLookup 子集匹配：键词 ⊆ 标记词 且剩余词全已知（S.currentKnown）→ 值替换整个短语；剩余词未知不整换（防 "tired of" 被 "tired" 值毁语义）。真 key 重演：`Seven Commandments → rules（via=subset）` ✓
+- **#24 中文值**：AI 偶把"简单词"答成中文（"七诫"2 字曾漏 ≥4 字防线）→ hasAnyChinese 单汉字即拒（值过滤+查找双重）。
+- **短语注释 AI 兜底（Wayne 本条授权"应该可以加备注"）**：多词短语词典无整词条（Seven Commandments/Animalism）——AI 只出 短语→纯中文(2-6 汉字，正则强校验) 映射，机器插入 `短语（注释）`、原句不动；**单词仍纯词典零 AI**（此前拍板不动）。真 key 重演：`{"Seven Commandments":"七诫","Animalism":"动物主义"}` 校验全过 ✓
+- 测试 161→164 绿（子集匹配正反例/中文值/同词跳过）。
+
 ## [未发布] - 2026-09-09（main · 第十三批附：#22 词汇简化映射恒空根修——Wayne 实测"最后都变成标中文"）
 
 - **根因（枚举表 #22）**：chatUntilJson/parseAiJson 恒返回数组（单对象自动包一层，by design），而 `Object.assign(gloss, 数组)` 只会得到 `{0:{…}}`——**「词汇简化」的 AI 映射从上线起每次恒空**，AI 老实给出的简单词全部丢失，每个词都被误判"换不出"→ 全部降级加中文标注（词典未收则报"既没有更简单的词、也没能加注"）。

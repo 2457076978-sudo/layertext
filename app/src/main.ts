@@ -47,6 +47,8 @@ import {
   progressPct,
   remapMarks,
   marksSurvivingManualEdit,
+  glossLookup,
+  hasAnyChinese,
   normalizeGlossMap,
   routeSelection,
   syncMarksToMd,
@@ -2705,7 +2707,39 @@ async function applyZhAnnotations(s: FileSession, marks: Mark[]): Promise<number
     setStatus('本地词典不可用：' + e, 'err');
     return 0;
   }
-  if (missed.length) setStatus(`词典未收录 ${missed.length} 个词：${missed.slice(0, 5).join('、')}${missed.length > 5 ? '…' : ''}（未加注，可在正文手写）`, 'dirty');
+  // 短语兜底（09-09 Wayne 授权）：多词短语（如 Seven Commandments）词典无整词条——AI 只出 短语→纯中文(2-6字) 映射，
+  // 机器插入、原句不动（同确定性管线思想）。单词仍纯词典零 AI（此前拍板不动）。
+  const missedPhrases = missed.filter((w) => /\s/.test(w.trim()));
+  let aiNoted = 0;
+  if (missedPhrases.length) {
+    setStatus(`词典未收 ${missed.length} 个（其中短语 ${missedPhrases.length} 个走 AI 注释兜底）…`);
+    try {
+      const { raw: praw } = await chatUntilJson(
+        [
+          {
+            role: 'system',
+            content:
+              '你是短语注释器。给每个英文短语一个准确的中文注释：2-6 个汉字，不含英文、不含拼音、不含标点（如 Seven Commandments→七诫）。只输出一个 JSON 对象 {"短语":"中文"}，键与输入完全一致，不要数组不要解释。',
+          },
+          { role: 'user', content: missedPhrases.join('\n') },
+        ],
+        1500,
+        '短语注释',
+      );
+      const pg = normalizeGlossMap(praw);
+      for (const w of missedPhrases) {
+        const zh = pg[w] ?? pg[w.toLowerCase()] ?? pg[w.replace(/\s+/g, ' ')];
+        if (zh && /^[\u4e00-\u9fff]{2,6}$/.test(zh)) {
+          gloss[w] = zh;
+          aiNoted++;
+        }
+      }
+    } catch {
+      /* AI 失败则走原有"未收录可手写"路径 */
+    }
+  }
+  const stillMissed = missed.filter((w) => !gloss[w] && !gloss[w.toLowerCase()] && !gloss[w.replace(/\s+/g, ' ')]);
+  if (stillMissed.length) setStatus(`词典未收录 ${stillMissed.length} 个词：${stillMissed.slice(0, 5).join('、')}${stillMissed.length > 5 ? '…' : ''}（未加注，可在正文手写）`, 'dirty');
   const paras = extractParas(splitChapter(s.md).body);
   const done: string[] = [];
   for (const m of marks) {
@@ -2797,17 +2831,20 @@ async function applyWordSimplifications(s: FileSession, marks: Mark[]): Promise<
     setStatus('词汇简化获取失败：' + e, 'err');
     return;
   }
-  // AI 边界防线：映射值剥 Markdown 记号（#16），空值/中文说明直接丢弃（#9 同源）
+  // AI 边界防线：映射值剥 Markdown 记号（#16）；含任何汉字＝AI 把"简单词"答成中文，拒用（#24，曾漏 ≥4 字防线）
   for (const k of Object.keys(gloss)) {
     const v = stripMarkdownNoise(String(gloss[k] ?? ''));
-    if (!v || hasProseChinese(v)) delete gloss[k];
+    if (!v || hasAnyChinese(v)) delete gloss[k];
     else gloss[k] = v;
   }
   const done: string[] = [];
   const morphWarn: string[] = [];
   for (const m of uniq) {
     const w = m.word!;
-    const simple = gloss[w] ?? gloss[w.toLowerCase()] ?? gloss[w.replace(/\s+/g, ' ')];
+    // #23：AI 常把短语键答成子词（"Seven Commandments"→键只给 "Commandments"）——
+    // 子集匹配：键词 ⊆ 标记词 且剩余词全已知 → 值替换整个短语（the Seven Commandments→the rules 成立）
+    const found = glossLookup(gloss, w, S.currentKnown);
+    const simple = found?.simple;
     if (!simple || simple.toLowerCase() === w.toLowerCase()) continue;
     const esc = w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const re = new RegExp(`\\b${esc}\\b`, 'i');
@@ -2837,7 +2874,7 @@ async function applyWordSimplifications(s: FileSession, marks: Mark[]): Promise<
     s.review.marks = s.review.marks.filter((x) => x.id !== m.id);
     s.review.marks = s.review.marks.filter((x) => !(x.level !== 'sent' && x.word && x.word.toLowerCase() === w.toLowerCase())); // 同词（词/短语级）其余标记一并完成
     remapMarks(s.review.marks, s.md);
-    done.push(`${matched}→${repl}`);
+    done.push(`${matched}→${repl}${found?.via === 'subset' ? '（整短语）' : ''}`);
   }
   // 整体思想：目标是学生读得懂——换不出更简单的词，就自动降级加中文标注
   const restMarks = marks.filter((m) => s.review.marks.some((x) => x.id === m.id));

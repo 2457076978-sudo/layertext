@@ -34,3 +34,31 @@ test('容错：非对象元素/空对象/纯字符串值过滤/长键跳过（>4
 test('直接对象输入（不经 parseAiJson 的调用方）也能归一化', () => {
   assert.deepEqual(normalizeGlossMap({ cynical: 'bitter' }), { cynical: 'bitter' });
 });
+
+import { glossLookup, hasAnyChinese } from '../app/src/pure.js';
+
+test('#23 子集匹配：短语键被 AI 答成子词——剩余词全已知才整块替换（真事故：Seven Commandments）', () => {
+  const gloss = { Commandments: 'rules' };
+  const known = new Set(['seven', 'the', 'of']);
+  const hit = glossLookup(gloss, 'Seven Commandments', known);
+  assert.ok(hit);
+  assert.equal(hit!.simple, 'rules');
+  assert.equal(hit!.via, 'subset');
+  // 反例：剩余词未知的短语不整换（防语义破坏）
+  const hit2 = glossLookup(gloss, 'Commandments of Animalism', new Set(['of']));
+  assert.equal(hit2, null);
+});
+
+test('#23 精确命中优先；单词条不走子集匹配；同词值跳过', () => {
+  assert.equal(glossLookup({ cynical: 'bitter' }, 'cynical')!.via, 'exact');
+  assert.equal(glossLookup({ cynical: 'bitter' }, 'dog'), null);
+  assert.equal(glossLookup({ commandments: 'rules' }, 'commandments', new Set(['x']))?.simple, 'rules'); // 小写兜底
+  assert.equal(glossLookup({ dog: 'dog' }, 'dog'), null); // AI 回传同词=换不出
+});
+
+test('#24 hasAnyChinese：单汉字也算（"七诫"曾漏过 ≥4 字防线）', () => {
+  assert.ok(hasAnyChinese('七诫'));
+  assert.ok(hasAnyChinese('七诫 rules'));
+  assert.ok(!hasAnyChinese('wild pig'));
+  assert.ok(!hasAnyChinese(''));
+});
