@@ -458,6 +458,37 @@
         text-decoration: dotted underline #475569;
         text-underline-offset: 3px;
       }
+      /* 学生视角：教师审校视觉全部隐藏，只留学生将读到的正文（含 word（中文） 生词注释） */
+      body.student-view .pid,
+      body.student-view .badge,
+      body.student-view .sbadge,
+      body.student-view .inline-sug,
+      body.student-view .heat-rail,
+      body.student-view .pm {
+        display: none !important;
+      }
+      body.student-view .sent.risk,
+      body.student-view .sent.mk-goods,
+      body.student-view .sent.risk.mk-goods,
+      body.student-view .sent.sug-pending {
+        background: transparent;
+      }
+      body.student-view .w {
+        color: inherit;
+        text-decoration: none;
+      }
+      body.student-view .w.oov {
+        color: inherit;
+      }
+      body.student-view .w.oov::after,
+      body.student-view .w.pending::after,
+      body.student-view .w.term::after {
+        background: transparent;
+      }
+      body.student-view #btn-student {
+        background: var(--mark-red, #c74c3f);
+        color: #fff;
+      }
       /* 短语级标记：直线下划线，颜色沿用词级类型色板（粒度=覆盖范围，类型=线色；Wayne 09-09 定：直线单一样式） */
       .pm {
         cursor: pointer;
@@ -2827,7 +2858,8 @@
         </button>
         <button id="btn-ai" title="精修：先在正文点词/划句做标记，再点这里成批改。改完即改还是等你确认，看右侧模式胶囊">
           <svg class="ico"><use href="#i-sparkle" /></svg>按标记修改
-        </button></span
+        </button>
+        <button id="btn-student" title="学生视角预览：隐藏全部审校视觉（标记下划线/风险角标/AI 建议/段号/热力轨），只看学生将读到的正文（含生词中文注释）。再点一次回到审校视角">学生视角</button></span
       >
       <span class="tspacer"></span>
       <span class="tgroup" id="grp-edit" style="display: none">

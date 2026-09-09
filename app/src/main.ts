@@ -3930,6 +3930,12 @@ $('mode-pill').addEventListener('click', async () => {
 });
 updateModePill();
 
+/* ---------- 学生视角预览：隐藏全部审校视觉，只看学生将读到的正文（含生词注释） ---------- */
+$('btn-student').addEventListener('click', () => {
+  const on = document.body.classList.toggle('student-view');
+  toast(on ? '学生视角：已隐藏标记/风险/建议/段号——这是学生将读到的样子（生词注释保留）' : '已回到审校视角', 'info');
+});
+
 /* ---------- 启动序列：配置 → 首启动欢迎 ---------- */
 setAiUi({ onStatus: (s) => setStatus(s, 'dirty') });
 
