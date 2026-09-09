@@ -11,7 +11,6 @@ import { S, esc } from './state.js';
 import { $, setStatus } from './uikit.js';
 import {
   activeSession,
-  addMark,
   buildLexiconNow,
   bufToB64,
   chatUntilJson,
@@ -20,8 +19,8 @@ import {
   openPathIntoSession,
   readTextSmart,
   renderAll,
-  sidebarHandlers,
 } from './main.js';
+import { addMark, sidebarHandlers } from './reader.js';
 import { tocChapters } from './shelf.js';
 import { renderDiffPane } from './widgets.js';
 import { scheduleSave, renderSidebar } from './review.js';

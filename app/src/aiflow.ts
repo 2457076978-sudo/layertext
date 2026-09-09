@@ -6,7 +6,8 @@
 import { invoke } from '@tauri-apps/api/core';
 import { S, esc } from './state.js';
 import { $, setStatus, toast, pop, hidePop, showSummaryPop } from './uikit.js';
-import { activeSession, renderReader, updateMarkBadge, flashApplied, persistEdit, sidebarHandlers, chatUntilJson, switchView } from './main.js';
+import { activeSession, flashApplied, persistEdit, chatUntilJson, switchView } from './main.js';
+import { renderReader, sidebarHandlers, updateMarkBadge } from './reader.js';
 import { renderSidebar, scheduleSave } from './review.js';
 import { CHANGELOG_HEADER, typeLabel, type FileSession, type Mark, type Suggestion } from './types.js';
 import { csvCell, estTokens, findOriginalFlex, hasProseChinese, locateOriginal, normalizeZhNotes, stripMarkdownNoise, remapMarks } from './pure.js';
