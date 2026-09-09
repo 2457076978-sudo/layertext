@@ -3953,7 +3953,7 @@ async function exportDocx(): Promise<void> {
     const children: (Paragraph | Table)[] = [new Paragraph({ text: s.fileName.replace(/\.(md|txt|markdown)$/i, ''), heading: HeadingLevel.HEADING_1 })];
     for (let i = 0; i < paras.length; i++) {
       const text = applyRewrite(sentsOf(paras[i], false).join(' ').replace(/\s+/g, ' ').trim());
-      if (text) children.push(new Paragraph({ children: [new TextRun({ text, size: 24, font: 'Georgia' })], spacing: { after: 160 } }));
+      if (text) children.push(new Paragraph({ children: [new TextRun({ text, size: 22, font: 'Georgia' })], spacing: { after: 100, line: 300, lineRule: 'auto' } }));
     }
     const rows = card.split('\n').filter((l) => l.trim().startsWith('|') && !/^\|[\s:-]+\|$/.test(l.trim()));
     if (rows.length >= 2) {
@@ -3968,13 +3968,23 @@ async function exportDocx(): Promise<void> {
               .split('|')
               .map((c) => c.trim());
             return new TableRow({
-              children: cells.map((c) => new TableCell({ children: [new Paragraph(c)] })),
+              children: cells.map((c) => new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: c, size: 20 })] })] })),
             });
           }),
         }),
       );
     }
-    const doc = new Document({ sections: [{ children }] });
+    const doc = new Document({
+      sections: [
+        {
+          children,
+          properties: {
+            // 紧凑默认版式：A4 上下 1.5cm 左右 1.8cm，正文 11pt、1.25 倍行距、段后 5pt——打印省纸，屏读不挤
+            page: { margin: { top: 850, bottom: 850, left: 1021, right: 1021 } },
+          },
+        },
+      ],
+    });
     const buf = await Packer.toBuffer(doc);
     const out = s.sourcePath
       ? s.sourcePath.slice(0, s.sourcePath.lastIndexOf('/')) + '/' + s.fileName.replace(/\.(md|txt|markdown)$/i, '') + '.docx'

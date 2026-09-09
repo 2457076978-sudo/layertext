@@ -7,9 +7,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import {
-  buildMcpLexicon, toolCheckRevision, toolQcText, toolSentenceRisks, toolWordStatus, wrapAsChapter,
-} from '../src/core/mcpTools.js';
+import { buildMcpLexicon, toolAlignPairs, toolCheckRevision, toolQcText, toolSentenceRisks, toolWordStatus, wrapAsChapter } from '../src/core/mcpTools.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const bundled = [
@@ -61,4 +59,21 @@ test('layer_check_revision：AI 拆句后不误报超长；被动残留被抓', 
   const issues = (bad as { 问题: string[] }).问题;
   assert.ok(issues.some((x) => /被动/.test(x)));
   assert.ok(issues.some((x) => /定语从句/.test(x)));
+});
+
+test('layer_align：丢句/新增/信号缺失全链路（toolAlignPairs）', () => {
+  const base = 'Boxer worked hard every day. He was twelve years old. The windmill was finished in 1936.';
+  const cur = 'Boxer worked hard every day. He was 12 years old. Snowball was a hero.';
+  const r = toolAlignPairs(base, cur) as Record<string, unknown>;
+  assert.equal(r['丢句数'], 1); // windmill 1936 句被丢
+  assert.match(String((r['丢句'] as { 基准句: string }[])[0]['基准句']), /windmill/);
+  assert.equal(r['新增句数'], 1); // Snowball 句
+  assert.match(String((r['新增'] as { 当前句: string }[])[0]['当前句']), /Snowball/);
+  assert.ok(Number(r['对齐句数']) >= 2); // 完全相同句锚点 + twelve/12 改写配对
+});
+
+test('layer_align：数字词与阿拉伯数字互认（twelve↔12 不报缺失）', () => {
+  const r = toolAlignPairs('She read three books.', 'She read 3 books.') as Record<string, unknown>;
+  assert.equal(r['信号缺失数'], 0);
+  assert.equal(r['丢句数'], 0);
 });

@@ -6,11 +6,12 @@
  * 启动：
  *   node dist/src/mcp-server.js [--vocab 教材词库.csv]... [--wordlist 词表.txt]... [--terms 术语.txt] [--proper 专名.txt]
  *
- * 工具（4 个，全部本地计算、零遥测、不落盘）：
+ * 工具（5 个，全部本地计算、零遥测、不落盘）：
  *   layer_qc              全文体检：生词率/覆盖率/句长/被动/定从/过去完成/OOV清单
  *   layer_word_status     单词词表状态与原形（词库=难度锚点）
  *   layer_sentence_risks  句法黑名单逐句检测（被动/定从/过去完成/超长）
  *   layer_check_revision  改写句复核：AI 改写后自查黑名单与超长残留
+ *   layer_align           两版逐句核对：丢句/新增/数字专名缺失（简化交付前机器核对）
  *
  * 配置示例见 docs/MCP.md。
  */
@@ -22,7 +23,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 import { readWordFile } from './core/files.js';
-import { buildMcpLexicon, toolCheckRevision, toolQcText, toolSentenceRisks, toolWordStatus, type McpLexiconOptions } from './core/mcpTools.js';
+import { buildMcpLexicon, toolAlignPairs, toolCheckRevision, toolQcText, toolSentenceRisks, toolWordStatus, type McpLexiconOptions } from './core/mcpTools.js';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
@@ -109,6 +110,20 @@ async function main(): Promise<void> {
       }),
     },
     async ({ revised, max_len }) => ({ content: [{ type: 'text', text: JSON.stringify(toolCheckRevision(revised, max_len), null, 1) }] }),
+  );
+
+  server.registerTool(
+    'layer_align',
+    {
+      title: 'LayerText 两版逐句核对',
+      description:
+        '把改写/简化版与基准版（如原文）逐句核对：机器找出丢句（基准有此处无，疑似丢情节）、新增句、配对句中缺失的数字与专名（three↔3 互认）。AI 交付简化稿前应先跑本工具确认零丢句、信号缺失有解释。',
+      inputSchema: z.object({
+        base_text: z.string().describe('基准版英文文本（如原文/上一版）'),
+        cur_text: z.string().describe('待核对的当前版英文文本'),
+      }),
+    },
+    async ({ base_text, cur_text }) => ({ content: [{ type: 'text', text: JSON.stringify(toolAlignPairs(base_text, cur_text), null, 1) }] }),
   );
 
   await server.connect(new StdioServerTransport());

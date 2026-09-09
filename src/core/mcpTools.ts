@@ -6,8 +6,9 @@
  * 隐私：工具只处理调用方传入的文本、只返回结果，不落盘、不缓存、零遥测。
  */
 
+import { alignSentencePairs } from './align.js';
 import { buildLexicon, type Lexicon } from './lexicon.js';
-import { hit, hitOrigin, pendHit } from './textpipe.js';
+import { hit, hitOrigin, pendHit, sentsOf } from './textpipe.js';
 import { runQc, toLegacyReport } from './qc.js';
 import { sentenceRisks } from './risks.js';
 import { IRR } from './irregular.js';
@@ -104,4 +105,34 @@ export function toolCheckRevision(revised: string, maxLen = 16): Record<string, 
   if (agg.pastperf) issues.push('过去完成残留');
   if (agg.overlong) issues.push(`超长（> ${maxLen} 词）`);
   return { 通过: issues.length === 0, 问题: issues, 最长句词数: Math.max(0, ...details.map((d) => d.words)), 逐句明细: details };
+}
+
+/** 工具5 layer_align：两个版本逐句核对（基准版 vs 改写/简化版）——丢句/新增/数字专名缺失
+ *  与 App「逐句对照」页同一实现（src/core/align.ts）：完全相同句 LCS 锚点 + 改写句 Jaccard≥0.45 配对。 */
+export function toolAlignPairs(baseText: string, curText: string): Record<string, unknown> {
+  const toRefs = (text: string) => {
+    const paras = text
+      .replace(/\r\n?/g, '\n')
+      .split(/\n\s*\n/)
+      .map((p) => p.replace(/\s*\n\s*/g, ' ').trim())
+      .filter((p) => /[A-Za-z]/.test(p));
+    const refs: { pi: number; si: number; text: string }[] = [];
+    paras.forEach((p, pi) => sentsOf(p, false).forEach((s, si) => refs.push({ pi: pi + 1, si: si + 1, text: s.trim() })));
+    return refs;
+  };
+  const rows = alignSentencePairs(toRefs(baseText), toRefs(curText));
+  const cut = (s: string) => (s.length > 90 ? s.slice(0, 90) + '…' : s);
+  const lost = rows.filter((r) => r.kind === 'lost').map((r) => ({ 位置: `P${r.base!.pi}-S${r.base!.si}`, 基准句: cut(r.base!.text) }));
+  const added = rows.filter((r) => r.kind === 'added').map((r) => ({ 位置: `P${r.cur!.pi}-S${r.cur!.si}`, 当前句: cut(r.cur!.text) }));
+  const signalLost = rows.filter((r) => r.kind === 'match' && r.lostSignals?.length).map((r) => ({ 位置: `P${r.base!.pi}-S${r.base!.si}`, 缺失信号: r.lostSignals!, 基准句: cut(r.base!.text) }));
+  return {
+    对齐句数: rows.filter((r) => r.kind === 'match').length,
+    丢句数: lost.length,
+    新增句数: added.length,
+    信号缺失数: signalLost.length,
+    丢句: lost,
+    新增: added,
+    信号缺失: signalLost,
+    口径说明: '丢句=基准有此处无（疑似丢情节）；新增=当前版多出；信号缺失=基准句里的数字（three↔3 互认）或专名在配对句中找不到。改写句配对阈值 Jaccard≥0.45。',
+  };
 }
