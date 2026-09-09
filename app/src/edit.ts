@@ -30,6 +30,7 @@ export function scrollNow(): number {
 async function applyMdSnapshot(s: FileSession, md: string, label: string): Promise<void> {
   await persistEdit(s, md);
   s.md = md;
+  s.review.warns = []; // 快照级回退：所有句位置已变，复核角标整体失效清空
   remapMarks(s.review.marks, s.md); // 正文变了标记跟着重对齐（撤销/查找替换曾是欠账：标记错位不修）
   scheduleSave(s, () => undefined);
   renderAll();

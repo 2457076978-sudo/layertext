@@ -43,6 +43,9 @@ export interface ReviewState {
   quota: QuotaItem[];
   gate: Record<string, boolean>;
   bookmarks: ParaBookmark[];
+  /** ⚠︎ 复核残留角标（AI 建议写入后引擎复核仍命中黑名单/超长的句）："pi:si|原因"——随本文件落盘，
+   *  教师点角标确认或手动改该句后消除；快照级回退（撤销/替换）整体清空 */
+  warns?: string[];
   updatedAt: number;
 }
 

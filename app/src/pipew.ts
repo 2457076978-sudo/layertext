@@ -341,6 +341,7 @@ async function applyManualSentenceEdit(pi: number, si: number): Promise<void> {
   s.md = s.md.slice(0, atExact) + revised + s.md.slice(atExact + exact.length);
   // 标记存留：该句句级标记随人工修订完成；被改掉的词不再留幽灵标记；其余 remap 重定位
   s.review.marks = marksSurvivingManualEdit(s.review.marks, { pi, si }, exact, revised);
+  s.review.warns = (s.review.warns ?? []).filter((x) => !x.startsWith(`${pi}:${si}|`)); // 教师亲手改过=复核完成
   remapMarks(s.review.marks, s.md);
   hidePop();
   const date = new Date().toLocaleDateString('sv-SE');

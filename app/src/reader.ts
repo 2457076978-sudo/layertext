@@ -91,6 +91,21 @@ export function renderReader(session: FileSession): void {
         if (risk.pastperf) s.appendChild(badge('完'));
         if (risk.overlong) s.appendChild(badge('长'));
       }
+      // ⚠︎ 复核残留角标：AI 建议已写入但引擎复核仍命中——持久化在 _审校标记.json，点角标=已复查无误
+      const warnEntry = session.review.warns?.find((w) => w.startsWith(`${pi}:${si}|`));
+      if (warnEntry) {
+        const wb = badge('⚠︎');
+        wb.classList.add('badge-warn');
+        wb.title = `引擎复核残留：${(warnEntry.split('|')[1] ?? '').replace(/\//g, ' / ')}——点此角标消除（表示你已复查）`;
+        wb.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          session.review.warns = (session.review.warns ?? []).filter((x) => x !== warnEntry);
+          wb.remove();
+          scheduleSave(session, () => undefined);
+          toast('已消除该句的复核角标');
+        });
+        s.appendChild(wb);
+      }
       const toks = tokenizeTxt(sent);
       const rawWords = sent.match(/[A-Za-z][A-Za-z'-]*/g) ?? [];
       let rest = sent;

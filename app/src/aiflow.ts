@@ -10,7 +10,7 @@ import { activeSession, flashApplied, persistEdit, chatUntilJson, switchView } f
 import { renderReader, sidebarHandlers, updateMarkBadge } from './reader.js';
 import { renderSidebar, scheduleSave } from './review.js';
 import { CHANGELOG_HEADER, typeLabel, type FileSession, type Mark, type Suggestion } from './types.js';
-import { csvCell, estTokens, findOriginalFlex, hasProseChinese, locateOriginal, normalizeZhNotes, pickSingleRewrite, resolveSuggestionTarget, stripMarkdownNoise, remapMarks, validSuggestionText } from './pure.js';
+import { csvCell, estTokens, hasProseChinese, locateOriginal, normalizeZhNotes, pickSingleRewrite, resolveSuggestionTarget, stripMarkdownNoise, remapMarks, validSuggestionText } from './pure.js';
 import { extractParas, sentsOf, splitChapter } from '../../src/core/textpipe.js';
 import { checkRevisedText } from './pure.js';
 import type { LedgerRow } from '../../src/core/adoption.js';
@@ -318,7 +318,11 @@ export async function acceptSuggestion(g: Suggestion, opts: { scene?: string; ou
       g.check.pastperf ? '过去完成' : '',
       g.check.overlong ? `超长(${g.revised.split(/\s+/).filter(Boolean).length}词)` : '',
     ].filter(Boolean);
-    if (stillBad.length) toast(`⚠ 新句仍含${stillBad.join('/')}——正文已按建议写入，建议复核（↩︎ 可撤销）`, 'info');
+    if (stillBad.length) {
+      const pos = `${g.pi ?? 0}:${g.si ?? 0}|`;
+      s.review.warns = [...(s.review.warns ?? []).filter((x) => !x.startsWith(pos)), `${pos}${stillBad.join('/')}`];
+      toast(`⚠︎ 新句仍含${stillBad.join('/')}——正文已按建议写入，句旁已挂 ⚠︎ 角标（点角标消除；↩︎ 可撤销）`, 'info');
+    }
     flashApplied(g.revised);
     return true;
   } catch (e) {
