@@ -1,6 +1,6 @@
 {
   "name": "layertext",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "LayerText 分层读 — 英语文本简化与审校工作台（含 MCP 质检服务）/ English text simplification & review workbench with MCP QC server",
   "type": "module",
   "private": true,

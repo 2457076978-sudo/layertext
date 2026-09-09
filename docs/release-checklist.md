@@ -5,7 +5,7 @@
 
 ## 1. 质量门禁
 
-- [ ] `npm test` 全绿（当前基线 92 项）
+- [ ] `npm test` 全绿（当前基线 176 项）
 - [ ] `npm run eval` 输出"✓ 不低于质量基线"（若规则有意变更：已 `--update-baseline` 并书面说明理由）
 - [ ] `node dist/tools/compare.js` 双引擎一致
 - [ ] `cd app && npx tsc --noEmit` 无错误
@@ -13,7 +13,7 @@
 
 ## 2. 版本与文档
 
-- [ ] 版本号三处一致：`package.json` / `app/src-tauri/tauri.conf.json` / `app/index.html` 的 `<small>`
+- [ ] 版本号四处一致（`node tools/check_versions.mjs`）：根 `package.json` / `app/package.json` / `app/src-tauri/tauri.conf.json` / `README.md` 当前状态
 - [ ] `CHANGELOG.md` 已有 `## [X.Y.Z] - 日期` 段落（Release 正文从这里提取，缺段落工作流会失败）
 - [ ] `README.md` 路线图与当前状态一致（无把已交付功能列为待办）
 - [ ] 涉及提示词变更：`prompts/manifest.json` 已 bump 版本并写变更说明
