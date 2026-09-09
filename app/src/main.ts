@@ -11,13 +11,12 @@ import { unzipSync, strFromU8 } from 'fflate';
 import {
   chnoFromPath,
   tagFromPath,
-  epubChapterMd,
-  parseEpubChapters,
   normalizeAndSplitChapters,
   parseAiJson,
   routeSelection,
   decodeAuto,
 } from './pure.js';
+import { parseEpubChapters, epubChapterMd } from './bookpure.js';
 import { renderModePill, switchView as switchViewDom, type ViewName } from './widgets.js';
 import { S, esc } from './state.js';
 import { $, setStatus, toast, pop, hidePop } from './uikit.js';

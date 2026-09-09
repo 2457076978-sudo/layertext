@@ -25,17 +25,12 @@ import { scheduleSave, renderSidebar } from './review.js';
 import { GATES, newMarkId, typeLabel, type FileSession } from './types.js';
 import {
   alignSentencePairs,
-  boardSummary,
-  buildChapterDossierMd,
   buildDiagSummary,
-  dossierFileName,
   mergeQuotaTexts,
   normalizeAndSplitChapters,
   pickSentMarkType,
-  workspaceChipName,
-  type DossierData,
-  type QcSummaryLite,
 } from './pure.js';
+import { boardSummary, buildChapterDossierMd, dossierFileName, workspaceChipName, type DossierData, type QcSummaryLite } from './bookpure.js';
 import { runQc, toLegacyReport } from '../../src/core/qc.js';
 import { aggregate, diagnose, parseLedger, type LedgerRow } from '../../src/core/adoption.js';
 import { summarizeCost } from '../../src/core/aiops.js';

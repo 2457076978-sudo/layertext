@@ -57,10 +57,10 @@ export const S = {
   reinforceText: null as string | null,
   reinforceName: '',
   /** 班级多人定制（折叠多选栏）：分组/个人目标与当前选择 */
-  classTargets: [] as import('./pure.js').ClassTarget[],
+  classTargets: [] as import('./bookpure.js').ClassTarget[],
   selectedIds: [] as string[],
   /** 工作区（书目录 _工作区.json，像浏览器标签按版本切换；各工作区可绑定班级定制目标） */
-  workspaces: [] as import('./pure.js').Workspace[],
+  workspaces: [] as import('./bookpure.js').Workspace[],
   activeWorkspace: null as string | null,
   /** 当前书的根目录（进度记账用；openBook/resume 设置，回书架清空） */
   currentBookDir: null as string | null,

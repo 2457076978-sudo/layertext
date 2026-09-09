@@ -21,14 +21,8 @@ import { scrollEl, scrollNow } from './edit.js';
 import { saveConfig } from './ai.js';
 import { jumpToBookmark } from './review.js';
 import {
-  buildVersionCards,
-  coverTitlePx,
-  filterShelfBooks,
-  parseWorkspaces,
-  progressPct,
-  shelfGroupsOf,
-  workspaceChipName,
 } from './pure.js';
+import { buildVersionCards, coverTitlePx, filterShelfBooks, parseWorkspaces, progressPct, shelfGroupsOf, workspaceChipName } from './bookpure.js';
 
 /* ---------- 工作区（书目录 _工作区.json：3 层次=3 工作区，浏览器标签式切换） ---------- */
 

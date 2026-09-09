@@ -2,7 +2,8 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { buildVersionCards, coverTitlePx, coverVisualWidth, filterShelfBooks, progressPct, shelfGroupsOf, toggleParaBookmark } from '../app/src/pure.js';
+import { toggleParaBookmark } from '../app/src/pure.js';
+import { buildVersionCards, coverTitlePx, coverVisualWidth, filterShelfBooks, progressPct, shelfGroupsOf } from '../app/src/bookpure.js';
 
 test('coverVisualWidth：中文全角=1、ASCII≈0.55', () => {
   assert.equal(coverVisualWidth('动物农场'), 4);

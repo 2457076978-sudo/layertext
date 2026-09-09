@@ -3,6 +3,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { applyRewriteTo, findOriginalFlex, hasProseChinese, normalizeAndSplitChapters, normWs, normalizeZhNotes, parseAiJson, withRetry } from '../app/src/pure.js';
+import { buildBookReportMd, planBatchChapters, filterTargets, mergeTargets, type BatchProgressFile, type BookReportRow, type ClassTarget } from '../app/src/bookpure.js';
 
 test('withRetry：网络错误自动重试后成功', async () => {
   let calls = 0;
@@ -233,7 +234,6 @@ test('planCompaction：assistant.tool_calls 与其 tool 结果不被拆开（都
 
 /* ---------- 全书批处理（O2） ---------- */
 
-import { buildBookReportMd, planBatchChapters, type BatchProgressFile, type BookReportRow } from '../app/src/pure.js';
 
 test('planBatchChapters：进度文件里 done 的章标记已完成（续跑跳过），其余可跑', () => {
   const progress: BatchProgressFile = {
@@ -377,7 +377,6 @@ test('remapMarks：替换句子后标记按句前缀重新对齐，词索引 wi 
 });
 
 /* ---------- 班级多人定制：mergeTargets / filterTargets（全假数据） ---------- */
-import { filterTargets, mergeTargets, type ClassTarget } from '../app/src/pure.js';
 
 const T = (id: string, 名称: string, 类型: '组' | '人', o: Partial<ClassTarget> = {}): ClassTarget => ({ id, 名称, 类型, ...o });
 
@@ -435,7 +434,7 @@ test('mergeTargets：dueCap 显式截断仍生效', () => {
 });
 
 /* ---------- 工作区：parseWorkspaces / workspaceChipName ---------- */
-import { parseWorkspaces, workspaceChipName } from '../app/src/pure.js';
+import { parseWorkspaces, workspaceChipName } from '../app/src/bookpure.js';
 
 test('parseWorkspaces：正常解析/坏JSON容错/空文件列表剔除', () => {
   const ws = parseWorkspaces(

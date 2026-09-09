@@ -10,7 +10,7 @@ import * as XLSX from 'xlsx';
 import { S } from './state.js';
 import { renderAll } from './main.js';
 import { setStatus } from './uikit.js';
-import { mergeTargets } from './pure.js';
+import { mergeTargets } from './bookpure.js';
 import { parseCsv, parseReinforceText, buildLexicon, type Lexicon } from '../../src/core/lexicon.js';
 import bundledWordlist from '../../assets/wordlists/curriculum_2022_level3_1600.txt?raw';
 import bundledAmendment from '../../assets/wordlists/curriculum_2022_amendment.txt?raw';

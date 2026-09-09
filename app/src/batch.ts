@@ -18,14 +18,10 @@ import { buildLexiconNow, mergedSelection, reinforceWordsNow } from './lexicon.j
 import { showAiSettings } from './settings.js';
 import { applyRewrite, loadBookConfig } from './bookio.js';
 import {
-  buildBookReportMd,
   chnoFromPath,
   normalizeAndSplitChapters,
-  planBatchChapters,
-  type BatchChapterItem,
-  type BatchProgressFile,
-  type BookReportRow,
 } from './pure.js';
+import { buildBookReportMd, planBatchChapters, type BatchChapterItem, type BatchProgressFile, type BookReportRow } from './bookpure.js';
 import { buildDraftSystemPrompt, callChat, simplifyMaxLen } from './ai.js';
 import { runQc } from '../../src/core/qc.js';
 import { splitChapter } from '../../src/core/textpipe.js';

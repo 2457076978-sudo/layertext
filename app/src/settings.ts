@@ -24,7 +24,7 @@ import {
   saveConfig,
   simplifyMaxLen,
 } from './ai.js';
-import { filterTargets, type ClassTarget } from './pure.js';
+import { filterTargets, type ClassTarget } from './bookpure.js';
 
 /* ---------- 班级多人定制（折叠多选栏，feature/reinforce） ---------- */
 

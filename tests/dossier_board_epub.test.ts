@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { strToU8, zipSync } from 'fflate';
-import { boardSummary, buildChapterDossierMd, dossierFileName, epubChapterMd, parseEpubChapters } from '../app/src/pure.js';
+import { boardSummary, buildChapterDossierMd, dossierFileName, epubChapterMd, parseEpubChapters } from '../app/src/bookpure.js';
 
 /* ---------- epub ---------- */
 
