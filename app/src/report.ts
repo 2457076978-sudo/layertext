@@ -21,8 +21,8 @@ import {
   readTextSmart,
   renderAll,
   sidebarHandlers,
-  tocChapters,
 } from './main.js';
+import { tocChapters } from './shelf.js';
 import { renderDiffPane } from './widgets.js';
 import { scheduleSave, renderSidebar } from './review.js';
 import { GATES, newMarkId, typeLabel, type FileSession } from './types.js';
