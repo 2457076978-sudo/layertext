@@ -4,6 +4,15 @@
 1.0.0 之前的版本号为开发期里程碑（当时 `package.json` 未同步递增，本文件按里程碑整理，2026-09-06 校准）。
 面向教师的通俗版功能说明见 [README](README.md) 与 [docs/PRD.md](docs/PRD.md)。
 
+## [未发布] - 2026-09-09（main · 第十三批：站在轮子上——ts-fsrs / CEFR / textstat 三件外部轮引入）
+
+> 调研报告：LayerText_GitHub可借鉴资源调研_2026-09-09（工作文档库）；Wayne 拍板"123 都做"。
+
+- **① ts-fsrs 并行试点（open-spaced-repetition/ts-fsrs，MIT）**：`src/core/fsrs.ts` 薄封装 + CLI 子命令 `fsrs <队列.csv>`（词,hits → FSRS 建议隔篇 vs 现行固定 2 篇并排）。不替换现行策略（Nakata 2015 等距有依据）——一学期限定班 A/B 后再定切换；画像回写脚本可直接调本命令。示例：hits=0→1 篇、2→5 篇、4→15 篇（扩展间隔曲线）。App 面板待画像导出含次数后接入（数据侧边界，如实记录）。
+- **② CEFR 等级维度（olp-en-cefrj，CC BY-SA 4.0）**：8314 词条转 `assets/wordlists/cefrj_levels.txt`（tools/convert_cefrj.py 可复现，同词多等级取最早引入）+ `src/core/cefr.ts`（词形回退查表）；词面板新增"CEFR：B1（进阶·中考上限带）"行——**纯显示维度，判定锚仍是课标 1600+教师词库**。
+- **③ textstat 相关性（论文素材）**：`tools/flesch_corr.py`（方法进仓可复现，报告按分层公开不进仓）；AF 三版前 5 章 15 样本实测：生词率×Flesch r=-0.37、×FK 年级 r=0.38、×Dale-Chall r=0.32——**中等偏弱**：通用公式测不准"对这班学生"的难度，词库锚定口径的必要性有了实证。
+- 借鉴 chinese-graded-readers（GitHub 4★）：其"词+释义内嵌标记、Anki 卡 CSV 导出、中英中三遍朗读"管线验证了内嵌注释格式；**Anki CSV 导出**列入下一批（与 FSRS 复习闭环天然衔接）。测试 154→157 绿。
+
 ## [未发布] - 2026-09-09（main · 第十二批：人工矫正闭环——手动改这句 + 两条审计欠账根修）
 
 > 起点：Wayne 质询"你确定人工矫正功能做完善了？"——审计结论：没有。最大缺口=正文不可直接编辑（教师只能再喂 AI 或查找替换）；顺带查出两条欠账。

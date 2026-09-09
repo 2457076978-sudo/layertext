@@ -84,6 +84,8 @@ import {
 } from './ai.js';
 import bundledWordlist from '../../assets/wordlists/curriculum_2022_level3_1600.txt?raw';
 import bundledAmendment from '../../assets/wordlists/curriculum_2022_amendment.txt?raw';
+import bundledCefr from '../../assets/wordlists/cefrj_levels.txt?raw';
+import { parseCefrLevels, cefrOf, CEFR_DESC, type CefrLevel } from '../../src/core/cefr.js';
 import exampleMd from '../../examples/texts/aesop_tortoise_hare.md?raw';
 import exampleVocab from '../../examples/vocab/sample_teaching_vocab.csv?raw';
 import { parseCsv, parseReinforceText } from '../../src/core/lexicon.js';
@@ -741,6 +743,14 @@ const sidebarHandlers = {
 
 const pop = $('pop');
 
+/** CEFR 等级行（显示用辅助维度；判定锚=课标1600+教师词库，CEFR 只加细粒度难度显示） */
+let cefrMap: Map<string, CefrLevel> | null = null;
+function cefrLine(tok: string): string {
+  cefrMap ??= parseCefrLevels(bundledCefr);
+  const lv = cefrOf(tok, cefrMap);
+  return lv ? `CEFR：${lv}（${CEFR_DESC[lv]}）· CEFR-J 词表` : 'CEFR：未收（CEFR-J 词表无此词）';
+}
+
 function hidePop(): void {
   pop.classList.remove('open');
   S.popSession = null;
@@ -815,7 +825,7 @@ function showWordPanel(session: FileSession, wEl: HTMLElement, x: number, y: num
   pop.dataset.wi = String(wi);
   pop.innerHTML = `
     <div class="pop-h">${esc(wEl.textContent ?? '')}</div>
-    <div class="pop-info">词表状态：${stateLabel}${origin && origin !== tok ? `<br/>词形还原原形：${esc(origin)}` : ''}</div>
+    <div class="pop-info">词表状态：${stateLabel}${origin && origin !== tok ? `<br/>词形还原原形：${esc(origin)}` : ''}<br/>${cefrLine(tok)}</div>
     <div class="pop-marks"></div>
     <div class="pop-btns"><button data-mk="__rewrite" class="primary" title="让 AI 按当前标记意图改写这一句（快捷键 R）"><svg class="ico"><use href="#i-sparkle"/></svg>AI 改写本句</button><button data-mk="__edit" title="亲手修改这一句（快捷键 E）——直接写入正文，可撤销，不经引擎复核（你是定稿人）">✎ 手动改这句</button>${WORD_TYPES.map((t, i) => `<button data-mk="${t.key}" title="标记为「${t.label}」${t.key === 'anchor' ? '——记录该词为本篇复现锚点（保留并计入复现，不改正文）' : S.appConfig.autoRewriteOnMark ? '——即改模式下点完立即执行（写原稿+日志）' : '——点「AI 改写本句」或批量时按此意图处理'}"><span class="kbd">${i + 1}</span>${t.label}</button>`).join('')}</div>
     <textarea id="pop-note" placeholder="备注（可选，随下一条标记保存）"></textarea>

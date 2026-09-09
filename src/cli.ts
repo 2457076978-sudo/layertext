@@ -26,15 +26,60 @@ import { findAssetPath, readWordFile } from './core/files.js';
 import { buildLexicon, parseReinforceText } from './core/lexicon.js';
 import { runQc, toLegacyReport, type Tier } from './core/qc.js';
 import { chnoFromPath, tagFromPath } from './core/textpipe.js';
+import { planFsrs, summarizeFsrs, type FsrsWordInput } from './core/fsrs.js';
+
+/** fsrs 子命令：复现队列（"词,hits" CSV 或纯词列表=hits 0）→ FSRS 建议间隔 vs 现行固定策略并排。
+ *  画像侧回写脚本可调本命令拿对照表（数据只存本地，不进仓）。 */
+function fsrsMain(argv: string[]): void {
+  const path = argv[0];
+  if (!path) {
+    console.error('用法: node dist/src/cli.js fsrs <复现队列.csv|txt> [--days-per-piece 3] [--current-pieces 2]');
+    process.exit(2);
+  }
+  const flags: Record<string, string> = {};
+  for (let i = 1; i < argv.length; i += 2) {
+    const k = argv[i];
+    if (!k?.startsWith('--')) {
+      console.error(`无法识别的参数: ${k}`);
+      process.exit(2);
+    }
+    flags[k.slice(2)] = argv[i + 1] ?? '';
+  }
+  // 输入宽容：CSV/TSV 首列=词、次列=已复现次数（无次列=0）；# 注释跳过
+  const items: FsrsWordInput[] = [];
+  for (const line of readFileSync(path, 'utf-8').split('\n')) {
+    const t = line.trim();
+    if (!t || t.startsWith('#')) continue;
+    const cells = t.split(/[,;\t]/);
+    const word = cells[0]?.trim().toLowerCase();
+    if (!word || /[^a-z' -]/.test(word) || /^(词|word)$/i.test(word)) continue; // 剥表头
+    const hits = Number(cells[1]?.trim() ?? '0');
+    items.push({ word, hits: Number.isFinite(hits) && hits > 0 ? Math.floor(hits) : 0 });
+  }
+  if (!items.length) {
+    console.error('队列里没有有效词条（首列=词，可选次列=已复现次数）');
+    process.exit(2);
+  }
+  const rows = planFsrs(items, {
+    ...(flags['days-per-piece'] ? { daysPerPiece: Number(flags['days-per-piece']) } : {}),
+    ...(flags['current-pieces'] ? { currentPieces: Number(flags['current-pieces']) } : {}),
+  });
+  console.log('词            已复现  FSRS建议(篇)  现行(篇)');
+  for (const r of rows) console.log(`${r.word.padEnd(14)}${String(r.hits).padEnd(8)}${String(r.nextPieces).padEnd(15)}${r.currentPieces}${r.nextPieces !== r.currentPieces ? '   ←' : ''}`);
+  const s = summarizeFsrs(rows);
+  console.error(`\n汇总：${s.total} 词，FSRS 平均建议隔 ${s.avgPieces} 篇 vs 现行固定 ${s.currentPieces} 篇；${s.differCount} 词建议不同——并行试点口径，学期末对比后再定切换。`);
+}
 
 const BUNDLED_WORDLIST = 'assets/wordlists/curriculum_2022_level3_1600.txt';
 const AMENDMENT_WORDLIST = 'assets/wordlists/curriculum_2022_amendment.txt'; // 数词/星期/月份等存档缺失块（见文件头注释）
 
 function main(): void {
   const argv = process.argv.slice(2);
+  if (argv[0] === 'fsrs') return fsrsMain(argv.slice(1));
   if (argv[0] !== 'qc' || !argv[1] || argv[1].startsWith('--')) {
     console.error(
-      '用法: node dist/src/cli.js qc <候选md> [--tier A|B|M] [--vocab x.csv]... [--reinforce 已学词.txt]... [--wordlist x.txt]... [--terms x.txt] [--proper x.txt] [--anchor "短语"]... [--tag t] [--out file]',
+      '用法: node dist/src/cli.js qc <候选md> [--tier A|B|M] [--vocab x.csv]... [--reinforce 已学词.txt]... [--wordlist x.txt]... [--terms x.txt] [--proper x.txt] [--anchor "短语"]... [--tag t] [--out file]\n' +
+        '     node dist/src/cli.js fsrs <复现队列.csv|txt> [--days-per-piece 3] [--current-pieces 2]   # FSRS vs 现行固定策略并排（并行试点）',
     );
     process.exit(2);
   }
