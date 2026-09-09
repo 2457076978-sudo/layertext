@@ -20,7 +20,6 @@ import {
   openPathIntoSession,
   readTextSmart,
   renderAll,
-  showAiSettings,
   sidebarHandlers,
   tocChapters,
 } from './main.js';
@@ -43,6 +42,7 @@ import {
 import { runQc, toLegacyReport } from '../../src/core/qc.js';
 import { aggregate, diagnose, parseLedger, type LedgerRow } from '../../src/core/adoption.js';
 import { summarizeCost } from '../../src/core/aiops.js';
+import { showAiSettings } from './settings.js';
 import { buildPlotPointsPrompt, simplifyMaxLen } from './ai.js';
 import { extractParas, sentsOf, splitChapter, tokenizeTxt } from '../../src/core/textpipe.js';
 import { sentenceRisks } from '../../src/core/risks.js';

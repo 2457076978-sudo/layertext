@@ -18,8 +18,8 @@ import {
   reinforceWordsNow,
   readTextSmart,
   runQcCurrent,
-  showAiSettings,
 } from './main.js';
+import { showAiSettings } from './settings.js';
 import {
   buildBookReportMd,
   chnoFromPath,

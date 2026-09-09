@@ -6,17 +6,18 @@
 import { invoke } from '@tauri-apps/api/core';
 import { S, esc } from './state.js';
 import { $, setStatus, toast, pop, hidePop, showSummaryPop } from './uikit.js';
-import { activeSession, renderAll, renderReader, updateMarkBadge, flashApplied, persistEdit, sidebarHandlers, chatUntilJson, switchView } from './main.js';
+import { activeSession, renderReader, updateMarkBadge, flashApplied, persistEdit, sidebarHandlers, chatUntilJson, switchView } from './main.js';
 import { renderSidebar, scheduleSave } from './review.js';
 import { CHANGELOG_HEADER, typeLabel, type FileSession, type Mark, type Suggestion } from './types.js';
-import { csvCell, estTokens, findOriginalFlex, hasProseChinese, locateOriginal, normalizeZhNotes, parseAiJson, stripMarkdownNoise, remapMarks } from './pure.js';
+import { csvCell, estTokens, findOriginalFlex, hasProseChinese, locateOriginal, normalizeZhNotes, stripMarkdownNoise, remapMarks } from './pure.js';
 import { extractParas, sentsOf, splitChapter } from '../../src/core/textpipe.js';
 import { checkRevisedText } from './pure.js';
 import type { LedgerRow } from '../../src/core/adoption.js';
 import { LEDGER_HEADER, toLedgerLine } from '../../src/core/adoption.js';
 import { sentenceRisks } from '../../src/core/risks.js';
-import { buildSystemPrompt, buildRewriteSentencePrompt, callChat, promptSetVersion, simplifyMaxLen } from './ai.js';
-import { RULE_BY_TYPE, showAiSettings, appendCsvLine } from './main.js';
+import { buildSystemPrompt, buildRewriteSentencePrompt, promptSetVersion, simplifyMaxLen } from './ai.js';
+import { RULE_BY_TYPE, appendCsvLine } from './main.js';
+import { showAiSettings } from './settings.js';
 import { applyZhAnnotations, applyWordSimplifications } from './pipew.js';
 
 export /**
