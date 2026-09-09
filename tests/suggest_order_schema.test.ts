@@ -137,11 +137,43 @@ test('Anki：组装去重、释义优先正文注释>词典>空、例句含该�
 test('Anki：CSV 转义（例句含逗号引号）与复现队列格式（词,hits=0 + # 注释头）', () => {
   const rows = ankiRowsOf([{ from: 'c', md: CH, words: ['boar'] }], { boar: '野猪' }, {}, () => '');
   const csv = ankiCsv(rows);
-  assert.ok(csv.startsWith('词,CEFR,中文释义,例句,出处\n'));
+  assert.ok(csv.startsWith('\ufeff词,CEFR,中文释义,例句,出处\n')); // 首字符 BOM（Excel 中文兼容）
   assert.ok(csv.includes('boar,'));
   const tricky = ankiCsv([{ word: 'x', cefr: '', zh: '', sent: 'He said "run", loudly.', from: 'c' }]);
   assert.ok(tricky.includes('"He said ""run"", loudly."')); // csvCell 转义
   const q = reinforceQueueCsv(rows);
   assert.ok(q.startsWith('# 复现队列'));
   assert.ok(q.includes('boar,0'));
+});
+
+/* ---------- 复核角标重排（warns 带句身份）与单句改写回退 ---------- */
+import { remapWarns } from '../app/src/pure.js';
+
+test('remapWarns：上方插段后角标跟随原句移位（pi 跟着变）', () => {
+  const md1 = '## Chapter One\n\n[P01] A new first line here. Old Major was a boar. He slept.\n';
+  const warns = ['0:1|He slept.|超长(18词)'];
+  const out = remapWarns(warns, md1);
+  assert.equal(out.length, 1);
+  assert.ok(out[0].startsWith('0:2|')); // 原句挪到第 3 句，角标跟着走
+});
+
+test('remapWarns：原句被删/被改写→角标使命结束（丢弃）；旧格式条目同样丢弃', () => {
+  const md1 = '## Chapter One\n\n[P01] Totally different text now.\n';
+  assert.deepEqual(remapWarns(['0:0|He slept.|超长'], md1), []); // 句子没了
+  assert.deepEqual(remapWarns(['0:0|仅旧格式原因'], md1), []); // 无原句身份，无法重定位
+  assert.deepEqual(remapWarns(undefined, md1), []);
+});
+
+test('#21 pickSingleRewrite：original 缺省回退到调用方给出的原句（不再整条拒收）', () => {
+  const r = pickSingleRewrite([{ revised: 'A fine pig.' }], 'The boar slept.');
+  assert.ok(r.ok === true);
+  assert.equal(r.original, 'The boar slept.');
+  const r2 = pickSingleRewrite([{ revised: 'A fine pig.' }]); // 无回退且无 original → 拒收
+  assert.deepEqual(r2, { ok: false, reason: 'bad-shape' });
+});
+
+test('Anki CSV 带 BOM（Excel 中文不乱码），复现队列不带（CLI 解析干净）', () => {
+  const row = { word: 'boar', cefr: '', zh: '野猪', sent: '', from: 'c' };
+  assert.equal(ankiCsv([row]).charCodeAt(0), 0xfeff);
+  assert.notEqual(reinforceQueueCsv([row]).charCodeAt(0), 0xfeff);
 });

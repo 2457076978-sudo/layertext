@@ -893,4 +893,6 @@ document.addEventListener('mousedown', (e) => {
     hideGatePop();
   }
   if (syncPop.classList.contains('open') && !(e.target as HTMLElement).closest('#sync-pop')) hideSyncPop();
+  const ap = document.getElementById('anki-pop');
+  if (ap?.classList.contains('open') && !(e.target as HTMLElement).closest('#anki-pop')) ap.classList.remove('open');
 });

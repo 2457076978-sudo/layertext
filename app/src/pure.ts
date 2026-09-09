@@ -338,13 +338,31 @@ export function ankiRowsOf(
 
 /** Anki 可导入 CSV（首行表头；例句含逗号/引号由 csvCell 转义） */
 export function ankiCsv(rows: AnkiRow[]): string {
-  return ['词,CEFR,中文释义,例句,出处', ...rows.map((r) => [r.word, r.cefr, r.zh, r.sent, r.from].map(csvCell).join(','))].join('\n') + '\n';
+  // \ufeff BOM：教师双击用 Excel 打开时中文列不乱码（Anki 导入对 BOM 兼容）
+  return '\ufeff' + ['词,CEFR,中文释义,例句,出处', ...rows.map((r) => [r.word, r.cefr, r.zh, r.sent, r.from].map(csvCell).join(','))].join('\n') + '\n';
 }
 
 /** 复现队列 CSV：词,hits（hits=已复现次数，默认 0——画像数据可补；# 注释行 fsrs CLI 会跳过）。
  *  与 CLI 闭环：node dist/src/cli.js fsrs 队列文件.csv → FSRS 建议隔篇 vs 现行固定 2 篇并排 */
 export function reinforceQueueCsv(rows: AnkiRow[]): string {
   return ['# 复现队列：词,hits（hits=已复现次数，默认 0，画像数据可补）', '# 查看 FSRS 间隔建议：node dist/src/cli.js fsrs 本文件.csv', ...rows.map((r) => `${r.word},0`)].join('\n') + '\n';
+}
+
+/** ⚠︎ 复核角标随正文重排（与 remapMarks 同思想）：角标条目带原句身份（pi:si|原句|原因），
+ *  正文变化后按原句文本重新定位；原句已不存在（被删/被改写）= 该角标使命结束，丢弃。
+ *  旧格式（pi:si|原因，无原句）无法重定位，同样丢弃。 */
+export function remapWarns(warns: string[] | undefined, md: string): string[] {
+  if (!warns?.length) return [];
+  const out: string[] = [];
+  for (const w of warns) {
+    const parts = w.split('|');
+    if (parts.length < 3) continue; // 旧格式/损坏条目
+    const loc = locateOriginal(md, parts[1]);
+    if (!loc) continue; // 句子没了：角标随之失效
+    const key = `${loc.pi}:${loc.si}`;
+    if (!out.some((x) => x.startsWith(key + '|'))) out.push(`${key}|${parts[1]}|${parts.slice(2).join('|')}`);
+  }
+  return out;
 }
 
 /** AI 边界 #18：建议定位三段决策（每条独立定位，同句多条互不依赖）——
@@ -394,17 +412,21 @@ export function validSuggestionText(v: unknown): v is string {
   return typeof v === 'string' && v.trim().length > 0;
 }
 
-/** AI 边界 #21：单句改写的响应裁决——schema 约定"单对象"，多条=AI 擅自给变体让用户选，拒收 */
+/** AI 边界 #21：单句改写的响应裁决——schema 约定"单对象"，多条=AI 擅自给变体让用户选，拒收。
+ *  original 缺省回退到 fallbackOriginal（调用方发出的原句）——AI 偶省略 original 不至于整条拒收（批量建议路径无此回退，保持严格） */
 export function pickSingleRewrite(
   arr: unknown[],
+  fallbackOriginal?: string,
 ): { ok: true; original?: string; revised: string; basis?: string; alternative?: string } | { ok: false; reason: 'multi' | 'empty' | 'bad-shape' } {
   if (arr.length > 1) return { ok: false, reason: 'multi' };
   const one = arr[0] as { original?: unknown; revised?: unknown; basis?: unknown; alternative?: unknown } | undefined;
   if (!one) return { ok: false, reason: 'empty' };
-  if (!validSuggestionText(one.revised) || !validSuggestionText(one.original)) return { ok: false, reason: 'bad-shape' };
+  if (!validSuggestionText(one.revised)) return { ok: false, reason: 'bad-shape' };
+  const original = validSuggestionText(one.original) ? one.original : fallbackOriginal;
+  if (!original) return { ok: false, reason: 'bad-shape' };
   return {
     ok: true,
-    original: one.original,
+    original,
     revised: one.revised,
     basis: typeof one.basis === 'string' ? one.basis : undefined,
     alternative: typeof one.alternative === 'string' ? one.alternative : undefined,

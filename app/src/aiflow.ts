@@ -10,7 +10,7 @@ import { activeSession, flashApplied, persistEdit, chatUntilJson, switchView } f
 import { renderReader, sidebarHandlers, updateMarkBadge } from './reader.js';
 import { renderSidebar, scheduleSave } from './review.js';
 import { CHANGELOG_HEADER, typeLabel, type FileSession, type Mark, type Suggestion } from './types.js';
-import { csvCell, estTokens, hasProseChinese, locateOriginal, normalizeZhNotes, pickSingleRewrite, resolveSuggestionTarget, stripMarkdownNoise, remapMarks, validSuggestionText } from './pure.js';
+import { csvCell, estTokens, hasProseChinese, locateOriginal, normalizeZhNotes, pickSingleRewrite, remapWarns, resolveSuggestionTarget, stripMarkdownNoise, remapMarks, validSuggestionText } from './pure.js';
 import { extractParas, sentsOf, splitChapter } from '../../src/core/textpipe.js';
 import { checkRevisedText } from './pure.js';
 import type { LedgerRow } from '../../src/core/adoption.js';
@@ -274,6 +274,7 @@ export async function acceptSuggestion(g: Suggestion, opts: { scene?: string; ou
   // 词被本次改写替换掉的词标记一并完成（如 bleated→made soft sounds 后，bleated 标记不再残留成幽灵）
   s.review.marks = s.review.marks.filter((m) => !(m.level === 'word' && m.word && g.original.includes(m.word) && !g.revised.includes(m.word)));
   remapMarks(s.review.marks, s.md);
+  s.review.warns = remapWarns(s.review.warns, s.md);
   g.status = 'accepted';
   S.suggestions = S.suggestions.filter((x) => x !== g);
 
@@ -320,7 +321,7 @@ export async function acceptSuggestion(g: Suggestion, opts: { scene?: string; ou
     ].filter(Boolean);
     if (stillBad.length) {
       const pos = `${g.pi ?? 0}:${g.si ?? 0}|`;
-      s.review.warns = [...(s.review.warns ?? []).filter((x) => !x.startsWith(pos)), `${pos}${stillBad.join('/')}`];
+      s.review.warns = [...(s.review.warns ?? []).filter((x) => !x.startsWith(pos)), `${pos}${g.original.slice(0, 60)}|${stillBad.join('/')}`];
       toast(`⚠︎ 新句仍含${stillBad.join('/')}——正文已按建议写入，句旁已挂 ⚠︎ 角标（点角标消除；↩︎ 可撤销）`, 'info');
     }
     flashApplied(g.revised);
@@ -456,7 +457,7 @@ export async function aiRewriteSentence(pi: number, si: number, intent: string, 
       '逐句改写',
     );
     // AI 边界 #21：schema 约定单对象——AI 擅自返回多条变体让用户选＝拒收（此前静默取第一条）
-    const picked = pickSingleRewrite(arrRaw);
+    const picked = pickSingleRewrite(arrRaw, sent); // original 缺省回退到发出的原句
     if (!picked.ok) {
       const why = picked.reason === 'multi' ? 'AI 返回了多条变体（应为单条），已拒收' : picked.reason === 'empty' ? 'AI 未返回改写' : 'AI 返回的改写字段不是单一文本（多条变体/对象），已拒收';
       throw new Error(why + '——请重试');

@@ -29,6 +29,7 @@ import {
   marksSurvivingManualEdit,
   normalizeGlossMap,
   remapMarks,
+  remapWarns,
   stripMarkdownNoise,
   morphMismatch,
   syncMarksToMd,
@@ -126,6 +127,7 @@ export async function applyZhAnnotations(s: FileSession, marks: Mark[]): Promise
     s.md = s.md.slice(0, at + matched.length) + `（${zh}）` + s.md.slice(at + matched.length);
     s.review.marks = s.review.marks.filter((x) => x.id !== m.id);
     remapMarks(s.review.marks, s.md);
+    s.review.warns = remapWarns(s.review.warns, s.md);
     done.push(`${matched}（${zh}）`);
     corrPairs.push({ word: matched, type: 'zh', result: zh });
   }
@@ -244,6 +246,7 @@ export async function applyWordSimplifications(s: FileSession, marks: Mark[]): P
     s.review.marks = s.review.marks.filter((x) => x.id !== m.id);
     s.review.marks = s.review.marks.filter((x) => !(x.level !== 'sent' && x.word && x.word.toLowerCase() === w.toLowerCase())); // 同词（词/短语级）其余标记一并完成
     remapMarks(s.review.marks, s.md);
+    s.review.warns = remapWarns(s.review.warns, s.md);
     done.push(`${matched0}→${repl}${n > 1 ? `（共${n}处）` : ''}${found?.via === 'subset' ? '（整短语）' : ''}`);
     corrPairs2.push({ word: w, type: 'simpl', result: repl });
   }
@@ -350,6 +353,7 @@ async function applyManualSentenceEdit(pi: number, si: number): Promise<void> {
   s.review.marks = marksSurvivingManualEdit(s.review.marks, { pi, si }, exact, revised);
   s.review.warns = (s.review.warns ?? []).filter((x) => !x.startsWith(`${pi}:${si}|`)); // 教师亲手改过=复核完成
   remapMarks(s.review.marks, s.md);
+    s.review.warns = remapWarns(s.review.warns, s.md);
   hidePop();
   const date = new Date().toLocaleDateString('sv-SE');
   const outDir = s.sourcePath ? s.sourcePath.slice(0, s.sourcePath.lastIndexOf('/')) : await invoke<string>('reports_dir');

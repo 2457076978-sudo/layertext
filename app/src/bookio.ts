@@ -368,11 +368,10 @@ export async function showAnkiExport(): Promise<void> {
   const missZh = rows.filter((r) => !r.zh).length;
 
   // ② 预览确认（导出前看清单：词数、释义缺失——缺失的留空列，教师可后补）
-  const popEl = document.getElementById('anki-pop');
-  const panel = popEl ?? Object.assign(document.createElement('div'), { id: 'anki-pop' });
-  if (!popEl) {
-    panel.className = 'pop';
-    panel.style.cssText = 'right:16px;bottom:16px;max-width:520px;max-height:70vh;overflow:auto';
+  let panel = document.getElementById('anki-pop');
+  if (!panel) {
+    panel = document.createElement('div');
+    panel.id = 'anki-pop';
     document.body.appendChild(panel);
   }
   panel.innerHTML = `

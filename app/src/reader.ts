@@ -96,7 +96,8 @@ export function renderReader(session: FileSession): void {
       if (warnEntry) {
         const wb = badge('⚠︎');
         wb.classList.add('badge-warn');
-        wb.title = `引擎复核残留：${(warnEntry.split('|')[1] ?? '').replace(/\//g, ' / ')}——点此角标消除（表示你已复查）`;
+        const wParts = warnEntry.split('|');
+        wb.title = `引擎复核残留：${(wParts.length >= 3 ? wParts.slice(2).join('/') : (wParts[1] ?? '')).replace(/\//g, ' / ')}——点此角标消除（表示你已复查）`;
         wb.addEventListener('click', (ev) => {
           ev.stopPropagation();
           session.review.warns = (session.review.warns ?? []).filter((x) => x !== warnEntry);

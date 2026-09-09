@@ -1026,6 +1026,26 @@
       }
 
       /* AI 设置弹层 & 修订建议 */
+      #anki-pop {
+        position: fixed;
+        right: 16px;
+        bottom: 16px;
+        z-index: 56;
+        display: none;
+        width: 520px;
+        max-width: 92vw;
+        max-height: 70vh;
+        overflow: auto;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        box-shadow: 0 8px 30px rgba(15, 23, 42, 0.14);
+        padding: 16px;
+        font-size: 13px;
+      }
+      #anki-pop.open {
+        display: block;
+      }
       #ai-pop {
         position: fixed;
         z-index: 56;
