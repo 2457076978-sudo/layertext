@@ -10,13 +10,11 @@ import { $, setStatus } from './uikit.js';
 import {
   activeSession,
   addSession,
-  buildLexiconNow,
   docxToText,
-  mergedSelection,
-  reinforceWordsNow,
   readTextSmart,
   runQcCurrent,
 } from './main.js';
+import { buildLexiconNow, mergedSelection, reinforceWordsNow } from './lexicon.js';
 import { showAiSettings } from './settings.js';
 import { applyRewrite, loadBookConfig } from './bookio.js';
 import {

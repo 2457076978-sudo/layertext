@@ -11,14 +11,13 @@ import { S, esc } from './state.js';
 import { $, setStatus } from './uikit.js';
 import {
   activeSession,
-  buildLexiconNow,
   chatUntilJson,
   docxToText,
-  mergedSelection,
   openPathIntoSession,
   readTextSmart,
   renderAll,
 } from './main.js';
+import { buildLexiconNow, mergedSelection } from './lexicon.js';
 import { addMark, sidebarHandlers } from './reader.js';
 import { tocChapters } from './shelf.js';
 import { renderDiffPane } from './widgets.js';

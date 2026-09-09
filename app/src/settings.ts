@@ -10,11 +10,10 @@ import { $, setStatus, toast } from './uikit.js';
 import {
   activeSession,
   fileSummary,
-  mergedSelection,
   renderAll,
-  reinforceWordsNow,
   updateModePill,
 } from './main.js';
+import { mergedSelection, reinforceWordsNow } from './lexicon.js';
 import { showVocabEditor } from './pipew.js';
 import { scheduleHeatRail } from './edit.js';
 import {

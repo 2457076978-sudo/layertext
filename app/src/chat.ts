@@ -6,7 +6,8 @@
 import { invoke } from '@tauri-apps/api/core';
 import { S, esc } from './state.js';
 import { $, setStatus } from './uikit.js';
-import { activeSession, buildLexiconNow } from './main.js';
+import { activeSession } from './main.js';
+import { buildLexiconNow } from './lexicon.js';
 import { renderReportPane } from './report.js';
 import { showAiSettings } from './settings.js';
 import { acceptSuggestion, attachInlineSuggestions, checkRev, locateSent, renderSuggestions } from './aiflow.js';
