@@ -2523,14 +2523,20 @@ async function aiSuggest(instruction?: string): Promise<void> {
         };
       });
     if (S.appConfig.autoRewriteOnMark && S.suggestions.length > 0) {
-      // 全局直改：所有建议自动生效（写工作稿+日志；⚠︎ 复核项计数提醒复查）——建议定位由 acceptSuggestion 以原句唯一定位完成
+      // 全局直改：能定位的建议直接生效（写工作稿+日志；⚠︎ 复核项计数提醒复查）；
+      // 定位失败的自动落入「修订建议」页逐条待人工采纳——建议不因直改失败而丢失
       let warned = 0;
       let applied = 0;
       for (const g of [...S.suggestions]) {
         if (g.check.passive || g.check.relcl || g.check.pastperf || g.check.overlong) warned++;
         if (await acceptSuggestion(g, { scene: '自动直改', outcome: '直改' })) applied++;
       }
-      setStatus(`AI 直改完成：自动应用 ${applied}/${S.suggestions.length} 条${warned ? `，其中 ${warned} 条引擎复核⚠︎（黑名单/超长残留），已留痕变更日志，建议复查` : ''} ${usage}`, 'saved');
+      const leftover = S.suggestions.length;
+      if (leftover > 0) renderSuggestions();
+      setStatus(
+        `AI 直改完成：自动应用 ${applied} 条${warned ? `，其中 ${warned} 条引擎复核⚠︎（黑名单/超长残留），已留痕变更日志，建议复查` : ''}${leftover ? `；未应用的 ${leftover} 条已放入「修订建议」页（原句定位失败，可逐条手动采纳）` : ''} ${usage}`,
+        'saved',
+      );
       return;
     }
     renderSuggestions();
