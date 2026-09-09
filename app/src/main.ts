@@ -2478,7 +2478,7 @@ ${marks || '（无标记）'}`;
 
 /** 「加中文标注」管线：AI 只出 词→中文 映射（一次小调用，零改写风险），
  *  原句逐字保留，机器在标记所在段对该词的词边界出现处插入 词（中文） */
-async function applyZhAnnotations(s: FileSession, marks: Mark[]): Promise<void> {
+async function applyZhAnnotations(s: FileSession, marks: Mark[]): Promise<number> {
   const words = [...new Set(marks.map((m) => m.word!).filter(Boolean))];
   const gloss: Record<string, string> = {};
   setStatus(`正在获取 ${words.length} 个词的中文释义（不改写句子）…`);
@@ -2494,7 +2494,7 @@ async function applyZhAnnotations(s: FileSession, marks: Mark[]): Promise<void> 
     Object.assign(gloss, raw as unknown as Record<string, string>);
   } catch (e) {
     setStatus('词义获取失败：' + e, 'err');
-    return;
+    return 0;
   }
   const paras = extractParas(splitChapter(s.md).body);
   const done: string[] = [];
@@ -2532,7 +2532,7 @@ async function applyZhAnnotations(s: FileSession, marks: Mark[]): Promise<void> 
   }
   if (!done.length) {
     setStatus('没有可插入的中文标注（词已不在正文中或释义缺失）', 'err');
-    return;
+    return 0;
   }
   scheduleSave(s, () => undefined);
   renderReader(s);
@@ -2555,6 +2555,7 @@ async function applyZhAnnotations(s: FileSession, marks: Mark[]): Promise<void> 
   }
   flashApplied(done[done.length - 1]);
   setStatus(`已加中文标注 ${done.length} 处（原句未动）：${done.slice(0, 6).join('、')}${done.length > 6 ? '…' : ''}`, 'saved');
+  return done.length;
 }
 
 /** 「词汇简化」管线：词级操作不重构句子——AI 只出 原词→简单词 映射（课标1600内、
@@ -2616,8 +2617,12 @@ async function applyWordSimplifications(s: FileSession, marks: Mark[]): Promise<
     remapMarks(s.review.marks, s.md);
     done.push(`${matched}→${repl}`);
   }
-  if (!done.length) {
-    setStatus('没有可替换的词（词已不在正文中或 AI 未给出更简单的词）', 'err');
+  // 整体思想：目标是学生读得懂——换不出更简单的词，就自动降级加中文标注
+  const restMarks = marks.filter((m) => s.review.marks.some((x) => x.id === m.id));
+  let noted = 0;
+  if (restMarks.length) noted = await applyZhAnnotations(s, restMarks);
+  if (!done.length && !noted) {
+    setStatus('既没有更简单的词、也没能加注（词已不在正文中？）', 'err');
     return;
   }
   scheduleSave(s, () => undefined);
@@ -2640,8 +2645,8 @@ async function applyWordSimplifications(s: FileSession, marks: Mark[]): Promise<
   } catch {
     /* 日志失败不阻塞 */
   }
-  flashApplied(done[done.length - 1].split('→')[1]);
-  setStatus(`已换 ${done.length} 个词（句子未动）：${done.slice(0, 6).join('、')}${done.length > 6 ? '…' : ''}`, 'saved');
+  if (done.length) flashApplied(done[done.length - 1].split('→')[1]);
+  setStatus(`已换 ${done.length} 个词（句子未动）：${done.slice(0, 6).join('、')}${done.length > 6 ? '…' : ''}${noted ? `；换不出的 ${noted} 个已改为加中文标注` : ''}`, 'saved');
 }
 
 async function aiSuggest(instruction?: string): Promise<void> {
