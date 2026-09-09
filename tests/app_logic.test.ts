@@ -453,3 +453,10 @@ test('workspaceChipName：候选版取目录名，普通文件取文件名', () 
   assert.equal(workspaceChipName('/x/候选版_v0.1_中梯队.md'), '候选版_v0.1_中梯队'); // 无目录名可用→回退文件名
   assert.equal(workspaceChipName('/x/ch3.md'), 'ch3');
 });
+
+test('findOriginalFlex：连字符互认（引擎拆句 hen-houses→hen houses 后 AI 原句仍可唯一定位）', () => {
+  const md = '[P01] Mr. Jones was the owner. He locked the hen-houses for the night. But he drank too much beer.';
+  const r = findOriginalFlex(md, 'He locked the hen houses for the night.');
+  assert.ok(r, '应定位成功');
+  assert.equal(r!.exact, 'He locked the hen-houses for the night.');
+});

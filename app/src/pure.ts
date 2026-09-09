@@ -96,28 +96,32 @@ export function parseAiJson(raw: string): unknown[] {
   throw new Error('AI 返回中未找到 JSON（AI 原话前 200 字：' + (raw ?? '').slice(0, 200).replace(/\s+/g, ' ') + '）');
 }
 
-/** 空白归一化：连续空白压成单个空格并去首尾（比对用，不改原文） */
+/** 比对归一化：连续空白压成单个空格、去首尾、连字符与破折号视同空格（引擎拆句会吃掉 hen-houses 的连字符，AI 原句与正文往返必见此差异；比对用，不改原文） */
 export function normWs(s: string): string {
-  return s.replace(/\s+/g, ' ').trim();
+  return s
+    .replace(/\s+/g, ' ')
+    .replace(/[-—–]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 /**
- * 空白不敏感地在正文中定位 AI 给出的 original（欠账#2：句末空格/多重空格曾导致比对失败、AI 反复重试）。
- * 优先唯一精确匹配；否则按空白归一化匹配；多处命中（歧义）或未命中返回 null。
- * 返回的 exact 是正文里的原文切片（含其原始空白），供后续精确替换使用。
+ * 空白与连字符不敏感地在正文中定位 AI 给出的 original（欠账#2：句末空格/多重空格；09-09：连字符）。
+ * 优先唯一精确匹配；否则按归一化匹配；多处命中（歧义）或未命中返回 null。
+ * 返回的 exact 是正文里的原文切片（含其原始空白与连字符），供后续精确替换使用。
  */
 export function findOriginalFlex(md: string, original: string): { start: number; exact: string } | null {
   if (!original.trim()) return null;
   // ① 唯一精确匹配直接用
   const first = md.indexOf(original);
   if (first >= 0 && md.indexOf(original, first + 1) < 0) return { start: first, exact: original };
-  // ② 归一化匹配：构建压缩视图 + 原文位置映射
+  // ② 归一化匹配：构建压缩视图（空白与连字符同置为单空格）+ 原文位置映射
   let norm = '';
   const map: number[] = [];
   for (let i = 0; i < md.length; i++) {
     const c = md[i];
-    if (/\s/.test(c)) {
-      if (norm.endsWith(' ')) continue; // 连续空白只记第一个的位置
+    if (/\s|[-—–]/.test(c)) {
+      if (norm.endsWith(' ')) continue; // 连续空白/连字符只记第一个的位置
       norm += ' ';
     } else {
       norm += c;
