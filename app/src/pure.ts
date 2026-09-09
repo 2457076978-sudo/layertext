@@ -144,6 +144,11 @@ export function findOriginalFlex(md: string, original: string): { start: number;
   return { start, exact: md.slice(start, end) };
 }
 
+/** 生词注释规整：AI 偶用半角括号加空格（word (中文)），统一为全角紧贴（word（中文））——只动"英文词+(纯中文)"模式 */
+export function normalizeZhNotes(text: string): string {
+  return text.replace(/([A-Za-z])\s*\(([\u4e00-\u9fff][^)()]{0,11})\)/g, '$1（$2）');
+}
+
 /** revised 中文防线：剔除「英文词（中文）」生词注释后仍含成句中文（≥4 连续汉字）
  *  = AI 输出了说明文字/翻译（如"（标注：这是歌曲中的诗句…）"），拒用 */
 export function hasProseChinese(text: string): boolean {

@@ -26,6 +26,7 @@ import {
   filterTargets,
   findOriginalFlex,
   hasProseChinese,
+  normalizeZhNotes,
   locateOriginal,
   mergeQuotaTexts,
   alignSentencePairs,
@@ -2817,6 +2818,7 @@ async function acceptSuggestion(g: Suggestion, opts: { scene?: string; outcome?:
     setStatus(`正文中找不到该原句，已跳过：${g.original.slice(0, 24)}…`, 'err');
     return false;
   }
+  g.revised = normalizeZhNotes(g.revised); // 生词注释统一全角紧贴（word（中文））
   s.md = s.md.slice(0, at) + g.revised + s.md.slice(at + g.original.length);
 
   // 标记对齐 + 对应标记清除 + 落盘
@@ -2862,7 +2864,7 @@ async function acceptSuggestion(g: Suggestion, opts: { scene?: string; outcome?:
     attachInlineSuggestions();
     renderSidebar(s, sidebarHandlers);
     renderSuggestions();
-    setStatus(`✓ 已采纳并写入 ${savedTo}${savedTo === s.sourcePath ? '（原稿，首改前已备份原始版）' : ''}；变更已记入日志`, 'saved');
+    setStatus(`✓ 正文已改好并写入原稿文件${savedTo === s.sourcePath ? '（首改前已备份原始版）' : ''}；变更日志同步留痕、可回溯`, 'saved');
     flashApplied(g.revised);
     return true;
   } catch (e) {

@@ -2,7 +2,7 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { applyRewriteTo, findOriginalFlex, hasProseChinese, normalizeAndSplitChapters, normWs, parseAiJson, withRetry } from '../app/src/pure.js';
+import { applyRewriteTo, findOriginalFlex, hasProseChinese, normalizeAndSplitChapters, normWs, normalizeZhNotes, parseAiJson, withRetry } from '../app/src/pure.js';
 
 test('withRetry：网络错误自动重试后成功', async () => {
   let calls = 0;
@@ -473,4 +473,9 @@ test('hasProseChinese：合法生词注释放行，成句中文说明拒收', ()
   assert.equal(hasProseChinese('They sang it five times in a row（连续）.'), false);
   assert.equal(hasProseChinese('Cruel whips no more shall crack. (标注：这是歌曲中的诗句，保留原样以体现韵律)'), true);
   assert.equal(hasProseChinese('任何动物都不能住在房子里。'), true);
+});
+
+test('normalizeZhNotes：半角括号注释统一为全角紧贴', () => {
+  assert.equal(normalizeZhNotes('The cows lowed (哞哞叫), the sheep bleated (咩咩叫).'), 'The cows lowed（哞哞叫）, the sheep bleated（咩咩叫）.');
+  assert.equal(normalizeZhNotes('see Chapter 3 (notes) and row (连续)'), 'see Chapter 3 (notes) and row（连续）');
 });
