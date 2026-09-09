@@ -2,8 +2,8 @@
 
 import type { QcResult } from '../../src/core/qc.js';
 
-export type WordMarkType = 'simpl' | 'zh' | 'oov' | 'hard' | 'factw' | 'goodw' | 'otherw';
-export type SentMarkType = 'syntax' | 'long' | 'ref' | 'fact' | 'stiff' | 'cut' | 'goods' | 'others';
+export type WordMarkType = 'simpl' | 'zh' | 'oov' | 'hard' | 'factw' | 'goodw' | 'anchor' | 'otherw';
+export type SentMarkType = 'syntax' | 'long' | 'ref' | 'cohesion' | 'fact' | 'stiff' | 'cut' | 'goods' | 'others';
 export type MarkType = WordMarkType | SentMarkType;
 /** 标记粒度三级（选区即范围）：word=点词 / phrase=拖选短语（下划线，类型色沿用词级色板）/ sent=整句 */
 export type MarkLevel = 'word' | 'phrase' | 'sent';
@@ -82,6 +82,7 @@ export const WORD_TYPES: { key: WordMarkType; label: string; badge: string; cls:
   { key: 'hard', label: '太难', badge: '难', cls: 'mk-hard' },
   { key: 'factw', label: '事实用词存疑', badge: '疑', cls: 'mk-factw' },
   { key: 'goodw', label: '好词保留', badge: '留', cls: 'mk-goodw' },
+  { key: 'anchor', label: '复现锚点', badge: '复', cls: 'mk-anchor' },
   { key: 'otherw', label: '其他问题', badge: '他', cls: 'mk-otherw' },
 ];
 
@@ -89,6 +90,7 @@ export const SENT_TYPES: { key: SentMarkType; label: string; badge: string }[] =
   { key: 'syntax', label: '语法太难', badge: '法' },
   { key: 'long', label: '句太长', badge: '长' },
   { key: 'ref', label: '指代不清', badge: '代' },
+  { key: 'cohesion', label: '衔接断裂', badge: '接' },
   { key: 'fact', label: '事实逻辑疑', badge: '实' },
   { key: 'stiff', label: '表达生硬', badge: '硬' },
   { key: 'cut', label: '建议删', badge: '删' },

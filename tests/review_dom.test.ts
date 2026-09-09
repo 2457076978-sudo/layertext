@@ -14,7 +14,7 @@ before(() => {
 });
 
 import { jumpTo, refreshMarkDom, removeMarkDom, renderSidebar, restoreAllMarkDom } from '../app/src/review.js';
-import { GATES, WORD_TYPES, SENT_TYPES, newMarkId, newReviewState, type Mark } from '../app/src/types.js';
+import { GATES, WORD_TYPES, SENT_TYPES, newMarkId, newReviewState, typeLabel, type Mark } from '../app/src/types.js';
 
 function buildReader(): void {
   win.document.body.innerHTML = `
@@ -155,12 +155,14 @@ test('侧栏：配额增删勾、门禁、清单分组渲染与回调', () => {
 test('标记类型集与门禁项定义完整（P0 要求的按钮组）', () => {
   assert.deepEqual(
     WORD_TYPES.map((t) => t.key),
-    ['simpl', 'zh', 'oov', 'hard', 'factw', 'goodw', 'otherw'],
+    ['simpl', 'zh', 'oov', 'hard', 'factw', 'goodw', 'anchor', 'otherw'],
   );
   assert.deepEqual(
     SENT_TYPES.map((t) => t.key),
-    ['syntax', 'long', 'ref', 'fact', 'stiff', 'cut', 'goods', 'others'],
+    ['syntax', 'long', 'ref', 'cohesion', 'fact', 'stiff', 'cut', 'goods', 'others'],
   );
+  assert.equal(typeLabel('anchor'), '复现锚点');
+  assert.equal(typeLabel('cohesion'), '衔接断裂');
   assert.equal(GATES.length, 4);
   assert.ok(!newMarkId().includes(' '), '标记 id 无空格，可作 DOM data 属性值');
 });

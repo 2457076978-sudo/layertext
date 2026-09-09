@@ -816,7 +816,7 @@ function showWordPanel(session: FileSession, wEl: HTMLElement, x: number, y: num
     <div class="pop-h">${esc(wEl.textContent ?? '')}</div>
     <div class="pop-info">词表状态：${stateLabel}${origin && origin !== tok ? `<br/>词形还原原形：${esc(origin)}` : ''}</div>
     <div class="pop-marks"></div>
-    <div class="pop-btns"><button data-mk="__rewrite" class="primary" title="让 AI 按当前标记意图改写这一句（快捷键 R）"><svg class="ico"><use href="#i-sparkle"/></svg>AI 改写本句</button>${WORD_TYPES.map((t, i) => `<button data-mk="${t.key}" title="标记为「${t.label}」${S.appConfig.autoRewriteOnMark ? '——即改模式下点完立即执行（写原稿+日志）' : '——点「AI 改写本句」或批量时按此意图处理'}"><span class="kbd">${i + 1}</span>${t.label}</button>`).join('')}</div>
+    <div class="pop-btns"><button data-mk="__rewrite" class="primary" title="让 AI 按当前标记意图改写这一句（快捷键 R）"><svg class="ico"><use href="#i-sparkle"/></svg>AI 改写本句</button>${WORD_TYPES.map((t, i) => `<button data-mk="${t.key}" title="标记为「${t.label}」${t.key === 'anchor' ? '——记录该词为本篇复现锚点（保留并计入复现，不改正文）' : S.appConfig.autoRewriteOnMark ? '——即改模式下点完立即执行（写原稿+日志）' : '——点「AI 改写本句」或批量时按此意图处理'}"><span class="kbd">${i + 1}</span>${t.label}</button>`).join('')}</div>
     <textarea id="pop-note" placeholder="备注（可选，随下一条标记保存）"></textarea>
     <div class="pop-tip">${S.appConfig.autoRewriteOnMark ? '当前为即改模式：点任一标记立即执行（如「加中文标注」插入注释、「词汇简化」换课标内简单词），改动写原稿并记日志，首改前自动备份' : '先标记意图再点「AI 改写本句」，改写会直接出现在正文中供采纳'}</div>`;
   bindTypeButtons(session, 'word', pi, si, wi);
@@ -870,7 +870,7 @@ function showPhrasePanel(session: FileSession, sentEl: HTMLElement, range: Range
     <div class="pop-h">短语标记（P${String(pi + 1).padStart(2, '0')} · 第${si + 1}句 · ${wl} 词）</div>
     <div class="pop-info">选区：${esc(shown)}<br/>选什么划什么——短语整体处理（词典释义 / 换简单说法 / 标记保留），句内其余文字不动</div>
     <div class="pop-marks"></div>
-    <div class="pop-btns"><button data-mk="__rewrite" class="primary" title="让 AI 按当前标记意图改写这一句（快捷键 R）"><svg class="ico"><use href="#i-sparkle"/></svg>AI 改写本句</button>${WORD_TYPES.map((t, i) => `<button data-mk="${t.key}" title="标记为「${t.label}」——将对整个短语生效（下划线范围）${S.appConfig.autoRewriteOnMark ? '；即改模式下点完立即执行（写原稿+日志）' : ''}"><span class="kbd">${i + 1}</span>${t.label}</button>`).join('')}</div>
+    <div class="pop-btns"><button data-mk="__rewrite" class="primary" title="让 AI 按当前标记意图改写这一句（快捷键 R）"><svg class="ico"><use href="#i-sparkle"/></svg>AI 改写本句</button>${WORD_TYPES.map((t, i) => `<button data-mk="${t.key}" title="标记为「${t.label}」——${t.key === 'anchor' ? '记录整个短语为复现锚点（不改正文）' : `将对整个短语生效（下划线范围）${S.appConfig.autoRewriteOnMark ? '；即改模式下点完立即执行（写原稿+日志）' : ''}`}"><span class="kbd">${i + 1}</span>${t.label}</button>`).join('')}</div>
     <textarea id="pop-note" placeholder="备注（可选，随下一条标记保存）"></textarea>
     <div class="pop-tip">${S.appConfig.autoRewriteOnMark ? '当前为即改模式：点任一标记立即对整个短语执行，改动写原稿并记日志' : '选什么划什么——标记后可点「AI 改写本句」处理整个短语'}</div>`;
   bindTypeButtons(session, 'phrase', pi, si, wi, wl);
@@ -906,6 +906,10 @@ function bindTypeButtons(session: FileSession, level: MarkLevel, pi: number, si:
       // 加中文标注例外——它是确定性操作，走词义映射+机器插入（原句逐字不动，不让 AI 改写句子）
       if (S.appConfig.autoRewriteOnMark) {
         hidePop();
+        if (mark.type === 'anchor' && mark.word) {
+          toast(`复现锚点已记录：${mark.word}（保留该词并计入本篇复现，正文不动）`, 'ok');
+          return; // 记录型标记：句子没问题，不触发改写
+        }
         if (mark.type === 'zh' && mark.word) void applyZhAnnotations(session, [mark]);
         else if (mark.type === 'simpl' && mark.word) void applyWordSimplifications(session, [mark]);
         else void aiRewriteSentence(pi, si, typeLabel(mark.type), mark.id);
@@ -2549,7 +2553,7 @@ function buildAiUserPrompt(session: FileSession): string {
   const maxLen = simplifyMaxLen();
   const r = session.report;
   const marks = session.review.marks
-    .filter((m) => m.type !== 'zh' && !(m.type === 'simpl' && m.level !== 'sent')) // 词/短语级操作（加注/换词）走确定性管线，不进句子改写
+    .filter((m) => m.type !== 'zh' && m.type !== 'anchor' && !(m.type === 'simpl' && m.level !== 'sent')) // 加注/换词走确定性管线、复现锚点是记录型——都不进句子改写
     .map((m) => {
       const sent = sentsOf(paras[m.pi] ?? '', false)[m.si] ?? '(未找到句子)';
       const label =
