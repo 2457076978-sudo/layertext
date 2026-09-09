@@ -3180,16 +3180,19 @@ function renderInlineOne(session: FileSession, g: Suggestion): void {
   const sentEl = document.querySelector(`.sent[data-pi="${g.pi}"][data-si="${g.si}"]`);
   if (!sentEl || sentEl.nextElementSibling?.classList.contains('inline-sug')) return;
   sentEl.classList.add('sug-pending');
+  // 自解释（交互标准 A1/A4）：黄句+绿字必须自己说明"这是建议、还没改正文、怎么处理"——不靠猜
+  (sentEl as HTMLElement).title = '黄色=这句有 AI 修改建议（正文还没改）——看下方绿字，点 ✓ 采纳或 ✗ 放弃';
   const bad = g.check.passive || g.check.relcl || g.check.pastperf || g.check.overlong;
   const div = document.createElement('span');
   div.className = 'inline-sug';
   div.dataset.markId = g.markId;
   div.innerHTML = `
+    <span class="sug-tag">AI 修改建议（未改正文，等你确认）</span>
     <span class="rev-text">${esc(g.revised)}</span>
     ${bad ? `<span class="sug-warn">⚠︎ 引擎复核：仍含${[g.check.passive ? '被动' : '', g.check.relcl ? '定从' : '', g.check.pastperf ? '过去完成' : '', g.check.overlong ? '超长' : ''].filter(Boolean).join('/')}</span>` : ''}
     <span class="sug-basis">${esc(g.basis)}${g.alternative ? '｜备选：' + esc(g.alternative) : ''}</span>
-    <button class="btn-ok">✓ 采纳（正文立即更新，改动记入工作稿）</button>
-    <button class="btn-no">✗ 放弃</button>`;
+    <button class="btn-ok" title="用上面的绿字替换黄句（写入正文+变更日志，首改前自动备份，↩︎ 可撤销）">✓ 采纳（写入正文，可撤销）</button>
+    <button class="btn-no" title="不要这条建议，黄色消失，正文不动">✗ 放弃</button>`;
   div.querySelector('.btn-ok')!.addEventListener('click', () => void acceptSuggestion(g));
   div.querySelector('.btn-no')!.addEventListener('click', () => {
     g.status = 'rejected';

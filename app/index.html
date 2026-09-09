@@ -1038,6 +1038,17 @@
         font-size: var(--read-fs, 17px);
         line-height: var(--read-lh, 2.1);
       }
+      .inline-sug .sug-tag {
+        display: inline-block;
+        font-size: 11px;
+        color: #166534;
+        background: #dcfce7;
+        border: 1px solid #86efac;
+        border-radius: 5px;
+        padding: 0 6px;
+        margin-right: 6px;
+        vertical-align: 2px;
+      }
       .inline-sug .rev-text {
         color: #14532d;
       }
@@ -2881,6 +2892,7 @@
             <span><i class="dot" style="background: var(--pending)"></i>待定（橙）</span>
             <span><i class="dot" style="background: var(--term)"></i>术语（蓝）</span>
             <span><i class="dot" style="background: var(--riskbg); border: 1px solid #f5c6c2"></i>难句（自动检测）</span>
+            <span><i class="dot" style="background: #fef9c3; border: 1px solid #fde047"></i>黄句=AI 建议，未改正文（绿字点 ✓ 才生效）</span>
           </div>
           <div id="reader">
             <div class="empty">
