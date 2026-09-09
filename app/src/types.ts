@@ -5,15 +5,19 @@ import type { QcResult } from '../../src/core/qc.js';
 export type WordMarkType = 'simpl' | 'zh' | 'oov' | 'hard' | 'factw' | 'goodw' | 'otherw';
 export type SentMarkType = 'syntax' | 'long' | 'ref' | 'fact' | 'stiff' | 'cut' | 'goods' | 'others';
 export type MarkType = WordMarkType | SentMarkType;
+/** 标记粒度三级（选区即范围）：word=点词 / phrase=拖选短语（下划线，类型色沿用词级色板）/ sent=整句 */
+export type MarkLevel = 'word' | 'phrase' | 'sent';
 
 export interface Mark {
   id: string;
-  level: 'word' | 'sent';
-  /** 定位：段落索引 / 句索引 / 词索引（词级才有）——不随文本大小写或重复句漂移 */
+  level: MarkLevel;
+  /** 定位：段落索引 / 句索引 / 词索引（词级与短语级起始词）——不随文本大小写或重复句漂移 */
   pi: number;
   si: number;
   wi?: number;
-  /** 显示用：词面 / 句子前缀（同时做轻量校验：若当前句与 text 前缀不符，清单里提示"待复核"） */
+  /** 短语级：覆盖的词数（word 级恒 1；渲染下划线与 remap 用） */
+  wl?: number;
+  /** 显示用：词面 / 短语文本 / 句子前缀（同时做轻量校验：若当前句与 text 前缀不符，清单里提示"待复核"） */
   word?: string;
   text?: string;
   type: MarkType;

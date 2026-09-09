@@ -38,7 +38,30 @@ export function extractParas(body: string): string[] {
   });
 }
 
-/** 分句（song=true 时歌词按行→句切分；否则按 [.!?"] + 空格切分） */
+/** 常见缩写尾词（Mr./Dr./U.S. 等后面跟的是人名/地名，不是句界）——AI 边界 #19：曾把 "Mr. Jones" 拆成两句。
+ *  必须全串匹配（^…$）：不加锚点时 "storms." 会被 "Ms.$" 尾部命中，整句误并（eval 评测当场抓住） */
+const ABBREV_END = /^(?:Mr|Mrs|Ms|Dr|St|Jr|Sr|Prof|Capt|Sgt|Lt|Gen|Gov|Sen|Rep|Rev|No|vs|Co|Inc|Ltd)\.$/i;
+/** 单字母缩写序列（J. / U.S. / J.K.）：字母+句点组合不是句界 */
+const ABBR_TOKEN = /^(?:[A-Z]\.)+$/;
+
+/** 把误切的部分按"上一段以缩写结尾"重新接回（与 Python 参照版 merge_abbrev 语义一致） */
+function mergeAbbrevParts(parts: string[]): string[] {
+  const out: string[] = [];
+  for (const p of parts) {
+    const prev = out[out.length - 1];
+    if (prev !== undefined) {
+      const tail = prev.trim().split(/\s+/).pop() ?? '';
+      if (ABBREV_END.test(tail) || ABBR_TOKEN.test(tail)) {
+        out[out.length - 1] = prev.replace(/\s+$/, '') + ' ' + p;
+        continue;
+      }
+    }
+    out.push(p);
+  }
+  return out;
+}
+
+/** 分句（song=true 时歌词按行→句切分；否则按 [.!?"] + 空格切分；缩写（Mr./U.S. 等）不切） */
 export function sentsOf(text: string, song: boolean): string[] {
   const t = text.replace(/[>—-]+/g, ' ');
   let parts: string[];
@@ -51,7 +74,7 @@ export function sentsOf(text: string, song: boolean): string[] {
     const norm = t.split(/\s+/).filter(Boolean).join(' ');
     parts = norm.split(/(?<=[.!?"] )/);
   }
-  return parts.filter((p) => /[A-Za-z]{2,}/.test(p));
+  return mergeAbbrevParts(parts).filter((p) => /[A-Za-z]{2,}/.test(p));
 }
 
 /** 词符化：提取英文词 → 小写 → 去首尾 ' / - → 去所有格 's */

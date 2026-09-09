@@ -40,14 +40,19 @@ import {
   normalizeAndSplitChapters,
   parseAiJson,
   parseWorkspaces,
+  phraseSpan,
   pickSentMarkType,
   planBatchChapters,
   planCompaction,
   progressPct,
   remapMarks,
+  routeSelection,
   shelfGroupsOf,
+  stripMarkdownNoise,
+  morphMismatch,
   toggleParaBookmark,
   workspaceChipName,
+  decodeAuto,
   type BatchChapterItem,
   type BatchProgressFile,
   type BookReportRow,
@@ -87,7 +92,21 @@ import { summarizeCost } from '../../src/core/aiops.js';
 import { extractParas, hitOrigin, hit, pendHit, sentsOf, splitChapter, tokenizeTxt, cardGlossWords } from '../../src/core/textpipe.js';
 import { sentenceRisks } from '../../src/core/risks.js';
 import { jumpTo, jumpToBookmark, refreshBookmarksDom, refreshMarkDom, removeMarkDom, renderSidebar, restoreAllMarkDom, scheduleSave } from './review.js';
-import { CHANGELOG_HEADER, GATES, GATE_HELP, SENT_TYPES, WORD_TYPES, newMarkId, newReviewState, typeLabel, type FileSession, type Mark, type MarkType, type Suggestion } from './types.js';
+import {
+  CHANGELOG_HEADER,
+  GATES,
+  GATE_HELP,
+  SENT_TYPES,
+  WORD_TYPES,
+  newMarkId,
+  newReviewState,
+  typeLabel,
+  type FileSession,
+  type Mark,
+  type MarkLevel,
+  type MarkType,
+  type Suggestion,
+} from './types.js';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -710,7 +729,7 @@ function placePop(x: number, y: number): void {
   pop.style.top = py + 'px';
 }
 
-function marksAt(session: FileSession, level: 'word' | 'sent', pi: number, si: number, wi?: number): Mark[] {
+function marksAt(session: FileSession, level: MarkLevel, pi: number, si: number, wi?: number): Mark[] {
   return session.review.marks.filter((m) => m.level === level && m.pi === pi && m.si === si && (level === 'sent' || m.wi === wi));
 }
 
@@ -737,7 +756,7 @@ function refreshPop(): void {
   const pi = Number(ctx.pi),
     si = Number(ctx.si),
     wi = ctx.wi === undefined ? undefined : Number(ctx.wi);
-  const level = ctx.level as 'word' | 'sent';
+  const level = ctx.level as MarkLevel;
   renderPopMarks(marksAt(S.popSession, level, pi, si, wi));
   // 类型按钮置灰已选项
   pop.querySelectorAll('[data-mk]').forEach((b) => {
@@ -772,9 +791,9 @@ function showWordPanel(session: FileSession, wEl: HTMLElement, x: number, y: num
     <div class="pop-h">${esc(wEl.textContent ?? '')}</div>
     <div class="pop-info">词表状态：${stateLabel}${origin && origin !== tok ? `<br/>词形还原原形：${esc(origin)}` : ''}</div>
     <div class="pop-marks"></div>
-    <div class="pop-btns"><button data-mk="__rewrite" class="primary" title="让 AI 按当前标记意图改写这一句（快捷键 R）"><svg class="ico"><use href="#i-sparkle"/></svg>AI 改写本句</button>${WORD_TYPES.map((t, i) => `<button data-mk="${t.key}"><span class="kbd">${i + 1}</span>${t.label}</button>`).join('')}</div>
+    <div class="pop-btns"><button data-mk="__rewrite" class="primary" title="让 AI 按当前标记意图改写这一句（快捷键 R）"><svg class="ico"><use href="#i-sparkle"/></svg>AI 改写本句</button>${WORD_TYPES.map((t, i) => `<button data-mk="${t.key}" title="标记为「${t.label}」${S.appConfig.autoRewriteOnMark ? '——即改模式下点完立即执行（写原稿+日志）' : '——点「AI 改写本句」或批量时按此意图处理'}"><span class="kbd">${i + 1}</span>${t.label}</button>`).join('')}</div>
     <textarea id="pop-note" placeholder="备注（可选，随下一条标记保存）"></textarea>
-    <div class="pop-tip">先标记意图再点「AI 改写本句」，改写会直接出现在正文中供采纳</div>`;
+    <div class="pop-tip">${S.appConfig.autoRewriteOnMark ? '当前为即改模式：点任一标记立即执行（如「加中文标注」插入注释、「词汇简化」换课标内简单词），改动写原稿并记日志，首改前自动备份' : '先标记意图再点「AI 改写本句」，改写会直接出现在正文中供采纳'}</div>`;
   bindTypeButtons(session, 'word', pi, si, wi);
   refreshPop();
   placePop(x, y);
@@ -803,15 +822,43 @@ function showSentPanel(session: FileSession, sentEl: HTMLElement, x: number, y: 
   placePop(x, y);
 }
 
-function bindTypeButtons(session: FileSession, level: 'word' | 'sent', pi: number, si: number, wi?: number): void {
+/* 短语面板（三级粒度之短语级）：拖选短语 → 直线下划线标记，类型色沿用词级色板；
+ * 选区即范围——弹层顶部显示选区原文，短语动作常驻；句动作不在此弹层（想标句就选整句） */
+function showPhrasePanel(session: FileSession, sentEl: HTMLElement, range: Range, x: number, y: number): void {
+  S.popSession = session;
+  const pi = Number(sentEl.dataset.pi);
+  const si = Number(sentEl.dataset.si);
+  const wis = [...sentEl.querySelectorAll<HTMLElement>('.w')].filter((w) => range.intersectsNode(w)).map((w) => Number(w.dataset.wi));
+  if (!wis.length) return;
+  const wi = Math.min(...wis);
+  const wl = Math.max(...wis) - wi + 1;
+  const sent = sentsOf(extractParas(splitChapter(session.md).body)[pi] ?? '', false)[si] ?? '';
+  const span = phraseSpan(sent, wi, wl);
+  if (!span) return;
+  const shown = span.text.length > 60 ? span.text.slice(0, 60) + '…' : span.text;
+  pop.dataset.level = 'phrase';
+  pop.dataset.pi = String(pi);
+  pop.dataset.si = String(si);
+  pop.dataset.wi = String(wi);
+  pop.dataset.wl = String(wl);
+  pop.innerHTML = `
+    <div class="pop-h">短语标记（P${String(pi + 1).padStart(2, '0')} · 第${si + 1}句 · ${wl} 词）</div>
+    <div class="pop-info">选区：${esc(shown)}<br/>选什么划什么——短语整体处理（词典释义 / 换简单说法 / 标记保留），句内其余文字不动</div>
+    <div class="pop-marks"></div>
+    <div class="pop-btns"><button data-mk="__rewrite" class="primary" title="让 AI 按当前标记意图改写这一句（快捷键 R）"><svg class="ico"><use href="#i-sparkle"/></svg>AI 改写本句</button>${WORD_TYPES.map((t, i) => `<button data-mk="${t.key}" title="标记为「${t.label}」——将对整个短语生效（下划线范围）${S.appConfig.autoRewriteOnMark ? '；即改模式下点完立即执行（写原稿+日志）' : ''}"><span class="kbd">${i + 1}</span>${t.label}</button>`).join('')}</div>
+    <textarea id="pop-note" placeholder="备注（可选，随下一条标记保存）"></textarea>
+    <div class="pop-tip">${S.appConfig.autoRewriteOnMark ? '当前为即改模式：点任一标记立即对整个短语执行，改动写原稿并记日志' : '选什么划什么——标记后可点「AI 改写本句」处理整个短语'}</div>`;
+  bindTypeButtons(session, 'phrase', pi, si, wi, wl);
+  refreshPop();
+  placePop(x, y);
+}
+
+function bindTypeButtons(session: FileSession, level: MarkLevel, pi: number, si: number, wi?: number, wl?: number): void {
   pop.querySelectorAll('[data-mk]').forEach((b) =>
     b.addEventListener('click', () => {
       const type = (b as HTMLElement).dataset.mk as MarkType | '__rewrite';
       if ((type as string) === '__rewrite') {
-        const intent =
-          marksAt(session, 'word', pi, si, wi)
-            .map((m) => typeLabel(m.type))
-            .join('、') || '词汇简化';
+        const intent = [...marksAt(session, 'word', pi, si, wi), ...marksAt(session, 'phrase', pi, si, wi)].map((m) => typeLabel(m.type)).join('、') || '词汇简化';
         void aiRewriteSentence(pi, si, intent);
         return;
       }
@@ -823,8 +870,9 @@ function bindTypeButtons(session: FileSession, level: 'word' | 'sent', pi: numbe
         level,
         pi,
         si,
-        ...(level === 'word' ? { wi } : {}),
-        ...(level === 'word' ? { word: pop.querySelector('.pop-h')?.textContent ?? '', text: sentText.slice(0, 40) } : { text: sentText.slice(0, 40) }),
+        ...(level !== 'sent' ? { wi } : {}),
+        ...(level === 'phrase' ? { wl: wl ?? 1, word: phraseSpan(sentText, wi ?? 0, wl ?? 1)?.text ?? '' } : level === 'word' ? { word: pop.querySelector('.pop-h')?.textContent ?? '' } : {}),
+        text: sentText.slice(0, 40),
         type: type as MarkType,
         note,
         ts: Date.now(),
@@ -1432,6 +1480,13 @@ function docxToText(b64: string): string {
   return paras.join('\n\n');
 }
 
+/** 读 txt/md：字节读入 + 自动编码探测（BOM → 严格 UTF-8 校验 → GB18030 兜底）。
+ *  中文环境导出的 txt 常为 GBK/GB2312，直接按 UTF-8 读会报错或乱码——对新手这是"软件坏了"级事故 */
+async function readTextSmart(path: string): Promise<string> {
+  const b64 = await invoke<string>('read_file_base64', { path });
+  return decodeAuto(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)));
+}
+
 async function openPathIntoSession(p: string): Promise<void> {
   const name = p.slice(p.lastIndexOf('/') + 1);
   if (p.toLowerCase().endsWith('.epub')) {
@@ -1443,7 +1498,7 @@ async function openPathIntoSession(p: string): Promise<void> {
     setStatus(`已从 epub 导入《${bookTitle}》${chapters.length} 章（原文件未改动）`, 'saved');
     return;
   }
-  const raw = p.toLowerCase().endsWith('.docx') ? docxToText(await invoke<string>('read_file_base64', { path: p })) : await invoke<string>('read_text_file', { path: p });
+  const raw = p.toLowerCase().endsWith('.docx') ? docxToText(await invoke<string>('read_file_base64', { path: p })) : await readTextSmart(p);
   // 智能归一化：已合规直接用；多章标题拆多 tab；无章节结构的文本内存包装直接显示（原文件不动）
   const { chapters } = normalizeAndSplitChapters(raw, name);
   for (const ch of chapters) await addSession(ch.md, chapters.length > 1 ? ch.title : name, p);
@@ -2462,10 +2517,15 @@ function buildAiUserPrompt(session: FileSession): string {
   const maxLen = simplifyMaxLen();
   const r = session.report;
   const marks = session.review.marks
-    .filter((m) => m.type !== 'zh' && !(m.type === 'simpl' && m.level === 'word')) // 词级操作（加注/换词）走确定性管线，不进句子改写
+    .filter((m) => m.type !== 'zh' && !(m.type === 'simpl' && m.level !== 'sent')) // 词/短语级操作（加注/换词）走确定性管线，不进句子改写
     .map((m) => {
       const sent = sentsOf(paras[m.pi] ?? '', false)[m.si] ?? '(未找到句子)';
-      const label = m.level === 'word' ? `词标记：${m.word ?? ''}（${typeLabel(m.type)}${m.note ? '，备注：' + m.note : ''}）` : `句标记（${typeLabel(m.type)}${m.note ? '，备注：' + m.note : ''}）`;
+      const label =
+        m.level === 'word'
+          ? `词标记：${m.word ?? ''}（${typeLabel(m.type)}${m.note ? '，备注：' + m.note : ''}）`
+          : m.level === 'phrase'
+            ? `短语标记：${m.word ?? ''}（${typeLabel(m.type)}${m.note ? '，备注：' + m.note : ''}）`
+            : `句标记（${typeLabel(m.type)}${m.note ? '，备注：' + m.note : ''}）`;
       return `【${m.id}】${label}\n所在句：${sent}`;
     })
     .join('\n\n');
@@ -2554,6 +2614,7 @@ async function applyZhAnnotations(s: FileSession, marks: Mark[]): Promise<number
   }
   flashApplied(done[done.length - 1]);
   setStatus(`已加中文标注 ${done.length} 处（原句未动）：${done.slice(0, 6).join('、')}${done.length > 6 ? '…' : ''}`, 'saved');
+  toast(`已加中文标注 ${done.length} 处（原句未动）`, 'ok');
   return done.length;
 }
 
@@ -2582,7 +2643,14 @@ async function applyWordSimplifications(s: FileSession, marks: Mark[]): Promise<
     setStatus('词汇简化获取失败：' + e, 'err');
     return;
   }
+  // AI 边界防线：映射值剥 Markdown 记号（#16），空值/中文说明直接丢弃（#9 同源）
+  for (const k of Object.keys(gloss)) {
+    const v = stripMarkdownNoise(String(gloss[k] ?? ''));
+    if (!v || hasProseChinese(v)) delete gloss[k];
+    else gloss[k] = v;
+  }
   const done: string[] = [];
+  const morphWarn: string[] = [];
   for (const m of uniq) {
     const w = m.word!;
     const simple = gloss[w] ?? gloss[w.toLowerCase()] ?? gloss[w.replace(/\s+/g, ' ')];
@@ -2610,9 +2678,10 @@ async function applyWordSimplifications(s: FileSession, marks: Mark[]): Promise<
     if (at < 0) continue;
     let repl = simple;
     if (/^[A-Z]/.test(matched)) repl = repl.charAt(0).toUpperCase() + repl.slice(1); // 保首字母大写形态
+    if (morphMismatch(matched, repl)) morphWarn.push(`${matched}→${repl}`); // AI 边界 #17：词尾形态类不一致，提示复核不拦截
     s.md = s.md.slice(0, at) + repl + s.md.slice(at + matched.length);
     s.review.marks = s.review.marks.filter((x) => x.id !== m.id);
-    s.review.marks = s.review.marks.filter((x) => !(x.level === 'word' && x.word && x.word.toLowerCase() === w.toLowerCase())); // 同词其余标记一并完成
+    s.review.marks = s.review.marks.filter((x) => !(x.level !== 'sent' && x.word && x.word.toLowerCase() === w.toLowerCase())); // 同词（词/短语级）其余标记一并完成
     remapMarks(s.review.marks, s.md);
     done.push(`${matched}→${repl}`);
   }
@@ -2645,7 +2714,11 @@ async function applyWordSimplifications(s: FileSession, marks: Mark[]): Promise<
     /* 日志失败不阻塞 */
   }
   if (done.length) flashApplied(done[done.length - 1].split('→')[1]);
-  setStatus(`已换 ${done.length} 个词（句子未动）：${done.slice(0, 6).join('、')}${done.length > 6 ? '…' : ''}${noted ? `；换不出的 ${noted} 个已改为加中文标注` : ''}`, 'saved');
+  const summary =
+    `已换 ${done.length} 个词（句子未动）：${done.slice(0, 6).join('、')}${done.length > 6 ? '…' : ''}${noted ? `；换不出的 ${noted} 个已改为加中文标注` : ''}` +
+    (morphWarn.length ? `；⚠ ${morphWarn.length} 处词形可能与语境不符（${morphWarn.slice(0, 3).join('、')}），建议复核` : '');
+  setStatus(summary, 'saved');
+  toast(morphWarn.length ? `已换 ${done.length} 个词；⚠ ${morphWarn.length} 处词形建议复核（详见状态行）` : `已换 ${done.length} 个词（句子未动）`, morphWarn.length ? 'info' : 'ok');
 }
 
 async function aiSuggest(instruction?: string): Promise<void> {
@@ -2654,8 +2727,8 @@ async function aiSuggest(instruction?: string): Promise<void> {
     setStatus('请先载入文本', 'err');
     return;
   }
-  // 幽灵词标记卫生：词已在之前修订中消失的标记不再发给 AI（曾诱导 AI 凭原著旧句作答、定位失败）
-  const ghosts = s.review.marks.filter((m) => m.level === 'word' && m.word && !s.md.includes(m.word));
+  // 幽灵标记卫生（词/短语级）：词已在之前修订中消失的标记不再发给 AI（曾诱导 AI 凭原著旧句作答、定位失败）
+  const ghosts = s.review.marks.filter((m) => m.level !== 'sent' && m.word && !s.md.includes(m.word));
   if (ghosts.length) {
     s.review.marks = s.review.marks.filter((m) => !ghosts.includes(m));
     renderSidebar(s, sidebarHandlers);
@@ -2676,10 +2749,10 @@ async function aiSuggest(instruction?: string): Promise<void> {
   btn.disabled = true;
   try {
     // 「加中文标注」是确定性操作，不走句子改写管线（曾致 AI 顺手简化整句）：
-    // AI 只出 词→中文 映射，原句逐字保留、机器插入（词（中文））
+    // AI 只出 词→中文 映射，原句逐字保留、机器插入（词（中文））——词级与短语级共用（短语=系统词典短语查询）
     const zhMarks = s.review.marks.filter((m) => m.type === 'zh' && m.word);
     if (zhMarks.length) await applyZhAnnotations(s, zhMarks);
-    const simplWordMarks = s.review.marks.filter((m) => m.type === 'simpl' && m.level === 'word' && m.word);
+    const simplWordMarks = s.review.marks.filter((m) => m.type === 'simpl' && m.level !== 'sent' && m.word);
     if (simplWordMarks.length) await applyWordSimplifications(s, simplWordMarks);
     if ((zhMarks.length || simplWordMarks.length) && s.review.marks.length === 0 && !instruction) {
       btn.textContent = '按标记修改';
@@ -2707,14 +2780,15 @@ async function aiSuggest(instruction?: string): Promise<void> {
     S.suggestions = raw
       .filter((x) => x.revised)
       .map((x) => {
-        const risk = checkRev(String(x.revised));
+        // AI 边界 #16：AI 偶在 revised/original 里混 Markdown 记号（**加粗**等）——归一化剥离后再进管线（形态枚举表）
+        const risk = checkRev(stripMarkdownNoise(String(x.revised)));
         return {
           markId: String(x.id),
           type: x.type ?? '',
-          original: String(x.original ?? ''),
-          revised: String(x.revised),
+          original: stripMarkdownNoise(String(x.original ?? '')),
+          revised: stripMarkdownNoise(String(x.revised)),
           basis: x.basis ?? '',
-          alternative: x.alternative,
+          alternative: x.alternative ? stripMarkdownNoise(x.alternative) : undefined,
           check: { passive: risk.passive, relcl: risk.relcl, pastperf: risk.pastperf, overlong: risk.overlong },
         };
       });
@@ -3321,7 +3395,7 @@ function showBatchPop(): void {
 }
 
 async function readChapterRaw(path: string): Promise<string> {
-  return path.toLowerCase().endsWith('.docx') ? docxToText(await invoke<string>('read_file_base64', { path })) : await invoke<string>('read_text_file', { path });
+  return path.toLowerCase().endsWith('.docx') ? docxToText(await invoke<string>('read_file_base64', { path })) : await readTextSmart(path);
 }
 
 async function pickBatchDir(): Promise<void> {
@@ -3982,7 +4056,7 @@ function buildHeatRail(): void {
   for (const m of s.review.marks) {
     const el = sentByKey.get(`${m.pi}:${m.si}`);
     if (!el) continue;
-    dot(el, riskSet.has(el) ? 'both' : 'mark', (m.level === 'word' ? '词' : '句') + '标记：' + (m.text ?? m.word ?? '').slice(0, 30));
+    dot(el, riskSet.has(el) ? 'both' : 'mark', (m.level === 'word' ? '词' : m.level === 'phrase' ? '短语' : '句') + '标记：' + (m.word ?? m.text ?? '').slice(0, 30));
   }
   // 视口指示块
   const view = document.createElement('div');
@@ -4327,7 +4401,7 @@ function renderAlignPane(): void {
         return;
       }
       try {
-        const raw = path.toLowerCase().endsWith('.docx') ? docxToText(await invoke<string>('read_file_base64', { path })) : await invoke<string>('read_text_file', { path });
+        const raw = path.toLowerCase().endsWith('.docx') ? docxToText(await invoke<string>('read_file_base64', { path })) : await readTextSmart(path);
         const { chapters } = normalizeAndSplitChapters(raw, path.slice(path.lastIndexOf('/') + 1));
         S.alignBase = { name: path.slice(path.lastIndexOf('/') + 1), md: chapters[0]?.md ?? raw, path };
         setStatus(`对照基准已设：${S.alignBase.name}`, 'saved');
@@ -5274,7 +5348,7 @@ $('reader').addEventListener('click', (e) => {
   showWordPanel(s, wEl as HTMLElement, e.clientX + 8, e.clientY + 12);
 });
 
-/* 拖选 → 句面板 */
+/* 拖选 → 路由（选区即范围，无隐式判定）：跨句/整句=句面板；句内 ≥2 词=短语面板；单词=词面板 */
 document.addEventListener('mouseup', (e) => {
   if ((e.target as HTMLElement).closest('#pop') || (e.target as HTMLElement).closest('#sidebar')) return;
   const sel = window.getSelection();
@@ -5284,10 +5358,27 @@ document.addEventListener('mouseup', (e) => {
   const sentEl = host?.closest('.sent');
   const s = activeSession();
   if (!sentEl || !s) return;
-  const anchorSent = (sel.anchorNode?.nodeType === 3 ? sel.anchorNode.parentElement : (sel.anchorNode as HTMLElement | null))?.closest('.sent');
-  const cross = anchorSent !== sentEl;
   const rect = sel.getRangeAt(0).getBoundingClientRect();
-  showSentPanel(s, sentEl as HTMLElement, rect.left, rect.bottom + 6, cross);
+  const anchorSent = (sel.anchorNode?.nodeType === 3 ? sel.anchorNode.parentElement : (sel.anchorNode as HTMLElement | null))?.closest('.sent');
+  if (anchorSent !== sentEl) {
+    showSentPanel(s, sentEl as HTMLElement, rect.left, rect.bottom + 6, true); // 跨句选择，仅标记所选末句
+    return;
+  }
+  const pi = Number((sentEl as HTMLElement).dataset.pi);
+  const si = Number((sentEl as HTMLElement).dataset.si);
+  const sentText = sentsOf(extractParas(splitChapter(s.md).body)[pi] ?? '', false)[si] ?? '';
+  const route = routeSelection(sel.toString(), sentText);
+  if (route === 'sent') {
+    showSentPanel(s, sentEl as HTMLElement, rect.left, rect.bottom + 6, false);
+    return;
+  }
+  if (route === 'phrase') {
+    showPhrasePanel(s, sentEl as HTMLElement, sel.getRangeAt(0), rect.left, rect.bottom + 6);
+    return;
+  }
+  // 单词拖选 → 词面板（定位到选区内第一个词；选到纯标点等无词场景忽略）
+  const wEl = [...(sentEl as HTMLElement).querySelectorAll<HTMLElement>('.w')].find((w) => sel.getRangeAt(0).intersectsNode(w));
+  if (wEl) showWordPanel(s, wEl, rect.left, rect.bottom + 6);
 });
 
 /* 点击空白关闭面板 */

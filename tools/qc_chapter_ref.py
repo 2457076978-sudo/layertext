@@ -55,6 +55,21 @@ def main():
     paras = re.findall(r'\[P\d+\](.*?)(?=\[P\d+\]|$)', body, re.S)
 
     # 语料：歌词计入正文（引语=文学锚点），但单独统计
+    ABBREV_END = re.compile(r'(?i)^(?:Mr|Mrs|Ms|Dr|St|Jr|Sr|Prof|Capt|Sgt|Lt|Gen|Gov|Sen|Rep|Rev|No|vs|Co|Inc|Ltd)\.$')  # 全串匹配：不加 ^$ 时 "storms." 被 "Ms.$" 尾部命中
+    ABBR_TOKEN = re.compile(r'^(?:[A-Z]\.)+$')
+
+    def merge_abbrev(parts):
+        # 缩写（Mr./U.S. 等）后跟的是人名/地名，不是句界（与 TS 版 mergeAbbrevParts 语义一致）
+        out = []
+        for p in parts:
+            if out:
+                tail = out[-1].strip().split(' ')[-1] if out[-1].strip() else ''
+                if ABBREV_END.search(tail) or ABBR_TOKEN.search(tail):
+                    out[-1] = out[-1].rstrip() + ' ' + p
+                    continue
+            out.append(p)
+        return out
+
     def sents_of(text, song=False):
         text = re.sub(r'[>—-]+', ' ', text)
         if song:
@@ -62,6 +77,7 @@ def main():
             parts = [q for p in parts for q in re.split(r'(?<=[.!?])\s+', p)]
         else:
             parts = re.split(r'(?<=[.!?\"] )', ' '.join(text.split()))
+        parts = merge_abbrev(parts)
         return [p for p in parts if re.search(r'[A-Za-z]{2,}', p)]
 
     all_sents, song_sents = [], []

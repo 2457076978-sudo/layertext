@@ -56,7 +56,50 @@ export function remapMarks(marks: Mark[], md: string): void {
       const wi = raws.findIndex((w, i) => (toks[i] ?? w.toLowerCase()) === m.word!.toLowerCase());
       if (wi >= 0) m.wi = wi;
     }
+    if (ok && m.level === 'phrase' && m.word) {
+      // 短语重对齐：句内找连续词序列匹配（大小写不敏感），找到即更新 wi/wl；找不到保留原值（渲染自然跳过）
+      const sent = sents[m.pi]?.[m.si] ?? '';
+      const raws = sent.match(/[A-Za-z][A-Za-z'-]*/g) ?? [];
+      const target = (m.word.match(/[A-Za-z][A-Za-z'-]*/g) ?? []).map((w) => w.toLowerCase());
+      for (let i = 0; target.length > 0 && i + target.length <= raws.length; i++) {
+        const hit = raws.slice(i, i + target.length).every((w, j) => w.toLowerCase() === target[j]);
+        if (hit) {
+          m.wi = i;
+          m.wl = target.length;
+          break;
+        }
+      }
+    }
   }
+}
+
+/* ---------- 短语级标记（三级粒度：词/短语/句） ---------- */
+
+/** 句内第 wi 个词起 wl 个词的原文切片（与渲染器同款逐词推进，重复词不串位）；越界返回 null */
+export function phraseSpan(sent: string, wi: number, wl: number): { text: string; so: number; eo: number } | null {
+  const raws = sent.match(/[A-Za-z][A-Za-z'-]*/g) ?? [];
+  if (wi < 0 || wl <= 0 || wi + wl > raws.length) return null;
+  let pos = 0;
+  let so = -1;
+  let eo = -1;
+  for (let i = 0; i <= wi + wl - 1; i++) {
+    const at = sent.indexOf(raws[i], pos);
+    if (at < 0) return null;
+    if (i === wi) so = at;
+    if (i === wi + wl - 1) eo = at + raws[i].length;
+    pos = at + raws[i].length;
+  }
+  return so >= 0 && eo > so ? { text: sent.slice(so, eo), so, eo } : null;
+}
+
+/** 拖选路由（选区即范围，无隐式判定）：归一化后等于整句 → 'sent'；
+ *  含 ≥2 个英文词 → 'phrase'（短语）；≤1 词 → 'word'（按词处理） */
+export function routeSelection(selText: string, sentText: string): 'sent' | 'phrase' | 'word' {
+  const sel = normWs(selText);
+  if (!sel) return 'word';
+  if (normWs(sentText) === sel) return 'sent';
+  const words = sel.match(/[A-Za-z][A-Za-z'-]*/g) ?? [];
+  return words.length >= 2 ? 'phrase' : 'word';
 }
 
 /** 从 AI 返回文本中尽力解析出 JSON 数组（代码围栏/单对象/多对象无括号/截断修复/前后解释文字） */
@@ -154,6 +197,47 @@ export function normalizeZhNotes(text: string): string {
 export function hasProseChinese(text: string): boolean {
   const stripped = text.replace(/[A-Za-z\u0027-]+\s*（[^）]*）/g, ' ');
   return /[\u4e00-\u9fff]{4,}/.test(stripped);
+}
+
+/** AI 边界 #16：revised 混入 Markdown 记号（**bold** / *italic* / `code` / __xx__）→ 归一化剥离（语义不变） */
+export function stripMarkdownNoise(s: string): string {
+  return s
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/__([^_]+)__/g, '$1')
+    .replace(/\*([^*\n]+)\*/g, '$1')
+    .replace(/`([^`\n]+)`/g, '$1')
+    .trim();
+}
+
+/** AI 边界 #17：屈折形态预警——替换前后的词尾形态类（ed/ing/s/原形）不一致时提示教师复核（不拦截，B3 复核不挡路） */
+export function morphMismatch(from: string, to: string): boolean {
+  const cls = (w: string): string => {
+    const t = w.toLowerCase().replace(/[^a-z]/g, '');
+    if (t.endsWith('ing')) return 'ing';
+    if (t.endsWith('ed')) return 'ed';
+    if (t.endsWith('s') && !t.endsWith('ss')) return 's';
+    return 'base';
+  };
+  return cls(from) !== cls(to);
+}
+
+/** 文件字节 → 文本（导入自动编码探测）：BOM 优先 → 严格 UTF-8 校验 → GB18030 兜底（覆盖 GBK/GB2312；
+ *  中文环境导出的 txt 常为 GBK，直接按 UTF-8 读会乱码或报错） */
+export function decodeAuto(bin: Uint8Array): string {
+  if (bin.length >= 3 && bin[0] === 0xef && bin[1] === 0xbb && bin[2] === 0xbf) {
+    return new TextDecoder('utf-8').decode(bin.subarray(3));
+  }
+  if (bin.length >= 2 && bin[0] === 0xff && bin[1] === 0xfe) return new TextDecoder('utf-16le').decode(bin.subarray(2));
+  if (bin.length >= 2 && bin[0] === 0xfe && bin[1] === 0xff) return new TextDecoder('utf-16be').decode(bin.subarray(2));
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(bin);
+  } catch {
+    try {
+      return new TextDecoder('gb18030').decode(bin);
+    } catch {
+      return new TextDecoder('utf-8').decode(bin); // 兜底替换字符（总比打不开好）
+    }
+  }
 }
 
 /** 书级替换：词边界确定性替换（机器执行，零遗漏） */

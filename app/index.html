@@ -232,12 +232,14 @@
       }
       #status .saved {
         color: #16a34a;
+        font-weight: 600;
       }
       #status .dirty {
         color: var(--pending);
       }
       #status .err {
         color: var(--oov);
+        font-weight: 600;
       }
       label.tier {
         color: var(--muted);
@@ -451,6 +453,39 @@
       .w.mk-otherw {
         text-decoration: dotted underline #475569;
         text-underline-offset: 3px;
+      }
+      /* 短语级标记：直线下划线，颜色沿用词级类型色板（粒度=覆盖范围，类型=线色；Wayne 09-09 定：直线单一样式） */
+      .pm {
+        cursor: pointer;
+        border-radius: 2px;
+        text-decoration: underline;
+        text-decoration-thickness: 1.5px;
+        text-underline-offset: 3px;
+        text-decoration-color: #475569;
+      }
+      .pm:hover {
+        background: #eef2ff;
+      }
+      .pm.mk-zh {
+        text-decoration-color: #16a34a;
+      }
+      .pm.mk-oov {
+        text-decoration-color: #b91c1c;
+      }
+      .pm.mk-hard {
+        text-decoration-color: #d97706;
+      }
+      .pm.mk-factw {
+        text-decoration-color: #7c3aed;
+      }
+      .pm.mk-goodw {
+        text-decoration-color: #ca8a04;
+      }
+      .pm.mk-simpl {
+        text-decoration-color: #2563eb;
+      }
+      .pm.mk-otherw {
+        text-decoration-color: #475569;
       }
       /* 句级标记角标 */
       .sbadge {
@@ -2752,7 +2787,7 @@
           <svg class="ico"><use href="#i-settings" /></svg>
         </button>
       </span>
-      <button id="mode-pill" class="mode-pill" title="点击切换">…</button>
+      <button id="mode-pill" class="mode-pill" title="修改模式：即改=点了标记立即生效 / 候选=等你点 ✓（点击切换）">…</button>
       <div id="status"></div>
     </header>
 
@@ -2774,12 +2809,12 @@
           <button id="tab-toc" title="全书章节目录与本章书签（再点或 Esc 关闭）">
             <svg class="ico"><use href="#i-list" /></svg>目录
           </button>
-          <button id="tab-text" class="active">正文审校</button>
-          <button id="tab-report">质检报告</button>
-          <button id="tab-suggest">
+          <button id="tab-text" class="active" title="点词/拖选做标记的主战场——生词红色、风险句有角标">正文审校</button>
+          <button id="tab-report" title="本章体检数字与逐条可勾选的诊断台（生词→标记/入词库）">质检报告</button>
+          <button id="tab-suggest" title="AI 给出的修改建议清单（含被防线拦下、定位失败的条目），逐条 ✓ 采纳或放弃">
             <svg class="ico"><use href="#i-annotate" /></svg>修订建议
           </button>
-          <button id="tab-diff">版本对比</button>
+          <button id="tab-diff" title="当前章与历史版本的段落红绿对照">版本对比</button>
           <button id="tab-align" title="基准版（如原文）与当前章行对行核对：左丢什么、右加什么，机器核数字与专名">
             <svg class="ico"><use href="#i-columns" /></svg>逐句对照
           </button>
@@ -2789,7 +2824,7 @@
           <button id="tab-dossier" title="审校过程档案：指标对照+逐句对照+决策记录，一键成卷（论文素材）">
             <svg class="ico"><use href="#i-doc" /></svg>档案
           </button>
-          <button id="tab-retro">复盘</button>
+          <button id="tab-retro" title="AI 建议采纳率台账：哪类建议常被拒——该改提示词还是改判读">复盘</button>
         </div>
         <section id="pane-text" class="pane active">
           <div class="legend">

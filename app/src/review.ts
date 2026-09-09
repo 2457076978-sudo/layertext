@@ -43,6 +43,27 @@ export function refreshMarkDom(mark: Mark): void {
   if (mark.level === 'word') {
     const el = findSentEl(mark.pi, mark.si)?.querySelector(`.w[data-wi="${mark.wi}"]`);
     el?.classList.add('mk-' + mark.type);
+  } else if (mark.level === 'phrase') {
+    // 短语：把第 wi..wi+wl-1 个词（含中间文本节点）包进 .pm 下划线 span；幂等（同 id 已包过跳过）
+    const sent = findSentEl(mark.pi, mark.si);
+    if (!sent || sent.querySelector(`.pm[data-mid="${mark.id}"]`)) return;
+    const from = Number(mark.wi ?? 0);
+    const to = from + Math.max(1, mark.wl ?? 1) - 1;
+    const words = [...sent.querySelectorAll<HTMLElement>('.w')];
+    const start = words.find((w) => Number(w.dataset.wi) === from);
+    const end = words.find((w) => Number(w.dataset.wi) === to);
+    if (!start || !end) return;
+    const moved: ChildNode[] = [];
+    for (let n: ChildNode | null = start; n; n = n.nextSibling) {
+      moved.push(n);
+      if (n === end) break;
+    }
+    const wrap = document.createElement('span');
+    wrap.className = 'pm mk-' + mark.type;
+    wrap.dataset.mid = mark.id;
+    wrap.title = `短语标记：${typeLabel(mark.type)}${mark.note ? ' ｜ ' + mark.note : ''}`;
+    sent.insertBefore(wrap, moved[0]);
+    for (const n of moved) wrap.appendChild(n);
   } else {
     const sent = findSentEl(mark.pi, mark.si);
     if (!sent) return;
@@ -61,6 +82,14 @@ export function removeMarkDom(mark: Mark): void {
   if (mark.level === 'word') {
     const el = findSentEl(mark.pi, mark.si)?.querySelector(`.w[data-wi="${mark.wi}"]`);
     el?.classList.remove('mk-' + mark.type);
+  } else if (mark.level === 'phrase') {
+    // 解包：子节点原位放回（词级标记的 class 在 .w 上，随子节点一起保留）
+    const pm = findSentEl(mark.pi, mark.si)?.querySelector(`.pm[data-mid="${mark.id}"]`);
+    if (pm?.parentNode) {
+      const parent = pm.parentNode;
+      while (pm.firstChild) parent.insertBefore(pm.firstChild, pm);
+      parent.removeChild(pm);
+    }
   } else {
     findSentEl(mark.pi, mark.si)?.querySelector(`.sbadge-${mark.type}`)?.remove();
   }
@@ -107,7 +136,12 @@ export function jumpToBookmark(pi: number): void {
 /* ---------- 定位跳转 ---------- */
 
 export function jumpTo(mark: Mark): void {
-  const el = mark.level === 'word' ? findSentEl(mark.pi, mark.si)?.querySelector(`.w[data-wi="${mark.wi}"]`) : findSentEl(mark.pi, mark.si);
+  const el =
+    mark.level === 'word'
+      ? findSentEl(mark.pi, mark.si)?.querySelector(`.w[data-wi="${mark.wi}"]`)
+      : mark.level === 'phrase'
+        ? findSentEl(mark.pi, mark.si)?.querySelector(`.pm[data-mid="${mark.id}"]`)
+        : findSentEl(mark.pi, mark.si);
   if (!el) return;
   el.scrollIntoView({ behavior: 'smooth', block: 'center' });
   el.classList.remove('flash');
@@ -164,7 +198,7 @@ export function renderSidebar(
         <div class="mgroup-h">${t.label}<span class="cnt">${ms.length}</span></div>
         ${ms
           .map((m) => {
-            const label = m.level === 'word' ? (m.word ?? '') : (m.text ?? '').slice(0, 22) + '…';
+            const label = m.level === 'sent' ? (m.text ?? '').slice(0, 22) + '…' : (m.word ?? '');
             return `<div class="mitem">
               <span class="jump" data-jump="${m.id}" title="${esc(label)}${m.note ? ' ｜ ' + esc(m.note) : ''}">${esc(label)}</span>
               ${m.note ? '<span class="note-dot" title="有备注">✎</span>' : ''}

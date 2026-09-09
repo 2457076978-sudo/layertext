@@ -24,6 +24,9 @@ jobs:
       - name: 安装依赖（根）
         run: npm ci
 
+      - name: 版本对齐门禁（四处版本一致，漂移即失败）
+        run: node tools/check_versions.mjs
+
       - name: Lint（ESLint 静态检查，0 error 门禁）
         run: npm run lint
 
