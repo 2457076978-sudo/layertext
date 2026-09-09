@@ -2523,17 +2523,14 @@ async function aiSuggest(instruction?: string): Promise<void> {
         };
       });
     if (S.appConfig.autoRewriteOnMark && S.suggestions.length > 0) {
-      // 全局直改：所有建议自动生效（写工作稿+日志；⚠︎ 复核项计数提醒复查）
+      // 全局直改：所有建议自动生效（写工作稿+日志；⚠︎ 复核项计数提醒复查）——建议定位由 acceptSuggestion 以原句唯一定位完成
       let warned = 0;
       let applied = 0;
       for (const g of [...S.suggestions]) {
         if (g.check.passive || g.check.relcl || g.check.pastperf || g.check.overlong) warned++;
-        if (g.pi !== undefined) {
-          await acceptSuggestion(g, { scene: '自动直改', outcome: '直改' });
-          applied++;
-        }
+        if (await acceptSuggestion(g, { scene: '自动直改', outcome: '直改' })) applied++;
       }
-      setStatus(`AI 直改完成：自动应用 ${applied} 条${warned ? `，其中 ${warned} 条引擎复核⚠︎（黑名单/超长残留），已留痕变更日志，建议复查` : ''} ${usage}`, 'saved');
+      setStatus(`AI 直改完成：自动应用 ${applied}/${S.suggestions.length} 条${warned ? `，其中 ${warned} 条引擎复核⚠︎（黑名单/超长残留），已留痕变更日志，建议复查` : ''} ${usage}`, 'saved');
       return;
     }
     renderSuggestions();
@@ -2766,18 +2763,28 @@ function workPath(s: FileSession): string {
 
 /* 标记重排 remapMarks(marks, md) 已抽至 pure.ts（O4，行为不变） */
 
-async function acceptSuggestion(g: Suggestion, opts: { scene?: string; outcome?: '采纳' | '直改' } = {}): Promise<void> {
+async function acceptSuggestion(g: Suggestion, opts: { scene?: string; outcome?: '采纳' | '直改' } = {}): Promise<boolean> {
   const scene = opts.scene ?? '行内';
   const outcome = opts.outcome ?? '采纳';
   const s = activeSession();
-  if (!s || g.pi === undefined || g.si === undefined) return;
+  if (!s) return false;
+  if (g.pi === undefined || g.si === undefined) {
+    // 无行内预挂载位置（如「按标记修改」直改路径）：以原句唯一定位
+    const loc = locateSent(s, g.original);
+    if (!loc) {
+      setStatus(`一条建议的原句在正文中无法唯一定位，已跳过：${g.original.slice(0, 24)}…`, 'err');
+      return false;
+    }
+    g.pi = loc.pi;
+    g.si = loc.si;
+  }
   const paras = extractParas(splitChapter(s.md).body);
   const cur = sentsOf(paras[g.pi] ?? '', false)[g.si];
   if (cur !== g.original) {
     const loc = locateSent(s, g.original);
     if (!loc) {
       setStatus('原句已变化且无法唯一定位，请重新请求建议', 'err');
-      return;
+      return false;
     }
     g.pi = loc.pi;
     g.si = loc.si;
@@ -2792,7 +2799,7 @@ async function acceptSuggestion(g: Suggestion, opts: { scene?: string; outcome?:
   }
   if (at < 0) {
     setStatus('正文中找不到该原句', 'err');
-    return;
+    return false;
   }
   s.md = s.md.slice(0, at) + g.revised + s.md.slice(at + g.original.length);
 
@@ -2839,8 +2846,10 @@ async function acceptSuggestion(g: Suggestion, opts: { scene?: string; outcome?:
     renderSuggestions();
     setStatus(`✓ 已采纳并写入 ${savedTo}${savedTo === s.sourcePath ? '（原稿，首改前已备份原始版）' : ''}；变更已记入日志`, 'saved');
     flashApplied(g.revised);
+    return true;
   } catch (e) {
     setStatus('落盘失败：' + e, 'err');
+    return false;
   }
 }
 
