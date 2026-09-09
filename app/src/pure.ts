@@ -302,6 +302,33 @@ export function morphMismatch(from: string, to: string): boolean {
   return cls(from) !== cls(to);
 }
 
+/** AI 边界 #22（真事故 09-09：词汇简化映射恒空，全部误降级加注）：
+ *  chatUntilJson/parseAiJson 恒返回数组（单对象自动包数组），Object.assign(gloss, 数组) 只会得到 {0:{…}}。
+ *  归一化 AI 的"词→替换"映射，兼容真实世界全部形态：纯映射对象（含被包数组）/字段对对象数组
+ *  （word+simple、原词+简单词、from+to 等字段名变体）；非字符串值跳过。 */
+export function normalizeGlossMap(raw: unknown): Record<string, string> {
+  const out: Record<string, string> = {};
+  const arr = Array.isArray(raw) ? raw : [raw];
+  for (const it of arr) {
+    if (!it || typeof it !== 'object') continue;
+    const obj = it as Record<string, unknown>;
+    const entries = Object.entries(obj);
+    if (!entries.length) continue;
+    // 字段对形态：{word|原词|from, simple|简单词|to|revised}（值为非字符串=映射对象不可能的形态）
+    const w = ['word', '原词', '原单词', 'from'].map((k) => obj[k]).find((v): v is string => typeof v === 'string');
+    const sv = ['simple', '简单词', '替换', '替换词', 'to', 'revised'].map((k) => obj[k]).find((v): v is string => typeof v === 'string');
+    if (w !== undefined && sv !== undefined) {
+      out[w] = sv;
+      continue;
+    }
+    // 纯映射对象形态：{"cynical": "bitter", ...}（值全为字符串）
+    for (const [k, v] of entries) {
+      if (typeof v === 'string' && k.length <= 48) out[k] = v;
+    }
+  }
+  return out;
+}
+
 /** 文件字节 → 文本（导入自动编码探测）：BOM 优先 → 严格 UTF-8 校验 → GB18030 兜底（覆盖 GBK/GB2312；
  *  中文环境导出的 txt 常为 GBK，直接按 UTF-8 读会乱码或报错） */
 export function decodeAuto(bin: Uint8Array): string {

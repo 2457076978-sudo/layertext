@@ -47,6 +47,7 @@ import {
   progressPct,
   remapMarks,
   marksSurvivingManualEdit,
+  normalizeGlossMap,
   routeSelection,
   syncMarksToMd,
   type SyncPlan,
@@ -2782,14 +2783,16 @@ async function applyWordSimplifications(s: FileSession, marks: Mark[]): Promise<
         {
           role: 'system',
           content:
-            '你是词汇简化器。把每个超纲英文词换成中国《义务教育英语课程标准》三级（约1600词）内的同义简单词：保持词性一致，按所在句的语境给正确形态（时态/单复数）。只输出一个 JSON 对象（{"原词":"简单词"}），不要任何其他文字。',
+            '你是词汇简化器。把每个超纲英文词换成中国《义务教育英语课程标准》三级（约1600词）内的同义简单词：保持词性一致，按所在句的语境给正确形态（时态/单复数）。只输出一个 JSON 对象，键=原词（与输入完全一致），值=简单词，例如 {"cynical": "bitter", "abandoned": "left alone"}。不要输出数组，不要解释文字。',
         },
         { role: 'user', content: uniq.map((m) => `${m.word}\n${(paras[m.pi] ?? '').slice(0, 120)}`).join('\n\n') },
       ],
       2000,
       '词汇简化',
     );
-    Object.assign(gloss, raw as unknown as Record<string, string>);
+    // #22 根修：parseAiJson 恒返数组（单对象被包一层），Object.assign 只会得到 {0:{…}}——
+    // 曾致 AI 给出的简单词全部丢失、每个词都被误判"换不出"而降级加注
+    Object.assign(gloss, normalizeGlossMap(raw));
   } catch (e) {
     setStatus('词汇简化获取失败：' + e, 'err');
     return;
