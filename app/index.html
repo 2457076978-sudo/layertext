@@ -897,6 +897,61 @@
       #gate-pop.open {
         display: block;
       }
+      /* 词库编辑器（居中弹层，同款视觉） */
+      #vocab-pop {
+        position: fixed;
+        left: 50%;
+        top: 50%;
+        transform: translate(-50%, -50%);
+        z-index: 58;
+        display: block;
+        width: 520px;
+        max-width: 92vw;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        box-shadow: 0 8px 30px rgba(15, 23, 42, 0.16);
+        padding: 14px;
+        font-size: 13px;
+      }
+      #vocab-pop input {
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        padding: 4px 8px;
+        font-size: 13px;
+      }
+      #vocab-pop .mchip {
+        display: inline-block;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        padding: 1px 6px;
+      }
+      /* 批量执行总结面板（右下角，不打断阅读位置） */
+      #summary-pop {
+        position: fixed;
+        right: 16px;
+        bottom: 16px;
+        z-index: 57;
+        display: none;
+        width: 400px;
+        max-width: 92vw;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        box-shadow: 0 8px 30px rgba(15, 23, 42, 0.16);
+        padding: 14px;
+        font-size: 13px;
+      }
+      #summary-pop.open {
+        display: block;
+      }
+      #summary-pop .gtable td {
+        padding: 4px 6px;
+      }
+      .inline-sug.focused {
+        box-shadow: 0 0 0 2px var(--mark-red, #c74c3f);
+        border-radius: 8px;
+      }
       /* 跨版本标记同步弹层（与 gate-pop 同款视觉） */
       #sync-pop {
         position: fixed;

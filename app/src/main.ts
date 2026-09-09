@@ -957,6 +957,13 @@ async function applyManualSentenceEdit(pi: number, si: number): Promise<void> {
     return;
   }
   scheduleSave(s, () => undefined);
+  {
+    const risk = sentenceRisks(revised, simplifyMaxLen());
+    const stillBad = [risk.passive ? '被动' : '', risk.relcl ? '定从' : '', risk.pastperf ? '过去完成' : '', risk.overlong ? `超长(${revised.split(/\s+/).filter(Boolean).length}词)` : ''].filter(
+      Boolean,
+    );
+    if (stillBad.length) toast(`⚠ 你改的新句仍含${stillBad.join('/')}——正文已按你的定稿写入，此处仅提示不拦截`, 'info');
+  }
   void runQcCurrent({ auto: true }); // 改完自动重检，报告不滞后
 }
 
@@ -2739,7 +2746,11 @@ async function applyZhAnnotations(s: FileSession, marks: Mark[]): Promise<number
     }
   }
   const stillMissed = missed.filter((w) => !gloss[w] && !gloss[w.toLowerCase()] && !gloss[w.replace(/\s+/g, ' ')]);
-  if (stillMissed.length) setStatus(`词典未收录 ${stillMissed.length} 个词：${stillMissed.slice(0, 5).join('、')}${stillMissed.length > 5 ? '…' : ''}（未加注，可在正文手写）`, 'dirty');
+  if (stillMissed.length)
+    setStatus(
+      `词典未收录 ${stillMissed.length} 个词：${stillMissed.slice(0, 5).join('、')}${stillMissed.length > 5 ? '…' : ''}（未加注，可在正文手写）${aiNoted ? `；另有 ${aiNoted} 个短语已由 AI 注释兜底（纯中文校验过）` : ''}`,
+      'dirty',
+    );
   const paras = extractParas(splitChapter(s.md).body);
   const done: string[] = [];
   for (const m of marks) {
@@ -3055,10 +3066,20 @@ async function aiSuggest(instruction?: string): Promise<void> {
       }
       const leftover = S.suggestions.length;
       if (leftover > 0) renderSuggestions();
-      setStatus(
-        `AI 直改完成：自动应用 ${applied} 条${warned ? `，其中 ${warned} 条引擎复核⚠︎（黑名单/超长残留），已留痕变更日志，建议复查` : ''}${cnBlocked ? `；拦下 ${cnBlocked} 条含中文说明文字的建议（见「修订建议」页）` : ''}${leftover ? `；未应用的 ${leftover} 条已放入「修订建议」页` : ''} ${usage}`,
-        'saved',
-      );
+      setStatus(`AI 直改完成：应用 ${applied} 条${warned ? ` · ⚠${warned} 条需复核` : ''} ${usage}`, 'saved');
+      showSummaryPop(`
+        <div class="pop-h">批量执行总结</div>
+        <table class="gtable">
+          <tr><td>已应用（写入正文）</td><td><b>${applied}</b> 条</td></tr>
+          ${warned ? `<tr class="warnrow"><td>⚠ 引擎复核残留（黑名单/超长，已留痕建议复查）</td><td><b>${warned}</b> 条</td></tr>` : ''}
+          ${cnBlocked ? `<tr class="warnrow"><td>拦下（含中文说明文字，未写正文）</td><td><b>${cnBlocked}</b> 条</td></tr>` : ''}
+          ${leftover ? `<tr><td>未应用（定位失败等）→ 已放「修订建议」页</td><td><b>${leftover}</b> 条</td></tr>` : ''}
+          <tr><td>token 用量</td><td>${esc(usage)}</td></tr>
+        </table>
+        <div class="pop-btns" style="margin-top:10px">
+          ${leftover || cnBlocked ? '<button id="sum-suggest" class="primary">打开「修订建议」页</button>' : ''}
+          <button id="sum-close">关闭</button>
+        </div>`);
       return;
     }
     renderSuggestions();
@@ -3377,6 +3398,13 @@ async function acceptSuggestion(g: Suggestion, opts: { scene?: string; outcome?:
     renderSidebar(s, sidebarHandlers);
     renderSuggestions();
     setStatus(`✓ 正文已改好并写入原稿文件${savedTo === s.sourcePath ? '（首改前已备份原始版）' : ''}；变更日志同步留痕、可回溯`, 'saved');
+    const stillBad = [
+      g.check.passive ? '被动' : '',
+      g.check.relcl ? '定从' : '',
+      g.check.pastperf ? '过去完成' : '',
+      g.check.overlong ? `超长(${g.revised.split(/\s+/).filter(Boolean).length}词)` : '',
+    ].filter(Boolean);
+    if (stillBad.length) toast(`⚠ 新句仍含${stillBad.join('/')}——正文已按建议写入，建议复核（↩︎ 可撤销）`, 'info');
     flashApplied(g.revised);
     return true;
   } catch (e) {
@@ -4154,6 +4182,101 @@ function stepReaderFont(d: number): void {
   toast('字号 ' + n + 'px');
 }
 
+/* ---- 词库编辑器：教师词库词条 App 内增删（内置课标不动；保存到书目录 _词库.csv 即时生效） ---- */
+function showVocabEditor(): void {
+  let popEl = document.getElementById('vocab-pop');
+  if (popEl) {
+    popEl.remove();
+    return; // 再点一次=关
+  }
+  popEl = document.createElement('div');
+  popEl.id = 'vocab-pop';
+  document.body.appendChild(popEl);
+  // 原始行整行保留（含备注列），只按首列词做增删
+  let rows: string[] = (S.vocabCsvText ?? '')
+    .split('\n')
+    .map((l) => l.replace(/\r$/, ''))
+    .filter((l) => l.trim() && !l.startsWith('#'));
+  let q = '';
+  const wordOf = (line: string): string =>
+    line
+      .split(/[,;\t]/)[0]!
+      .trim()
+      .toLowerCase();
+  const render = (): void => {
+    const filtered = rows.filter((l) => !q || wordOf(l).includes(q));
+    const chips =
+      filtered
+        .slice(0, 300)
+        .map((l) => `<span class="mchip">${esc(l.split(/[,;\t]/)[0]!.trim())}<button class="x" data-vr="${rows.indexOf(l)}" title="删除该词条">×</button></span>`)
+        .join('') || '<span class="dim">（无匹配词条）</span>';
+    popEl!.innerHTML = `
+      <div class="pop-h">编辑教师词库 <span class="dim" style="font-weight:400;font-size:12px">（内置课标 1600 不在此层，不动）</span></div>
+      <div class="pop-info">当前 ${rows.length} 条${q ? ` · 搜索命中 ${filtered.length}` : ''}。保存到书目录 <b>_词库.csv</b> 并立即生效（重新着色+重跑体检）。</div>
+      <div style="display:flex;gap:6px;margin:8px 0">
+        <input id="vq" placeholder="搜词条…" value="${esc(q)}" style="flex:1" />
+        <input id="vadd" placeholder="添加词条（回车或点＋）…" style="flex:1" />
+        <button id="vadd-btn">＋</button>
+      </div>
+      <div class="pop-marks" style="max-height:260px;overflow-y:auto;display:flex;flex-wrap:wrap;gap:4px">${chips}</div>
+      <div class="pop-btns" style="margin-top:10px">
+        <button id="vsave" class="primary">保存并生效（写 _词库.csv）</button>
+        <button id="vclose">取消</button>
+      </div>`;
+    popEl!.querySelector('#vq')?.addEventListener('input', (ev) => {
+      q = (ev.target as HTMLInputElement).value.trim().toLowerCase();
+      render();
+      (popEl!.querySelector('#vq') as HTMLInputElement).focus();
+    });
+    popEl!.querySelector('#vadd')?.addEventListener('keydown', (ev) => {
+      if ((ev as KeyboardEvent).key === 'Enter') add();
+    });
+    const add = (): void => {
+      const inp = popEl!.querySelector('#vadd') as HTMLInputElement | null;
+      const w = inp?.value.trim().toLowerCase() ?? '';
+      if (!w) return;
+      if (rows.some((l) => wordOf(l) === w)) {
+        toast(`「${w}」已在词库中`);
+        return;
+      }
+      rows.push(w);
+      inp!.value = '';
+      render();
+    };
+    popEl!.querySelector('#vadd-btn')?.addEventListener('click', add);
+    popEl!.querySelectorAll('[data-vr]').forEach((b) =>
+      b.addEventListener('click', () => {
+        rows = rows.filter((_, i) => i !== Number((b as HTMLElement).dataset.vr));
+        render();
+      }),
+    );
+    popEl!.querySelector('#vclose')?.addEventListener('click', () => popEl!.remove());
+    popEl!.querySelector('#vsave')?.addEventListener(
+      'click',
+      () =>
+        void (async () => {
+          const s = activeSession();
+          const text = rows.join('\n') + '\n';
+          const dir = s?.sourcePath ? s.sourcePath.slice(0, s.sourcePath.lastIndexOf('/')) : await invoke<string>('examples_dir');
+          const path = `${dir}/_词库.csv`;
+          try {
+            await invoke('write_text_file', { path, content: text });
+            S.vocabCsvText = text;
+            S.vocabName = '_词库.csv';
+            popEl!.remove();
+            renderAll(); // 重新着色（renderReader 会按新词库重算三态）
+            void runQcCurrent({ auto: true });
+            toast(`词库已保存并生效：${rows.length} 条 → ${path}`, 'ok');
+          } catch (e) {
+            setStatus('词库保存失败：' + e, 'err');
+          }
+        })(),
+    );
+  };
+  render();
+  (popEl.querySelector('#vq') as HTMLInputElement | null)?.focus();
+}
+
 /* ---- 设置弹层 ---- */
 function toggleSettings(): void {
   let pop = document.getElementById('settings-pop');
@@ -4182,7 +4305,7 @@ function renderSettings(): void {
     ${row('句长上限（简化标准）', `<button id="set-len">调整（${simplifyMaxLen()} 词）</button>`)}
     ${row('直接修改原稿（首改自动备份）', `<input type="checkbox" id="set-inplace" ${(S.appConfig.inPlaceEdit ?? true) ? 'checked' : ''}/>`)}
     ${row('AI 改写直接生效', `<input type="checkbox" id="set-autorew" ${S.appConfig.autoRewriteOnMark ? 'checked' : ''}/>`)}
-    ${row('词库', `<span class="dim">课标1600（内置）${S.vocabCsvText ? ` + ${esc(S.vocabName ?? '自定义词库')}` : ''}${S.termsText ? ' + 术语表' : ''}</span>`)}
+    ${row('词库', `<span class="dim">课标1600（内置）${S.vocabCsvText ? ` + ${esc(S.vocabName ?? '自定义词库')}` : ''}${S.termsText ? ' + 术语表' : ''}</span> <button id="set-vocab" title="在应用内增删教师词库词条（内置课标不动）；保存到书目录 _词库.csv 并立即生效">编辑…</button>`)}
     ${row('复现队列', `<span class="dim">${rw ? `${esc(S.reinforceName ?? '已学词')} · ${rw.length} 词 · ⑩指标与简化注入已启用` : '未启用（班级定制勾选后自动生效）'}</span>`)}
     ${row('班级定制口径', `<button id="set-cls">${sel.active ? `【${esc(sel.label)}】句长≤${sel.minLen} · 更换` : '选择班级…'}</button>`)}
     <div class="dim" style="margin-top:8px">LayerText v1.1 · 词库以书目录 _词库.csv 为准</div>`;
@@ -4200,6 +4323,10 @@ function renderSettings(): void {
       renderSettings();
     }),
   );
+  document.getElementById('set-vocab')?.addEventListener('click', () => {
+    toggleSettings(); // 关设置弹层再开编辑器，避免叠层
+    showVocabEditor();
+  });
   document.getElementById('set-fm')?.addEventListener('click', () => {
     stepReaderFont(-1);
     renderSettings();
@@ -4346,13 +4473,66 @@ function buildHeatRail(): void {
   heatUpdateView();
 }
 
+/* ---- 建议键盘流：N 下一条 / Enter 采纳 / X 放弃（逐条过建议不碰鼠标） ---- */
+let sugFocusIdx = -1;
+function focusNextSuggestion(step: number): void {
+  const all = [...document.querySelectorAll<HTMLElement>('#reader .inline-sug')];
+  if (!all.length) {
+    toast('当前没有待确认的建议（行内绿字块）');
+    return;
+  }
+  all.forEach((el) => el.classList.remove('focused'));
+  sugFocusIdx = (sugFocusIdx + step + all.length) % all.length;
+  const el = all[sugFocusIdx]!;
+  el.classList.add('focused');
+  el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  toast(`建议 ${sugFocusIdx + 1}/${all.length} — Enter 采纳 · X 放弃 · N 下一条`);
+}
+function suggestionByEl(el: HTMLElement): Suggestion | undefined {
+  return S.suggestions.find((x) => String(x.markId) === el.dataset.markId);
+}
+
 /* ---- 全局快捷键 ---- */
 document.addEventListener('keydown', (e) => {
   const mod = e.metaKey || e.ctrlKey;
-  // 键盘审校流：弹层数字键选标记 > ⌘数字切工作区 > F8/⌘G 跳难句（⇧⌘G 上一个）
+  // 键盘审校流：弹层数字键选标记 > ⌘数字切工作区 > F8/⌘G 跳难句（⇧⌘G 上一个）> N/Enter/X 建议流
   if (!mod && popHotkey(e.key)) {
     e.preventDefault();
     return;
+  }
+  if (!mod && !pop.classList.contains('open')) {
+    const ae = document.activeElement;
+    const typing = ae && (ae.tagName === 'TEXTAREA' || ae.tagName === 'INPUT');
+    if (!typing && S.suggestions.length > 0) {
+      if (e.key === 'n' || e.key === 'N') {
+        e.preventDefault();
+        focusNextSuggestion(1);
+        return;
+      }
+      const focused = document.querySelector<HTMLElement>('.inline-sug.focused');
+      if (focused) {
+        const g = suggestionByEl(focused);
+        if (e.key === 'Enter' && g) {
+          e.preventDefault();
+          void (async () => {
+            if (await acceptSuggestion(g, { scene: '键盘', outcome: '采纳' })) focusNextSuggestion(1);
+          })();
+          return;
+        }
+        if ((e.key === 'x' || e.key === 'X') && g) {
+          e.preventDefault();
+          g.status = 'rejected';
+          focused.previousElementSibling?.classList.remove('sug-pending');
+          focused.remove();
+          S.suggestions = S.suggestions.filter((x) => x !== g);
+          const s = activeSession();
+          if (s) void logSuggestion(s, g, '拒绝', '键盘');
+          renderSuggestions();
+          focusNextSuggestion(1);
+          return;
+        }
+      }
+    }
   }
   if (mod && /^[1-9]$/.test(e.key)) {
     const w = S.workspaces[Number(e.key) - 1];
@@ -5623,6 +5803,23 @@ const syncPop = $('sync-pop');
 
 function hideSyncPop(): void {
   syncPop.classList.remove('open');
+}
+
+/** 批量执行总结面板（右下角浮层）：应用/⚠/拦下/落建议页 一张表看清，可直达建议页 */
+function showSummaryPop(html: string): void {
+  let el = document.getElementById('summary-pop');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'summary-pop';
+    document.body.appendChild(el);
+  }
+  el.innerHTML = html;
+  el.classList.add('open');
+  el.querySelector('#sum-close')?.addEventListener('click', () => el!.classList.remove('open'));
+  el.querySelector('#sum-suggest')?.addEventListener('click', () => {
+    el!.classList.remove('open');
+    switchView('suggest');
+  });
 }
 
 interface SyncTargetPlan {
