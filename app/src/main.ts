@@ -2481,37 +2481,20 @@ ${marks || '（无标记）'}`;
 async function applyZhAnnotations(s: FileSession, marks: Mark[]): Promise<number> {
   const words = [...new Set(marks.map((m) => m.word!).filter(Boolean))];
   const gloss: Record<string, string> = {};
-  // 本地词典优先（系统牛津英汉，零网络毫秒级）；查不到的词才请 AI 兜底
-  let missing = words;
+  // 纯本地词典（系统牛津英汉，零网络零 AI）；未收录的词不加注、标记保留给教师自行处理
+  let missed: string[] = [];
   try {
     const local = await invoke<(string | null)[]>('dict_lookup_zh', { words });
-    missing = [];
+    missed = [];
     words.forEach((w, i) => {
       if (local[i]) gloss[w] = local[i]!;
-      else missing.push(w);
+      else missed.push(w);
     });
-  } catch {
-    /* 词典服务不可用 → 全部走 AI */
+  } catch (e) {
+    setStatus('本地词典不可用：' + e, 'err');
+    return 0;
   }
-  if (missing.length) {
-    setStatus(`本地词典查到 ${words.length - missing.length} 个，${missing.length} 个问 AI…`);
-    try {
-      const { raw } = await chatUntilJson(
-        [
-          { role: 'system', content: '你是英汉词典。把英文单词/短语译成适合初中生的简短中文释义（2-6 个字）。只输出一个 JSON 对象（{"词":"释义"}），不要任何其他文字。' },
-          { role: 'user', content: missing.join('\n') },
-        ],
-        2000,
-        '词义',
-      );
-      Object.assign(gloss, raw as unknown as Record<string, string>);
-    } catch (e) {
-      if (!Object.keys(gloss).length) {
-        setStatus('词义获取失败：' + e, 'err');
-        return 0;
-      }
-    }
-  }
+  if (missed.length) setStatus(`词典未收录 ${missed.length} 个词：${missed.slice(0, 5).join('、')}${missed.length > 5 ? '…' : ''}（未加注，可在正文手写）`, 'dirty');
   const paras = extractParas(splitChapter(s.md).body);
   const done: string[] = [];
   for (const m of marks) {
