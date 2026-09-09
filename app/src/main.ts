@@ -2768,37 +2768,34 @@ async function acceptSuggestion(g: Suggestion, opts: { scene?: string; outcome?:
   const outcome = opts.outcome ?? '采纳';
   const s = activeSession();
   if (!s) return false;
+  // 句级坐标（日志定位与漂移重挂）：尽力而为，拿不到不阻塞——替换成败由下面的宽容匹配决定
   if (g.pi === undefined || g.si === undefined) {
-    // 无行内预挂载位置（如「按标记修改」直改路径）：以原句唯一定位
     const loc = locateSent(s, g.original);
-    if (!loc) {
-      setStatus(`一条建议的原句在正文中无法唯一定位，已跳过：${g.original.slice(0, 24)}…`, 'err');
-      return false;
+    if (loc) {
+      g.pi = loc.pi;
+      g.si = loc.si;
     }
-    g.pi = loc.pi;
-    g.si = loc.si;
-  }
-  const paras = extractParas(splitChapter(s.md).body);
-  const cur = sentsOf(paras[g.pi] ?? '', false)[g.si];
-  if (cur !== g.original) {
-    const loc = locateSent(s, g.original);
-    if (!loc) {
-      setStatus('原句已变化且无法唯一定位，请重新请求建议', 'err');
-      return false;
+  } else {
+    const paras = extractParas(splitChapter(s.md).body);
+    const cur = sentsOf(paras[g.pi] ?? '', false)[g.si];
+    if (cur !== g.original) {
+      const loc = locateSent(s, g.original);
+      if (loc) {
+        g.pi = loc.pi;
+        g.si = loc.si;
+      }
     }
-    g.pi = loc.pi;
-    g.si = loc.si;
   }
   let at = s.md.indexOf(g.original);
   if (at < 0) {
-    const flex = findOriginalFlex(s.md, g.original); // 空白差异容忍（欠账#2）
+    const flex = findOriginalFlex(s.md, g.original); // 空白/连字符差异容忍
     if (flex) {
       at = flex.start;
       g.original = flex.exact;
     }
   }
   if (at < 0) {
-    setStatus('正文中找不到该原句', 'err');
+    setStatus(`正文中找不到该原句，已跳过：${g.original.slice(0, 24)}…`, 'err');
     return false;
   }
   s.md = s.md.slice(0, at) + g.revised + s.md.slice(at + g.original.length);

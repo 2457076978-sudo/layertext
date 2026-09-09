@@ -460,3 +460,10 @@ test('findOriginalFlex：连字符互认（引擎拆句 hen-houses→hen houses 
   assert.ok(r, '应定位成功');
   assert.equal(r!.exact, 'He locked the hen-houses for the night.');
 });
+
+test('findOriginalFlex：歌篇引用块前缀互认（md 行首 > 被引擎拆句吃掉后仍可定位）', () => {
+  const md = '[P12] Old Major began to sing:\n> Beasts of England, beasts of Ireland,\n> Beasts of every land and clime,\n> Listen to my joyful news';
+  const r = findOriginalFlex(md, 'Beasts of England, beasts of Ireland, Beasts of every land and clime, Listen to my joyful news');
+  assert.ok(r, '应定位成功');
+  assert.ok(r!.exact.includes('\n'), 'exact 取正文原文切片（含换行引用块）');
+});
