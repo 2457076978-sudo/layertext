@@ -11,6 +11,121 @@ fn read_text_file(path: String) -> Result<String, String> {
     std::fs::read_to_string(&path).map_err(|e| e.to_string())
 }
 
+/// 本地词典（macOS Dictionary Services / 牛津英汉）：查词返回首个中文义项，零网络零 AI
+#[cfg(target_os = "macos")]
+mod dict {
+    use std::ffi::{c_char, CStr, CString};
+
+    type CFStringRef = *const u8; // opaque
+    #[repr(C)]
+    struct CFRange {
+        location: i64,
+        length: i64,
+    }
+
+    extern "C" {
+        fn CFStringCreateWithCString(
+            alloc: *const u8,
+            c_str: *const c_char,
+            encoding: u32,
+        ) -> CFStringRef;
+        fn CFStringGetLength(the_string: CFStringRef) -> i64;
+        fn CFStringGetCString(
+            the_string: CFStringRef,
+            buffer: *mut c_char,
+            buffer_size: i64,
+            encoding: u32,
+        ) -> u8;
+        fn CFRelease(cf: *const u8);
+        fn DCSCopyTextDefinition(
+            dictionary: CFStringRef,
+            term: CFStringRef,
+            range: CFRange,
+        ) -> CFStringRef;
+    }
+    const K_CFSTRING_ENCODING_UTF8: u32 = 0x0800_0100;
+
+    /// 查询一个词，返回首个中文义项（如 boar→野猪）；查不到返回 None
+    pub fn lookup_zh(word: &str) -> Option<String> {
+        let c_word = CString::new(word).ok()?;
+        unsafe {
+            let cf_word = CFStringCreateWithCString(
+                std::ptr::null(),
+                c_word.as_ptr(),
+                K_CFSTRING_ENCODING_UTF8,
+            );
+            if cf_word.is_null() {
+                return None;
+            }
+            let len = CFStringGetLength(cf_word);
+            let def = DCSCopyTextDefinition(
+                std::ptr::null(),
+                cf_word,
+                CFRange {
+                    location: 0,
+                    length: len,
+                },
+            );
+            CFRelease(cf_word);
+            if def.is_null() {
+                return None;
+            }
+            let mut buf = vec![0 as c_char; 16384];
+            let ok = CFStringGetCString(
+                def,
+                buf.as_mut_ptr(),
+                buf.len() as i64,
+                K_CFSTRING_ENCODING_UTF8,
+            );
+            CFRelease(def);
+            if ok == 0 {
+                return None;
+            }
+            let text = CStr::from_ptr(buf.as_ptr()).to_string_lossy().to_string();
+            first_zh_phrase(&text)
+        }
+    }
+
+    /// 牛津英汉格式 "… noun ① countable (wild) 野猪 yězhū …"——取首个连续中文块（≤6 字，即义项本身，不含其后的拼音）
+    fn first_zh_phrase(def: &str) -> Option<String> {
+        let mut best: Option<String> = None;
+        let mut run = String::new();
+        for ch in def.chars() {
+            let is_zh = ('\u{4e00}'..='\u{9fff}').contains(&ch) || ch == '的';
+            if is_zh {
+                run.push(ch);
+                if run.chars().count() >= 6 {
+                    break; // 义项过长即截断
+                }
+            } else if !run.is_empty() {
+                if run.chars().count() >= 1 && best.is_none() {
+                    best = Some(run.clone());
+                }
+                run.clear();
+                if best.is_some() {
+                    break;
+                }
+            }
+        }
+        if best.is_none() && !run.is_empty() {
+            best = Some(run);
+        }
+        best
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn dict_lookup_zh(words: Vec<String>) -> Vec<Option<String>> {
+    words.iter().map(|w| dict::lookup_zh(w)).collect()
+}
+
+#[cfg(not(target_os = "macos"))]
+#[tauri::command]
+fn dict_lookup_zh(_words: Vec<String>) -> Vec<Option<String>> {
+    vec![None; _words.len()]
+}
+
 /// 二进制读取（base64），供前端解析 xlsx 等格式
 #[tauri::command]
 fn read_file_base64(path: String) -> Result<String, String> {
@@ -600,6 +715,7 @@ fn main() {
             read_text_file,
             read_file_base64,
             write_text_file,
+            dict_lookup_zh,
             reports_dir,
             examples_dir,
         class_groups_dir,
@@ -625,6 +741,16 @@ fn main() {
 }
 
 /* ================= 单元测试（纯逻辑：base64 编解码、封面过滤、目录清单） ================= */
+
+#[cfg(test)]
+mod dict_tests {
+    #[test]
+    fn local_dict_returns_zh_gloss() {
+        // 系统（牛津英汉）词典：boar 的首个中文义项含"猪"
+        let zh = crate::dict::lookup_zh("boar").expect("本机应有系统词典");
+        assert!(zh.contains('猪'), "boar 释义应含 猪，实得 {zh}");
+    }
+}
 
 #[cfg(test)]
 mod tests {

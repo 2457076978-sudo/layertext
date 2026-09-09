@@ -2481,20 +2481,36 @@ ${marks || '（无标记）'}`;
 async function applyZhAnnotations(s: FileSession, marks: Mark[]): Promise<number> {
   const words = [...new Set(marks.map((m) => m.word!).filter(Boolean))];
   const gloss: Record<string, string> = {};
-  setStatus(`正在获取 ${words.length} 个词的中文释义（不改写句子）…`);
+  // 本地词典优先（系统牛津英汉，零网络毫秒级）；查不到的词才请 AI 兜底
+  let missing = words;
   try {
-    const { raw } = await chatUntilJson(
-      [
-        { role: 'system', content: '你是英汉词典。把英文单词/短语译成适合初中生的简短中文释义（2-6 个字）。只输出一个 JSON 对象（{"词":"释义"}），不要任何其他文字。' },
-        { role: 'user', content: words.join('\n') },
-      ],
-      2000,
-      '词义',
-    );
-    Object.assign(gloss, raw as unknown as Record<string, string>);
-  } catch (e) {
-    setStatus('词义获取失败：' + e, 'err');
-    return 0;
+    const local = await invoke<(string | null)[]>('dict_lookup_zh', { words });
+    missing = [];
+    words.forEach((w, i) => {
+      if (local[i]) gloss[w] = local[i]!;
+      else missing.push(w);
+    });
+  } catch {
+    /* 词典服务不可用 → 全部走 AI */
+  }
+  if (missing.length) {
+    setStatus(`本地词典查到 ${words.length - missing.length} 个，${missing.length} 个问 AI…`);
+    try {
+      const { raw } = await chatUntilJson(
+        [
+          { role: 'system', content: '你是英汉词典。把英文单词/短语译成适合初中生的简短中文释义（2-6 个字）。只输出一个 JSON 对象（{"词":"释义"}），不要任何其他文字。' },
+          { role: 'user', content: missing.join('\n') },
+        ],
+        2000,
+        '词义',
+      );
+      Object.assign(gloss, raw as unknown as Record<string, string>);
+    } catch (e) {
+      if (!Object.keys(gloss).length) {
+        setStatus('词义获取失败：' + e, 'err');
+        return 0;
+      }
+    }
   }
   const paras = extractParas(splitChapter(s.md).body);
   const done: string[] = [];
