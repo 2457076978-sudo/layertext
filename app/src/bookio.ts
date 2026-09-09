@@ -12,7 +12,13 @@ import { renderReader, sidebarHandlers } from './reader.js';
 import { attachInlineSuggestions } from './aiflow.js';
 import { renderSidebar } from './review.js';
 import { splitChapter, extractParas, sentsOf } from '../../src/core/textpipe.js';
-import { applyRewriteTo } from './pure.js';
+import { runQc } from '../../src/core/qc.js';
+import { ankiCsv, ankiRowsOf, extractZhNotes, reinforceQueueCsv, applyRewriteTo } from './pure.js';
+import { buildLexiconNow } from './lexicon.js';
+import { readReviewJson } from './report.js';
+import { tocChapters } from './shelf.js';
+import { cefrOf, parseCefrLevels, type CefrLevel } from '../../src/core/cefr.js';
+import bundledCefr from '../../assets/wordlists/cefrj_levels.txt?raw';
 
 /* ---------- 本书配置：词库/术语/专名/约定 随书稿文件夹保存与自动加载 ---------- */
 
@@ -299,3 +305,106 @@ export function showRewritePop(): void {
 document.addEventListener('mousedown', (e) => {
   if (rewritePop.classList.contains('open') && !(e.target as HTMLElement).closest('#rewrite-pop')) rewritePop.classList.remove('open');
 });
+
+/* ================= 生词卡导出（Anki + 复现队列，与 FSRS 复习闭环） ================= */
+
+let cefrMapCache: Map<string, CefrLevel> | null = null;
+const cefrOfWord = (w: string): string => {
+  cefrMapCache ??= parseCefrLevels(bundledCefr);
+  const lv = cefrOf(w, cefrMapCache);
+  return lv ?? '';
+};
+
+/** 组一章的词源：OOV（词表外生词）∪ zh/anchor 标记词（教师点过的教学词） */
+function chapterWords(md: string, marks: { level?: string; type?: string; word?: string }[] | undefined): string[] {
+  const oov = (() => {
+    try {
+      return runQc(md, buildLexiconNow(), { tier: 'M', fileName: '' }).oov;
+    } catch {
+      return [];
+    }
+  })();
+  const marked = (marks ?? []).filter((m) => (m.type === 'zh' || m.type === 'anchor') && m.word).map((m) => m.word!);
+  return [...new Set([...oov, ...marked])];
+}
+
+export async function showAnkiExport(): Promise<void> {
+  const s = activeSession();
+  if (!s) {
+    setStatus('先打开一个章节（词源=本章生词+已标记词）；全书导出需要从书架进入这本书', 'err');
+    return;
+  }
+  // ① 组数据：当前章 = 本章 md+标记；全书 = 目录各章 md+各自标记文件
+  const chapters: { from: string; md: string; words: string[] }[] = [];
+  let bookDir = '';
+  if (s.sourcePath) bookDir = s.sourcePath.slice(0, s.sourcePath.lastIndexOf('/'));
+  chapters.push({ from: s.fileName, md: s.md, words: chapterWords(s.md, s.review.marks) });
+  const wholeFiles = S.currentBookDir ? await tocChapters() : [];
+  for (const f of wholeFiles) {
+    if (f === s.sourcePath) continue;
+    try {
+      const md = await invoke<string>('read_text_file', { path: f });
+      const rv = await readReviewJson(f);
+      chapters.push({ from: f.slice(f.lastIndexOf('/') + 1), md, words: chapterWords(md, rv?.marks as { level?: string; type?: string; word?: string }[] | undefined) });
+    } catch {
+      /* 读不了的章跳过 */
+    }
+  }
+  if (bookDir === '' && S.currentBookDir) bookDir = S.currentBookDir;
+  const zhNotes = extractZhNotes(chapters.map((c) => c.md).join('\n'));
+  const needDict = [...new Set(chapters.flatMap((c) => c.words))].filter((w) => !zhNotes[w]);
+  const dictZh: Record<string, string> = {};
+  if (needDict.length) {
+    try {
+      const local = await invoke<(string | null)[]>('dict_lookup_zh', { words: needDict });
+      needDict.forEach((w, i) => {
+        if (local[i]) dictZh[w] = local[i]!;
+      });
+    } catch {
+      /* 系统词典不可用则留空 */
+    }
+  }
+  const rows = ankiRowsOf(chapters, zhNotes, dictZh, cefrOfWord);
+  const missZh = rows.filter((r) => !r.zh).length;
+
+  // ② 预览确认（导出前看清单：词数、释义缺失——缺失的留空列，教师可后补）
+  const popEl = document.getElementById('anki-pop');
+  const panel = popEl ?? Object.assign(document.createElement('div'), { id: 'anki-pop' });
+  if (!popEl) {
+    panel.className = 'pop';
+    panel.style.cssText = 'right:16px;bottom:16px;max-width:520px;max-height:70vh;overflow:auto';
+    document.body.appendChild(panel);
+  }
+  panel.innerHTML = `
+    <div class="pop-h">导出生词卡 · Anki + 复现队列</div>
+    <p class="dim" style="font-size:12px;line-height:1.8;margin:4px 0 8px">
+      词源 = 各章词表外生词 ∪ 你标记的「加中文标注/复现锚点」词（共 <b>${rows.length}</b> 词，去重）。
+      释义优先用正文已有注释，其次系统词典${missZh ? `，<b>${missZh} 个无释义（留空，导入 Anki 后可补）</b>` : '，全部有释义'}。
+      将写入：<code>${esc(bookDir || '示例目录')}/生词卡_Anki_日期.csv</code>（词/CEFR/释义/例句/出处）与 <code>复现队列_日期.csv</code>（词,hits——可用 <code>node dist/src/cli.js fsrs</code> 看 FSRS 间隔建议）。
+    </p>
+    <div style="max-height:200px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:4px">
+      <table class="sgtable"><tr><th>词</th><th>CEFR</th><th>释义</th><th>例句</th></tr>
+      ${rows.slice(0, 60).map((r) => `<tr><td>${esc(r.word)}</td><td>${esc(r.cefr)}</td><td>${esc(r.zh) || '<span class="dim">—</span>'}</td><td class="dim" title="${esc(r.sent)}">${esc(r.sent.slice(0, 40))}</td></tr>`).join('')}
+      </table>
+      ${rows.length > 60 ? `<div class="dim" style="padding:4px">（预览前 60 词，共 ${rows.length}）</div>` : ''}
+    </div>
+    <div class="row-btns" style="margin-top:8px">
+      <button id="anki-save" class="primary">导出 CSV</button>
+      <button id="anki-close">取消</button>
+    </div>`;
+  panel.classList.add('open');
+  panel.querySelector('#anki-close')?.addEventListener('click', () => panel.classList.remove('open'));
+  panel.querySelector('#anki-save')?.addEventListener('click', async () => {
+    const dir = bookDir || (await invoke<string>('reports_dir'));
+    const date = new Date().toLocaleDateString('sv-SE');
+    try {
+      await invoke('write_text_file', { path: `${dir}/生词卡_Anki_${date}.csv`, content: ankiCsv(rows) });
+      await invoke('write_text_file', { path: `${dir}/复现队列_${date}.csv`, content: reinforceQueueCsv(rows) });
+      panel.classList.remove('open');
+      setStatus(`生词卡已导出（${rows.length} 词，含复现队列）：${dir}/生词卡_Anki_${date}.csv——Anki 直接导入（逗号分隔）；复现队列可用 fsrs 命令看间隔建议`, 'saved');
+      void invoke('reveal_path', { path: `${dir}/生词卡_Anki_${date}.csv` });
+    } catch (e) {
+      setStatus('生词卡导出失败：' + e, 'err');
+    }
+  });
+}

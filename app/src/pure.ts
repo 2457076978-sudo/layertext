@@ -271,6 +271,82 @@ export function findOriginalFlex(md: string, original: string): { start: number;
   return { start, exact: md.slice(start, end) };
 }
 
+/** 正文已有生词注释放射：word（中文）→ { word: 中文 }（生词卡释义优先用它——教师校过的释义最可信）。
+ *  英文 run 会贪婪吃掉前置词（"The boar（野猪）"的 run 是 "The boar"）——剥离前导虚词后作 key */
+const ZH_NOTE_LEADING_STOPWORDS = new Set([
+  'the', 'a', 'an', 'of', 'his', 'her', 'its', 'their', 'our', 'my', 'your', 'this', 'that', 'these', 'those',
+  'to', 'in', 'on', 'for', 'with', 'and', 'but', 'or', 'was', 'is', 'are', 'were', 'be', 'been', 'he', 'she', 'it', 'they', 'we', 'you', 'i',
+]);
+export function extractZhNotes(md: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  const re = /([A-Za-z][A-Za-z'-]*(?:\s+[A-Za-z][A-Za-z'-]*)*)（([^（）]{1,12})）/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(md))) {
+    const toks = m[1].split(/\s+/);
+    while (toks.length > 1 && ZH_NOTE_LEADING_STOPWORDS.has(toks[0].toLowerCase())) toks.shift();
+    out[toks.join(' ')] = m[2];
+  }
+  return out;
+}
+
+/** 生词卡行（Anki 导出）：词 / CEFR / 中文释义 / 例句 / 出处 */
+export interface AnkiRow {
+  word: string;
+  cefr: string;
+  zh: string;
+  sent: string;
+  from: string;
+}
+
+/** 生词卡组装：多章词去重（首章出例句，出处累记）；释义优先级=正文已有注释 > 系统词典 > 留空教师补；
+ *  例句=含该词（词边界、大小写不敏感）的第一个句子，截断 90 字符 */
+export function ankiRowsOf(
+  chapters: { from: string; md: string; words: string[] }[],
+  zhNotes: Record<string, string>,
+  dictZh: Record<string, string>,
+  cefrOfWord: (w: string) => string,
+): AnkiRow[] {
+  const rows = new Map<string, AnkiRow>();
+  for (const ch of chapters) {
+    const sents = (() => {
+      try {
+        return extractParas(splitChapter(ch.md).body).flatMap((p) => sentsOf(p, false));
+      } catch {
+        return [];
+      }
+    })();
+    for (const w of ch.words) {
+      const key = w.toLowerCase();
+      const exist = rows.get(key);
+      if (exist) {
+        if (!exist.from.includes(ch.from)) exist.from += '、' + ch.from;
+        continue;
+      }
+      const re = new RegExp(`\\b${w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+      const sent = sents.find((x) => re.test(x)) ?? '';
+      rows.set(key, {
+        word: w,
+        cefr: cefrOfWord(w),
+        zh: zhNotes[w] ?? dictZh[w] ?? '',
+        sent: sent.length > 90 ? sent.slice(0, 90) + '…' : sent.trim(),
+        from: ch.from,
+      });
+    }
+  }
+  return [...rows.values()];
+}
+
+/** Anki 可导入 CSV（首行表头；例句含逗号/引号由 csvCell 转义） */
+export function ankiCsv(rows: AnkiRow[]): string {
+  return ['词,CEFR,中文释义,例句,出处', ...rows.map((r) => [r.word, r.cefr, r.zh, r.sent, r.from].map(csvCell).join(','))].join('\n') + '\n';
+}
+
+/** 复现队列 CSV：词,hits（hits=已复现次数，默认 0——画像数据可补；# 注释行 fsrs CLI 会跳过）。
+ *  与 CLI 闭环：node dist/src/cli.js fsrs 队列文件.csv → FSRS 建议隔篇 vs 现行固定 2 篇并排 */
+export function reinforceQueueCsv(rows: AnkiRow[]): string {
+  return ['# 复现队列：词,hits（hits=已复现次数，默认 0，画像数据可补）', '# 查看 FSRS 间隔建议：node dist/src/cli.js fsrs 本文件.csv', ...rows.map((r) => `${r.word},0`)].join('\n') + '\n';
+}
+
 /** AI 边界 #18：建议定位三段决策（每条独立定位，同句多条互不依赖）——
  *  ① 缺坐标或坐标句已变 → locateSent 重定位（尽力而为，只影响日志）；
  *  ② indexOf 精确匹配；③ findOriginalFlex 宽容匹配（空白/连字符差异，命中回写正文原句形态）。

@@ -100,3 +100,48 @@ test('#21 pickSingleRewrite：revised 为数组/对象/空 → bad-shape；合�
     alternative: '备选',
   });
 });
+
+/* ---------- 生词卡导出（Anki + 复现队列）纯逻辑 ---------- */
+import { ankiCsv, ankiRowsOf, extractZhNotes, reinforceQueueCsv } from '../app/src/pure.js';
+
+const CH = '## Chapter One\n\n[P01] The boar（野猪） slept. He was cynical about the rules.\n';
+
+test('Anki：正文已有注释放射（word（中文）→ 映射）', () => {
+  const notes = extractZhNotes(CH);
+  assert.equal(notes['boar'], '野猪');
+  assert.equal(Object.keys(notes).length, 1);
+});
+
+test('Anki：组装去重、释义优先正文注释>词典>空、例句含该词、出处累记', () => {
+  const rows = ankiRowsOf(
+    [
+      { from: 'ch1.md', md: CH, words: ['boar', 'cynical'] },
+      { from: 'ch2.md', md: CH, words: ['boar'] },
+    ],
+    { boar: '野猪' },
+    { cynical: '愤世嫉俗的' },
+    (w) => (w === 'boar' ? 'B2' : ''),
+  );
+  assert.equal(rows.length, 2);
+  const boar = rows.find((r) => r.word === 'boar')!;
+  assert.equal(boar.zh, '野猪'); // 正文注释优先
+  assert.ok(boar.sent.includes('boar'));
+  assert.equal(boar.from, 'ch1.md、ch2.md'); // 出处累记
+  const cyn = rows.find((r) => r.word === 'cynical')!;
+  assert.equal(cyn.zh, '愤世嫉俗的'); // 词典兜底
+  assert.equal(cyn.cefr, ''); // cefrOfWord 只给 boar 定级
+  const none = ankiRowsOf([{ from: 'c', md: CH, words: ['rules'] }], {}, {}, () => '');
+  assert.equal(none[0].zh, ''); // 无释义留空
+});
+
+test('Anki：CSV 转义（例句含逗号引号）与复现队列格式（词,hits=0 + # 注释头）', () => {
+  const rows = ankiRowsOf([{ from: 'c', md: CH, words: ['boar'] }], { boar: '野猪' }, {}, () => '');
+  const csv = ankiCsv(rows);
+  assert.ok(csv.startsWith('词,CEFR,中文释义,例句,出处\n'));
+  assert.ok(csv.includes('boar,'));
+  const tricky = ankiCsv([{ word: 'x', cefr: '', zh: '', sent: 'He said "run", loudly.', from: 'c' }]);
+  assert.ok(tricky.includes('"He said ""run"", loudly."')); // csvCell 转义
+  const q = reinforceQueueCsv(rows);
+  assert.ok(q.startsWith('# 复现队列'));
+  assert.ok(q.includes('boar,0'));
+});

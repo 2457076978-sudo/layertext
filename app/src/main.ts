@@ -28,7 +28,7 @@ import { ensureClassGroups, toggleClsPanel, applyTheme, applyReaderLineHeight, a
 import { renderShelf, touchProgress, tocPanelEl, refreshToc, renderWorkspaceBar, backToShelf, toggleToc, closeToc, closeShelfCtxMenu, switchWorkspace, scheduleSaveLastSession, saveLastSession, loadWorkspaces } from './shelf.js';
 import { renderReader, updateMarkBadge, sidebarHandlers, showWordPanel, showSentPanel, showPhrasePanel } from './reader.js';
 import { restoreChat, chatRender, hideGatePop, gatePop } from './chat.js';
-import { saveBookConfig, loadBookConfig, exportDocx, exportTts, showRewritePop } from './bookio.js';
+import { saveBookConfig, loadBookConfig, exportDocx, exportTts, showRewritePop, showAnkiExport } from './bookio.js';
 import { scrollEl, scrollNow, doUndo, doRedo, openFind, closeFind, runFind, jumpFind, replaceAllFind, jumpNextRisk, popHotkey, resetRiskJump } from './edit.js';
 import { buildLexiconNow, mergedSelection, reinforceWordsNow, importVocabFile, importTermsFile, importProperFile, loadLocalExampleConfig } from './lexicon.js';
 import {
@@ -589,6 +589,9 @@ void listen<string>('menu-action', (ev) => {
       break;
     case 'tier-plan':
       showStandardPop();
+      break;
+    case 'anki-cards':
+      void showAnkiExport();
       break;
     case 'book-config':
       void saveBookConfig();

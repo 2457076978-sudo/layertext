@@ -530,7 +530,7 @@ export function renderAlignPane(): void {
 /* ================= 书级审校看板（一张表看懂还剩多少活） ================= */
 
 /** 读一章的审校标记 JSON（无文件返回 null——未审不报错） */
-async function readReviewJson(chapterPath: string): Promise<{ marks?: unknown[]; bookmarks?: unknown[]; gate?: Record<string, boolean> } | null> {
+export async function readReviewJson(chapterPath: string): Promise<{ marks?: unknown[]; bookmarks?: unknown[]; gate?: Record<string, boolean> } | null> {
   try {
     const base = chapterPath.slice(chapterPath.lastIndexOf('/') + 1).replace(/\.(md|txt|markdown|docx)$/i, '');
     const j = JSON.parse(await invoke<string>('read_text_file', { path: `${chapterPath.slice(0, chapterPath.lastIndexOf('/'))}/${base}_审校标记.json` }));

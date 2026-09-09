@@ -629,12 +629,18 @@ fn main() {
                 "同步本章标记到其他版本…（词/短语级，同章多版本共用审校意图）",
             )
             .build(app)?;
+            let mi_anki = MenuItemBuilder::with_id(
+                "anki-cards",
+                "导出生词卡（Anki + 复现队列）…",
+            )
+            .build(app)?;
             let qc_menu = SubmenuBuilder::new(app, "质检")
                 .item(&mi_run)
                 .item(&mi_draft)
                 .item(&mi_batch)
                 .item(&mi_cls)
                 .item(&mi_sync)
+                .item(&mi_anki)
                 .separator()
                 .item(&mi_ai)
                 .build()?;
