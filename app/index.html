@@ -855,6 +855,44 @@
       #gate-pop.open {
         display: block;
       }
+      /* 跨版本标记同步弹层（与 gate-pop 同款视觉） */
+      #sync-pop {
+        position: fixed;
+        z-index: 56;
+        display: none;
+        width: 460px;
+        max-width: 92vw;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        box-shadow: 0 8px 30px rgba(15, 23, 42, 0.14);
+        padding: 14px;
+        font-size: 13px;
+        max-height: 70vh;
+        overflow-y: auto;
+      }
+      #sync-pop.open {
+        display: block;
+      }
+      /* 候选模式「按标记修改」待处理徽标 */
+      #btn-ai {
+        position: relative;
+      }
+      .pbadge {
+        position: absolute;
+        top: -7px;
+        right: -9px;
+        background: var(--mark-red, #c74c3f);
+        color: #fff;
+        border-radius: 9px;
+        min-width: 16px;
+        height: 16px;
+        font-size: 10px;
+        line-height: 16px;
+        padding: 0 4px;
+        font-weight: 600;
+        text-align: center;
+      }
       #gate-pop p {
         margin: 6px 0;
         line-height: 1.7;
@@ -2892,6 +2930,7 @@
 
     <div id="pop"></div>
     <div id="gate-pop"></div>
+    <div id="sync-pop"></div>
     <div id="ai-pop"></div>
     <div id="draft-pop"></div>
     <div id="batch-pop"></div>

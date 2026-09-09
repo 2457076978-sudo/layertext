@@ -47,6 +47,8 @@ import {
   progressPct,
   remapMarks,
   routeSelection,
+  syncMarksToMd,
+  type SyncPlan,
   shelfGroupsOf,
   stripMarkdownNoise,
   morphMismatch,
@@ -488,6 +490,7 @@ function renderAll(): void {
   renderSidebar(s, sidebarHandlers);
   syncChrome();
   fileSummary();
+  updateMarkBadge();
 }
 
 function renderFileTabs(): void {
@@ -658,6 +661,7 @@ function addMark(session: FileSession, mark: Mark): Mark {
   refreshMarkDom(mark);
   scheduleHeatRail();
   renderSidebar(session, sidebarHandlers);
+  updateMarkBadge();
   scheduleSave(session, (st, detail) => {
     if (st === 'dirty') setStatus('标记待保存…', 'dirty');
     else if (st === 'saved') setStatus('✓ 标记已自动保存：' + detail, 'saved');
@@ -672,6 +676,27 @@ function removeMark(session: FileSession, m: Mark): void {
   scheduleHeatRail();
   renderSidebar(session, sidebarHandlers);
   scheduleSave(session, () => undefined);
+  updateMarkBadge();
+}
+
+/** 候选模式下「按标记修改」按钮的待处理徽标——标记≠修改（候选模式只入清单），
+ *  攒了多少活必须一眼可见（交互标准 A1/A3：点了会发生什么/发生了什么） */
+function updateMarkBadge(): void {
+  const btn = $('btn-ai');
+  const s = activeSession();
+  const n = s && S.appConfig.autoRewriteOnMark !== true ? s.review.marks.length : 0;
+  let b = btn.querySelector<HTMLElement>('.pbadge');
+  if (!n) {
+    b?.remove();
+    return;
+  }
+  if (!b) {
+    b = document.createElement('span');
+    b.className = 'pbadge';
+    btn.appendChild(b);
+  }
+  b.textContent = String(n);
+  b.title = `本章还有 ${n} 条标记未执行——点了「按标记修改」才会改（当前为候选模式；切即改模式则点标记立即生效）`;
 }
 
 const sidebarHandlers = {
@@ -889,6 +914,10 @@ function bindTypeButtons(session: FileSession, level: MarkLevel, pi: number, si:
       const ta = pop.querySelector('#pop-note') as HTMLTextAreaElement | null;
       if (ta) ta.value = '';
       refreshPop();
+      // 候选模式闭环：标记只是入了清单、正文还没改——必须当场说清"去哪执行"（用户问"点了 AI 没修改怎么办"的根修）
+      const tip = pop.querySelector('.pop-tip');
+      if (tip) tip.textContent = `已入标记清单（本章待执行 ${session.review.marks.length} 条，正文未改）——点工具栏「按标记修改」批量执行，或切右侧模式胶囊为即改模式`;
+      updateMarkBadge();
     }),
   );
 }
@@ -2286,6 +2315,9 @@ void listen<string>('menu-action', (ev) => {
     case 'cls':
       toggleClsPanel();
       break;
+    case 'sync-marks':
+      void showSyncMarksDialog();
+      break;
     case 'view-text':
       switchView('text');
       break;
@@ -2596,6 +2628,7 @@ async function applyZhAnnotations(s: FileSession, marks: Mark[]): Promise<number
   scheduleSave(s, () => undefined);
   renderReader(s);
   renderSidebar(s, sidebarHandlers);
+  updateMarkBadge();
   const date = new Date().toLocaleDateString('sv-SE');
   const outDir = s.sourcePath ? s.sourcePath.slice(0, s.sourcePath.lastIndexOf('/')) : await invoke<string>('reports_dir');
   const logPath = `${outDir}/变更日志_AI审核.csv`;
@@ -2696,6 +2729,7 @@ async function applyWordSimplifications(s: FileSession, marks: Mark[]): Promise<
   scheduleSave(s, () => undefined);
   renderReader(s);
   renderSidebar(s, sidebarHandlers);
+  updateMarkBadge();
   const date = new Date().toLocaleDateString('sv-SE');
   const outDir = s.sourcePath ? s.sourcePath.slice(0, s.sourcePath.lastIndexOf('/')) : await invoke<string>('reports_dir');
   const logPath = `${outDir}/变更日志_AI审核.csv`;
@@ -2757,6 +2791,7 @@ async function aiSuggest(instruction?: string): Promise<void> {
     if ((zhMarks.length || simplWordMarks.length) && s.review.marks.length === 0 && !instruction) {
       btn.textContent = '按标记修改';
       btn.disabled = false;
+      updateMarkBadge();
       return;
     }
     const system = await buildSystemPrompt();
@@ -2824,6 +2859,7 @@ async function aiSuggest(instruction?: string): Promise<void> {
   } finally {
     btn.textContent = '<svg class="ico"><use href="#i-sparkle"/></svg>AI 审核建议';
     btn.disabled = false;
+    updateMarkBadge();
   }
 }
 
@@ -3674,6 +3710,7 @@ $('mode-pill').addEventListener('click', async () => {
   S.appConfig.autoRewriteOnMark = !(S.appConfig.autoRewriteOnMark === true);
   await saveConfig();
   updateModePill();
+  updateMarkBadge();
   setStatus(S.appConfig.autoRewriteOnMark ? '已切换【即改模式】：点标记/AI建议将立即生效（写原稿+变更日志，首次修改前自动备份）' : '已切换【候选模式】：AI 只出建议，你点 ✓ 才生效', 'saved');
 });
 updateModePill();
@@ -5336,7 +5373,127 @@ document.addEventListener('mousedown', (e) => {
   if (gatePop.classList.contains('open') && !(e.target as HTMLElement).closest('#gate-pop') && !(e.target as HTMLElement).closest('.qmark')) {
     hideGatePop();
   }
+  if (syncPop.classList.contains('open') && !(e.target as HTMLElement).closest('#sync-pop')) hideSyncPop();
 });
+
+/* ---------- 跨版本标记同步：同章多版本文件（同目录其他 md），词/短语级审校意图广播 ---------- */
+
+const syncPop = $('sync-pop');
+
+function hideSyncPop(): void {
+  syncPop.classList.remove('open');
+}
+
+interface SyncTargetPlan {
+  name: string;
+  path: string;
+  plan: SyncPlan;
+}
+
+/** 同步弹层：先给后果预告（每个版本建多少/跳过多少及原因），确认才写盘——正文不动，只同步"待办" */
+async function showSyncMarksDialog(): Promise<void> {
+  const s = activeSession();
+  if (!s?.sourcePath) {
+    setStatus('示例模式没有版本文件——从书架打开章节后使用', 'err');
+    return;
+  }
+  const syncable = s.review.marks.filter((m) => m.level !== 'sent' && m.word);
+  if (!syncable.length) {
+    setStatus('本章还没有词/短语级标记（句级不跨版本同步——三版本句结构不同，句对不上）', 'err');
+    return;
+  }
+  const dir = s.sourcePath.slice(0, s.sourcePath.lastIndexOf('/'));
+  let names: string[];
+  try {
+    names = await invoke<string[]>('list_dir', { dir });
+  } catch (e) {
+    setStatus('读取章节目录失败：' + e, 'err');
+    return;
+  }
+  const targets = names.filter((n) => /\.md$/i.test(n) && `${dir}/${n}` !== s.sourcePath).filter((n) => !/质检报告|审校档案|全书简化|基准|AI修订|分层初稿|工作稿|原始备份|词句卡/.test(n));
+  const plans: SyncTargetPlan[] = [];
+  for (const n of targets) {
+    const path = `${dir}/${n}`;
+    try {
+      const md = await readTextSmart(path);
+      let existing: Mark[] = [];
+      try {
+        const saved = await invoke<string>('read_text_file', { path: await markPathFor(path, n) });
+        const parsed = JSON.parse(saved) as { marks?: Mark[] };
+        if (Array.isArray(parsed.marks)) existing = parsed.marks;
+      } catch {
+        /* 目标还没有标记文件 */
+      }
+      plans.push({ name: n, path, plan: syncMarksToMd(syncable, md, existing, newMarkId) });
+    } catch {
+      /* 目标文件读不了就跳过 */
+    }
+  }
+  if (!plans.length) {
+    setStatus('同目录没找到可用的其他版本文件——同章多版本放同一文件夹即可同步', 'err');
+    return;
+  }
+  const totalCreated = plans.reduce((n, p) => n + p.plan.totalCreated, 0);
+  syncPop.innerHTML = `
+    <div class="pop-h">同步本章标记到其他版本</div>
+    <p>把当前版本（${esc(s.fileName)}）的 <b>${syncable.length} 条词/短语级标记</b> 同步到同目录其他版本——审校意图共用，各版本按自己的口径执行。句级标记不同步（三版本句结构不同）。</p>
+    <table class="gtable">
+      <tr><th>版本文件</th><th>将新建</th><th>跳过·已标过</th><th>跳过·目标无此词</th></tr>
+      ${plans
+        .map(
+          (p) =>
+            `<tr><td>${esc(p.name)}</td><td>${p.plan.totalCreated}</td><td>${p.plan.items.filter((i) => i.skipped === 'duplicate').length}</td><td>${p.plan.items.filter((i) => i.skipped === 'not-found').length}</td></tr>`,
+        )
+        .join('')}
+    </table>
+    <p class="dim">目标无此词 = 更简版本已把该词换掉或删掉（等于已处理），属正常；已标过 = 不重复建（幂等）。只同步标记待办，不改任何正文。</p>
+    <div class="pop-btns" style="margin-top:10px">
+      <button id="sync-go" class="primary">同步 ${totalCreated} 条标记</button>
+      <button id="sync-cancel">取消</button>
+    </div>`;
+  syncPop.classList.add('open');
+  const r = syncPop.getBoundingClientRect();
+  syncPop.style.left = Math.max(8, (window.innerWidth - r.width) / 2) + 'px';
+  syncPop.style.top = Math.max(8, (window.innerHeight - r.height) / 2) + 'px';
+  $('sync-cancel').addEventListener('click', hideSyncPop);
+  $('sync-go').addEventListener('click', async () => {
+    let wrote = 0;
+    let refreshed = 0;
+    for (const p of plans) {
+      if (!p.plan.totalCreated) continue;
+      const created = p.plan.items.flatMap((i) => i.created);
+      const sess = S.sessions.find((x) => x.sourcePath === p.path);
+      if (sess) {
+        sess.review.marks.push(...created);
+        sess.review.updatedAt = Date.now();
+        scheduleSave(sess, () => undefined);
+        if (S.sessions[S.activeIdx] === sess) {
+          renderSidebar(sess, sidebarHandlers);
+          restoreAllMarkDom(sess);
+          scheduleHeatRail();
+          updateMarkBadge();
+        }
+        refreshed++;
+      } else {
+        const markPath = await markPathFor(p.path, p.name);
+        const base = { file: p.name, marks: [] as Mark[], quota: [], gate: {}, bookmarks: [], updatedAt: Date.now() };
+        let review = base;
+        try {
+          review = { ...base, ...(JSON.parse(await invoke<string>('read_text_file', { path: markPath })) as typeof base) };
+        } catch {
+          /* 新建标记文件 */
+        }
+        review.marks = [...(review.marks ?? []), ...created];
+        review.updatedAt = Date.now();
+        await invoke('write_text_file', { path: markPath, content: JSON.stringify(review, null, 1) });
+        wrote++;
+      }
+    }
+    hideSyncPop();
+    toast(`已同步：${wrote} 个版本文件写入、${refreshed} 个已打开版本即时刷新`, 'ok');
+    setStatus(`标记已同步（正文未动）——在各版本打开后点「按标记修改」按该版本口径执行`, 'saved');
+  });
+}
 
 /* 正文词点击 → 词面板 */
 $('reader').addEventListener('click', (e) => {

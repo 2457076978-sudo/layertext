@@ -624,11 +624,17 @@ fn main() {
             let mi_draft = MenuItemBuilder::with_id("draft", "AI 简化本章…").build(app)?;
             let mi_batch = MenuItemBuilder::with_id("batch", "全书批处理…（多章队列+汇总报告）").build(app)?;
             let mi_cls = MenuItemBuilder::with_id("cls", "班级多人定制…（勾选分组，质检/改写按其口径）").build(app)?;
+            let mi_sync = MenuItemBuilder::with_id(
+                "sync-marks",
+                "同步本章标记到其他版本…（词/短语级，同章多版本共用审校意图）",
+            )
+            .build(app)?;
             let qc_menu = SubmenuBuilder::new(app, "质检")
                 .item(&mi_run)
                 .item(&mi_draft)
                 .item(&mi_batch)
                 .item(&mi_cls)
+                .item(&mi_sync)
                 .separator()
                 .item(&mi_ai)
                 .build()?;

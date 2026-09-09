@@ -102,6 +102,68 @@ export function routeSelection(selText: string, sentText: string): 'sent' | 'phr
   return words.length >= 2 ? 'phrase' : 'word';
 }
 
+/* ---------- 跨版本标记同步（同一章多版本文件：词/短语级审校意图广播） ---------- */
+
+export interface SyncPlanItem {
+  /** 源标记（词/短语级） */
+  source: Mark;
+  /** 目标版本中新建的标记（每处出现一条；同词多处出现=多条） */
+  created: Mark[];
+  /** 未建或部分未建的原因：目标无此词（更简版本往往已换掉=已处理）/ 目标已有同词同类型（幂等跳过） */
+  skipped?: 'not-found' | 'duplicate';
+}
+
+export interface SyncPlan {
+  items: SyncPlanItem[];
+  totalCreated: number;
+}
+
+/** 把源版本的词/短语级标记同步到目标版本 md：
+ *  词级=目标中每处出现建标；短语级=连续词序列匹配处建标；目标无此词=跳过并记录；
+ *  目标已有同词同类型（existing）=幂等跳过。句级标记不同步（三版本句结构完全不同，句对不上）。
+ *  语义：同步的是"审校意图"（待办），执行仍由各版本自己的管线按需跑——B 版句长/词库口径可能不同。 */
+export function syncMarksToMd(marks: Mark[], targetMd: string, existing: Mark[], newId: () => string, now = Date.now()): SyncPlan {
+  const paras = extractParas(splitChapter(targetMd).body);
+  const sents = paras.map((p) => sentsOf(p, false));
+  const items: SyncPlanItem[] = [];
+  let totalCreated = 0;
+  for (const m of marks) {
+    if (m.level === 'sent' || !m.word) continue;
+    const targetWords = (m.word.match(/[A-Za-z][A-Za-z'-]*/g) ?? []).map((w) => w.toLowerCase());
+    if (!targetWords.length) continue;
+    if (existing.some((x) => x.word?.toLowerCase() === m.word!.toLowerCase() && x.type === m.type)) {
+      items.push({ source: m, created: [], skipped: 'duplicate' });
+      continue;
+    }
+    const created: Mark[] = [];
+    sents.forEach((ss, pi) =>
+      ss.forEach((sent, si) => {
+        const raws = sent.match(/[A-Za-z][A-Za-z'-]*/g) ?? [];
+        for (let i = 0; i + targetWords.length <= raws.length; i++) {
+          const hit = raws.slice(i, i + targetWords.length).every((w, j) => w.toLowerCase() === targetWords[j]);
+          if (!hit) continue;
+          created.push({
+            id: newId(),
+            level: m.level,
+            pi,
+            si,
+            wi: i,
+            ...(m.level === 'phrase' ? { wl: targetWords.length } : {}),
+            word: m.word,
+            text: sent.slice(0, 40),
+            type: m.type,
+            ...(m.note ? { note: m.note } : {}),
+            ts: now,
+          });
+        }
+      }),
+    );
+    totalCreated += created.length;
+    items.push({ source: m, created, ...(created.length ? {} : { skipped: 'not-found' as const }) });
+  }
+  return { items, totalCreated };
+}
+
 /** 从 AI 返回文本中尽力解析出 JSON 数组（代码围栏/单对象/多对象无括号/截断修复/前后解释文字） */
 export function parseAiJson(raw: string): unknown[] {
   let t = (raw ?? '').trim();
