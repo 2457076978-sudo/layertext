@@ -5,7 +5,7 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import { S, esc } from './state.js';
-import { $, setStatus, toast, pop, hidePop, placePop } from './uikit.js';
+import { $, setStatus, toast, pop, hidePop, placePop, showSummaryPop } from './uikit.js';
 import {
   activeSession,
   renderAll,
@@ -277,11 +277,18 @@ export async function applyWordSimplifications(s: FileSession, marks: Mark[]): P
     /* 日志失败不阻塞 */
   }
   if (done.length) flashApplied(done[done.length - 1].split('→')[1]);
-  const summary =
-    `已换 ${done.length} 个词（句子未动）：${done.slice(0, 6).join('、')}${done.length > 6 ? '…' : ''}${noted ? `；换不出的 ${noted} 个已改为加中文标注` : ''}` +
-    (morphWarn.length ? `；⚠ ${morphWarn.length} 处词形可能与语境不符（${morphWarn.slice(0, 3).join('、')}），建议复核` : '');
-  setStatus(summary, 'saved');
-  toast(morphWarn.length ? `已换 ${done.length} 个词；⚠ ${morphWarn.length} 处词形建议复核（详见状态行）` : `已换 ${done.length} 个词（句子未动）`, morphWarn.length ? 'info' : 'ok');
+  // 总结面板：换词/降级加注/词形待复核全量明细（此前只有状态行截断前 3 条，长清单看不全）
+  showSummaryPop(`
+    <div class="pop-h">词汇简化总结</div>
+    <table class="gtable">
+      <tr><td>已换（写入正文，句子未动）</td><td><b>${done.length}</b> 个</td></tr>
+      ${noted ? `<tr><td>换不出更简单词 → 降级加中文标注</td><td><b>${noted}</b> 个</td></tr>` : ''}
+      ${morphWarn.length ? `<tr class="warnrow"><td>⚠︎ 词形可能与语境不符（AI 边界 #17：词尾 ed/ing/s/原形类不一致，建议复核）</td><td><b>${morphWarn.length}</b> 处</td></tr>` : ''}
+    </table>
+    ${done.length ? `<div style="margin-top:8px;font-size:12px;line-height:1.9"><b>换词明细</b><br/>${done.map((d) => '· ' + esc(d)).join('<br/>')}</div>` : ''}
+    ${morphWarn.length ? `<div class="dim" style="margin-top:6px;font-size:12px;line-height:1.9">⚠︎ 词形待复核：<br/>${morphWarn.map((d) => '· ' + esc(d)).join('<br/>')}</div>` : ''}
+    <div class="pop-btns" style="margin-top:10px"><button id="sum-close">关闭</button></div>`);
+  setStatus(`已换 ${done.length} 个词（句子未动）${noted ? `；${noted} 个降级加注` : ''}${morphWarn.length ? `；⚠︎ ${morphWarn.length} 处词形待复核（明细见右下总结面板）` : ''}`, 'saved');
   void propagateCorrection(s, corrPairs2);
 }
 
