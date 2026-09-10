@@ -75,13 +75,17 @@ function cleanDraftSeg(text: string, fallbackMarker: string): string {
   return t.trim();
 }
 
-/** 整章逐段简化核心（「AI 简化本章」与全书批处理共用）：逐段调用、前文衔接、段标记补回、书级替换 */
+/** 段词数（收缩率口径）：与 tokenize 同源正则 */
+const segWords = (t: string): number => (t.match(/[A-Za-z][A-Za-z'-]*/g) ?? []).length;
+
+/** 整章逐段简化核心（「AI 简化本章」与全书批处理共用）：逐段调用、前文衔接、段标记补回、书级替换。
+ *  同义转换守恒（提示词 v1.6 + 引擎侧双保险）：每段改完算词数收缩，>15% 自动带纠正指令重试一次（采纳更长的一版）。 */
 async function simplifyChapterCore(
   md: string,
   instructions: string,
   onSeg: (i: number, total: number, segHead: string) => void,
   signal?: AbortSignal,
-): Promise<{ md: string; outTokens: number; segCount: number }> {
+): Promise<{ md: string; outTokens: number; segCount: number; srcWords: number; outWords: number; retried: number }> {
   const chLine = md.match(/^## Chapter \w+.*$/m)?.[0] ?? '## Chapter One';
   const header = md.slice(0, md.indexOf(chLine)) || '';
   const body = splitChapter(md).body;
@@ -99,25 +103,52 @@ async function simplifyChapterCore(
   });
   const out: string[] = [];
   let tokens = 0;
+  let srcTotal = 0;
+  let outTotal = 0;
+  let retried = 0;
   for (let i = 0; i < segs.length; i++) {
     onSeg(i, segs.length, segs[i].slice(0, 8).trim());
     const prevTail = out.length ? out[out.length - 1].slice(-500) : '（本章开头）';
+    const srcW = segWords(segs[i]);
+    srcTotal += srcW;
+    const userMsg = `前文（已简化，供语气与指代衔接参考）：\n…${prevTail}\n\n请简化以下段落：\n${segs[i].trim()}`;
     const { content, usage } = await callChat(
       [
         { role: 'system', content: system },
-        {
-          role: 'user',
-          content: `前文（已简化，供语气与指代衔接参考）：\n…${prevTail}\n\n请简化以下段落：\n${segs[i].trim()}`,
-        },
+        { role: 'user', content: userMsg },
       ],
       2500,
       signal,
       'AI 简化本章',
     );
     tokens += Number(usage.match(/(\d+) 出/)?.[1] ?? 0);
-    out.push(applyRewrite(cleanDraftSeg(content, segs[i].match(/\[P\d+\]/)![0])));
+    const mark = segs[i].match(/\[P\d+\]/)![0];
+    let revised = applyRewrite(cleanDraftSeg(content, mark));
+    // 段级守恒双保险：提示词已要求 ±15%，仍缩水（源段≥20词才卡，短段波动大）→ 带纠正指令重试一次，采纳更长的一版
+    if (srcW >= 20 && segWords(revised) < srcW * 0.85) {
+      const { content: c2, usage: u2 } = await callChat(
+        [
+          { role: 'system', content: system },
+          { role: 'user', content: userMsg },
+          { role: 'assistant', content },
+          {
+            role: 'user',
+            content: `你上一版只有 ${segWords(revised)} 词，比原文（${srcW} 词）短了 ${Math.round((1 - segWords(revised) / srcW) * 100)}%。同义转换不是压缩：请保留原文全部细节、修饰与氛围描写，只把词汇和句式换成学生能懂的说法，重写这一段，输出词数应与原文相当（±15% 内）。`,
+          },
+        ],
+        2500,
+        signal,
+        'AI 简化本章',
+      );
+      tokens += Number(u2.match(/(\d+) 出/)?.[1] ?? 0);
+      const revised2 = applyRewrite(cleanDraftSeg(c2, mark));
+      if (segWords(revised2) > segWords(revised)) revised = revised2; // 采纳更长的一版（仍短也放行——守恒是软约束，教师定稿）
+      retried++;
+    }
+    outTotal += segWords(revised);
+    out.push(revised);
   }
-  return { md: `${header}${chLine}\n\n${out.join('\n\n')}\n`, outTokens: tokens, segCount: segs.length };
+  return { md: `${header}${chLine}\n\n${out.join('\n\n')}\n`, outTokens: tokens, segCount: segs.length, srcWords: srcTotal, outWords: outTotal, retried };
 }
 
 async function generateDraft(): Promise<void> {
@@ -136,11 +167,7 @@ async function generateDraft(): Promise<void> {
   ($('draft-cancel') as HTMLElement).style.display = '';
   $('draft-progress').style.display = '';
   try {
-    const {
-      md: newMd,
-      outTokens: tokens,
-      segCount,
-    } = await simplifyChapterCore(
+    const { md: newMd, outTokens: tokens, segCount, srcWords, outWords, retried } = await simplifyChapterCore(
       s.md,
       instructions,
       (i, total, head) => {
@@ -166,7 +193,11 @@ async function generateDraft(): Promise<void> {
     draftPop.classList.remove('open');
     await addSession(newMd, outPath.slice(outPath.lastIndexOf('/') + 1), outPath, { noAutoQc: true });
     await runQcCurrent();
-    setStatus(`简化版已生成（${segCount} 段，约 ${tokens} 出tokens）：${outPath}。体检指标见报告页——继续用标记精修；要更简版本：打开它再简化一次`, 'saved');
+    const shrink = srcWords ? Math.round((1 - outWords / srcWords) * 100) : 0;
+    setStatus(
+      `简化版已生成（${segCount} 段，${srcWords}→${outWords} 词${shrink > 0 ? `，收缩 ${shrink}%` : shrink < 0 ? `，扩写 ${-shrink}%` : ''}${retried ? `，${retried} 段触发篇幅守恒重试` : ''}，约 ${tokens} 出tokens）：${outPath}。体检指标见报告页——继续用标记精修；要更简版本：打开它再简化一次`,
+      'saved',
+    );
     void invoke('reveal_path', { path: outPath });
   } catch (e) {
     $('draft-step').textContent = '✗ 中断：' + e;
@@ -370,11 +401,7 @@ async function runBatch(): Promise<void> {
         const tCh = Date.now();
         const base = item.name.replace(/\.(md|txt|markdown|docx)$/i, '');
         const outName = `${chapters.length > 1 ? `${base}_${chi + 1}` : base}_简化_${date}${mergedSelection().active ? `_${mergedSelection().label.replace(/[/\\?%*:|"<>&]/g, '')}` : ''}.md`;
-        const {
-          md: newMd,
-          outTokens: tk,
-          segCount,
-        } = await simplifyChapterCore(
+        const { md: newMd, outTokens: tk, segCount, srcWords, outWords } = await simplifyChapterCore(
           ch.md,
           instructions,
           (i, total) => {
@@ -397,6 +424,7 @@ async function runBatch(): Promise<void> {
           chapter: chapters.length > 1 ? `${item.name} · ${chi + 1}` : item.name,
           output: outName,
           segCount,
+          shrinkPct: srcWords ? Math.round((1 - outWords / srcWords) * 100) : undefined,
           oovRate: (report.newWordRate * 100).toFixed(1) + '%',
           avgLen: report.avgLenNarrRaw.toFixed(1),
           maxLen: report.maxLen,

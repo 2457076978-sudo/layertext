@@ -53,6 +53,8 @@ export interface BookReportRow {
   outTokens: number;
   status: 'done' | 'failed';
   error?: string;
+  /** 篇幅收缩百分比（正=缩，负=扩写；同义转换守恒口径，>15 进复查提示） */
+  shrinkPct?: number;
 }
 
 /** 书级汇总报告（全书简化报告_日期.md）：各章指标横向表 + 合计 + 人工复查提示 */
@@ -65,16 +67,16 @@ export function buildBookReportMd(rows: BookReportRow[], meta: { book: string; d
   if (meta.provider) lines.push(`- AI 供应商：${meta.provider}`);
   lines.push(
     '',
-    '| 章 | 产物 | 段数 | 生词率 | 平均句长 | 最长句 | 被动 | 定从 | 过去完成 | 超长 | 规则残留 | 耗时 | 出tokens |',
-    '|---|---|---|---|---|---|---|---|---|---|---|---|---|',
+    '| 章 | 产物 | 段数 | 篇幅收缩 | 生词率 | 平均句长 | 最长句 | 被动 | 定从 | 过去完成 | 超长 | 规则残留 | 耗时 | 出tokens |',
+    '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|',
     ...rows.map(
       (r) =>
-        `| ${r.chapter} | ${r.status === 'failed' ? '（失败）' : r.output} | ${cell(r, (x) => x.segCount)} | ${cell(r, (x) => x.oovRate)} | ${cell(r, (x) => x.avgLen)} | ${cell(r, (x) => x.maxLen)} | ${cell(r, (x) => x.passive)} | ${cell(r, (x) => x.relcl)} | ${cell(r, (x) => x.pastperf)} | ${cell(r, (x) => x.overlong)} | ${cell(r, (x) => x.ruleLeft)} | ${cell(r, (x) => `${(x.elapsedMs / 1000).toFixed(0)}s`)} | ${cell(r, (x) => x.outTokens)} |`,
+        `| ${r.chapter} | ${r.status === 'failed' ? '（失败）' : r.output} | ${cell(r, (x) => x.segCount)} | ${cell(r, (x) => (x.shrinkPct === undefined ? '—' : x.shrinkPct >= 0 ? `−${x.shrinkPct}%` : `+${-x.shrinkPct}%`))} | ${cell(r, (x) => x.oovRate)} | ${cell(r, (x) => x.avgLen)} | ${cell(r, (x) => x.maxLen)} | ${cell(r, (x) => x.passive)} | ${cell(r, (x) => x.relcl)} | ${cell(r, (x) => x.pastperf)} | ${cell(r, (x) => x.overlong)} | ${cell(r, (x) => x.ruleLeft)} | ${cell(r, (x) => `${(x.elapsedMs / 1000).toFixed(0)}s`)} | ${cell(r, (x) => x.outTokens)} |`,
     ),
     `| **合计** | | ${sum((r) => r.segCount)} | | | | ${sum((r) => r.passive)} | ${sum((r) => r.relcl)} | ${sum((r) => r.pastperf)} | ${sum((r) => r.overlong)} | ${sum((r) => r.ruleLeft)} | ${(sum((r) => r.elapsedMs) / 1000).toFixed(0)}s | ${sum((r) => r.outTokens)} |`,
     '',
   );
-  const attention = rows.filter((r) => r.status === 'failed' || (r.status === 'done' && (r.passive + r.relcl + r.pastperf + r.overlong > 0 || r.ruleLeft > 0)));
+  const attention = rows.filter((r) => r.status === 'failed' || (r.status === 'done' && (r.passive + r.relcl + r.pastperf + r.overlong > 0 || r.ruleLeft > 0 || (r.shrinkPct ?? 0) > 15)));
   if (attention.length) {
     lines.push('## 建议人工复查', '');
     for (const r of attention) {
@@ -86,6 +88,7 @@ export function buildBookReportMd(rows: BookReportRow[], meta: { book: string; d
           r.pastperf ? `过去完成 ${r.pastperf}` : '',
           r.overlong ? `超长 ${r.overlong}` : '',
           r.ruleLeft ? `替换规则残留 ${r.ruleLeft} 处` : '',
+          (r.shrinkPct ?? 0) > 15 ? `篇幅收缩 ${r.shrinkPct}%（超守恒线，检查是否丢细节）` : '',
         ].filter(Boolean);
         lines.push(`- ${r.chapter}：${bits.join('、')}——打开产物做标记精修`);
       }

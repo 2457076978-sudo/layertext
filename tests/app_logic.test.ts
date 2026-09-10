@@ -261,6 +261,7 @@ test('buildBookReportMd：横向表 + 合计 + 失败章与残留提示', () => 
       chapter: '第一章.md',
       output: '第一章_简化_2026-09-07.md',
       segCount: 10,
+      shrinkPct: 8,
       oovRate: '2.1%',
       avgLen: '10.5',
       maxLen: 15,
@@ -294,15 +295,16 @@ test('buildBookReportMd：横向表 + 合计 + 失败章与残留提示', () => 
   const md = buildBookReportMd(rows, { book: '动物农场', date: '2026-09-07', maxLen: 16, instructions: '面向九年级' });
   assert.ok(md.includes('# 全书简化报告 · 动物农场'));
   assert.ok(md.includes('完成 1/2 章'));
-  assert.ok(md.includes('| 第一章.md | 第一章_简化_2026-09-07.md | 10 | 2.1% | 10.5 | 15 | 0 | 1 |'));
+  assert.ok(md.includes('| 第一章.md | 第一章_简化_2026-09-07.md | 10 | −8% | 2.1% | 10.5 | 15 | 0 | 1 |'), '篇幅收缩列在段数后（守恒口径 −8%=缩 8%）');
   assert.ok(md.includes('（失败）'), '失败章产物列显示失败');
   assert.ok(md.includes('**合计**'));
   assert.ok(md.includes('## 建议人工复查'));
   assert.ok(md.includes('定从 1'), '黑名单残留章进入复查提示');
+  assert.ok(!md.includes('篇幅收缩 8%'), '收缩 8% 未超守恒线（15%），不进复查提示');
   assert.ok(md.includes('简化失败（HTTP 429: rate limit）'));
 });
 
-test('buildBookReportMd：全部达标时不出现复查段，给 🎉 判读', () => {
+test('buildBookReportMd：全部达标时不出现复查段，给 🎉 判读；篇幅收缩超 15% 进复查', () => {
   const rows: BookReportRow[] = [
     {
       chapter: '第一章.md',
@@ -324,6 +326,10 @@ test('buildBookReportMd：全部达标时不出现复查段，给 🎉 判读', 
   const md = buildBookReportMd(rows, { book: '书', date: '2026-09-07', maxLen: 16 });
   assert.ok(!md.includes('## 建议人工复查'));
   assert.ok(md.includes('🎉'));
+  // 守恒复查线：同一章收缩 18%（超 ±15%）→ 进复查提示
+  const md2 = buildBookReportMd([{ ...rows[0]!, shrinkPct: 18 }], { book: '书', date: '2026-09-07', maxLen: 16 });
+  assert.ok(md2.includes('篇幅收缩 18%'), '超守恒线的章提示检查丢细节');
+  assert.ok(md2.includes('−18%'));
 });
 
 /* ---------- O4：自 main.ts 抽出的纯函数 ---------- */

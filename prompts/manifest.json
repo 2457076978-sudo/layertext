@@ -1,5 +1,5 @@
 {
-  "setVersion": "v1.5",
+  "setVersion": "v1.6",
   "prompts": {
     "system_simplify": {
       "version": "v1.1",
@@ -7,9 +7,9 @@
       "desc": "修订候选 system：词库边界/句法黑名单/保真/输出 JSON 格式（教师长期约定与书级规则由代码追加）"
     },
     "system_draft": {
-      "version": "v1.0",
+      "version": "v1.1",
       "file": "system_draft.md",
-      "desc": "AI 简化本章 system：逐段改写规则（占位符 {{tierRule}}/{{chnoNote}}/{{instructions}}）"
+      "desc": "AI 简化本章 system：逐段改写规则（占位符 {{tierRule}}/{{chnoNote}}/{{instructions}}）；v1.1 加同义转换优先/篇幅守恒（±15%）"
     },
     "system_assistant": {
       "version": "v1.0",
@@ -17,9 +17,9 @@
       "desc": "AI 助手身份与固定工作方式（占位符 {{submitRule}}/{{fileName}}/{{markCount}}）"
     },
     "rewrite_sentence": {
-      "version": "v1.1",
+      "version": "v1.2",
       "file": "rewrite_sentence.md",
-      "desc": "逐句改写 user 模板（占位符 {{maxLen}}/{{intent}}/{{sent}}）"
+      "desc": "逐句改写 user 模板（占位符 {{maxLen}}/{{intent}}/{{sent}}）；v1.2 加同义转换优先（信息量与篇幅守恒，建议删才可删）"
     },
     "plot_points": {
       "version": "v1.0",
@@ -43,6 +43,11 @@
     }
   },
   "changelog": [
+    {
+      "version": "v1.6",
+      "date": "2026-09-10",
+      "note": "同义转换/篇幅守恒（Wayne 拍板'尽量同义转换，别大幅度缩减原文'）：system_draft v1.1 每段输出词数与原文相当（±15%）细节修饰照常转述；rewrite_sentence v1.2 同口径；引擎侧配套段级收缩率>15% 自动重试（batch.ts）"
+    },
     {
       "version": "v1.5",
       "date": "2026-09-10",
