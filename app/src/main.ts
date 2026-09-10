@@ -126,6 +126,9 @@ export async function addSession(md: string, fileName: string, sourcePath: strin
   if (sourcePath && S.sessions.filter((x) => x.sourcePath && x.sourcePath.slice(0, x.sourcePath.lastIndexOf('/')) === sourcePath.slice(0, sourcePath.lastIndexOf('/'))).length === 1) {
     setStatus('本书尚未配专属词库——文件 → 导入自定义词库 后「保存为本书配置」', '');
   }
+  // 传播感知：本版若有高层校正传播来的待办（origin 标识），打开时一次性明示——"做得好要看得见"
+  const propCnt = review.marks.filter((m) => m.origin).length;
+  if (propCnt) setTimeout(() => toast(`本版有 ${propCnt} 条校正待办自高层版本传播来（侧栏标记 ⇄ 标识，正文未动）`, 'info'), 800);
   // 首次载入文件 → 自动进入四步导览
   if (!S.appConfig.tourSeen && S.sessions.length === 1) setTimeout(() => tourShow(0), 600);
 }

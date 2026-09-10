@@ -291,9 +291,14 @@ export async function applyWordSimplifications(s: FileSession, marks: Mark[]): P
     </table>
     ${done.length ? `<div style="margin-top:8px;font-size:12px;line-height:1.9"><b>换词明细</b><br/>${done.map((d) => '· ' + esc(d)).join('<br/>')}</div>` : ''}
     ${morphWarn.length ? `<div class="dim" style="margin-top:6px;font-size:12px;line-height:1.9">⚠︎ 词形待复核：<br/>${morphWarn.map((d) => '· ' + esc(d)).join('<br/>')}</div>` : ''}
+    <div id="sum-prop" class="dim" style="margin-top:6px;font-size:12px;line-height:1.8">⇄ 正在传播到同章其他版本…</div>
     <div class="pop-btns" style="margin-top:10px"><button id="sum-close">关闭</button></div>`);
   setStatus(`已换 ${done.length} 个词（句子未动）${noted ? `；${noted} 个降级加注` : ''}${morphWarn.length ? `；⚠︎ ${morphWarn.length} 处词形待复核（明细见右下总结面板）` : ''}`, 'saved');
-  void propagateCorrection(s, corrPairs2);
+  // 传播结果回填总结面板（感知原则：后台自动行为必须在可回看的面板留一行，不允许只有一闪 toast）
+  void propagateCorrection(s, corrPairs2).then((msg) => {
+    const el = document.getElementById('sum-prop');
+    if (el) el.innerHTML = msg ?? '⇄ 无新增传播（本目录无其他版本，或低层已有同词待办）';
+  });
 }
 
 /** 编辑页即时指标（输入防抖 250ms）：黑名单/超长在保存前就看得见——保存仍按教师定稿写入，仅提示不拦截 */
@@ -511,15 +516,16 @@ export async function siblingVersionFiles(sourcePath: string): Promise<{ name: s
 
 /**
  * 校正成果跨版本传播（Wayne 09-10："高层次的人工校正改动会更新影响低层次的词库，但仅限于此"）：
- * 高层版本词级校正（换词/加注）定案后，自动把同词同类型标记建到同目录低层版本（幂等），
+ * 高层版本词级校正（换词/加注）定案后，自动把同词同类型标记建到同目录低层版本（幂等，origin=来源版本名），
  * 并沉淀书级 `_校正知识.csv`——**只建标记（待办）+知识留痕，低层正文一律不动**；
  * 低层打开后按自己的口径执行（或忽略）。
+ * 返回感知文案（回填总结面板 #sum-prop，"做得好要看得见"）；无传播返回 null。
  */
-async function propagateCorrection(s: FileSession, done: { word: string; type: 'simpl' | 'zh'; result: string }[]): Promise<void> {
-  if (!s.sourcePath || !done.length) return;
+async function propagateCorrection(s: FileSession, done: { word: string; type: 'simpl' | 'zh'; result: string }[]): Promise<string | null> {
+  if (!s.sourcePath || !done.length) return null;
   try {
     const targets = await siblingVersionFiles(s.sourcePath);
-    if (!targets.length) return;
+    if (!targets.length) return null;
     const date = new Date().toLocaleDateString('sv-SE');
     const srcName = s.fileName.replace(/\.md$/i, '');
     // ① 知识沉淀（书目录 _校正知识.csv）
@@ -532,7 +538,7 @@ async function propagateCorrection(s: FileSession, done: { word: string; type: '
       /* 新建 */
     }
     if (!kcsv.trim()) kcsv = '版本,日期,词,处理,结果,传播到\n';
-    // ② 每个版本建标记（幂等：已有同词同类型跳过）
+    // ② 每个版本建标记（幂等：已有同词同类型跳过）；origin 让低层侧栏 ⇄ 徽章/看板传播列可感知
     const plans: SyncTargetPlan[] = [];
     for (const tg of targets) {
       let md = '';
@@ -545,18 +551,21 @@ async function propagateCorrection(s: FileSession, done: { word: string; type: '
       } catch {
         /* 无标记文件 */
       }
-      const srcMarks: Mark[] = done.map((d) => ({ id: 'k' + d.word + d.type, level: 'word', pi: 0, si: 0, wi: 0, word: d.word, text: '', type: d.type, ts: Date.now() }));
+      const srcMarks: Mark[] = done.map((d) => ({ id: 'k' + d.word + d.type, level: 'word', pi: 0, si: 0, wi: 0, word: d.word, text: '', type: d.type, origin: srcName, ts: Date.now() }));
       const plan = syncMarksToMd(srcMarks, md, existing, newMarkId);
       if (plan.totalCreated > 0) plans.push({ name: tg.name, path: tg.path, plan });
       kcsv += [srcName, date, done.map((d) => d.word).join('、'), done[0]!.type === 'simpl' ? '换词' : '加注', done.map((d) => d.result).join('、'), tg.name].map(csvCell).join(',') + '\n';
     }
     await invoke('write_text_file', { path: kPath, content: kcsv });
-    if (!plans.length) return;
+    if (!plans.length) return null;
     const r = await applySyncPlans(plans);
+    const msg = `⇄ 高层校正已传播到低层版本：${plans.map((p) => `${p.name.replace(/\.md$/i, '')} 建 ${p.plan.totalCreated} 条待办（⇄ 标识，正文不动）`).join('；')}——知识已沉淀 _校正知识.csv（${r.wrote + r.refreshed} 个文件）`;
     toast(`高层次校正已传播：${plans.map((p) => `${p.name.replace(/\.md$/i, '')} 建 ${p.plan.totalCreated} 条标记`).join('、')}（仅标记，正文不动）`, 'ok');
     setStatus(`校正知识已沉淀到 _校正知识.csv 并传播到低层版本待办（${r.wrote + r.refreshed} 个文件）`, 'saved');
+    return msg;
   } catch {
     /* 传播失败不影响本版校正 */
+    return null;
   }
 }
 
@@ -567,7 +576,9 @@ export async function showSyncMarksDialog(): Promise<void> {
     setStatus('示例模式没有版本文件——从书架打开章节后使用', 'err');
     return;
   }
-  const syncable = s.review.marks.filter((m) => m.level !== 'sent' && m.word);
+  // 手动同步的标记同样带 origin（来源=当前版）——低层侧栏 ⇄ 徽章/看板传播列与自动传播同口径可感知
+  const srcName = s.fileName.replace(/\.md$/i, '');
+  const syncable = s.review.marks.filter((m) => m.level !== 'sent' && m.word).map((m) => ({ ...m, origin: m.origin ?? srcName }));
   if (!syncable.length) {
     setStatus('本章还没有词/短语级标记（句级不跨版本同步——三版本句结构不同，句对不上）', 'err');
     return;

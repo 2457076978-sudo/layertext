@@ -641,7 +641,7 @@ export async function renderBoardPane(): Promise<void> {
   }
   const ledger = await readLedger();
   const cur = s?.sourcePath ?? null;
-  const rows: { path: string; 章: string; 门禁勾选: number; 门禁总数: number; 标记数: number; 书签数: number; 生词率: number | null; 建议数: number; 采纳数: number; 当前: boolean }[] = [];
+  const rows: { path: string; 章: string; 门禁勾选: number; 门禁总数: number; 标记数: number; 书签数: number; 生词率: number | null; 建议数: number; 采纳数: number; 传播待办: number; 当前: boolean }[] = [];
   for (const f of chapters) {
     const r = await readReviewJson(f);
     const gates = r?.gate ? Object.values(r.gate).filter(Boolean).length : 0;
@@ -655,6 +655,7 @@ export async function renderBoardPane(): Promise<void> {
       }
     }
     const mine = ledgerOf(ledger, workspaceChipName(f), f);
+    const propCnt = ((r?.marks as { origin?: string }[] | undefined) ?? []).filter((m) => m.origin).length;
     rows.push({
       path: f,
       章: workspaceChipName(f),
@@ -665,6 +666,7 @@ export async function renderBoardPane(): Promise<void> {
       生词率: rate,
       建议数: mine.length,
       采纳数: mine.filter((x) => x.outcome === '采纳' || x.outcome === '直改').length,
+      传播待办: propCnt,
       当前: f === cur,
     });
   }
@@ -677,7 +679,7 @@ export async function renderBoardPane(): Promise<void> {
       <div class="retro-card"><div class="retro-num">${esc(sum.采纳率)}</div><div class="retro-label">AI 建议采纳率</div><div class="retro-hint">台账统计（采纳+直改）</div></div>
     </div>
     <table class="sgtable">
-      <tr><th>章</th><th>门禁</th><th>标记</th><th>书签</th><th>生词率</th><th>建议（采纳）</th></tr>
+      <tr><th>章</th><th>门禁</th><th>标记</th><th>书签</th><th>生词率</th><th>建议（采纳）</th><th title="自高层版本校正传播来的待办标记数（⇄）">传播待办</th></tr>
       ${rows
         .map(
           (r) => `<tr class="board-row" data-bpath="${esc(r.path)}" style="cursor:pointer;${r.当前 ? 'outline:1px solid var(--accent);outline-offset:-1px' : ''}">
@@ -686,7 +688,7 @@ export async function renderBoardPane(): Promise<void> {
         <td>${r.标记数}</td>
         <td>${r.书签数}</td>
         <td>${r.生词率 === null ? '—' : (r.生词率 * 100).toFixed(1) + '%'}</td>
-        <td>${r.建议数 ? `${r.建议数}（${r.采纳数}）` : '—'}</td>
+        <td>${r.建议数 ? `${r.建议数}（${r.采纳数}）` : '—'}</td><td>${r.传播待办 ? `<span style="color:var(--pending)">⇄ ${r.传播待办}</span>` : '—'}</td>
       </tr>`,
         )
         .join('')}
@@ -816,7 +818,7 @@ async function exportBookDossier(): Promise<void> {
     }
     const ledger = await readLedger();
     const parts: string[] = [];
-    const boardRows: { path: string; 章: string; 门禁勾选: number; 门禁总数: number; 标记数: number; 书签数: number; 生词率: number | null; 建议数: number; 采纳数: number; 当前: boolean }[] = [];
+    const boardRows: { path: string; 章: string; 门禁勾选: number; 门禁总数: number; 标记数: number; 书签数: number; 生词率: number | null; 建议数: number; 采纳数: number; 传播待办: number; 当前: boolean }[] = [];
     for (const f of chapters) {
       const md = await invoke<string>('read_text_file', { path: f });
       const r = runQc(md, buildLexiconNow(), { tier: 'M', fileName: f.slice(f.lastIndexOf('/') + 1) });
@@ -832,6 +834,7 @@ async function exportBookDossier(): Promise<void> {
         生词率: r.newWordRate,
         建议数: mine.length,
         采纳数: mine.filter((x) => x.outcome === '采纳' || x.outcome === '直改').length,
+        传播待办: ((rv?.marks as { origin?: string }[] | undefined) ?? []).filter((m) => m.origin).length,
         当前: f === activeSession()?.sourcePath,
       });
       const byType = new Map<string, number>();

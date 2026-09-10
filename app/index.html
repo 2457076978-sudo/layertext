@@ -910,6 +910,11 @@
       .mitem .note-dot {
         color: var(--pending);
       }
+      .mitem .origin-dot {
+        color: var(--brand);
+        font-weight: 600;
+        cursor: help;
+      }
 
       /* 门禁 ？帮助 */
       .qmark {
@@ -2609,6 +2614,9 @@
       .heat-dot.risk {
         background: var(--oov);
       }
+      .heat-dot.vocab {
+        background: var(--pending);
+      }
       .heat-dot.mark {
         background: var(--brand);
       }
@@ -3092,6 +3100,7 @@
             <span><i class="dot" style="background: var(--term)"></i>术语（蓝）</span>
             <span><i class="dot" style="background: var(--riskbg); border: 1px solid #f5c6c2"></i>难句（自动检测）</span>
             <span><i class="dot" style="background: #fef9c3; border: 1px solid #fde047"></i>黄句=AI 建议，未改正文（绿字点 ✓ 才生效）</span>
+            <span title="右缘竖轨：红=句法难句，橙=含生词的句子（点击直达该句），蓝/紫=你的标记">轨道点：红=难句 橙=生词句</span>
           </div>
           <div id="reader">
             <div class="empty"><b>书架装载中…</b><br /><span style="font-size: 12px">正在读取你的书与配置（本地，不联网）</span></div>

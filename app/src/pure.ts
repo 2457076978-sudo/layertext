@@ -175,6 +175,7 @@ export function syncMarksToMd(marks: Mark[], targetMd: string, existing: Mark[],
             text: sent.slice(0, 40),
             type: m.type,
             ...(m.note ? { note: m.note } : {}),
+            ...(m.origin ? { origin: m.origin } : {}),
             ts: now,
           });
         }

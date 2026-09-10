@@ -110,6 +110,7 @@ export function renderReader(session: FileSession): void {
       const toks = tokenizeTxt(sent);
       const rawWords = sent.match(/[A-Za-z][A-Za-z'-]*/g) ?? [];
       let rest = sent;
+      let oovCount = 0; // 句级生词数（热力轨词汇点数据源；待定词不上轨——保守已知口径，⑨单独计量）
       for (let i = 0; i < rawWords.length; i++) {
         const raw = rawWords[i];
         const at = rest.indexOf(raw);
@@ -117,6 +118,7 @@ export function renderReader(session: FileSession): void {
         const w = document.createElement('span');
         const tok = toks[i] ?? raw.toLowerCase();
         const cls = terms.has(tok) ? 'term' : pendHit(tok, lex.pending) ? 'pending' : hit(tok, S.currentKnown) ? '' : 'oov';
+        if (cls === 'oov') oovCount++;
         w.className = 'w' + (cls ? ' ' + cls : '');
         w.dataset.wi = String(i);
         w.dataset.tok = tok;
@@ -127,6 +129,7 @@ export function renderReader(session: FileSession): void {
         s.appendChild(w);
         rest = rest.slice(at + raw.length);
       }
+      if (oovCount) s.dataset.oov = String(oovCount);
       s.appendChild(document.createTextNode(rest));
       div.appendChild(s);
       div.appendChild(document.createTextNode(' '));

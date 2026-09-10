@@ -86,3 +86,13 @@ test('连字符词形态：目标里 hen-houses 被拆句归一成两个词，�
   const plan = syncMarksToMd([pm], '# T\n\n## Chapter One\n\n[P01] They walked past the hen-houses slowly.\n', [], newId);
   assert.equal(plan.totalCreated, 1); // sentsOf 归一后 hen houses 两词连续命中
 });
+
+test('origin 溯源随标记复制（传播感知）：源带 origin → 每处新建标记都带；无 origin → 不带', () => {
+  seq = 0;
+  const src: Mark = { ...wm('donkey'), origin: 'A层挑战' };
+  const plan = syncMarksToMd([src], TGT_MD, [], newId);
+  assert.equal(plan.totalCreated, 2);
+  for (const c of plan.items[0]!.created) assert.equal(c.origin, 'A层挑战'); // 低层侧栏 ⇄ 徽章/看板传播列的数据载体
+  const plan2 = syncMarksToMd([wm('boar')], TGT_MD, [], newId);
+  assert.equal(plan2.items[0]!.created[0]!.origin, undefined); // 本地标记不带（向后兼容：旧 JSON 无字段同态）
+});

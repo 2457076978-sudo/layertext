@@ -22,6 +22,8 @@ export interface Mark {
   text?: string;
   type: MarkType;
   note?: string;
+  /** 溯源：此标记由哪个版本校正传播而来（如「A层挑战」）——低层待办的可见性依据（侧栏 ⇄ 徽章/看板传播列） */
+  origin?: string;
   ts: number;
 }
 

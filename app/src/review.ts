@@ -200,7 +200,8 @@ export function renderSidebar(
           .map((m) => {
             const label = m.level === 'sent' ? (m.text ?? '').slice(0, 22) + '…' : (m.word ?? '');
             return `<div class="mitem">
-              <span class="jump" data-jump="${m.id}" title="${esc(label)}${m.note ? ' ｜ ' + esc(m.note) : ''}">${esc(label)}</span>
+              <span class="jump" data-jump="${m.id}" title="${esc(label)}${m.origin ? ` ｜ 自《${esc(m.origin)}》传播` : ''}${m.note ? ' ｜ ' + esc(m.note) : ''}">${esc(label)}</span>
+              ${m.origin ? `<span class="origin-dot" title="此标记由《${esc(m.origin)}》校正传播而来——低层待办，正文未动；按本版口径处理或删除">⇄</span>` : ''}
               ${m.note ? '<span class="note-dot" title="有备注">✎</span>' : ''}
               <button class="x" data-rm="${m.id}" title="删除标记">×</button>
             </div>`;

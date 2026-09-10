@@ -226,11 +226,11 @@ function buildHeatRail(): void {
   const H = reader.offsetHeight || 1;
   const total = reader.scrollHeight || 1;
   const readerTop = contentY(reader, pane);
-  const dot = (el: HTMLElement, cls: string, title: string): void => {
+  const dot = (el: HTMLElement, cls: string, title: string, slot = 0): void => {
     const d = document.createElement('div');
     d.className = 'heat-dot ' + cls;
     const y = ((contentY(el, pane) - readerTop) / total) * H;
-    d.style.top = Math.max(0, Math.min(H - 6, y)) + 'px';
+    d.style.top = Math.max(0, Math.min(H - 6, y + slot * 6)) + 'px'; // 同句多类信号自上而下每类偏移一个点位
     d.title = title;
     d.addEventListener('click', () => {
       el.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -240,17 +240,37 @@ function buildHeatRail(): void {
     });
     rail!.appendChild(d);
   };
-  // 风险句红点
-  const riskEls = [...document.querySelectorAll<HTMLElement>('#reader .sent.risk')];
-  const riskSet = new Set(riskEls);
-  for (const el of riskEls) dot(el, 'risk', (el.textContent ?? '').slice(0, 50));
-  // 标记蓝点（与风险句同句 → 紫点）
+  // 按句聚合三类信号：红=句法风险 / 橙=句内生词 / 蓝=标记（紫=风险+标记融合，title 汇总同句多标记）
+  interface RailFlags { risk: boolean; vocab: number; mark: string | null }
+  const flags = new Map<HTMLElement, RailFlags>();
+  const flagOf = (el: HTMLElement): RailFlags => {
+    let f = flags.get(el);
+    if (!f) {
+      f = { risk: false, vocab: 0, mark: null };
+      flags.set(el, f);
+    }
+    return f;
+  };
+  document.querySelectorAll<HTMLElement>('#reader .sent.risk').forEach((el) => {
+    flagOf(el).risk = true;
+  });
+  document.querySelectorAll<HTMLElement>('#reader .sent[data-oov]').forEach((el) => {
+    flagOf(el).vocab = Number(el.dataset.oov ?? 0);
+  });
   const sentByKey = new Map<string, HTMLElement>();
   document.querySelectorAll<HTMLElement>('#reader .sent').forEach((el) => sentByKey.set(`${el.dataset.pi}:${el.dataset.si}`, el));
   for (const m of s.review.marks) {
     const el = sentByKey.get(`${m.pi}:${m.si}`);
     if (!el) continue;
-    dot(el, riskSet.has(el) ? 'both' : 'mark', (m.level === 'word' ? '词' : m.level === 'phrase' ? '短语' : '句') + '标记：' + (m.word ?? m.text ?? '').slice(0, 30));
+    const label = (m.level === 'word' ? '词' : m.level === 'phrase' ? '短语' : '句') + '标记：' + (m.word ?? m.text ?? '').slice(0, 30);
+    const f = flagOf(el);
+    f.mark = f.mark ? f.mark + '；' + label : label;
+  }
+  for (const [el, f] of flags) {
+    let slot = 0;
+    if (f.risk) dot(el, 'risk', (el.textContent ?? '').slice(0, 50), slot++);
+    if (f.vocab) dot(el, 'vocab', `P${Number(el.dataset.pi) + 1}·S${Number(el.dataset.si) + 1} · ${f.vocab} 个生词（点击词面可标记处理）`, slot++);
+    if (f.mark !== null) dot(el, f.risk ? 'both' : 'mark', f.mark, slot);
   }
   // 视口指示块
   const view = document.createElement('div');
