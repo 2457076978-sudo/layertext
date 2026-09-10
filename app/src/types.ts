@@ -3,7 +3,7 @@
 import type { QcResult } from '../../src/core/qc.js';
 
 export type WordMarkType = 'simpl' | 'zh' | 'oov' | 'hard' | 'factw' | 'goodw' | 'anchor' | 'otherw';
-export type SentMarkType = 'syntax' | 'long' | 'ref' | 'cohesion' | 'fact' | 'stiff' | 'cut' | 'goods' | 'others';
+export type SentMarkType = 'syntax' | 'long' | 'ref' | 'cohesion' | 'fact' | 'stiff' | 'paraphrase' | 'cut' | 'goods' | 'others';
 export type MarkType = WordMarkType | SentMarkType;
 /** 标记粒度三级（选区即范围）：word=点词 / phrase=拖选短语（下划线，类型色沿用词级色板）/ sent=整句 */
 export type MarkLevel = 'word' | 'phrase' | 'sent';
@@ -98,6 +98,7 @@ export const SENT_TYPES: { key: SentMarkType; label: string; badge: string }[] =
   { key: 'cohesion', label: '衔接断裂', badge: '接' },
   { key: 'fact', label: '事实逻辑疑', badge: '实' },
   { key: 'stiff', label: '表达生硬', badge: '硬' },
+  { key: 'paraphrase', label: '转述改写', badge: '述' },
   { key: 'cut', label: '建议删', badge: '删' },
   { key: 'goods', label: '好句锚点', badge: '锚' },
   { key: 'others', label: '其他问题', badge: '他' },

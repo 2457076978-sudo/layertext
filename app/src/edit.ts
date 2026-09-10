@@ -162,7 +162,7 @@ export function jumpNextRisk(dir: 1 | -1): void {
   toast(`难句 ${riskJumpIdx + 1}/${risks.length}${kinds ? ' · ' + kinds : ''}`);
 }
 
-/** 标记弹层开着时：数字键 1-9 = 选第 N 类标记，R = AI 改写本句，E = 手动改这句（note 输入框聚焦时不拦截） */
+/** 标记弹层开着时：数字键 1-9、0(=第10类) 选标记类型，R = AI 改写本句，E = 手动改这句（note 输入框聚焦时不拦截） */
 export function popHotkey(k: string): boolean {
   if (!pop.classList.contains('open')) return false;
   const ae = document.activeElement;
@@ -171,7 +171,7 @@ export function popHotkey(k: string): boolean {
   let hit: HTMLElement | null = null;
   if (k === 'r' || k === 'R') hit = pop.querySelector<HTMLElement>('[data-mk="__rewrite"]');
   else if (k === 'e' || k === 'E') hit = pop.querySelector<HTMLElement>('[data-mk="__edit"]');
-  else if (/^[1-9]$/.test(k)) hit = btns.filter((b) => !b.dataset.mk!.startsWith('__'))[Number(k) - 1] ?? null;
+  else if (/^[0-9]$/.test(k)) hit = btns.filter((b) => !b.dataset.mk!.startsWith('__'))[k === '0' ? 9 : Number(k) - 1] ?? null;
   if (!hit) return false;
   hit.click();
   return true;

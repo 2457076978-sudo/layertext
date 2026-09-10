@@ -652,6 +652,7 @@ export const RULE_BY_TYPE: Record<string, string> = {
   ref: 'R05',
   cut: 'R01',
   stiff: 'R08',
+  paraphrase: 'R00',
   simpl: 'R02',
   zh: 'R02',
   oov: 'R02',

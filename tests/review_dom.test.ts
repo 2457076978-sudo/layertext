@@ -159,10 +159,11 @@ test('标记类型集与门禁项定义完整（P0 要求的按钮组）', () =>
   );
   assert.deepEqual(
     SENT_TYPES.map((t) => t.key),
-    ['syntax', 'long', 'ref', 'cohesion', 'fact', 'stiff', 'cut', 'goods', 'others'],
+    ['syntax', 'long', 'ref', 'cohesion', 'fact', 'stiff', 'paraphrase', 'cut', 'goods', 'others'],
   );
   assert.equal(typeLabel('anchor'), '复现锚点');
   assert.equal(typeLabel('cohesion'), '衔接断裂');
+  assert.equal(typeLabel('paraphrase'), '转述改写');
   assert.equal(GATES.length, 4);
   assert.ok(!newMarkId().includes(' '), '标记 id 无空格，可作 DOM data 属性值');
 });
