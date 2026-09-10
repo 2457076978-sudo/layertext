@@ -5,7 +5,8 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import { S, esc } from './state.js';
-import { $, setStatus, toast, pop, hidePop, placePop, showSummaryPop } from './uikit.js';
+import { $, setStatus, toast, hidePop, showSummaryPop } from './uikit.js';
+import { switchSide } from './chat.js';
 import {
   activeSession,
   renderAll,
@@ -295,35 +296,76 @@ export async function applyWordSimplifications(s: FileSession, marks: Mark[]): P
   void propagateCorrection(s, corrPairs2);
 }
 
+/** 编辑页即时指标（输入防抖 250ms）：黑名单/超长在保存前就看得见——保存仍按教师定稿写入，仅提示不拦截 */
+let editLiveTimer: ReturnType<typeof setTimeout> | null = null;
+function renderEditLive(): void {
+  const ta = document.getElementById('edit-sent') as HTMLTextAreaElement | null;
+  const live = document.getElementById('edit-live');
+  if (!ta || !live) return;
+  const revised = ta.value.replace(/\s+/g, ' ').trim();
+  if (!revised) {
+    live.innerHTML = '<span class="warn-badge2">内容为空（保存会提示，不会写入）</span>';
+    return;
+  }
+  const risk = sentenceRisks(revised, simplifyMaxLen());
+  const words = revised.split(/\s+/).filter(Boolean).length;
+  const bad = [risk.passive ? '被动' : '', risk.relcl ? '定从' : '', risk.pastperf ? '过去完成' : '', risk.overlong ? `超长(${words}词)` : ''].filter(Boolean);
+  live.innerHTML = bad.length
+    ? `<span class="warn-badge2">⚠ 新句含 ${bad.join(' / ')}</span> <span class="dim">——保存仍按你的定稿写入，此处仅提示</span>`
+    : `<span class="ok-badge2">✓ 黑名单干净（${words} 词，上限 ${simplifyMaxLen()}）</span>`;
+}
+
+/** 编辑页恢复空态说明（保存/完成后回到这里） */
+function resetEditPane(): void {
+  document.getElementById('side-edit')!.innerHTML =
+    '<div class="side-empty">句子编辑工作台：正文里点句 → 「✎ 手动改这句」（或按 E 键），这里显示原句上下文＋大编辑框＋改后即时指标</div>';
+}
+
+/** 手动改这句（侧栏编辑工作台）：原句+前后文灰显 + 大编辑框 + 即时指标；定稿权在教师 */
 export function showSentenceEditor(pi: number, si: number): void {
   const s = activeSession();
   if (!s) return;
-  const sent = sentsOf(extractParas(splitChapter(s.md).body)[pi] ?? '', false)[si] ?? '';
+  const sents = sentsOf(extractParas(splitChapter(s.md).body)[pi] ?? '', false);
+  const sent = sents[si] ?? '';
   if (!sent) return;
-  const r0 = pop.getBoundingClientRect();
-  pop.dataset.level = 'edit';
-  pop.innerHTML = `
-    <div class="pop-h">手动改这句（P${String(pi + 1).padStart(2, '0')} · 第${si + 1}句 · 定稿权在你）</div>
-    <div class="pop-info">改动直接写入正文（首改自动备份、↩︎ 可撤销、变更日志记"人工修订"），<b>不经引擎复核</b>。保存后会自动重新体检。</div>
-    <textarea id="edit-sent" rows="4" style="width:100%;font-size:13px;line-height:1.7;border:1px solid var(--line);border-radius:8px;padding:6px 8px;box-sizing:border-box">${esc(sent.trim())}</textarea>
-    <div class="pop-btns" style="margin-top:8px">
-      <button id="edit-save" class="primary">保存修改（写入正文）</button>
-      <button id="edit-cancel">取消</button>
+  hidePop(); // E 键从标记弹层进来：弹层让位给侧栏工作台
+  switchSide('edit');
+  const side = document.getElementById('side-edit')!;
+  side.innerHTML = `
+    <div class="pop-h" style="margin-bottom:6px">手动改这句 <span class="dim" style="font-weight:400">P${String(pi + 1).padStart(2, '0')} · 第${si + 1}句 · 定稿权在你</span></div>
+    <div class="pop-info" style="font-size:12px;line-height:1.7">改动直接写入正文（首改自动备份、↩︎ 可撤销、变更日志记"人工修订"），<b>不经引擎复核</b>。保存后自动重新体检。</div>
+    <div class="edit-ctx">${esc((sents[si - 1] ?? '').trim())}
+      <div class="cur">${esc(sent.trim())}</div>
+      ${esc((sents[si + 1] ?? '').trim())}
+    </div>
+    <textarea id="edit-sent" placeholder="在这里改这一句…">${esc(sent.trim())}</textarea>
+    <div class="edit-live" id="edit-live"></div>
+    <div class="pop-btns">
+      <button id="edit-save" class="primary">保存修改（⌘↵ 写入正文）</button>
+      <button id="edit-cancel">完成</button>
     </div>`;
-  placePop(r0.left, r0.top);
-  const ta = pop.querySelector('#edit-sent') as HTMLTextAreaElement | null;
+  const ta = side.querySelector('#edit-sent') as HTMLTextAreaElement | null;
+  renderEditLive();
   ta?.focus();
-  pop.querySelector('#edit-cancel')?.addEventListener('click', hidePop);
-  pop.querySelector('#edit-save')?.addEventListener('click', () => void applyManualSentenceEdit(pi, si));
+  ta?.setSelectionRange(ta.value.length, ta.value.length);
+  ta?.addEventListener('input', () => {
+    if (editLiveTimer) clearTimeout(editLiveTimer);
+    editLiveTimer = setTimeout(renderEditLive, 250);
+  });
   ta?.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) void applyManualSentenceEdit(pi, si);
   });
+  side.querySelector('#edit-cancel')?.addEventListener('click', () => {
+    switchSide('review');
+    resetEditPane();
+  });
+  side.querySelector('#edit-save')?.addEventListener('click', () => void applyManualSentenceEdit(pi, si));
 }
 
 async function applyManualSentenceEdit(pi: number, si: number): Promise<void> {
   const s = activeSession();
   if (!s) return;
-  const ta = pop.querySelector('#edit-sent') as HTMLTextAreaElement | null;
+  const ta = document.getElementById('edit-sent') as HTMLTextAreaElement | null;
   const revised = (ta?.value ?? '').replace(/\s+/g, ' ').trim();
   const sent = sentsOf(extractParas(splitChapter(s.md).body)[pi] ?? '', false)[si] ?? '';
   if (!ta || !revised) {
@@ -331,7 +373,8 @@ async function applyManualSentenceEdit(pi: number, si: number): Promise<void> {
     return;
   }
   if (revised === sent.trim()) {
-    hidePop();
+    switchSide('review');
+    resetEditPane();
     toast('没有变化，正文未动');
     return;
   }
@@ -354,7 +397,8 @@ async function applyManualSentenceEdit(pi: number, si: number): Promise<void> {
   s.review.warns = (s.review.warns ?? []).filter((x) => !x.startsWith(`${pi}:${si}|`)); // 教师亲手改过=复核完成
   remapMarks(s.review.marks, s.md);
     s.review.warns = remapWarns(s.review.warns, s.md);
-  hidePop();
+  switchSide('review');
+  resetEditPane();
   const date = new Date().toLocaleDateString('sv-SE');
   const outDir = s.sourcePath ? s.sourcePath.slice(0, s.sourcePath.lastIndexOf('/')) : await invoke<string>('reports_dir');
   const logPath = `${outDir}/变更日志_AI审核.csv`;

@@ -831,12 +831,13 @@ document.addEventListener('scroll', () => scheduleSaveLastSession(), true);
 
 void (async () => {
   await loadConfig();
-  if (!S.appConfig.firstRunSeen) showWelcome();
-  await restoreChat();
+  // 主题/排版先于一切渲染：书架出现前屏幕保持中性装载态，不闪默认浅色（#reader 初始骨架=书架装载中）
+  applyTheme();
   applyReaderFont();
   applyReaderLineHeight();
-  applyTheme();
   await renderShelf(); // 首页=书架（示例+我的书；原"最近编辑"空状态升级为书架）
+  if (!S.appConfig.firstRunSeen) showWelcome();
+  void restoreChat(); // 右栏 AI 会话后台恢复，不挡书架首屏
   setInterval(() => void saveLastSession(), 20000); // 兜底：上次会话自动保存
 })();
 

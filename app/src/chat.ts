@@ -378,14 +378,17 @@ async function maybeCompactChat(): Promise<void> {
   }
 }
 
-/* 侧栏双页切换 */
-function switchSide(name: 'review' | 'ai'): void {
+/* 侧栏三页切换（审校 / 编辑 / AI 助手）——编辑页由 showSentenceEditor 在打开句子时自动切入 */
+export function switchSide(name: 'review' | 'edit' | 'ai'): void {
   $('side-tab-review').classList.toggle('active', name === 'review');
+  $('side-tab-edit').classList.toggle('active', name === 'edit');
   $('side-tab-ai').classList.toggle('active', name === 'ai');
   ($('side-review') as HTMLElement).style.display = name === 'review' ? '' : 'none';
+  ($('side-edit') as HTMLElement).style.display = name === 'edit' ? '' : 'none';
   ($('side-ai') as HTMLElement).style.display = name === 'ai' ? 'flex' : 'none';
 }
 $('side-tab-review').addEventListener('click', () => switchSide('review'));
+$('side-tab-edit').addEventListener('click', () => switchSide('edit'));
 $('side-tab-ai').addEventListener('click', () => switchSide('ai'));
 
 /* ---------- 门禁说明弹层 ---------- */

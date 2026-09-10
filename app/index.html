@@ -781,6 +781,51 @@
         font-size: 12px;
         line-height: 1.8;
       }
+      /* ---------- 编辑工作台（侧栏「编辑」页）：原句上下文 + 大编辑框 + 即时指标 ---------- */
+      .edit-ctx {
+        font-size: 12.5px;
+        color: var(--muted);
+        line-height: 1.8;
+        border-left: 2px solid var(--line);
+        padding-left: 10px;
+        margin: 8px 0;
+      }
+      .edit-ctx .cur {
+        color: var(--ink);
+        background: color-mix(in srgb, var(--accent) 10%, transparent);
+        border-left: 3px solid var(--accent);
+        padding: 4px 8px;
+        border-radius: 4px;
+        margin: 4px 0;
+      }
+      #side-edit textarea {
+        width: 100%;
+        box-sizing: border-box;
+        min-height: 150px;
+        resize: vertical;
+        font-size: 14px;
+        line-height: 1.8;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 10px 12px;
+        background: var(--panel, #fff);
+        color: var(--ink);
+      }
+      #side-edit textarea:focus {
+        outline: none;
+        border-color: var(--accent);
+      }
+      .edit-live {
+        margin-top: 8px;
+        font-size: 12px;
+        line-height: 2;
+      }
+      .edit-live .ok-badge2 {
+        color: #16a34a;
+      }
+      .edit-live .warn-badge2 {
+        color: #b45309;
+      }
       .quota-list,
       .gate-list {
         list-style: none;
@@ -3049,9 +3094,7 @@
             <span><i class="dot" style="background: #fef9c3; border: 1px solid #fde047"></i>黄句=AI 建议，未改正文（绿字点 ✓ 才生效）</span>
           </div>
           <div id="reader">
-            <div class="empty">
-              <b>第一步：打开一篇课文</b><br />点上方「载入示例」先看演示，或「打开章节文件…」选你的书稿<br /><span style="font-size: 12px">一本书建议放在同一个文件夹里（配一次词库，全书通用）</span>
-            </div>
+            <div class="empty"><b>书架装载中…</b><br /><span style="font-size: 12px">正在读取你的书与配置（本地，不联网）</span></div>
           </div>
         </section>
         <section id="pane-report" class="pane">
@@ -3088,9 +3131,13 @@
       <aside id="sidebar">
         <div class="side-tabs">
           <button id="side-tab-review" class="active">审校</button>
+          <button id="side-tab-edit">编辑</button>
           <button id="side-tab-ai">AI 助手</button>
         </div>
         <div id="side-review"><div class="side-empty">打开文件后：要点配额 / 终审门禁 / 标记清单</div></div>
+        <div id="side-edit" style="display: none">
+          <div class="side-empty">句子编辑工作台：正文里点句 → 「✎ 手动改这句」（或按 E 键），这里显示原句上下文＋大编辑框＋改后即时指标</div>
+        </div>
         <div id="side-ai" style="display: none">
           <div id="chat-log">
             <div class="chat-empty"><b>对话式助手</b>：适合提问、查证、零散改（"这句怎么改""这个词学过吗"）。工具栏两个按钮适合成批、固定动作（整章/按标记）——两边能力等价，用哪个都行。</div>
