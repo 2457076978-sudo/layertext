@@ -60,19 +60,19 @@ const STEPS = [
   },
   {
     id: '修复', script: 'LayerText_AF修复_20260910.mjs',
-    args: [],
+    args: ['--tier', tierArg, ...(chapters ? ['--chapters', chapters] : [])],
     note: '确定性清理：专名误注 / 字面 [P##] / 嵌套注释 / 同词多义 / 缺空格（幂等，无 API）',
     needsApi: false,
   },
   {
     id: '复核', script: 'LayerText_AF三档复核.mjs',
-    args: [],
+    args: ['--tier', tierArg, ...(chapters ? ['--chapters', chapters] : [])],
     note: '按各层句长上限重算 QC 汇总',
     needsApi: false,
   },
   {
     id: '台账', script: 'LayerText_AF对照台账.mjs',
-    args: [],
+    args: ['--tier', tierArg, ...(chapters ? ['--chapters', chapters] : [])],
     note: '逐句对照台账（保留/改写/删句/数字专名缺失）',
     needsApi: false,
   },
@@ -107,7 +107,7 @@ for (const s of plan) {
   const path = join(HERE, s.script);
   if (!existsSync(path)) { console.error(`\n✗ 缺脚本：${s.script}`); process.exit(1); }
   // 补注脚本用 --tier/--chapters（与生成/精修的 A,M 位置参数不同），在这里转换
-  const stepArgs = s.id === '补注'
+  const stepArgs = ['补注', '修复', '复核', '台账'].includes(s.id)
     ? ['--tier', tiers.join(','), ...(chapters ? ['--chapters', chapters] : [])]
     : s.args;
   console.log(`\n──────── ${s.id} ────────`);

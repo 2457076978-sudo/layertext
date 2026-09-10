@@ -27,8 +27,21 @@ const SRC_BASE = P.原文目录;
 const OUT_BASE = P.产物目录;
 const DATE = P.日期;
 const DRY = process.argv.includes('--dry');
-const CN = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十'];
-const TAGS = ['A层85', 'M层75', 'B层60'];
+// ── 层级/章节过滤（2026-09-10 补）：原先这三个脚本无条件处理 A/M/B 三档全章，
+//    于是"只生成一层试跑"（如 --tier B --chapters 1）跑到「修复」必因找不到文件而崩，
+//    换一本书/换一个层级试跑直接卡死。现在三个脚本都接受 --tier / --chapters。
+const argv = process.argv.slice(2);
+const argOf = (n, d) => { const i = argv.indexOf(n); return i >= 0 ? argv[i + 1] : d; };
+const TAGS_ALL = { A: 'A层85', M: 'M层75', B: 'B层60' };
+const TAGS = (argOf('--tier', 'A,M,B')).split(',').map((x) => x.trim().toUpperCase())
+  .map((k) => TAGS_ALL[k]).filter(Boolean);
+const CN_ALL = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十'];
+/** 章号（数字，1 起）：路径与台账都按它取中文章名 */
+const CHAPTER_IDS = argOf('--chapters', '')
+  ? argOf('--chapters').split(',').map((x) => Number(x.trim())).filter((n) => n >= 1 && n <= 10)
+  : CN_ALL.slice(0, Number(P.章数 ?? 10)).map((_, i) => i + 1);
+const CH_NAME = (ci) => `第${CN_ALL[ci - 1]}章`;
+
 
 // 与 QC 同一套已知判定（否则出现「我删了、引擎却还判它生词」，覆盖率两边打架）
 const isKnown = await makeKnownChecker(P);
@@ -45,7 +58,7 @@ const GLOSS_OVERRIDE = new Map([
 
 const ANN_RE = /([A-Za-z][A-Za-z'-]*)（([^（）]{1,24})）/g;
 const read = (p) => readFileSync(p, 'utf-8');
-const pOf = (ch, tag) => join(OUT_BASE, `第${ch}章`, `原文_${tag}_${DATE}.md`);
+const pOf = (ch, tag) => join(OUT_BASE, ch, `原文_${tag}_${DATE}.md`);
 
 /* ── ① 全局统计：同词多义 ── */
 /** 畸形嵌套注释：模型把释义又注了一遍，产生 `Mollie（莫丽（名字））`、
@@ -83,7 +96,8 @@ function fixMarkers(md) {
 /* ── ① 全局统计：同词多义（先在摊平后的文本上统计，否则畸形注释会被漏算） ── */
 const stat = new Map();
 let nestedFixed = 0, markerFixed = 0;
-for (const tag of TAGS) for (const ch of CN) {
+for (const tag of TAGS) for (const ci of CHAPTER_IDS) {
+  const ch = CH_NAME(ci);
   const p = pOf(ch, tag);
   const before = read(p);
   const flat = flattenNested(before);
@@ -125,7 +139,16 @@ const fixSpacing = (t) => t
 /** 段首 OCR 章节名残留：覆盖 "Chapter 2 " 与 "Chapter 2: " 两种形态 */
 const stripP01 = (t) => t.replace(/^(\[P\d+\] )(?:Chapter\s+\d+\s*:?\s*)/gm, '$1');
 
+/** 重复释义：模型自己吐出 `word (中文)`（半角括号），补注又按冻结格式加了 `word（中文）`，
+ *  于是留下 `arrow（箭头） (箭)`、`hoofs（蹄） (蹄子)` 这种双份。
+ *  规则：只删**半角括号且内含中文**的那份，英文括注（如 `(no bits or reins)`）原样保留。 */
+const DUP_GLOSS_RE = /([A-Za-z][A-Za-z'-]*（[^）]{1,24}）)\s*[（(]\s*[\u4e00-\u9fff][^)）]{0,20}[)）]/g;
+function dropDuplicateGloss(md) {
+  return md.replace(DUP_GLOSS_RE, '$1');
+}
+
 function repairProduct(md) {
+  md = dropDuplicateGloss(md);
   const flat = flattenNested(md);                       // ① 畸形嵌套注释先摊平
   const { text: marked } = fixMarkers(flat);            // ② 字面 [P##] 补回真标记
   const out = marked.replace(ANN_RE, (full, word, gloss) => {
@@ -139,18 +162,20 @@ function repairProduct(md) {
 
 /* ── 执行 ── */
 const changes = [];
-for (const tag of TAGS) for (const ch of CN) {
+for (const tag of TAGS) for (const ci of CHAPTER_IDS) {
+  const ch = CH_NAME(ci);
   const p = pOf(ch, tag);
   const before = read(p);
   const after = repairProduct(before);
-  if (before !== after) { changes.push({ p: `第${ch}章/原文_${tag}`, before, after }); if (!DRY) writeFileSync(p, after, 'utf-8'); }
+  if (before !== after) { changes.push({ p: `${ch}/原文_${tag}`, before, after }); if (!DRY) writeFileSync(p, after, 'utf-8'); }
 }
-for (const ch of CN) {
-  const sp = join(SRC_BASE, `第${ch}章`, '原文_规范化.md');
+for (const ci of CHAPTER_IDS) {
+  const ch = CH_NAME(ci);
+  const sp = join(SRC_BASE, ch, '原文_规范化.md');
   if (!existsSync(sp)) continue;
   const before = read(sp);
   const after = fixSpacing(stripP01(fixMarkers(flattenNested(before)).text));
-  if (before !== after) { changes.push({ p: `原文重制_M50/第${ch}章/原文_规范化`, before, after }); if (!DRY) writeFileSync(sp, after, 'utf-8'); }
+  if (before !== after) { changes.push({ p: `${ch}/原文_规范化`, before, after }); if (!DRY) writeFileSync(sp, after, 'utf-8'); }
 }
 
 /* ── 写出注释词典 ── */

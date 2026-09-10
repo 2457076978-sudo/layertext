@@ -24,14 +24,14 @@ export let LTR = process.env.LAYERTEXT_ENGINE ?? join(HERE, '..', '..');
 export const PROJECT_POINTER = join(process.env.HOME ?? '.', '.layertext.project');
 
 export function findProjectFile(start = process.cwd()) {
-  // ① 环境变量最优先
-  if (process.env.LAYERTEXT_PROJECT) return process.env.LAYERTEXT_PROJECT;
+  // ① 环境变量最优先（显式指定 → 不写指针。否则"临时跑一下别的书"会把默认项目带跑偏）
+  if (process.env.LAYERTEXT_PROJECT) return { path: process.env.LAYERTEXT_PROJECT, sticky: false };
   // ② 从当前目录向上找 调适项目_*.json
   let cur = start.replace(/\/+$/, '');
   for (let i = 0; i < 5 && cur && cur !== '/'; i++) {
     try {
       const hit = readdirSync(cur).find((f) => /^调适项目_.*\.json$/.test(f));
-      if (hit) return join(cur, hit);
+      if (hit) return { path: join(cur, hit), sticky: true };
     } catch { /* 目录不可读就往上走 */ }
     cur = cur.replace(/\/[^/]+$/, '');
   }
@@ -39,7 +39,7 @@ export function findProjectFile(start = process.cwd()) {
   try {
     if (existsSync(PROJECT_POINTER)) {
       const last = readFileSync(PROJECT_POINTER, 'utf-8').trim();
-      if (last && existsSync(last)) return last;
+      if (last && existsSync(last)) return { path: last, sticky: false };
     }
   } catch { /* 指针坏了就当没有 */ }
   return null;
@@ -55,7 +55,12 @@ export function loadProper(path) {
 
 /** 读项目配置 → 展开成脚本直接可用的常量（含专名表内容）
  *  这样脚本里不再出现任何绝对路径，也不再各自维护 PROPER。 */
-export function loadProject(path = findProjectFile()) {
+export function loadProject(path) {
+  let sticky = false;
+  if (!path) {
+    const found = findProjectFile();
+    if (found) { path = found.path; sticky = found.sticky; }
+  }
   if (!path) {
     throw new Error(
       '找不到 调适项目_*.json。三种解法任选：\n' +
@@ -65,8 +70,9 @@ export function loadProject(path = findProjectFile()) {
     );
   }
   if (!existsSync(path)) throw new Error(`项目配置不存在：${path}`);
-  // 记下"上次用的项目"，下次在任何目录下跑都不用再设环境变量
-  try { writeFileSync(PROJECT_POINTER, path + '\n', 'utf-8'); } catch { /* 只读环境就算了 */ }
+  // 记下"上次在目录里找到的项目"，下次在任何目录下跑都不用再设环境变量。
+  // 显式传路径 / 设环境变量时不写指针——避免"临时跑一下别的项目"把默认带跑偏。
+  if (sticky) { try { writeFileSync(PROJECT_POINTER, path + '\n', 'utf-8'); } catch { /* 只读环境就算了 */ } }
   const d = JSON.parse(readFileSync(path, 'utf-8'));
   const 书级 = d.书级 ?? {};
   if (d.引擎目录) LTR = d.引擎目录;
@@ -130,6 +136,12 @@ export async function loadLexicon(P) {
   ]
     .filter((p) => existsSync(p))
     .map((p) => readFileSync(p, 'utf-8'));
+  // 教材进度 → 已学词，并进"已知"口径。
+  // 2026-09-10 修复：loadTextbookLearned 原先只被 管线.mjs 拿去打印一行日志，
+  // 生成/复核脚本根本不消费它 —— 也就是说"教材进度接入 QC 口径"这句承诺是空的。
+  // 未配置 教材进度 时（默认 null）行为不变，已报出的数字不受影响。
+  const learned = loadTextbookLearned(P);
+  if (learned?.size) plainWordlistTexts.push([...learned].join('\n'));
   return buildLexicon({
     plainWordlistTexts,
     vocabCsvTexts: [readFileSync(P.词库, 'utf-8')],
@@ -212,6 +224,8 @@ export function loadTextbookLearned(project) {
     if (bi < bIdx) { for (const c of Object.values(us)) (c.词 ?? []).forEach((w) => learned.add(w)); continue; }
     if (b !== book.trim()) continue;
     for (const [u, c] of Object.entries(us)) {
+      // "（未标单元）"→ 999：当前这册没学完时不计入（可能来自后面单元）；
+      // 已学完的册走上面 bi < bIdx 分支，整册计入。两个分支规则一致。
       const n = Number((u.match(/U(\d+)/i) ?? [])[1] ?? 999);
       if (n < unum) (c.词 ?? []).forEach((w) => learned.add(w));
       else if (n === unum) {

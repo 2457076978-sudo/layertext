@@ -54,18 +54,31 @@ function chapterLedger(tier, tag, i) {
   };
 }
 
-const TIERS = [
+const AI_TIERS = [
   { tag: 'A层85', label: 'A 层（原文 85%）' },
   { tag: 'M层75', label: 'M 层（原文 75%）' },
   { tag: 'B层60', label: 'B 层（原文 60%）' },
 ];
+// ── 层级/章节过滤（2026-09-10 补）：原先无条件处理三档全章，
+//    于是"只生成一层试跑"跑到后面几步必因找不到文件而崩。
+const argv = process.argv.slice(2);
+const argOf = (n, d) => { const i = argv.indexOf(n); return i >= 0 ? argv[i + 1] : d; };
+const TAGS_ALL = { A: 'A层85', M: 'M层75', B: 'B层60' };
+const TAGS = (argOf('--tier', 'A,M,B')).split(',').map((x) => x.trim().toUpperCase())
+  .map((k) => TAGS_ALL[k]).filter(Boolean);
+const CN_ALL = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十'];
+/** 章号（数字，1 起）：路径与台账都按它取中文章名 */
+const CHAPTER_IDS = argOf('--chapters', '')
+  ? argOf('--chapters').split(',').map((x) => Number(x.trim())).filter((n) => n >= 1 && n <= 10)
+  : CN_ALL.slice(0, Number(P.章数 ?? 10)).map((_, i) => i + 1);
+const TIERS = AI_TIERS.filter((t) => TAGS.includes(t.tag));
 const overview = ['# AF 三档重制 · 原文对照台账总览', '', `生成：${new Date().toLocaleString('zh-CN')}｜对齐口径：完全相同句 LCS 锚点 + 改写句 Jaccard≥0.45 配对（LayerText 引擎 alignSentencePairs）`, ''];
 for (const t of TIERS) {
   const lines = [`# ${t.label} · 原文对照台账`, '', `产物：重制三版/第X章/原文_${t.tag}_${DATE}.md｜对齐基准：原文规范化版（245 段）`, '',
     '| 章 | 对齐句 | 原样保留 | 改写 | 数字/专名缺失 | 删句 | 加注 | 篇幅 |', '|---|---|---|---|---|---|---|---|'];
   const totals = { rows: 0, kept: 0, rewritten: 0, sigLost: 0, lost: 0, notes: 0, sw: 0, ow: 0 };
-  for (let i = 1; i <= 10; i++) {
-    const L = chapterLedger(tier_tag(t), t.tag, i);
+  for (const ci of CHAPTER_IDS) {
+    const L = chapterLedger(tier_tag(t), t.tag, ci);
     totals.rows += L.rows; totals.kept += L.kept; totals.rewritten += L.rewritten; totals.sigLost += L.sigLost;
     totals.lost += L.lost.length; totals.notes += L.notes; totals.sw += L.srcWords; totals.ow += L.outWords;
     lines.push(`| ${L.ch} | ${L.rows} | ${L.kept} | ${L.rewritten} | ${L.sigLost} | ${L.lost.length} | ${L.notes} | ${L.srcWords}→${L.outWords}（${((L.outWords / L.srcWords) * 100).toFixed(0)}%） |`);

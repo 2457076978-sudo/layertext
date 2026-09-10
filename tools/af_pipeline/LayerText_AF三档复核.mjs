@@ -18,7 +18,6 @@ const LTR = P.引擎目录;
 const SRC_BASE = P.原文目录;
 const OUT_BASE = P.产物目录;
 const DATE = P.日期;
-const CN = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十'];
 
 const { splitChapter, extractParas, sentsOf } = await import(`${LTR}/dist/src/core/textpipe.js`);
 const { runQc } = await import(`${LTR}/dist/src/core/qc.js`);
@@ -26,11 +25,26 @@ const { runQc } = await import(`${LTR}/dist/src/core/qc.js`);
 const LEX = await loadLexicon(P);
 
 /** 三档：ratio=目标篇幅占比；maxLen=该层句长上限（超标即违规） */
-const TIERS = [
+const AI_TIERS = [
   { key: 'A', tag: 'A层85', label: 'A 层（原文 85%）', ratio: 0.85, maxLen: 20 },
   { key: 'M', tag: 'M层75', label: 'M 层（原文 75%）', ratio: 0.75, maxLen: 16 },
   { key: 'B', tag: 'B层60', label: 'B 层（原文 60%）', ratio: 0.6, maxLen: 14 },
 ];
+// ── 层级/章节过滤（2026-09-10 补）：原先这三个脚本无条件处理 A/M/B 三档全章，
+//    于是"只生成一层试跑"（如 --tier B --chapters 1）跑到「修复」必因找不到文件而崩，
+//    换一本书/换一个层级试跑直接卡死。现在三个脚本都接受 --tier / --chapters。
+const argv = process.argv.slice(2);
+const argOf = (n, d) => { const i = argv.indexOf(n); return i >= 0 ? argv[i + 1] : d; };
+const TAGS_ALL = { A: 'A层85', M: 'M层75', B: 'B层60' };
+const TAGS = (argOf('--tier', 'A,M,B')).split(',').map((x) => x.trim().toUpperCase())
+  .map((k) => TAGS_ALL[k]).filter(Boolean);
+const CN_ALL = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十'];
+/** 章号（数字，1 起）：路径与台账都按它取中文章名 */
+const CHAPTER_IDS = argOf('--chapters', '')
+  ? argOf('--chapters').split(',').map((x) => Number(x.trim())).filter((n) => n >= 1 && n <= 10)
+  : CN_ALL.slice(0, Number(P.章数 ?? 10)).map((_, i) => i + 1);
+const CH_NAME = (ci) => `第${CN_ALL[ci - 1]}章`;
+const TIERS = AI_TIERS.filter((t) => TAGS.includes(t.tag));
 const wc = (t) => (t.match(/[A-Za-z][A-Za-z'-]*/g) ?? []).length;
 const ANN_RE = /([A-Za-z][A-Za-z'-]*)（([^（）]{1,24})）/g;
 
@@ -49,9 +63,9 @@ function overLimit(md, maxLen) {
 
 const rows = [];
 for (const t of TIERS) {
-  let tot = { sw: 0, ow: 0, notes: 0, over: 0, over20: 0, sents: 0, nw: 0, al: 0, pa: 0, rc: 0, pp: 0, ann: 0, annt: 0 };
-  for (let i = 1; i <= 10; i++) {
-    const ch = `第${CN[i - 1]}章`;
+  let tot = { sw: 0, ow: 0, notes: 0, over: 0, over20: 0, sents: 0, nw: 0, al: 0, pa: 0, rc: 0, pp: 0, ann: 0, annt: 0, n: 0 };
+  for (const ci of CHAPTER_IDS) {
+    const ch = CH_NAME(ci);
     const src = readFileSync(join(SRC_BASE, ch, '原文_规范化.md'), 'utf-8');
     const p = join(OUT_BASE, ch, `原文_${t.tag}_${DATE}.md`);
     const md = readFileSync(p, 'utf-8');
@@ -63,7 +77,7 @@ for (const t of TIERS) {
     rows.push({ t, ch, sw, ow, ratio: ow / sw, notes, qc, over: ol.over, sents: ol.total, maxLen: t.maxLen });
     tot.sw += sw; tot.ow += ow; tot.notes += notes; tot.over += ol.over; tot.over20 += qc.over20;
     tot.sents += ol.total; tot.nw += qc.newWordRate; tot.al += qc.avgLenNarrRaw;
-    tot.ann += qc.annotated; tot.annt += qc.annotatable;
+    tot.ann += qc.annotated; tot.annt += qc.annotatable; tot.n += 1;
     tot.pa += qc.passive; tot.rc += qc.relcl; tot.pp += qc.pastperf;
   }
   rows.push({ tierTotal: t, tot });
@@ -81,7 +95,7 @@ L.push('|---|---|---|---|---|---|---|---|---|---|---|---|---|');
 for (const r of rows) {
   if (r.tierTotal) {
     const { tierTotal: t, tot } = r;
-    L.push(`| **${t.key}** | **合计** | **${tot.sw}** | **${tot.ow}** | **${((tot.ow / tot.sw) * 100).toFixed(1)}%** | **${Math.round(t.ratio * 100)}%** | **${((tot.nw / 10) * 100).toFixed(1)}%** | **${(tot.al / 10).toFixed(1)}** | **${tot.pa}/${tot.rc}/${tot.pp}** | **${tot.over}** | **${tot.over20}** | **${((tot.over / tot.sents) * 100).toFixed(1)}%** | **${tot.notes}** | **${tot.ann}/${tot.annt} = ${((tot.ann / (tot.annt || 1)) * 100).toFixed(0)}%** |`);
+    L.push(`| **${t.key}** | **合计** | **${tot.sw}** | **${tot.ow}** | **${((tot.ow / tot.sw) * 100).toFixed(1)}%** | **${Math.round(t.ratio * 100)}%** | **${((tot.nw / (tot.n || 1)) * 100).toFixed(1)}%** | **${(tot.al / (tot.n || 1)).toFixed(1)}** | **${tot.pa}/${tot.rc}/${tot.pp}** | **${tot.over}** | **${tot.over20}** | **${((tot.over / tot.sents) * 100).toFixed(1)}%** | **${tot.notes}** | **${tot.ann}/${tot.annt} = ${((tot.ann / (tot.annt || 1)) * 100).toFixed(0)}%** |`);
     continue;
   }
   const off = Math.abs(r.ratio - r.t.ratio) > 0.12 ? ' ⚠偏' : '';

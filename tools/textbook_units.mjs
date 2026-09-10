@@ -132,17 +132,28 @@ function progress(unitsPath, at, half, outPath) {
   const detail = [];
   const bIdx = BOOK_ORDER.indexOf(book);
 
+  // 基础层（课标1600 + 补录）先入账 —— 2026-09-10 修复：原先明细里不列这一行，
+  // 于是"分项加起来 197 词、合计却报 1800"看着像算错了（差的 1614 就是它）。
+  detail.push(`课标基础层（含数词/星期/月份补录）${d.base.length} 词`);
+
   for (const [b, us] of Object.entries(d.books)) {
     const bi = BOOK_ORDER.indexOf(b);
-    if (bi < bIdx) {                     // 进度之前的所有册：全算已学
+    if (bi < bIdx) {                     // 进度之前的所有册：全算已学（含"（未标单元）"）
       let n = 0, g = 0;
       for (const c of Object.values(us)) { c.词.forEach((w) => learned.add(w)); n += c.词.length; g += c.语法.length; grammars.push(...c.语法); }
-      detail.push(`${b}（全册）${n} 词 / ${g} 语法`);
+      detail.push(`${b}（全册，含未标单元）${n} 词 / ${g} 语法`);
       continue;
     }
     if (b !== book) continue;
+    let untagged = 0;
     for (const [u, c] of Object.entries(us).sort((x, y) => unitNum(x[0]) - unitNum(y[0]))) {
       const un = unitNum(u);
+      if (un === 999) {                  // "（未标单元）"：只知册、不知单元
+        // 口径：当前这册还没学完 → **不计入已学**（这些词可能来自后面的单元）。
+        // 已学完的册走上面那条分支，全册计入。这样两个分支的规则是一致的。
+        untagged += c.词.length;
+        continue;
+      }
       if (un < unitNum(unit)) {
         c.词.forEach((w) => learned.add(w));
         grammars.push(...c.语法);
@@ -155,6 +166,7 @@ function progress(unitsPath, at, half, outPath) {
         detail.push(`${b} ${u}${half ? '（半）' : ''} ${take.length}/${c.词.length} 词 / ${c.语法.length} 语法`);
       }
     }
+    if (untagged) detail.push(`${b}（未标单元）${untagged} 词 —— 未计入（本册未学完，无法判断来自哪个单元）`);
   }
 
   const list = [...learned].sort();

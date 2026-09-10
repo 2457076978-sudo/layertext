@@ -164,3 +164,39 @@ test('pyRound1 与 Python round(x,1) 一致（半偶 + 二进制真值）', () =
   assert.equal(pyRound1(6.35), 6.3); // 6.35 二进制真值 6.3499… → 6.3
   assert.equal(pyRound1(7.75), 7.8); // 精确 .75，77.5 半偶 → 7.8
 });
+
+// ---------- 指标⑪ 加注覆盖率（2026-09-10 新增：把"检测→加注"闭环量化） ----------
+
+test('加注覆盖率：应注 = OOV 词型（去两字母词），已注按 word（中文）计', () => {
+  // 常用词给进已知，剩下的三个实词才是"该注"的
+  const r = qc(['The animals saw a windmill and a quarry near the pasture.'],
+    ['the', 'a', 'and', 'saw', 'near', 'animals']);
+  assert.deepEqual([...r.annotMissing].sort(), ['pasture', 'quarry', 'windmill']);
+  assert.equal(r.annotatable, 3);
+  assert.equal(r.annotated, 0);
+  assert.equal(r.annotationCoverage, 0);
+});
+
+test('加注覆盖率：注出来的词算已注，没注的留在 annotMissing 里', () => {
+  const r = qc(['The quarry（采石场） was full of snowdrifts and the windmill stood still.'], []);
+  assert.ok(r.annotated >= 1);
+  assert.ok(r.annotMissing.includes('snowdrifts'), 'snowdrifts 没注，应出现在缺口清单里');
+  assert.ok(!r.annotMissing.includes('quarry'), 'quarry 已注，不该再算缺口');
+  assert.ok(r.annotationCoverage > 0 && r.annotationCoverage < 1);
+});
+
+test('加注覆盖率：连字符复合词按拆开算已注（否则永远补不上）', () => {
+  // blood-curdling（…） 同时说明 blood 与 curdling 已注
+  const r = qc(['They let out blood-curdling（令人毛骨悚然的） growls.'], []);
+  assert.ok(!r.annotMissing.includes('curdling'), 'curdling 已被 blood-curdling 的注释覆盖');
+});
+
+test('加注覆盖率：专名并入已知后不进 OOV（专名不该被算成"该注没注"）', () => {
+  const md = '## Chapter One\n\n[P01] Napoleon and Squealer walked to the quarry.\n';
+  const r = runQc(md, lexiconFromWords(['napoleon', 'squealer', 'and', 'walked', 'to', 'the']),
+    { tier: 'M', fileName: 't.md' });
+  assert.ok(!r.oov.includes('napoleon'));
+  assert.deepEqual(r.annotMissing, ['quarry']);
+  assert.equal(r.annotatable, 1);
+  assert.equal(r.annotationCoverage, 0);
+});
