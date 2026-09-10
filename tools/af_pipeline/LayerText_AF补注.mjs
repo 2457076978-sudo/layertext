@@ -153,7 +153,7 @@ for (const tk of tiers) {
           const f = (freq.get(b) ?? 0) - (freq.get(a) ?? 0);
           return f !== 0 ? f : a.localeCompare(b);
         });
-      const picked = ranked.slice(0, budget);
+      const picked = ranked.slice(0, budget + SKIP_BUFFER);
 
       const fromDict = new Map();
       const needAsk = [];

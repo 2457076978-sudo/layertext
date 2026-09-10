@@ -47,6 +47,12 @@ const STEPS = [
     needsApi: true,
   },
   {
+    id: '补注', script: 'LayerText_AF补注.mjs',
+    args: [tierArg, ...(chapters ? [chapters] : [])],
+    note: '加注补齐：QC 的 OOV → 查词典 → 缺的才问模型 → 首次出现处插入（**消耗 API 额度**，词典命中多则很省）',
+    needsApi: true,
+  },
+  {
     id: '修复', script: 'LayerText_AF修复_20260910.mjs',
     args: [],
     note: '确定性清理：专名误注 / 字面 [P##] / 嵌套注释 / 同词多义 / 缺空格（幂等，无 API）',
@@ -94,9 +100,13 @@ const results = [];
 for (const s of plan) {
   const path = join(HERE, s.script);
   if (!existsSync(path)) { console.error(`\n✗ 缺脚本：${s.script}`); process.exit(1); }
+  // 补注脚本用 --tier/--chapters（与生成/精修的 A,M 位置参数不同），在这里转换
+  const stepArgs = s.id === '补注'
+    ? ['--tier', tiers.join(','), ...(chapters ? ['--chapters', chapters] : [])]
+    : s.args;
   console.log(`\n──────── ${s.id} ────────`);
   const t0 = Date.now();
-  const r = spawnSync(process.execPath, [path, ...s.args], { stdio: 'inherit', env: process.env });
+  const r = spawnSync(process.execPath, [path, ...stepArgs], { stdio: 'inherit', env: process.env });
   const sec = ((Date.now() - t0) / 1000).toFixed(1);
   const ok = r.status === 0;
   results.push({ id: s.id, ok, sec });

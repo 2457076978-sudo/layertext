@@ -15,7 +15,11 @@
 export interface PanelIo {
   read(path: string): Promise<string>;
   write(path: string, content: string): Promise<void>;
-  appendLog(name: string, line: string): Promise<void>;
+  /** 追加一行变更日志到指定文件（不存在则创建）。
+   *  2026-09-10 修复：原先调用 `append_log(name, line)`，而 Rust 侧签名是 `append_log(lines: String)`
+   *  —— 参数名对不上，调用必然失败，还被 catch 静默吞掉；而且那个命令写的是**错误日志**，
+   *  不是数据变更日志。现在改成"读→拼接→写"，既不用改 Rust（不必重编 App），也落到正确的位置。 */
+  appendLog(logPath: string, line: string): Promise<void>;
   listDir(dir: string): Promise<string[]>;
 }
 
@@ -28,9 +32,11 @@ export let io: PanelIo = {
     const mod = await import('@tauri-apps/api/core');
     await mod.invoke('write_text_file', { path, content });
   },
-  async appendLog(name, line) {
-    const mod = await import('@tauri-apps/api/core');
-    await mod.invoke('append_log', { name, line });
+  async appendLog(logPath, line) {
+    let prev = '';
+    try { prev = await io.read(logPath); } catch { /* 首次没有这个文件 */ }
+    const head = prev.startsWith('\uFEFF') ? prev : '\uFEFF' + prev;
+    await io.write(logPath, head.replace(/\n*$/, '\n') + line + '\n');
   },
   async listDir(dir) {
     const mod = await import('@tauri-apps/api/core');
@@ -38,9 +44,14 @@ export let io: PanelIo = {
   },
 };
 
+/** 变更日志文件名（与项目配置同目录） */
+export const CHANGE_LOG_NAME = '数据面板变更日志.csv';
+
+export interface ProjectHit { config: Record<string, unknown>; dir: string }
+
 /** 在某本书的根目录里找 调适项目_*.json（数据面板靠它知道各数据文件在哪）。
- *  找不到则逐级向上再试一层，方便 调适工作区/ 这类层级。 */
-export async function findProjectConfig(bookDir: string): Promise<Record<string, unknown> | null> {
+ *  找不到则逐级向上再试，方便 调适工作区/ 这类层级。 */
+export async function findProjectConfig(bookDir: string): Promise<ProjectHit | null> {
   // 向上找三层：配置常放在书的上一级（如 名著阅读工作区/调适项目_X.json，而书开的是 调适工作区/）
   const dirs: string[] = [];
   let cur = bookDir.replace(/\/+$/, '');
@@ -52,7 +63,7 @@ export async function findProjectConfig(bookDir: string): Promise<Record<string,
     try {
       const files = await io.listDir(d);
       const hit = files.find((f) => /^调适项目_.+\.json$/.test(f));
-      if (hit) return JSON.parse(await io.read(`${d}/${hit}`)) as Record<string, unknown>;
+      if (hit) return { config: JSON.parse(await io.read(`${d}/${hit}`)) as ProjectConfig, dir: d };
     } catch { /* 继续试下一层 */ }
   }
   return null;
@@ -129,7 +140,7 @@ export const DATA_KINDS: DataKind[] = [
     note: '每本书一份：人名/地名/作品名。QC 不计生词、改写不加注。⚠ 漏一个主要人物就会把名字注成普通名词。',
   },
   {
-    id: 'groups', label: '分层参数', pathKey: '分层正本', format: 'json',
+    id: 'groups', label: '分层参数', pathKey: '分层正本', format: 'json', derived: true,
     note: '分层参数的唯一正本（json）。App 分组配置与 Markdown 参数表都由它派生；本页只读，改参数请用导出脚本回环校验。',
   },
 ];
@@ -301,6 +312,18 @@ export function deleteRow(kind: DataKind, text: string, keyValue: string): { tex
   return { text: fromTable(t) };
 }
 
+/** 按行号删除——用于"同一个键有多行"时让用户选择删哪一行。
+ *  2026-09-10 修复：原 deleteRow 按"词"全删，知识库里两条 harness（马具/挽具）会被一起删掉、
+ *  两条释义全丢；而面板又只有"按词删"这一种操作，等于无法正确修复这条数据。 */
+export function deleteRowAt(kind: DataKind, text: string, rowIndex: number): { text: string; error?: string } {
+  const t = toTable(text);
+  if (!Number.isInteger(rowIndex) || rowIndex < 0 || rowIndex >= t.rows.length) {
+    return { text, error: `行号越界：${rowIndex + 1}（共 ${t.rows.length} 行数据）` };
+  }
+  t.rows.splice(rowIndex, 1);
+  return { text: fromTable(t) };
+}
+
 /** 专名表：一行一名 */
 export function upsertProperLine(text: string, word: string): { text: string; error?: string } {
   const w = word.trim().toLowerCase();
@@ -337,8 +360,8 @@ export interface PanelState {
 /** 项目配置：字段名→值（值为字符串或嵌套对象）。取值处显式转换。 */
 export type ProjectConfig = Record<string, unknown>;
 
-export const panelState: PanelState & { project: ProjectConfig | null } =
-  { active: 'vocab', tables: {}, filter: '', log: [], project: null };
+export const panelState: PanelState & { project: ProjectConfig | null; projectDir: string | null } =
+  { active: 'vocab', tables: {}, filter: '', log: [], project: null, projectDir: null };
 
 /** 载入全部数据文件（含校验） */
 export async function loadAll(kinds: DataKind[], project: ProjectConfig): Promise<void> {
@@ -354,11 +377,30 @@ export async function loadAll(kinds: DataKind[], project: ProjectConfig): Promis
   }
 }
 
-/** 保存：写前校验 → 写 → 写后校验 → 追加变更日志 */
+/** 已有错误与新错误的差集判定：只保留"新引入的错误"。
+ *  规则：**不允许引入新错误，但文件里已有的历史问题不阻塞本次编辑**。
+ *  2026-09-10 修复：原先是"整份文件预校验必须全绿才允许写"——只要文件里有一条历史问题
+ *  （如知识库里的 harness 同词多义），这个标签页的所有编辑都会被拒，连改别的词都不行，
+ *  教师被迫回去手改文件，正好违背"教师不碰文件"的设计。 */
+export function newErrors(fresh: string[], existing: string[]): string[] {
+  const pool = new Map<string, number>();
+  for (const e of existing) pool.set(e, (pool.get(e) ?? 0) + 1);
+  const out: string[] = [];
+  for (const e of fresh) {
+    const n = pool.get(e) ?? 0;
+    if (n > 0) pool.set(e, n - 1);
+    else out.push(e);
+  }
+  return out;
+}
+
+/** 保存：写前校验（只拦新引入的错误）→ 写 → 写后校验 → 追加变更日志。
+ *  `existingErrs` 是本次编辑前该文件的校验结果；`logDir` 是变更日志所在目录。 */
 export async function save(
   kind: DataKind, project: ProjectConfig, newText: string, what: string,
-): Promise<{ ok: boolean; error?: string }> {
-  const pre = validateText(kind, newText);
+  opts: { existingErrs?: string[]; logDir?: string } = {},
+): Promise<{ ok: boolean; error?: string; warned?: string }> {
+  const pre = newErrors(validateText(kind, newText), opts.existingErrs ?? []);
   if (pre.length) return { ok: false, error: '写前校验未通过：' + pre.slice(0, 3).join('；') };
   const path = getPath(project, kind.pathKey) as string | undefined;
   if (!path) return { ok: false, error: `项目配置缺「${kind.pathKey}」` };
@@ -366,16 +408,22 @@ export async function save(
     await io.write(path, newText);
   } catch (e) { return { ok: false, error: `写入失败：${String(e)}` }; }
   const back = await io.read(path);
-  const post = validateText(kind, back);
+  const post = newErrors(validateText(kind, back), opts.existingErrs ?? []);
   if (post.length) return { ok: false, error: '写后校验未通过（文件已写入，请检查）：' + post.slice(0, 3).join('；') };
 
-  panelState.tables[kind.id] = { text: back, errs: [] };
+  const left = validateText(kind, back);
+  panelState.tables[kind.id] = { text: back, errs: left };
   const line = `${new Date().toISOString()} | ${kind.label} | ${what} | ${path}`;
   panelState.log.unshift(line);
-  try {
-    await io.appendLog('数据面板变更日志.csv', line);
-  } catch { /* 留痕尽力而为，不阻塞 */ }
-  return { ok: true };
+  if (opts.logDir) {
+    try {
+      await io.appendLog(`${opts.logDir}/${CHANGE_LOG_NAME}`, line);
+    } catch (e) {
+      // 留痕失败不再静默：明确告诉用户"改动生效了，但日志没写上"
+      return { ok: true, warned: `改动已写入，但变更日志追加失败：${String(e)}` };
+    }
+  }
+  return { ok: true, warned: left.length ? `文件仍有 ${left.length} 个历史问题（非本次引入）：${left[0]}` : undefined };
 }
 
 /* ══════════════ DOM 渲染 ══════════════ */
@@ -394,13 +442,23 @@ export async function renderDataPane(bookDir: string): Promise<void> {
         请先在一本书的根目录放一份（模板见 <code>templates/调适项目_模板.json</code>），再重新打开本书。</div></div>`;
       return;
     }
-    panelState.project = found;
-    await loadAll(DATA_KINDS, found);
+    panelState.project = found.config;
+    panelState.projectDir = found.dir;
+    await loadAll(DATA_KINDS, found.config);
   }
   const project = panelState.project;
 
   const cur = DATA_KINDS.find((k) => k.id === panelState.active)!;
   const st = panelState.tables[cur.id] ?? { text: '', errs: [] };
+  /** 保存时带上：编辑前的错误清单（用于"只拦新错误"）与变更日志目录 */
+  const saveOpts = { existingErrs: st.errs, logDir: panelState.projectDir ?? undefined };
+  const doSave = async (newText: string, what: string) => {
+    const res = await save(cur, project, newText, what, saveOpts);
+    if (!res.ok) { alert(res.error); return false; }
+    if (res.warned) alert(res.warned);
+    await renderDataPane(bookDir);
+    return true;
+  };
 
   const tabs = DATA_KINDS.map((k) => {
     const e = panelState.tables[k.id]?.errs?.length ?? 0;
@@ -440,22 +498,46 @@ export async function renderDataPane(bookDir: string): Promise<void> {
         .join('')}</div>`;
   } else {
     const t = toTable(st.text);
-    const rows = t.rows.filter((r) => !panelState.filter ||
-      Object.values(r).some((v) => String(v).toLowerCase().includes(panelState.filter.toLowerCase())));
+    const rows = t.rows
+      .map((r, i) => ({ r, i }))
+      .filter(({ r }) => !panelState.filter ||
+        Object.values(r).some((v) => String(v).toLowerCase().includes(panelState.filter.toLowerCase())));
+    // 每个词型出现几次——多于一次时删除要问"删哪一行"
+    const keyCol = cur.uniqueBy ?? t.header[0]!;
+    const dupCount = new Map<string, number>();
+    for (const r of t.rows) {
+      const k = (r[keyCol] ?? '').toLowerCase();
+      if (k) dupCount.set(k, (dupCount.get(k) ?? 0) + 1);
+    }
+    const cols: Column[] = cur.columns ?? t.header.map((h) => ({ key: h, type: 'text' as const }));
     body += `<div class="dp-toolbar">
       <input id="dp-filter" placeholder="筛选" value="${esc(panelState.filter)}">
       <span class="dp-count">${t.rows.length} 行</span></div>
+      <div class="dp-form" id="dp-form">
+        <b id="dp-form-title">新增一行</b>
+        ${cols.map((c) => `<label>${esc(c.key)}${c.required ? ' <em>*</em>' : ''}
+          <input data-dp-field="${esc(c.key)}" placeholder="${esc(c.hint ?? '')}" value=""></label>`).join('')}
+        <div class="dp-form-actions">
+          <button id="dp-save">保存</button>
+          <button id="dp-clear">清空</button>
+        </div>
+      </div>
       <table class="dp-table"><thead><tr>${t.header.map((h) => `<th>${esc(h)}</th>`).join('')}<th></th></tr></thead>
-      <tbody>${rows.map((r) => `<tr>${t.header.map((h) => `<td>${esc(r[h] ?? '')}</td>`).join('')}
-        <td><button data-dp-del="${esc(r[cur.uniqueBy ?? t.header[0]!] ?? '')}">删除</button></td></tr>`).join('')}</tbody></table>`;
+      <tbody>${rows.map(({ r, i }) => `<tr>
+        ${t.header.map((h) => `<td>${esc(r[h] ?? '')}</td>`).join('')}
+        <td>
+          <button data-dp-edit="${i}">编辑</button>
+          <button data-dp-delrow="${i}">删除${(dupCount.get((r[keyCol] ?? '').toLowerCase()) ?? 1) > 1 ? '此行' : ''}</button>
+        </td></tr>`).join('')}</tbody></table>`;
   }
 
   el.innerHTML = `<div class="dp">
       <div class="dp-head"><b>数据</b><span class="dp-sub">${esc(cur.note)}</span></div>
       <div class="dp-tabs">${tabs}</div>
-      ${st.errs.length ? `<div class="dp-note dp-err">⚠ ${st.errs.length} 个校验问题：<br>${st.errs.slice(0, 5).map(esc).join('<br>')}${st.errs.length > 5 ? '<br>…' : ''}</div>` : '<div class="dp-note dp-ok">✓ 校验通过</div>'}
+      ${st.errs.length ? `<div class="dp-note dp-err">⚠ ${st.errs.length} 个校验问题（不阻塞本次编辑，但不能引入新问题）：<br>${st.errs.slice(0, 5).map(esc).join('<br>')}${st.errs.length > 5 ? '<br>…' : ''}</div>` : '<div class="dp-note dp-ok">✓ 校验通过</div>'}
       ${body}
       ${panelState.log.length ? `<div class="dp-log"><b>本次改动</b><br>${panelState.log.slice(0, 5).map(esc).join('<br>')}</div>` : ''}
+      ${panelState.projectDir ? `<div class="dp-note" style="margin-top:8px;opacity:.7">项目配置：<code>${esc(panelState.projectDir)}</code> ｜ 变更日志：<code>${esc(CHANGE_LOG_NAME)}</code></div>` : ''}
     </div>`;
 
   el.querySelectorAll('[data-dp-tab]').forEach((b) =>
@@ -467,16 +549,60 @@ export async function renderDataPane(bookDir: string): Promise<void> {
     const inp = el.querySelector('#dp-new') as HTMLInputElement;
     const r = upsertProperLine(st.text, inp.value);
     if (r.error) { alert(r.error); return; }
-    const res = await save(cur, project, r.text, `新增专名 ${inp.value.trim().toLowerCase()}`);
-    if (!res.ok) alert(res.error); else void renderDataPane(bookDir);
+    await doSave(r.text, `新增专名 ${inp.value.trim().toLowerCase()}`);
   });
-  el.querySelectorAll('[data-dp-del]').forEach((b) =>
+
+  /* ---- CSV：新增 / 编辑 / 按行删除 ---- */
+  const form = el.querySelector('#dp-form') as HTMLElement | null;
+  const fillForm = (row: Record<string, string> | null, title: string) => {
+    if (!form) return;
+    (form.querySelector('#dp-form-title') as HTMLElement).textContent = title;
+    form.querySelectorAll('[data-dp-field]').forEach((inp) => {
+      const k = (inp as HTMLElement).dataset.dpField!;
+      (inp as HTMLInputElement).value = row?.[k] ?? '';
+    });
+  };
+  const readForm = (): Record<string, string> => {
+    const unit: Record<string, string> = {};
+    form?.querySelectorAll('[data-dp-field]').forEach((inp) => {
+      const k = (inp as HTMLElement).dataset.dpField!;
+      unit[k] = (inp as HTMLInputElement).value.trim();
+    });
+    return unit;
+  };
+  el.querySelector('#dp-clear')?.addEventListener('click', () => fillForm(null, '新增一行'));
+  el.querySelector('#dp-save')?.addEventListener('click', async () => {
+    const unit = readForm();
+    const r = upsertRow(cur, st.text, unit);
+    if (r.error) { alert(r.error); return; }
+    const key = unit[cur.uniqueBy ?? ''] ?? '';
+    await doSave(r.text, key ? `保存 ${key}` : '新增一行');
+    fillForm(null, '新增一行');
+  });
+  el.querySelectorAll('[data-dp-edit]').forEach((b) =>
+    b.addEventListener('click', () => {
+      const i = Number((b as HTMLElement).dataset.dpEdit);
+      const t = toTable(st.text);
+      const row = t.rows[i];
+      if (!row) return;
+      fillForm(row, `编辑第 ${i + 2} 行`);
+      form?.scrollIntoView({ block: 'nearest' });
+    }));
+  el.querySelectorAll('[data-dp-delrow]').forEach((b) =>
     b.addEventListener('click', async () => {
-      const key = (b as HTMLElement).dataset.dpDel!;
-      if (!confirm(`确认删除「${key}」？`)) return;
-      const r = cur.format === 'txt' ? deleteProperLine(st.text, key) : deleteRow(cur, st.text, key);
+      const i = Number((b as HTMLElement).dataset.dpDelrow);
+      const t = toTable(st.text);
+      const row = t.rows[i];
+      if (!row) return;
+      const keyCol = cur.uniqueBy ?? t.header[0]!;
+      const same = t.rows.filter((r) => (r[keyCol] ?? '').toLowerCase() === (row[keyCol] ?? '').toLowerCase());
+      const preview = t.header.map((h) => row[h]).filter(Boolean).join(' | ');
+      const msg = same.length > 1
+        ? `「${row[keyCol]}」共有 ${same.length} 行，本次只删第 ${i + 2} 行：\n${preview}\n\n确认？`
+        : `确认删除：\n${preview}？`;
+      if (!confirm(msg)) return;
+      const r = deleteRowAt(cur, st.text, i);
       if (r.error) { alert(r.error); return; }
-      const res = await save(cur, project, r.text, `删除 ${key}`);
-      if (!res.ok) alert(res.error); else void renderDataPane(bookDir);
+      await doSave(r.text, `删除第 ${i + 2} 行 ${preview}`);
     }));
 }

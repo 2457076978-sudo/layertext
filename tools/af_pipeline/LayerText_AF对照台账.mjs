@@ -8,7 +8,6 @@ import { join } from 'node:path';
 
 const P = (await import('./LayerText_AF词表与词典.mjs')).loadProject();
 const REPO = P.引擎目录;
-const WS = P.调适工作区;
 const SRC_BASE = P.原文目录;
 const OUT_BASE = P.产物目录;
 const DATE = P.日期;

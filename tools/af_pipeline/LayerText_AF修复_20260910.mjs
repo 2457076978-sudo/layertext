@@ -18,10 +18,9 @@
  */
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { PROPER, DICT_CSV, loadKnownForms, isKnownForm, loadKbGloss, KB_CSV } from './LayerText_AF词表与词典.mjs';
+import { PROPER, DICT_CSV, loadKnownForms, isKnownForm, loadKbGloss } from './LayerText_AF词表与词典.mjs';
 
 const P = (await import('./LayerText_AF词表与词典.mjs')).loadProject();
-const WS = P.调适工作区;
 const SRC_BASE = P.原文目录;
 const OUT_BASE = P.产物目录;
 const DATE = P.日期;

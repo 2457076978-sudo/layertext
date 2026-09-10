@@ -322,6 +322,15 @@
       .dp-derived { background: rgba(120,120,120,.12); }
       .dp-toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; }
       .dp-toolbar input { min-width: 180px; }
+      /* 新增/编辑表单（2026-09-10：CSV 三个标签页原先只能删，不能增改） */
+      .dp-form { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: flex-end;
+                 padding: 10px; margin-bottom: 10px; border: 1px solid rgba(128,128,128,.25);
+                 border-radius: 6px; background: rgba(128,128,128,.06); font-size: 13px; }
+      .dp-form label { display: flex; flex-direction: column; gap: 3px; }
+      .dp-form label em { color: #c0392b; font-style: normal; }
+      .dp-form input { min-width: 140px; }
+      .dp-form-actions { display: flex; gap: 8px; }
+      .dp-form b { flex-basis: 100%; font-size: 13px; }
       .dp-count { color: var(--muted); font-size: 12px; }
       .dp-list, .dp-table { max-height: 60vh; overflow: auto; font-size: 13px; }
       .dp-row { display: flex; justify-content: space-between; gap: 10px; padding: 4px 6px; border-bottom: 1px solid rgba(128,128,128,.15); }

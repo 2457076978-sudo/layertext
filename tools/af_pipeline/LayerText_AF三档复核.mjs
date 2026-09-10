@@ -15,10 +15,8 @@ import { loadLexicon } from './LayerText_AF词表与词典.mjs';
 
 const P = (await import('./LayerText_AF词表与词典.mjs')).loadProject();
 const LTR = P.引擎目录;
-const WS = P.调适工作区;
 const SRC_BASE = P.原文目录;
 const OUT_BASE = P.产物目录;
-const VOCAB = P.词库;
 const DATE = P.日期;
 const CN = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十'];
 

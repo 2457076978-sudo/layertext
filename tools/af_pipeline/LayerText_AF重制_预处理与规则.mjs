@@ -22,7 +22,7 @@ for (let i = 1; i <= 10; i++) {
   const outDir = join(OUT, ch);
   mkdirSync(outDir, { recursive: true });
   const cleaned = join(dir, '原文基线_清理对齐版.md');
-  let md = '';
+  let md;
   if (existsSync(cleaned)) {
     // 第一章：人工清理版内容原样，补齐 Chapter 标记（锚定行首 [P01]，引擎 splitChapter 需要）
     const raw2 = readFileSync(cleaned, 'utf-8');
@@ -39,8 +39,8 @@ for (let i = 1; i <= 10; i++) {
     for (const s of sents) {
       cur.push(s);
       const n = wc(cur.join(' '));
-      if (n >= 60 && (n >= 110 || sents.indexOf(s) === sents.length - 1)) paras.push(cur.join(' ')), (cur = []);
-      else if (n > 150) paras.push(cur.join(' ')), (cur = []);
+      if (n >= 60 && (n >= 110 || sents.indexOf(s) === sents.length - 1)) { paras.push(cur.join(' ')); cur = []; }
+      else if (n > 150) { paras.push(cur.join(' ')); cur = []; }
     }
     if (cur.length) paras.push(cur.join(' '));
     md = `# AF ${ch} 原文（重制基线）\n\n## Chapter ${i}\n\n${paras.map((p, k) => `[P${String(k + 1).padStart(2, '0')}] ${p}`).join('\n\n')}\n`;
@@ -71,7 +71,7 @@ for (const d of readdirSync(WS)) {
     let inQ = false, c = '';
     for (const ch2 of line) {
       if (ch2 === '"') inQ = !inQ;
-      else if (ch2 === ',' && !inQ) (cells.push(c), (c = ''));
+      else if (ch2 === ',' && !inQ) { cells.push(c); c = ''; }
       else c += ch2;
     }
     cells.push(c);

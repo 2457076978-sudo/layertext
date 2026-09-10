@@ -9,9 +9,15 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
   DATA_KINDS, parseCsv, toTable, fromTable, validateText, validateUnit,
-  upsertRow, deleteRow, upsertProperLine, deleteProperLine, setIo,
+  upsertRow, deleteRow, deleteRowAt, upsertProperLine, deleteProperLine,
+  setIo, newErrors,
   type DataKind,
 } from '../app/src/datapanel.js';
+
+/* 新用例里的简名别名（与既有 K.* 写法区分开） */
+const DP_newErrors = newErrors;
+const DP_deleteRowAt = deleteRowAt;
+const DP_validateText = validateText;
 
 const K: Record<string, DataKind> = Object.fromEntries(DATA_KINDS.map((k) => [k.id, k]));
 const VOCAB_HDR = '词,类型,词性,释义,来源册,来源单元,音标,备注';
@@ -150,11 +156,88 @@ test('save：合法数据写入成功并留痕', async () => {
   });
   const DP = await import('../app/src/datapanel.js');
   const good = '\uFEFF词,释义,来源\nmajestic,威严的,教师知识库\n';
-  const r = await DP.save(K.dict!, { 书级: { 词典: '/tmp/y.csv' } }, good, '新增 majestic');
+  const r = await DP.save(K.dict!, { 书级: { 词典: '/tmp/y.csv' } }, good, '新增 majestic',
+    { existingErrs: [], logDir: '/ws' });
   assert.equal(r.ok, true, r.error);
   assert.ok(store['/tmp/y.csv']!.includes('majestic'));
   assert.equal(logs.length, 1, '应留一行变更日志');
   assert.match(logs[0]!, /新增 majestic/);
+});
+
+/* ══════ 2026-09-10 第二轮：面板补完的回归用例 ══════ */
+
+test('newErrors：只保留新引入的错误，历史问题不算新错', () => {
+  const existing = ['第 2 行：「a」重复', '第 3 行：「b」重复'];
+  assert.deepEqual(DP_newErrors(existing, existing), [], '同一批历史错误不算新错');
+  assert.deepEqual(DP_newErrors([...existing, '第 9 行：新问题'], existing), ['第 9 行：新问题']);
+  assert.deepEqual(DP_newErrors(['第 2 行：「a」重复', '第 2 行：「a」重复'], ['第 2 行：「a」重复']), ['第 2 行：「a」重复']);
+});
+
+test('save：文件里已有历史错误时，仍允许编辑（只拦新错误）', async () => {
+  const store: Record<string, string> = {};
+  const logs: string[] = [];
+  setIo({
+    async read(p) { return store[p] ?? ''; },
+    async write(p, c) { store[p] = c; },
+    async appendLog(p, line) { logs.push(`${p}|${line}`); },
+    async listDir() { return []; },
+  });
+  const DP = await import('../app/src/datapanel.js');
+  // 知识库：两条 harness 不同释义 = 历史问题（正是 harness 那条真数据的形状）
+  const text = '\uFEFF类型,词,值,来源数\n加注词,harness,马具,1\n加注词,harness,挽具,1\n';
+  const existing = DP.validateText(K.kb!, text);
+  assert.ok(existing.length > 0, '这份数据本来就该判有问题');
+  const after = text + '加注词,windmill,风车,1\n';
+  const r = await DP.save(K.kb!, { 书级: { 知识库: '/tmp/kb.csv' } }, after, '新增 windmill',
+    { existingErrs: existing, logDir: '/ws' });
+  assert.equal(r.ok, true, r.error);
+  assert.match(r.warned ?? '', /历史问题/);
+  assert.ok(store['/tmp/kb.csv']!.includes('windmill'));
+  assert.equal(logs.length, 1);
+  assert.match(logs[0]!, /^\/ws\/数据面板变更日志\.csv\|/, '日志要落到项目配置目录，不是错误日志');
+});
+
+test('save：新引入的错误仍然拦下（放开历史问题不等于不校验）', async () => {
+  let wrote = false;
+  setIo({
+    async read() { return ''; },
+    async write() { wrote = true; },
+    async appendLog() { /* noop */ },
+    async listDir() { return []; },
+  });
+  const DP = await import('../app/src/datapanel.js');
+  const bad = '\uFEFF类型,词,值,来源数\n加注词,harness,马具,1\n加注词,harness,挽具,1\n加注词,,风车,1\n';
+  const existing = DP.validateText(K.kb!, '\uFEFF类型,词,值,来源数\n加注词,harness,马具,1\n加注词,harness,挽具,1\n');
+  const r = await DP.save(K.kb!, { 书级: { 知识库: '/tmp/kb2.csv' } }, bad, '新增空词',
+    { existingErrs: existing, logDir: '/ws' });
+  assert.equal(r.ok, false);
+  assert.match(r.error!, /写前校验未通过/);
+  assert.equal(wrote, false);
+});
+
+test('deleteRowAt：同名多行时只删指定的一行', () => {
+  const text = '\uFEFF类型,词,值,来源数\n加注词,harness,马具,1\n加注词,harness,挽具,1\n加注词,mare,母马,3\n';
+  const r1 = DP_deleteRowAt(K.kb!, text, 1);
+  assert.equal(r1.error, undefined);
+  assert.ok(r1.text.includes('马具'));
+  assert.ok(!r1.text.includes('挽具'), '只该删掉第 2 行那条');
+  assert.ok(r1.text.includes('mare'));
+  const r2 = DP_deleteRowAt(K.kb!, text, 9);
+  assert.match(r2.error!, /行号越界/);
+});
+
+test('deleteRowAt 后整份文件校验通过（同名冲突随之解决）', () => {
+  const text = '\uFEFF类型,词,值,来源数\n加注词,harness,马具,1\n加注词,harness,挽具,1\n';
+  const r = DP_deleteRowAt(K.kb!, text, 1);
+  assert.deepEqual(DP_validateText(K.kb!, r.text), []);
+});
+
+test('upsertRow：新增一行后能直接过 save 的写前校验', async () => {
+  const DP = await import('../app/src/datapanel.js');
+  const text = '\uFEFF类型,词,值,来源数\n加注词,majestic,威严的,4\n';
+  const up = DP.upsertRow(K.kb!, text, { 类型: '加注词', 词: 'windmill', 值: '风车', 来源数: '1' });
+  assert.equal(up.error, undefined);
+  assert.deepEqual(DP.validateText(K.kb!, up.text), []);
 });
 
 test('parseCsv 空文件返回空数组', () => {
@@ -169,8 +252,9 @@ test('findProjectConfig：在书目里找到 调适项目_*.json', async () => {
     async listDir(dir) { return dir === '/book' ? ['调适项目_X.json', '其他.md'] : []; },
   });
   const DP = await import('../app/src/datapanel.js');
-  const cfg = await DP.findProjectConfig('/book');
-  assert.equal(cfg?.['书名'], 'X');
+  const hit = await DP.findProjectConfig('/book');
+  assert.equal(hit?.config['书名'], 'X');
+  assert.equal(hit?.dir, '/book');
 });
 
 test('findProjectConfig：找不到时逐级向上一层再试', async () => {
@@ -181,8 +265,9 @@ test('findProjectConfig：找不到时逐级向上一层再试', async () => {
     async listDir(dir) { return dir === '/book' ? ['调适项目_Y.json'] : []; },
   });
   const DP = await import('../app/src/datapanel.js');
-  const cfg = await DP.findProjectConfig('/book/调适工作区');
-  assert.equal(cfg?.['书名'], 'Y');
+  const hit = await DP.findProjectConfig('/book/调适工作区');
+  assert.equal(hit?.config['书名'], 'Y');
+  assert.equal(hit?.dir, '/book');
 });
 
 test('findProjectConfig：都没有则返回 null', async () => {
@@ -215,6 +300,7 @@ test('findProjectConfig：向上三层能找到（书开的是 调适工作区/ 
     async listDir(dir) { return dir === '/ws' ? ['调适项目_Z.json'] : ['其他.md']; },
   });
   const DP = await import('../app/src/datapanel.js');
-  const cfg = await DP.findProjectConfig('/ws/调适工作区/第三章');
-  assert.equal(cfg?.['书名'], 'Z');
+  const hit = await DP.findProjectConfig('/ws/调适工作区/第三章');
+  assert.equal(hit?.config['书名'], 'Z');
+  assert.equal(hit?.dir, '/ws');
 });

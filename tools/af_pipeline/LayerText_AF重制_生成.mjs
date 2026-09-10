@@ -3,7 +3,7 @@
  * 用法：node LayerText_AF重制_生成.mjs [章号如1或1,2 或空=全部] [--dry]
  * 与 App「AI 简化本章」同口径：逐段、前文衔接、段标记补回；另加段级守恒重试（App 第二十四批同款）。
  */
-import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import { join } from 'node:path';
 
@@ -12,7 +12,6 @@ const REPO = P.引擎目录;
 const BASE = P.原文目录;
 const VOCAB = P.词库;
 const DATE = P.日期;
-const MAXLEN = 16; // M 层句长
 const MIN_CHAPTER_RATIO = 0.5; // 章级下限：产物 ≥ 原文 50%
 const SEG_KEEP = 0.85; // 段级守恒线：单段 < 原段 85% 触发重试
 
@@ -90,7 +89,8 @@ async function runChapter(i) {
     out.push(revised);
     process.stdout.write(`  ${ch} 段 ${k + 1}/${segs.length}（${srcW}→${wc(revised)}）${retried ? '' : ''}\r`);
   }
-  const newMd = `${header}${chLine}\n\n${out.join('\n\n')}\n`;
+  // 2026-09-10 修复：原为 `const newMd`，但下面注释轮要对它赋值——运行时必然 TypeError
+  let newMd = `${header}${chLine}\n\n${out.join('\n\n')}\n`;
   const outPath = join(BASE, ch, `原文_M层重制_${DATE}.md`);
   writeFileSync(outPath, newMd, 'utf-8');
   const srcWords = wc(md.split('## 词句卡')[0]);
