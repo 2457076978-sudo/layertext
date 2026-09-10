@@ -177,3 +177,53 @@ test('Anki CSV 带 BOM（Excel 中文不乱码），复现队列不带（CLI 解
   assert.equal(ankiCsv([row]).charCodeAt(0), 0xfeff);
   assert.notEqual(reinforceQueueCsv([row]).charCodeAt(0), 0xfeff);
 });
+
+/* ---------- 批改域（学生产出体检）：AI 批改候选裁决 + 批改稿/班级汇总 ---------- */
+import { buildClassGradingMd, buildGradingSheetMd, classGradingCsv, parseGradingItems } from '../app/src/pure.js';
+
+const ESSAY = 'I have read the book. The story was interesting. He was seen by the farmer, and it surprised me.';
+
+test('#25 批改候选：type 白名单外/原文定位不到/note 空 = 拒收计数；合法条目（含 comment 无 original）通过', () => {
+  const raw = [
+    { type: 'grammar', original: 'He was seen', note: '被动语态还没学，建议改主动' },
+    { type: 'comment', note: '整体结构清楚，能复现故事主线' },
+    { type: 'praise', original: 'interesting', note: '类型不在白名单' },
+    { type: 'grammar', original: 'This sentence never existed.', note: '原文定位不到' },
+    { type: 'usage', original: 'the book', note: '' },
+    { type: 'highlight', original: 'it surprised me', note: '好句', suggestion: 'It surprised me.' },
+  ];
+  const { ok, rejected } = parseGradingItems(raw, ESSAY);
+  assert.equal(rejected, 3);
+  assert.equal(ok.length, 3);
+  assert.equal(ok[1].type, 'comment');
+  assert.equal(ok[1].original, '');
+  assert.equal(ok[2].suggestion, 'It surprised me.');
+});
+
+test('批改稿组装：批注挂对应段后、comment 进总评、定位不到的列尾不丢', () => {
+  const notes = [
+    { type: 'comment' as const, original: '', note: '结构完整' },
+    { type: 'grammar' as const, original: 'He was seen', note: '被动未学' },
+    { type: 'usage' as const, original: 'never anywhere here', note: '定位不到的批注' },
+  ];
+  const md = buildGradingSheetMd('李明睿', ESSAY, notes, { date: '2026-09-10', vocabNote: '课标1600' });
+  assert.ok(md.includes('# 批改稿 · 李明睿'));
+  assert.ok(md.includes('## 总评') && md.includes('结构完整'));
+  const gPos = md.indexOf('He was seen');
+  const nPos = md.indexOf('被动未学');
+  assert.ok(gPos >= 0 && nPos > gPos); // 批注在原句所在段之后
+  assert.ok(md.includes('## 未定位批注') && md.includes('定位不到的批注')); // 不静默丢弃
+});
+
+test('班级批改汇总：md 表 + csv BOM，复现命中列有队列才显示', () => {
+  const rows = [
+    { name: '甲', words: 100, sents: 10, avgLen: 10, structure: 2, longSents: 1, oovWords: 3, used: 4, queue: 8 },
+    { name: '乙', words: 80, sents: 9, avgLen: 8.9, structure: 0, longSents: 0, oovWords: 1, used: 0, queue: 0 },
+  ];
+  const md = buildClassGradingMd(rows, { date: '2026-09-10', folder: '/tmp/九4班', vocabNote: '课标1600' });
+  assert.ok(md.includes('| 甲 | 100 | 10 |') && md.includes('4/8'));
+  assert.ok(md.includes('| 乙 |') && md.includes('—'));
+  const csv = classGradingCsv(rows);
+  assert.equal(csv.charCodeAt(0), 0xfeff);
+  assert.ok(csv.includes('学生,词数,句数,平均句长'));
+});

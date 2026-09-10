@@ -38,6 +38,7 @@
 | 22 | **键值对映射的数组包装**：AI 老实输出映射对象 {"词":"替换"}，但 parseAiJson 恒返数组（单对象自动包一层）——Object.assign(gloss, 数组) 得 {0:{…}} 恒空，AI 给的替换全丢、全部误判"换不出"降级加注（真事故 09-09 夜 Wayne 实测"词汇简化最后都变成标中文"） | **已防**：normalizeGlossMap 归一化（纯映射对象/字段对对象 word+simple 等字段名变体全兼容）+提示词给输出示例；真 key 重演实证修复（AI 原话→旧法 miss→新法命中）；测试 gloss_map.test.ts | ④ | 已防 |
 | 23 | **短语键被答成子词**：标记"Seven Commandments"，AI 键只给 "Commandments"（它认为 Seven 不超纲）——按完整短语查恒 miss，误判"换不出"（真事故 09-09 夜 Wayne 实测短语简化失灵） | **已防**：glossLookup 子集匹配——键词 ⊆ 标记词 且剩余词全部已知 → 值替换整个短语（the Seven Commandments→the rules；剩余词未知不整换防语义破坏）；真 key 重演实证 | ④ | 已防 |
 | 24 | 映射值是中文（如"七诫"，AI 把"简单词"答成中文）——hasProseChinese ≥4 字防线漏过短中文 | **已防**：hasAnyChinese 单汉字即拒（值过滤+查找双重）；测试 gloss_map.test.ts | ③④ | 已防 |
+| 25 | **批改候选形态**（09-10 新增 AI 批改功能）：type 不在五类白名单 / original 在学生原文中定位不到（AI 编造或改写了学生句子）/ note 空缺 | **已防（09-10）**：parseGradingItems 裁决（type 白名单 grammar/usage/structure/highlight/comment；非 comment 类 original 必须可定位，宽容匹配；note 必须非空）——不合规整条拒收+计数明示，绝不进批改稿；comment 类无 original；测试 suggest_order_schema.test.ts | ③ | 已防 |
 
 ## 三、使用规则
 

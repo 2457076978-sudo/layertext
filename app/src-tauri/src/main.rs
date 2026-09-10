@@ -634,6 +634,14 @@ fn main() {
                 "导出生词卡（Anki + 复现队列）…",
             )
             .build(app)?;
+            let mi_grade_one = MenuItemBuilder::with_id("grade-one", "学生产出体检…（单份：粘贴/选文件）")
+                .build(app)?;
+            let mi_grade_class = MenuItemBuilder::with_id("grade-class", "全班批改队列…（一个文件夹=一个班）")
+                .build(app)?;
+            let grading_menu = SubmenuBuilder::new(app, "批改")
+                .item(&mi_grade_one)
+                .item(&mi_grade_class)
+                .build()?;
             let qc_menu = SubmenuBuilder::new(app, "质检")
                 .item(&mi_run)
                 .item(&mi_draft)
@@ -703,7 +711,7 @@ fn main() {
                 .build()?;
 
             let menu = MenuBuilder::new(app)
-                .items(&[&app_menu, &file_menu, &edit_menu, &qc_menu, &view_menu, &window_menu, &help_menu])
+                .items(&[&app_menu, &file_menu, &edit_menu, &qc_menu, &grading_menu, &view_menu, &window_menu, &help_menu])
                 .build()?;
             app.set_menu(menu)?;
             Ok(())

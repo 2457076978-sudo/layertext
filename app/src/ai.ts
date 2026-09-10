@@ -296,6 +296,12 @@ export async function buildAssistantPrompt(vars: { submitRule: string; fileName:
   return '\n\n' + composePrompt(tpl, vars);
 }
 
+/** AI 批改候选 user 消息（批改域：AI 只出候选，教师勾选定稿——同情节要点方法论） */
+export async function buildGradingPrompt(vars: { student: string; vocabNote: string; engine: string; text: string }): Promise<string> {
+  const tpl = (await loadPrompt('grading')).body;
+  return composePrompt(tpl, vars);
+}
+
 /** 初步诊断·情节要点提取 user 消息（AI 出候选，教师勾选后进要点配额） */
 export async function buildPlotPointsPrompt(chapter: string): Promise<string> {
   const tpl = (await loadPrompt('plot_points')).body;

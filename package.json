@@ -10,7 +10,7 @@
     "eval": "tsc -p tsconfig.json && node dist/src/eval.js",
     "mcp": "node dist/src/mcp-server.js",
     "qc": "node dist/src/cli.js",
-    "lint": "eslint app/src src tests tools",
+    "lint": "eslint app/src src tests tools --max-warnings 0",
     "lint:fix": "eslint --fix app/src src tests tools",
     "format": "prettier --write app/src src tests tools",
     "typecheck": "tsc -p tsconfig.json && cd app && tsc --noEmit -p tsconfig.json",

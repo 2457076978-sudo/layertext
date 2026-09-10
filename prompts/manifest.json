@@ -1,5 +1,5 @@
 {
-  "setVersion": "v1.3",
+  "setVersion": "v1.4",
   "prompts": {
     "system_simplify": {
       "version": "v1.1",
@@ -25,9 +25,19 @@
       "version": "v1.0",
       "file": "plot_points.md",
       "desc": "初步诊断·情节要点提取（占位符 {{chapter}}）：摘出简化不能丢的情节点/伏笔，教师勾选后进要点配额"
+    },
+    "grading": {
+      "version": "v1.0",
+      "file": "grading.md",
+      "desc": "AI 批改候选 user 模板（占位符 {{student}}/{{vocabNote}}/{{engine}}/{{text}}）：教师批改域——AI 只出候选，教师勾选定稿"
     }
   },
   "changelog": [
+    {
+      "version": "v1.4",
+      "date": "2026-09-10",
+      "note": "新增 grading（批改域）：学生产出体检的 AI 批改候选（grammar/usage/structure/highlight/comment 五类，original 逐字复制，教师勾选定稿）"
+    },
     {
       "version": "v1.3",
       "date": "2026-09-09",

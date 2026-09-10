@@ -348,6 +348,109 @@ export function reinforceQueueCsv(rows: AnkiRow[]): string {
   return ['# 复现队列：词,hits（hits=已复现次数，默认 0，画像数据可补）', '# 查看 FSRS 间隔建议：node dist/src/cli.js fsrs 本文件.csv', ...rows.map((r) => `${r.word},0`)].join('\n') + '\n';
 }
 
+/* ================= 批改域纯逻辑（学生产出体检：AI 批改候选裁决 + 批改稿/班级汇总组装） ================= */
+
+export type GradingNoteType = 'grammar' | 'usage' | 'structure' | 'highlight' | 'comment';
+export interface GradingNote {
+  type: GradingNoteType;
+  original: string;
+  note: string;
+  suggestion?: string;
+}
+export const GRADING_TYPE_LABEL: Record<GradingNoteType, string> = {
+  grammar: '语法',
+  usage: '用词',
+  structure: '结构',
+  highlight: '亮点',
+  comment: '总评',
+};
+
+/** AI 边界 #25（批改候选裁决）：type 必须在白名单；note 必须非空；grammar/usage/structure/highlight 的
+ *  original 必须是非空字符串且能在学生原文中定位（宽容匹配），comment 类不需要 original；
+ *  不合规整条拒收并计数（UI 明示），绝不进批改稿 */
+export function parseGradingItems(raw: unknown[], text: string): { ok: GradingNote[]; rejected: number } {
+  let rejected = 0;
+  const ok: GradingNote[] = [];
+  for (const x of raw as { type?: unknown; original?: unknown; note?: unknown; suggestion?: unknown }[]) {
+    const type = x?.type as GradingNoteType;
+    const note = typeof x?.note === 'string' ? x.note.trim() : '';
+    const suggestion = typeof x?.suggestion === 'string' && x.suggestion.trim() ? x.suggestion.trim() : undefined;
+    let original = typeof x?.original === 'string' ? x.original.trim() : '';
+    if (!(type in GRADING_TYPE_LABEL) || !note) {
+      rejected++;
+      continue;
+    }
+    if (type === 'comment') {
+      original = '';
+    } else if (!original || (text.indexOf(original) < 0 && !findOriginalFlex(text, original))) {
+      rejected++; // 原文定位不到：AI 编造/改写了学生句子——拒收
+      continue;
+    }
+    ok.push({ type, original, note, ...(suggestion ? { suggestion } : {}) });
+  }
+  return { ok, rejected };
+}
+
+/** 批改稿组装：原文按空行分段保留，勾选的批注挂在包含其 original 的段之后；comment 类进头部总评；
+ *  定位不到段的批注集中列尾（不静默丢弃） */
+export function buildGradingSheetMd(name: string, text: string, notes: GradingNote[], meta: { date: string; vocabNote?: string }): string {
+  const paras = text.split(/\n{2,}/).map((p) => p.trim()).filter(Boolean);
+  const matches = (p: string, o: string) => p.includes(o) || normWs(p).includes(normWs(o));
+  const comments = notes.filter((n) => n.type === 'comment');
+  const inline = notes.filter((n) => n.type !== 'comment');
+  const out: string[] = [`# 批改稿 · ${name}`, '', `批改日期：${meta.date}${meta.vocabNote ? ` ｜ 词库口径：${meta.vocabNote}` : ''}`, ''];
+  if (comments.length) out.push('## 总评', ...comments.map((c) => `- ${c.note}`), '');
+  out.push('## 原文与批注', '');
+  const placed = new Set<GradingNote>();
+  for (const p of paras) {
+    out.push(p, '');
+    for (const n of inline) {
+      if (n.original && matches(p, n.original) && !placed.has(n)) {
+        placed.add(n);
+        out.push(`> ✏ **${GRADING_TYPE_LABEL[n.type]}**：${n.note}${n.suggestion ? `（建议：${n.suggestion}）` : ''}`, '');
+      }
+    }
+  }
+  const unplaced = inline.filter((n) => !placed.has(n));
+  if (unplaced.length) out.push('## 未定位批注（对应段落有变动，请人工核对）', ...unplaced.map((n) => `- [${GRADING_TYPE_LABEL[n.type]}] ${n.original}：${n.note}`), '');
+  return out.join('\n') + '\n';
+}
+
+/** 班级批改汇总行（学生 × 指标：超纲结构/超纲词/复现词产出命中） */
+export interface ClassGradingRow {
+  name: string;
+  words: number;
+  sents: number;
+  avgLen: number;
+  structure: number;
+  longSents: number;
+  oovWords: number;
+  used: number;
+  queue: number;
+}
+export function buildClassGradingMd(rows: ClassGradingRow[], meta: { date: string; folder: string; vocabNote?: string }): string {
+  const sum = (f: (r: ClassGradingRow) => number) => rows.reduce((n, r) => n + f(r), 0);
+  const qRows = rows.filter((r) => r.queue > 0);
+  const head = [
+    `# 班级批改汇总 · ${meta.folder.split('/').pop() ?? ''}`,
+    '',
+    `批改日期：${meta.date}${meta.vocabNote ? ` ｜ 词库口径：${meta.vocabNote}` : ''} ｜ 学生 ${rows.length} 人`,
+    '',
+    `**合计**：平均词数 ${rows.length ? Math.round(sum((r) => r.words) / rows.length) : 0} ｜ 平均句长 ${rows.length ? (sum((r) => r.avgLen) / rows.length).toFixed(1) : 0} 词 ｜ 未学结构 ${sum((r) => r.structure)} 处 ｜ 超纲词 ${sum((r) => r.oovWords)} 个${qRows.length ? ` ｜ 复现词产出命中 ${sum((r) => r.used)}/${sum((r) => r.queue)}（队列均摊）` : ''}`,
+    '',
+    '| 学生 | 词数 | 句数 | 均长 | 未学结构 | 长句 | 超纲词 | 复现命中 |',
+    '|---|---|---|---|---|---|---|---|',
+    ...rows.map((r) => `| ${r.name} | ${r.words} | ${r.sents} | ${r.avgLen.toFixed(1)} | ${r.structure} | ${r.longSents} | ${r.oovWords} | ${r.queue ? `${r.used}/${r.queue}` : '—' } |`),
+    '',
+    '> 指标口径：未学结构=被动/定语从句/过去完成（学生未学，出现即列出教师判断）；超纲词=班级词库（课标1600+教师词库）之外；复现命中=复现队列词在本篇产出中的使用（词形家族计一次）。全部本地引擎计算。',
+    '',
+  ];
+  return head.join('\n') + '\n';
+}
+export function classGradingCsv(rows: ClassGradingRow[]): string {
+  return '\ufeff' + ['学生,词数,句数,平均句长,未学结构,长句,超纲词,复现命中,队列词数', ...rows.map((r) => [r.name, r.words, r.sents, r.avgLen.toFixed(1), r.structure, r.longSents, r.oovWords, r.used, r.queue].map((v) => csvCell(String(v))).join(','))].join('\n') + '\n';
+}
+
 /** ⚠︎ 复核角标随正文重排（与 remapMarks 同思想）：角标条目带原句身份（pi:si|原句|原因），
  *  正文变化后按原句文本重新定位；原句已不存在（被删/被改写）= 该角标使命结束，丢弃。
  *  旧格式（pi:si|原因，无原句）无法重定位，同样丢弃。 */

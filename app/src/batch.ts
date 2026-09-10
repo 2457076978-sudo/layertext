@@ -219,7 +219,7 @@ export function showBatchPop(): void {
   });
 }
 
-async function readChapterRaw(path: string): Promise<string> {
+export async function readChapterRaw(path: string): Promise<string> {
   return path.toLowerCase().endsWith('.docx') ? docxToText(await invoke<string>('read_file_base64', { path })) : await readTextSmart(path);
 }
 

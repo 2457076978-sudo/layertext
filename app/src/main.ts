@@ -29,6 +29,7 @@ import { renderShelf, touchProgress, tocPanelEl, refreshToc, renderWorkspaceBar,
 import { renderReader, updateMarkBadge, sidebarHandlers, showWordPanel, showSentPanel, showPhrasePanel } from './reader.js';
 import { restoreChat, chatRender, hideGatePop, gatePop } from './chat.js';
 import { saveBookConfig, loadBookConfig, exportDocx, exportTts, showRewritePop, showAnkiExport } from './bookio.js';
+import { showGradingPop, showClassGradingPop } from './grading.js';
 import { scrollEl, scrollNow, doUndo, doRedo, openFind, closeFind, runFind, jumpFind, replaceAllFind, jumpNextRisk, popHotkey, resetRiskJump } from './edit.js';
 import { buildLexiconNow, mergedSelection, reinforceWordsNow, importVocabFile, importTermsFile, importProperFile, loadLocalExampleConfig } from './lexicon.js';
 import {
@@ -590,6 +591,12 @@ void listen<string>('menu-action', (ev) => {
     case 'tier-plan':
       showStandardPop();
       break;
+    case 'grade-one':
+      showGradingPop();
+      break;
+    case 'grade-class':
+      void showClassGradingPop();
+      break;
     case 'anki-cards':
       void showAnkiExport();
       break;
@@ -895,4 +902,6 @@ document.addEventListener('mousedown', (e) => {
   if (syncPop.classList.contains('open') && !(e.target as HTMLElement).closest('#sync-pop')) hideSyncPop();
   const ap = document.getElementById('anki-pop');
   if (ap?.classList.contains('open') && !(e.target as HTMLElement).closest('#anki-pop')) ap.classList.remove('open');
+  const gp = document.getElementById('grade-pop');
+  if (gp?.classList.contains('open') && !(e.target as HTMLElement).closest('#grade-pop')) gp.classList.remove('open');
 });
