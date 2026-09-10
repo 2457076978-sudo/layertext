@@ -363,6 +363,13 @@ export type ProjectConfig = Record<string, unknown>;
 export const panelState: PanelState & { project: ProjectConfig | null; projectDir: string | null } =
   { active: 'vocab', tables: {}, filter: '', log: [], project: null, projectDir: null };
 
+/** 表格一次渲染多少行（词库 3600+ 行全量入 DOM 会拖慢输入与滚动）。
+ *  2026-09-11 加：默认 200 行，底部「显示更多」每次再加 400。 */
+export const PAGE_STEP = 400;
+export let rowsShown = 200;
+export function moreRows(): void { rowsShown += PAGE_STEP; }
+export function resetRows(): void { rowsShown = 200; }
+
 /** 载入全部数据文件（含校验） */
 export async function loadAll(kinds: DataKind[], project: ProjectConfig): Promise<void> {
   for (const k of kinds) {
@@ -437,9 +444,22 @@ export async function renderDataPane(bookDir: string): Promise<void> {
   if (!panelState.project) {
     const found = bookDir ? await findProjectConfig(bookDir) : null;
     if (!found) {
-      el.innerHTML = `<div class="dp"><div class="dp-note dp-err">
-        没找到 <code>调适项目_*.json</code>。<br>数据面板靠它定位各数据文件——
-        请先在一本书的根目录放一份（模板见 <code>templates/调适项目_模板.json</code>），再重新打开本书。</div></div>`;
+      el.innerHTML = `<div class="dp">
+        <div class="dp-note dp-err">
+          <b>这本书还没有数据资产配置。</b><br>
+          数据面板靠 <code>调适项目_*.json</code> 定位词库 / 知识库 / 词典 / 专名表 / 分层正本。
+          在内置示例上看到这一屏是正常的——示例书不带调适项目。
+        </div>
+        <div class="dp-note">
+          <b>怎么建一份：</b><br>
+          ① 复制模板：<code>cp templates/调适项目_模板.json &lt;你的书&gt;/调适项目_&lt;书名&gt;.json</code><br>
+          ② 打开它，把 词库 / 书级.专名表 / 书级.知识库 / 书级.词典 / 分层正本 换成你的绝对路径<br>
+          ③ 重新打开这本书，「库」页就会列出这些文件（写法见 <code>docs/快速开始.md</code> 第 2 节）
+        </div>
+        <div class="dp-note dp-derived">小白也能用的一条命令（在本机终端里跑）：<br>
+          <code>node &lt;引擎目录&gt;/tools/af_pipeline/LayerText_AF补注.mjs --dry</code> 用来看加注缺口；
+          项目配置本身必须手写或复制模板——它记录的是**你这台机器上的路径**。</div>
+      </div>`;
       return;
     }
     panelState.project = found.config;
@@ -510,25 +530,31 @@ export async function renderDataPane(bookDir: string): Promise<void> {
       if (k) dupCount.set(k, (dupCount.get(k) ?? 0) + 1);
     }
     const cols: Column[] = cur.columns ?? t.header.map((h) => ({ key: h, type: 'text' as const }));
+    // 分页：只渲染前 N 行（词库 3600+ 行全量入 DOM 会让筛选输入卡顿、滚动发飘）
+    const shown = rows.slice(0, rowsShown);
+    const rest = rows.length - shown.length;
+    // 释义这类长文本列允许换行，其余保持不换行（否则一列长文会把整张表撑出横向滚动条）
+    const wide = new Set(['释义', '值', '备注', '说明']);
     body += `<div class="dp-toolbar">
-      <input id="dp-filter" placeholder="筛选" value="${esc(panelState.filter)}">
-      <span class="dp-count">${t.rows.length} 行</span></div>
+      <input id="dp-filter" placeholder="筛选（词 / 释义 / 来源……）" value="${esc(panelState.filter)}">
+      <span class="dp-count">共 ${t.rows.length} 行${rows.length !== t.rows.length ? `，命中 ${rows.length}` : ''}${rest > 0 ? `，已显示 ${shown.length}` : ''}</span></div>
       <div class="dp-form" id="dp-form">
         <b id="dp-form-title">新增一行</b>
-        ${cols.map((c) => `<label>${esc(c.key)}${c.required ? ' <em>*</em>' : ''}
+        ${cols.map((c) => `<label><span class="dp-lab">${esc(c.key)}${c.required ? '<em>*</em>' : ''}</span>
           <input data-dp-field="${esc(c.key)}" placeholder="${esc(c.hint ?? '')}" value=""></label>`).join('')}
         <div class="dp-form-actions">
-          <button id="dp-save">保存</button>
+          <button id="dp-save" class="dp-primary">保存</button>
           <button id="dp-clear">清空</button>
         </div>
       </div>
-      <table class="dp-table"><thead><tr>${t.header.map((h) => `<th>${esc(h)}</th>`).join('')}<th></th></tr></thead>
-      <tbody>${rows.map(({ r, i }) => `<tr>
-        ${t.header.map((h) => `<td>${esc(r[h] ?? '')}</td>`).join('')}
-        <td>
+      <table class="dp-table"><thead><tr>${t.header.map((h) => `<th${wide.has(h) ? ' class="dp-wide"' : ''}>${esc(h)}</th>`).join('')}<th></th></tr></thead>
+      <tbody>${shown.map(({ r, i }) => `<tr>
+        ${t.header.map((h) => `<td${wide.has(h) ? ' class="dp-wide"' : ''}>${esc(r[h] ?? '')}</td>`).join('')}
+        <td class="dp-ops">
           <button data-dp-edit="${i}">编辑</button>
           <button data-dp-delrow="${i}">删除${(dupCount.get((r[keyCol] ?? '').toLowerCase()) ?? 1) > 1 ? '此行' : ''}</button>
-        </td></tr>`).join('')}</tbody></table>`;
+        </td></tr>`).join('')}</tbody></table>
+      ${rest > 0 ? `<div class="dp-more"><button id="dp-more">显示更多（还有 ${rest} 行）</button></div>` : ''}`;
   }
 
   el.innerHTML = `<div class="dp">
@@ -541,9 +567,9 @@ export async function renderDataPane(bookDir: string): Promise<void> {
     </div>`;
 
   el.querySelectorAll('[data-dp-tab]').forEach((b) =>
-    b.addEventListener('click', () => { panelState.active = (b as HTMLElement).dataset.dpTab!; void renderDataPane(bookDir); }));
+    b.addEventListener('click', () => { panelState.active = (b as HTMLElement).dataset.dpTab!; resetRows(); void renderDataPane(bookDir); }));
   el.querySelector('#dp-filter')?.addEventListener('input', (e) => {
-    panelState.filter = (e.target as HTMLInputElement).value; void renderDataPane(bookDir);
+    panelState.filter = (e.target as HTMLInputElement).value; resetRows(); void renderDataPane(bookDir);
   });
   el.querySelector('#dp-add')?.addEventListener('click', async () => {
     const inp = el.querySelector('#dp-new') as HTMLInputElement;
@@ -570,6 +596,7 @@ export async function renderDataPane(bookDir: string): Promise<void> {
     });
     return unit;
   };
+  el.querySelector('#dp-more')?.addEventListener('click', () => { moreRows(); void renderDataPane(bookDir); });
   el.querySelector('#dp-clear')?.addEventListener('click', () => fillForm(null, '新增一行'));
   el.querySelector('#dp-save')?.addEventListener('click', async () => {
     const unit = readForm();
