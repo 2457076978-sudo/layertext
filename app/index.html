@@ -306,6 +306,32 @@
         padding: 12px;
         min-width: 0;
       }
+      /* 数据面板 */
+      .dp { padding: 14px 18px; color: var(--fg); }
+      .dp-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px; }
+      .dp-head b { font-size: 15px; }
+      .dp-sub { color: var(--muted); font-size: 12px; }
+      .dp-tabs { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 10px; }
+      .dp-tab { border-radius: 999px; padding: 4px 12px; font-size: 13px; }
+      .dp-tab.active { color: #fff; background: var(--brand); border-color: var(--brand); }
+      .dp-badge { margin-left: 6px; background: #d9534f; color: #fff; border-radius: 999px; padding: 0 6px; font-size: 11px; }
+      .dp-ro { margin-left: 6px; font-size: 10px; color: var(--muted); border: 1px solid currentColor; border-radius: 4px; padding: 0 4px; }
+      .dp-note { font-size: 12px; line-height: 1.7; margin-bottom: 10px; padding: 8px 10px; border-radius: 6px; }
+      .dp-ok { background: rgba(60,160,90,.12); }
+      .dp-err { background: rgba(217,83,79,.12); }
+      .dp-derived { background: rgba(120,120,120,.12); }
+      .dp-toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; }
+      .dp-toolbar input { min-width: 180px; }
+      .dp-count { color: var(--muted); font-size: 12px; }
+      .dp-list, .dp-table { max-height: 60vh; overflow: auto; font-size: 13px; }
+      .dp-row { display: flex; justify-content: space-between; gap: 10px; padding: 4px 6px; border-bottom: 1px solid rgba(128,128,128,.15); }
+      .dp-table { width: 100%; border-collapse: collapse; }
+      .dp-table th, .dp-table td { text-align: left; padding: 4px 8px; border-bottom: 1px solid rgba(128,128,128,.15); white-space: nowrap; }
+      .dp-table { table-layout: auto; }
+      .dp-table td:nth-child(2), .dp-table th:nth-child(2) { min-width: 62px; }
+      .dp-table td:last-child { width: 1%; }
+      .dp-table th { position: sticky; top: 0; background: var(--bg); }
+      .dp-log { margin-top: 12px; font-size: 12px; color: var(--muted); }
       .viewtabs {
         display: flex;
         gap: 4px;
@@ -3212,6 +3238,7 @@
         <section id="pane-dossier" class="pane">
           <div class="empty">审校过程档案：指标对照 + 逐句对照摘要 + AI 决策记录 + 标记门禁，一键导出成卷（论文素材）</div>
         </section>
+        <section id="pane-data" class="pane"></section>
         <section id="pane-retro" class="pane">
           <div class="empty">
             <b>复盘：AI 建议采纳率与改进方向</b><br />你每次点 ✓ 采纳 / ✗ 放弃 AI 建议，都会记入本书文件夹的《AI建议台账.csv》<br />这里自动汇总：哪类建议最不可靠、该改提示词还是改规则

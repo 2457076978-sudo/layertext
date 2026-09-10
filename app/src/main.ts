@@ -18,6 +18,7 @@ import {
 } from './pure.js';
 import { parseEpubChapters, epubChapterMd } from './bookpure.js';
 import { renderModePill, switchView as switchViewDom, bindViewTabs, type ViewName } from './widgets.js';
+import { renderDataPane } from './datapanel.js';
 import { S, esc } from './state.js';
 import { $, setStatus, toast, pop, hidePop } from './uikit.js';
 import { showSyncMarksDialog, syncPop, hideSyncPop } from './pipew.js';
@@ -301,6 +302,7 @@ const VIEW_HOOKS: Partial<Record<ViewName, () => void>> = {
   board: () => void renderBoardPane(),
   dossier: () => void renderDossierPane(),
   retro: () => void renderRetroPane(),
+  data: () => void renderDataPane(S.currentBookDir ?? '').catch(() => undefined),
 };
 
 let curView: ViewName = 'text';
