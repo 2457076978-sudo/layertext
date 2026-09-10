@@ -12,7 +12,7 @@
 - **构建指纹（版权举证）**：build.rs 编译期注入 `版本|git哈希-epoch` → 新 command `get_build_id` → **诊断包 JSON 含 buildId**——官方 Release 每个构建唯一且对应 CI 记录，盗版自行重编译的指纹必然对不上（举证"拿源码另行构建"）。
 - **版权水印**：六个判定引擎核心文件（qc/lexicon/textpipe/wordfreq/mcpTools/align）加 SPDX 版权头；About 对话框版权行常驻（© 2026 Wayne · PolyForm Noncommercial）。
 - **版本门禁五处对齐**：Cargo.toml 纳入 check_versions.mjs——顺手修真 bug：Cargo.toml 滞留 1.1.0 致 About 显示错版本（门禁此前只查四处漏了它）；About 版本改 `env!("CARGO_PKG_VERSION")` 构建期注入，此后跟 Cargo.toml 单源。
-- **docs/维权.md**：指纹在案清单（pyRound1 半偶舍入/suffixCandidates 候选序/align Jaccard 口径/错误文案措辞等=作者刻意设计的暗指纹）+ 软著登记操作路径（中国版权保护中心，~¥300/30-60 工作日）+ 侵权动作序列（固证→DMCA→函告→行政/司法）。
+- **docs/版权与授权.md**：许可说明（教师/学校免费、商用需授权）+ 版权保护声明（已部署验证体系，细节不予公开）。指纹在案文档只存作者私密处，不进公开仓。
 - 验证：cargo fmt/clippy/test（5 过）+ 版本五处一致 + npm verify 192 绿。
 
 ## [未发布] - 2026-09-10（main · 第二十一批：让"做得好的东西"被看见——热力轨词汇维度 + 校正传播感知）

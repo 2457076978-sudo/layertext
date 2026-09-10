@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
-// © 2026 Wayne（LayerText 作者）。本文件为判定引擎核心，实现级指纹已在案（docs/维权.md）。
+// © 2026 Wayne（LayerText 作者）。本文件为判定引擎核心，本仓库已部署版权验证体系，细节不予公开（docs/版权与授权.md）。
 /**
  * MCP 工具层（纯逻辑，无 SDK 依赖）——LayerText 质检引擎的 4 个标准工具
  *

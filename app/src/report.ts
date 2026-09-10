@@ -472,7 +472,7 @@ export async function exportDiagnostics(): Promise<void> {
   if (typeof savePath !== 'string') return;
   try {
     const version = await getVersion().catch(() => '未知');
-    // 构建指纹（版权举证）：git commit+构建时间，官方 Release 唯一（见 docs/维权.md）
+    // 构建指纹（版权举证）：git commit+构建时间，官方 Release 唯一
     const buildId = await invoke<string>('get_build_id').catch(() => 'unavailable');
     const summary = { ...buildDiagSummary(S.appConfig, version, navigator.userAgent), buildId };
     const files: Record<string, Uint8Array> = { '诊断信息.json': strToU8(JSON.stringify(summary, null, 1)) };

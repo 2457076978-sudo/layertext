@@ -11,7 +11,7 @@ fn read_text_file(path: String) -> Result<String, String> {
     std::fs::read_to_string(&path).map_err(|e| e.to_string())
 }
 
-/// 构建指纹（版权举证用）：git commit + 构建时间，由 build.rs 编译期注入（见 docs/维权.md）。
+/// 构建指纹（版权举证用）：git commit + 构建时间，由 build.rs 编译期注入。
 /// 官方 Release 每个构建唯一；盗版者自行重编译的指纹与官方发布记录对不上。诊断包含此字段。
 #[tauri::command]
 fn get_build_id() -> String {
