@@ -91,8 +91,8 @@ export function tokenizeTxt(txt: string): string[] {
     .filter((t) => t.length > 0);
 }
 
-/** 词形还原候选（hit / hitOrigin 共用，顺序即命中优先级） */
-function suffixCandidates(tok: string): string[] {
+/** 词形还原候选（hit / hitOrigin / zipf 词频家族查询共用，顺序即命中优先级） */
+export function suffixCandidates(tok: string): string[] {
   const cands: string[] = [tok];
   if (tok.endsWith('s')) cands.push(tok.slice(0, -1));
   if (tok.endsWith('es')) cands.push(tok.slice(0, -2));

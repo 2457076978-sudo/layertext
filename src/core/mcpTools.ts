@@ -12,6 +12,7 @@ import { hit, hitOrigin, pendHit, sentsOf } from './textpipe.js';
 import { runQc, toLegacyReport } from './qc.js';
 import { sentenceRisks } from './risks.js';
 import { IRR } from './irregular.js';
+import { triageOov, type ZipfTable } from './wordfreq.js';
 
 /** 任意英文文本 → 章节 md（按空行切段、编 [P01]，与应用"导入归一化"同构的最小版） */
 export function wrapAsChapter(text: string, title = 'MCP text'): string {
@@ -41,18 +42,33 @@ export function buildMcpLexicon(opts: McpLexiconOptions, bundledWordlists: strin
   });
 }
 
-/** 工具1 layer_qc：全文体检（生词率/覆盖率/句长/被动/定从/过去完成/OOV清单）；reinforce=已学词集（⑩复现指标） */
-export function toolQcText(text: string, lex: Lexicon, oovLimit = 50, reinforceWords?: string[]): Record<string, unknown> {
+/** 工具1 layer_qc：全文体检（生词率/覆盖率/句长/被动/定从/过去完成/OOV清单）；reinforce=已学词集（⑩复现指标）；
+ *  zipfTable=词频先验表（提供时 OOV 清单逐词带 zipf 与分诊：高频未收=疑似漏收候选，低频=真·生词教学优先——只出候选不碰判定） */
+export function toolQcText(
+  text: string,
+  lex: Lexicon,
+  oovLimit = 50,
+  reinforceWords?: string[],
+  zipfTable?: ZipfTable,
+): Record<string, unknown> {
   const md = /[P]\d+\]/.test(text) ? `# qc\n\n## Chapter One\n\n${text}` : wrapAsChapter(text);
   const r = runQc(md, lex, { tier: 'M', fileName: 'mcp', ...(reinforceWords ? { reinforceWords } : {}) });
-  const oovDetail = [...new Set(r.oov)].slice(0, oovLimit).map((w) => ({
-    word: w,
-    pending: pendHit(w, lex.pending),
-  }));
+  const oovDetail = [...new Set(r.oov)].slice(0, oovLimit).map((w) => {
+    const item: Record<string, unknown> = { word: w, pending: pendHit(w, lex.pending) };
+    if (zipfTable) {
+      const t = triageOov(w, zipfTable);
+      item.zipf = t.zipf;
+      item.分诊 = t.label;
+    }
+    return item;
+  });
   return {
     ...(toLegacyReport(r) as Record<string, unknown>),
     OOV清单前N: oovDetail,
     口径说明: '句法黑名单（被动/定从/过去完成）按初中教学进度一律禁用；直接引语内豁免；词形还原命中内置课标1600+补录+IRR',
+    ...(zipfTable
+      ? { OOV分诊口径: 'zipf 词频先验（wordfreq，纯离线）：≥4.0 高频未收=疑似漏收（教师核对后入库），3.0–4.0 中频，<3.0 低频=真·生词教学优先。只出候选，词库表仍是唯一判定锚' }
+      : {}),
   };
 }
 

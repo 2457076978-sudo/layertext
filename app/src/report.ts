@@ -40,7 +40,12 @@ import { showAiSettings } from './settings.js';
 import { bufToB64 } from './bookio.js';
 import { buildPlotPointsPrompt, buildReadingQuizPrompt, simplifyMaxLen } from './ai.js';
 import { extractParas, sentsOf, splitChapter, tokenizeTxt } from '../../src/core/textpipe.js';
+import { parseZipfTable, triageOov } from '../../src/core/wordfreq.js';
+import zipfTsv from '../../assets/wordfreq/en_zipf.tsv?raw';
 import { sentenceRisks } from '../../src/core/risks.js';
+
+/** zipf 词频先验（wordfreq 导出，纯离线）：OOV 分诊候选——高频未收=疑似漏收，低频=真·生词；不碰判定 */
+const ZIPF_TABLE = parseZipfTable(zipfTsv);
 
 /** 初步诊断：在正文里找某词（词形还原口径）第一次出现的位置 */
 function locateWordFirst(session: FileSession, tok: string): { pi: number; si: number; wi: number; raw: string } | null {
@@ -101,14 +106,24 @@ export function renderReportPane(s: FileSession): void {
   const gatesNote = `句法黑名单（被动/定从/过去完成）一律禁用；句长参考 = ${sel.active ? `班级定制【${sel.label}】最严 ${sel.minLen}` : `简化标准 ${simplifyMaxLen()}`} 词/句`;
   const risks = riskSentenceList(s);
 
-  /* 生词清单：每个词两个动作——标记简化（进标记清单走 AI）/ 计入已学词（不再标红） */
-  const oovRows = oov
+  /* 生词清单：每词三个动作位——词频先验分诊（疑似漏收置顶）/ 标记简化（进标记清单走 AI）/ 计入已学词（不再标红） */
+  const triaged = oov.map((w) => triageOov(w, ZIPF_TABLE));
+  const suspects = triaged.filter((t) => t.triage === 'suspect').sort((a, b) => (b.zipf ?? 0) - (a.zipf ?? 0));
+  const oovRows = [...suspects, ...triaged.filter((t) => t.triage !== 'suspect')]
     .slice(0, 80)
-    .map((w) => {
+    .map((t) => {
+      const w = t.word;
       const marked = s.review.marks.some((m) => m.level === 'word' && (m.word ?? '').toLowerCase() === w);
       const learned = S.currentKnown.has(w);
+      const freqCell =
+        t.triage === 'suspect'
+          ? `<span class="chip warn-chip">⚠ 疑似漏收</span> <span class="dim">zipf ${t.zipf!.toFixed(1)}</span>`
+          : t.zipf !== null
+            ? `<span class="dim">zipf ${t.zipf.toFixed(1)} · 中频</span>`
+            : '<span class="dim">低频 · 真生词</span>';
       return `<tr>
       <td style="font-weight:600">${esc(w)}</td>
+      <td>${freqCell}</td>
       <td>${marked ? '<span class="ok-badge">✓ 已标记简化</span>' : `<button data-oov-simpl="${esc(w)}">✓ 标记要简化</button>`}
           ${learned ? '<span class="ok-badge">✓ 已学</span>' : `<button data-oov-learn="${esc(w)}">✓ 学生已学过</button>`}</td>
     </tr>`;
@@ -136,10 +151,10 @@ export function renderReportPane(s: FileSession): void {
       <tr><th>覆盖率参考带${sel.active && sel.coverageTarget ? `（本批目标 ≥${sel.coverageTarget}%）` : ''}</th><td class="dim">${sel.active && sel.coverageTarget ? `分层覆盖目标带 ≥${sel.coverageTarget}%（多目标取最严；个体化依据见 docs/文献对齐）` : '95% = 最低限度理解（Laufer 1989）；98% = 无辅助顺畅阅读（Hu & Nation 2000）——文献群体均值'}</td></tr>
     </table>
 
-    <div class="diag-h">① 生词清单（去重 ${oov.length} 词）<span class="dim">——勾一个动一个：要简化的进标记清单，学生已学过的立即不再标红</span></div>
+    <div class="diag-h">① 生词清单（去重 ${oov.length} 词${suspects.length ? `，其中 <span style="color:#b45309">疑似漏收 ${suspects.length}</span>` : ''}）<span class="dim">——⚠ 疑似漏收 = zipf≥4 高频词但词库未收（bike/flood/onto 类漏词史），先勾「学生已学过」核对入库；低频词才是真·生词，勾「标记要简化」。勾一个动一个</span></div>
     ${
       oov.length
-        ? `<table class="sgtable"><tr><th style="width:90px">词</th><th>处理（你说了算）</th></tr>${oovRows}</table>
+        ? `<table class="sgtable"><tr><th style="width:90px">词</th><th style="width:170px">词频先验</th><th>处理（你说了算）</th></tr>${oovRows}</table>
     ${oov.length > 80 ? `<div class="dim" style="margin-bottom:10px">（只列前 80 词，处理或换词库后点「重新质检」看剩余）</div>` : ''}`
         : '<div class="dim" style="margin-bottom:10px">没有词表外生词——全部在词表内</div>'
     }

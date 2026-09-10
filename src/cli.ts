@@ -26,6 +26,7 @@ import { findAssetPath, readWordFile } from './core/files.js';
 import { buildLexicon, parseReinforceText } from './core/lexicon.js';
 import { runQc, toLegacyReport, type Tier } from './core/qc.js';
 import { chnoFromPath, tagFromPath } from './core/textpipe.js';
+import { parseZipfTable, triageOov, TRIAGE_RANK, type ZipfTable } from './core/wordfreq.js';
 import { planFsrs, summarizeFsrs, type FsrsWordInput } from './core/fsrs.js';
 
 /** fsrs 子命令：复现队列（"词,hits" CSV 或纯词列表=hits 0）→ FSRS 建议间隔 vs 现行固定策略并排。
@@ -72,6 +73,13 @@ function fsrsMain(argv: string[]): void {
 
 const BUNDLED_WORDLIST = 'assets/wordlists/curriculum_2022_level3_1600.txt';
 const AMENDMENT_WORDLIST = 'assets/wordlists/curriculum_2022_amendment.txt'; // 数词/星期/月份等存档缺失块（见文件头注释）
+const BUNDLED_ZIPF = 'assets/wordfreq/en_zipf.tsv'; // wordfreq 导出（tools/export_zipf.py），OOV 疑似漏收分诊先验
+
+/** zipf 词频先验表：找到才启用 OOV 分诊列，缺失时报告保持旧 schema */
+function bundledZipfTable(): ZipfTable | undefined {
+  const p = findAssetPath(BUNDLED_ZIPF);
+  return p ? parseZipfTable(readFileSync(p, 'utf-8')) : undefined;
+}
 
 function main(): void {
   const argv = process.argv.slice(2);
@@ -132,13 +140,26 @@ function main(): void {
   });
   const report = toLegacyReport(result);
 
-  const { 'OOV词(去重)': oov, ...rest } = report as Record<string, unknown>;
+  // zipf 分诊（调研〇-3 第一级）：只加报告字段，不动引擎 schema 与判定
+  const zipf = bundledZipfTable();
+  const triaged = zipf
+    ? (report['OOV词(去重)'] as string[])
+        .map((w) => triageOov(w, zipf))
+        .sort((a, b) => TRIAGE_RANK[a.triage] - TRIAGE_RANK[b.triage] || (b.zipf ?? 0) - (a.zipf ?? 0))
+    : undefined;
+  const outReport = { ...report, ...(triaged ? { OOV分诊: triaged } : {}) };
+
+  const { 'OOV词(去重)': oov, ...rest } = outReport as Record<string, unknown>;
   console.log(JSON.stringify(rest, null, 1));
   console.log('OOV:', (oov as string[]).slice(0, 40));
+  if (triaged) {
+    const suspects = triaged.filter((t) => t.triage === 'suspect');
+    console.log(`疑似漏收（zipf≥4 高频未收，教师核对后入库）${suspects.length} 词:`, suspects.map((t) => `${t.word}(${t.zipf?.toFixed(1)})`).join(' ') || '无');
+  }
 
   const tag = opts.tag?.[0] ?? tagFromPath(path);
   const outPath = opts.out?.[0] ?? join(dirname(resolve(path)), `质检报告_${tag}.json`);
-  writeFileSync(outPath, JSON.stringify(report, null, 1), 'utf-8');
+  writeFileSync(outPath, JSON.stringify(outReport, null, 1), 'utf-8');
   console.error(`报告已落盘: ${outPath}`);
 }
 

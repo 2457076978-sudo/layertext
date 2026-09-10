@@ -23,6 +23,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 import { readWordFile } from './core/files.js';
+import { parseZipfTable, type ZipfTable } from './core/wordfreq.js';
 import { buildMcpLexicon, toolAlignPairs, toolCheckRevision, toolQcText, toolSentenceRisks, toolWordStatus, type McpLexiconOptions } from './core/mcpTools.js';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -31,6 +32,15 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 function bundledWordlists(): string[] {
   const files = [join(ROOT, 'assets', 'wordlists', 'curriculum_2022_level3_1600.txt'), join(ROOT, 'assets', 'wordlists', 'curriculum_2022_amendment.txt')];
   return files.map((f) => readFileSync(f, 'utf-8'));
+}
+
+/** zipf 词频先验表（wordfreq 导出，纯离线）——OOV"疑似漏收"分诊候选；缺失时跳过分诊列 */
+function bundledZipfTable(): ZipfTable | undefined {
+  try {
+    return parseZipfTable(readFileSync(join(ROOT, 'assets', 'wordfreq', 'en_zipf.tsv'), 'utf-8'));
+  } catch {
+    return undefined;
+  }
 }
 
 function parseArgs(argv: string[]): McpLexiconOptions {
@@ -53,6 +63,7 @@ function parseArgs(argv: string[]): McpLexiconOptions {
 async function main(): Promise<void> {
   const opts = parseArgs(process.argv.slice(2));
   const lex = buildMcpLexicon(opts, bundledWordlists());
+  const zipf = bundledZipfTable();
 
   const server = new McpServer(
     { name: 'layertext-qc', version: '1.0.0' },
@@ -67,13 +78,13 @@ async function main(): Promise<void> {
     {
       title: 'LayerText 全文体检',
       description:
-        '对一段英文文本做全面质检：词表覆盖率/生词率/句长/被动/定语从句/过去完成/OOV 生词清单。适合教师在简化前评估原文难度、简化后验收。可传已学词集（复现队列）：队列词不再计 OOV，并输出⑩复现命中指标。',
+        '对一段英文文本做全面质检：词表覆盖率/生词率/句长/被动/定语从句/过去完成/OOV 生词清单。适合教师在简化前评估原文难度、简化后验收。OOV 清单带 zipf 词频先验分诊：高频未收=疑似漏收（教师核对后入词库），低频=真·生词教学优先。可传已学词集（复现队列）：队列词不再计 OOV，并输出⑩复现命中指标。',
       inputSchema: z.object({
         text: z.string().describe('英文文本（任意格式；按空行分段自动处理）'),
         reinforce: z.array(z.string()).optional().describe('已学词集/复现队列（词形家族按词种计命中）'),
       }),
     },
-    async ({ text, reinforce }) => ({ content: [{ type: 'text', text: JSON.stringify(toolQcText(text, lex, 50, reinforce), null, 1) }] }),
+    async ({ text, reinforce }) => ({ content: [{ type: 'text', text: JSON.stringify(toolQcText(text, lex, 50, reinforce, zipf), null, 1) }] }),
   );
 
   server.registerTool(
