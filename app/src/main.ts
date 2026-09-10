@@ -868,18 +868,22 @@ document.addEventListener('mouseup', (e) => {
   if ((e.target as HTMLElement).closest('#pop') || (e.target as HTMLElement).closest('#sidebar')) return;
   const sel = window.getSelection();
   if (!sel || sel.isCollapsed) return;
-  const node = sel.focusNode;
-  const host = node?.nodeType === 3 ? node.parentElement : (node as HTMLElement | null);
-  const sentEl = host?.closest('.sent');
+  // 选区句子一律取 Range 文档序（start/end 与拖选方向无关）：从右往左拖时 anchor/focus 反转，
+  // 曾致框选后一句、面板却锚到前一句（Wayne 09-10 实测抓出）
+  const range = sel.getRangeAt(0);
+  const sentOf = (n: Node | null): HTMLElement | null =>
+    ((n?.nodeType === 3 ? n.parentElement : (n as HTMLElement | null))?.closest('.sent') as HTMLElement | null) ?? null;
+  const startSent = sentOf(range.startContainer);
+  const endSent = sentOf(range.endContainer);
   const s = activeSession();
-  if (!sentEl || !s) return;
-  const rect = sel.getRangeAt(0).getBoundingClientRect();
-  const anchorSent = (sel.anchorNode?.nodeType === 3 ? sel.anchorNode.parentElement : (sel.anchorNode as HTMLElement | null))?.closest('.sent');
-  if (anchorSent !== sentEl) {
-    showSentPanel(s, sentEl as HTMLElement, rect.left, rect.bottom + 6, true); // 跨句选择，仅标记所选末句
+  if (!endSent || !s) return;
+  const sentEl = endSent;
+  const rect = range.getBoundingClientRect();
+  if (startSent !== endSent) {
+    showSentPanel(s, sentEl, rect.left, rect.bottom + 6, true); // 跨句选择，仅标记所选末句（文档序末句，与拖选方向无关）
     return;
   }
-  const pi = Number((sentEl as HTMLElement).dataset.pi);
+  const pi = Number(sentEl.dataset.pi);
   const si = Number((sentEl as HTMLElement).dataset.si);
   const sentText = sentsOf(extractParas(splitChapter(s.md).body)[pi] ?? '', false)[si] ?? '';
   const route = routeSelection(sel.toString(), sentText);
