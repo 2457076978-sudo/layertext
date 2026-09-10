@@ -17,7 +17,7 @@ import {
   readTextSmart,
   renderAll,
 } from './main.js';
-import { buildLexiconNow, mergedSelection } from './lexicon.js';
+import { buildLexiconNow, mergedSelection, reinforceWordsNow } from './lexicon.js';
 import { addMark, sidebarHandlers } from './reader.js';
 import { tocChapters } from './shelf.js';
 import { renderDiffPane } from './widgets.js';
@@ -28,7 +28,9 @@ import {
   buildDiagSummary,
   mergeQuotaTexts,
   normalizeAndSplitChapters,
+  parseQuizItems,
   pickSentMarkType,
+  buildQuizMd,
 } from './pure.js';
 import { boardSummary, buildChapterDossierMd, dossierFileName, workspaceChipName, type DossierData, type QcSummaryLite } from './bookpure.js';
 import { runQc, toLegacyReport } from '../../src/core/qc.js';
@@ -36,7 +38,7 @@ import { aggregate, diagnose, parseLedger, type LedgerRow } from '../../src/core
 import { summarizeCost } from '../../src/core/aiops.js';
 import { showAiSettings } from './settings.js';
 import { bufToB64 } from './bookio.js';
-import { buildPlotPointsPrompt, simplifyMaxLen } from './ai.js';
+import { buildPlotPointsPrompt, buildReadingQuizPrompt, simplifyMaxLen } from './ai.js';
 import { extractParas, sentsOf, splitChapter, tokenizeTxt } from '../../src/core/textpipe.js';
 import { sentenceRisks } from '../../src/core/risks.js';
 
@@ -155,7 +157,14 @@ export function renderReportPane(s: FileSession): void {
       <button id="diag-plot-btn" class="primary"><svg class="ico"><use href="#i-sparkle"/></svg>AI 摘情节要点</button>
       <span class="dim">让 AI 通读本章，摘出"简化时绝不能丢的情节点/伏笔"（5~8 条），你逐条勾选后进配额清单；没配 AI 也可以在右侧手动添加</span>
     </div>
-    <div id="diag-plot-out"></div>`;
+    <div id="diag-plot-out"></div>
+
+    <div class="diag-h">④ 读后检测题（AI 出选择题候选 → 你勾选 → 导出检测卷）</div>
+    <div style="margin-bottom:8px">
+      <button id="quiz-btn" class="primary"><svg class="ico"><use href="#i-sparkle"/></svg>AI 出读后检测题</button>
+      <span class="dim">理解/推断/词汇三型选择题（词汇题优先复现队列词）；勾选后导出「学生卷 + 教师答案页」</span>
+    </div>
+    <div id="quiz-out"></div>`;
   document.getElementById('btn-reveal')?.addEventListener('click', () => {
     if (s.reportSavedPath) void invoke('reveal_path', { path: s.reportSavedPath });
   });
@@ -218,6 +227,7 @@ export function renderReportPane(s: FileSession): void {
   );
 
   document.getElementById('diag-plot-btn')?.addEventListener('click', () => void aiPlotPoints(s));
+  document.getElementById('quiz-btn')?.addEventListener('click', () => void aiQuiz(s));
 }
 
 /* ---------- 初步诊断③：AI 摘情节要点 → 教师勾选 → 预填要点配额 ---------- */
@@ -271,6 +281,67 @@ async function aiPlotPoints(s: FileSession): Promise<void> {
   } finally {
     btn.disabled = false;
     btn.textContent = '<svg class="ico"><use href="#i-sparkle"/></svg>AI 摘情节要点';
+  }
+}
+
+/* ---------- ④ 读后检测题：AI 出选择题候选，教师勾选定卷（词汇题优先复现队列词） ---------- */
+
+async function aiQuiz(s: FileSession): Promise<void> {
+  const key = await invoke<string>('load_api_key');
+  if (!key) {
+    setStatus('出检测题需要先配置 AI（菜单 LayerText → AI 设置…）', 'err');
+    showAiSettings();
+    return;
+  }
+  const out = $('quiz-out');
+  const btn = $('quiz-btn') as unknown as HTMLButtonElement;
+  btn.disabled = true;
+  btn.textContent = '⏳ AI 出题中…';
+  try {
+    const chapter = splitChapter(s.md).body.slice(0, 12000);
+    const words = reinforceWordsNow()?.slice(0, 30).join(', ') || '（无复现队列——词汇题自选本章关键词）';
+    const { raw } = await chatUntilJson([{ role: 'user', content: await buildReadingQuizPrompt({ chapter, words }) }], 3000, '读后检测题');
+    const { ok, rejected } = parseQuizItems(raw);
+    if (rejected > 0) setStatus(`已拒收 ${rejected} 道不合规题（题干/选项/答案缺项），其余正常`, 'info');
+    if (ok.length === 0) throw new Error('AI 未返回可用的检测题');
+    const letters = ['A', 'B', 'C', 'D', 'E'];
+    out.innerHTML = `
+      <div class="dim" style="margin:6px 0">AI 出了 ${ok.length} 道候选——<b>只把你勾的导出成卷</b>：</div>
+      ${ok
+        .map(
+          (it, i) => `<label class="plot-row" style="display:block;margin:4px 0;padding:4px 6px;border:1px solid var(--line);border-radius:6px">
+        <input type="checkbox" data-quiz="${i}" checked />
+        <b>${i + 1}.</b> ${esc(it.q)}<br/>
+        <span style="font-size:12px;color:var(--muted)">${it.options.map((o, j) => `${letters[j]}. ${esc(o)}`).join('　')}</span>
+        <span class="dim" style="font-size:11px">｜答案 ${it.answer} ｜ ${it.focus === 'vocabulary' ? '词汇' : it.focus === 'inference' ? '推断' : '理解'}${it.why ? ' ｜ ' + esc(it.why) : ''}</span>
+      </label>`,
+        )
+        .join('')}
+      <div class="row-btns" style="margin-top:8px"><button id="quiz-export" class="primary">导出检测卷（勾选题数）</button></div>`;
+    $('quiz-export').addEventListener('click', () =>
+      void (async () => {
+        const picked = [...out.querySelectorAll<HTMLInputElement>('[data-quiz]:checked')].map((cb) => ok[Number(cb.dataset.quiz)]).filter(Boolean);
+        if (picked.length === 0) {
+          setStatus('先勾选要进卷的题', 'err');
+          return;
+        }
+        const date = new Date().toLocaleDateString('sv-SE');
+        const savePath = await saveFileDialog({
+          defaultPath: `读后检测_${s.fileName.replace(/\.(md|txt|markdown)$/i, '')}_${date}.md`,
+          filters: [{ name: 'Markdown', extensions: ['md'] }],
+        });
+        if (typeof savePath !== 'string') return;
+        await invoke('write_text_file', { path: savePath, content: buildQuizMd(s.fileName, picked, { date, maxLen: 16 }) });
+        setStatus(`检测卷已导出（${picked.length} 题，含教师答案页）：${savePath}`, 'saved');
+        void invoke('reveal_path', { path: savePath });
+      })(),
+    );
+  } catch (e) {
+    out.innerHTML = '';
+    setStatus('AI 出题失败：' + e, 'err');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'AI 出读后检测题';
   }
 }
 

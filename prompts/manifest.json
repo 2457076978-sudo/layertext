@@ -30,13 +30,18 @@
       "version": "v1.0",
       "file": "grading.md",
       "desc": "AI 批改候选 user 模板（占位符 {{student}}/{{vocabNote}}/{{engine}}/{{text}}）：教师批改域——AI 只出候选，教师勾选定稿"
+    },
+    "reading_quiz": {
+      "version": "v1.0",
+      "file": "reading_quiz.md",
+      "desc": "读后检测题生成 user 模板（占位符 {{chapter}}/{{words}}）：理解/推断/词汇三型选择题候选，教师勾选定卷；词汇题优先复现队列词"
     }
   },
   "changelog": [
     {
       "version": "v1.4",
       "date": "2026-09-10",
-      "note": "新增 grading（批改域）：学生产出体检的 AI 批改候选（grammar/usage/structure/highlight/comment 五类，original 逐字复制，教师勾选定稿）"
+      "note": "新增 grading（批改域）与 reading_quiz（读后检测题）：AI 只出候选，教师勾选定稿"
     },
     {
       "version": "v1.3",

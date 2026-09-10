@@ -227,3 +227,31 @@ test('班级批改汇总：md 表 + csv BOM，复现命中列有队列才显示'
   assert.equal(csv.charCodeAt(0), 0xfeff);
   assert.ok(csv.includes('学生,词数,句数,平均句长'));
 });
+
+/* ---------- 读后检测题：候选裁决 + 试卷组装 ---------- */
+import { buildQuizMd, parseQuizItems } from '../app/src/pure.js';
+
+test('#26 检测题裁决：缺题干/选项不足/答案越界/focus 白名单外 = 拒收；合法题通过', () => {
+  const raw = [
+    { q: 'Why was the farmer surprised?', options: ['A1', 'B1', 'C1', 'D1'], answer: 'B', why: '事实', focus: 'comprehension' },
+    { q: '', options: ['a', 'b', 'c', 'd'], answer: 'A', focus: 'inference' },
+    { q: '有题干但选项只有两个', options: ['a', 'b'], answer: 'A', focus: 'inference' },
+    { q: '答案指向不存在的选项', options: ['a', 'b', 'c'], answer: 'D', focus: 'vocabulary' },
+    { q: 'focus 不在白名单', options: ['a', 'b', 'c', 'd'], answer: 'A', focus: 'grammar' },
+  ];
+  const { ok, rejected } = parseQuizItems(raw);
+  assert.equal(rejected, 4);
+  assert.equal(ok.length, 1);
+  assert.equal(ok[0].answer, 'B');
+});
+
+test('检测卷组装：学生卷不带答案，教师答案页含 why 与词汇题标注', () => {
+  const items = [
+    { q: 'Q1?', options: ['a', 'b', 'c', 'd'], answer: 'A', why: '考因果', focus: 'comprehension' as const },
+    { q: 'Word "boar" means?', options: ['猪', '牛', '羊', '马'], answer: 'A', why: '词汇', focus: 'vocabulary' as const },
+  ];
+  const md = buildQuizMd('第一章', items, { date: '2026-09-10', maxLen: 16 });
+  const studentPart = md.slice(0, md.indexOf('## 答案'));
+  assert.ok(studentPart.includes('1. Q1?') && !studentPart.includes('—— 考因果'));
+  assert.ok(md.includes('## 答案（教师页）') && md.includes('A —— 考因果') && md.includes('（词汇题）'));
+});

@@ -302,6 +302,12 @@ export async function buildGradingPrompt(vars: { student: string; vocabNote: str
   return composePrompt(tpl, vars);
 }
 
+/** 读后检测题生成 user 消息（AI 出候选，教师勾选定卷；词汇题优先复现队列词） */
+export async function buildReadingQuizPrompt(vars: { chapter: string; words: string }): Promise<string> {
+  const tpl = (await loadPrompt('reading_quiz')).body;
+  return composePrompt(tpl, vars);
+}
+
 /** 初步诊断·情节要点提取 user 消息（AI 出候选，教师勾选后进要点配额） */
 export async function buildPlotPointsPrompt(chapter: string): Promise<string> {
   const tpl = (await loadPrompt('plot_points')).body;

@@ -348,6 +348,49 @@ export function reinforceQueueCsv(rows: AnkiRow[]): string {
   return ['# 复现队列：词,hits（hits=已复现次数，默认 0，画像数据可补）', '# 查看 FSRS 间隔建议：node dist/src/cli.js fsrs 本文件.csv', ...rows.map((r) => `${r.word},0`)].join('\n') + '\n';
 }
 
+/* ================= 读后检测题（阅读侧配套：AI 出题候选裁决 + 试卷组装） ================= */
+
+export interface QuizItem {
+  q: string;
+  options: string[];
+  answer: string; // A-D 字母
+  why: string;
+  focus: 'comprehension' | 'inference' | 'vocabulary';
+}
+/** AI 边界 #26（检测题候选裁决）：题干非空；选项 3~5 个非空字符串；answer 是有效字母且指向存在选项；
+ *  focus 白名单；不合规整题拒收计数 */
+export function parseQuizItems(raw: unknown[]): { ok: QuizItem[]; rejected: number } {
+  let rejected = 0;
+  const ok: QuizItem[] = [];
+  for (const x of raw as { q?: unknown; options?: unknown; answer?: unknown; why?: unknown; focus?: unknown }[]) {
+    const q = typeof x?.q === 'string' ? x.q.trim() : '';
+    const opts = Array.isArray(x?.options) ? x.options.filter((o) => typeof o === 'string' && o.trim()) : [];
+    const answer = typeof x?.answer === 'string' ? x.answer.trim().toUpperCase() : '';
+    const focus = x?.focus;
+    if (!q || opts.length < 3 || opts.length > 5 || !/^[A-D]$/.test(answer) || answer.charCodeAt(0) - 65 >= opts.length || (focus !== 'comprehension' && focus !== 'inference' && focus !== 'vocabulary')) {
+      rejected++;
+      continue;
+    }
+    ok.push({ q, options: opts, answer, why: typeof x?.why === 'string' ? x.why.trim() : '', focus });
+  }
+  return { ok, rejected };
+}
+
+/** 检测卷组装：题卷（学生用，无答案）+ 答案页（教师用，含 why）；focus 标注词汇题 */
+export function buildQuizMd(title: string, items: QuizItem[], meta: { date: string; maxLen: number }): string {
+  const letters = ['A', 'B', 'C', 'D', 'E'];
+  const head = [`# 读后检测 · ${title}`, '', `日期：${meta.date} ｜ ${items.length} 题（理解/推断/词汇）｜ 建议用时 8 分钟`, '', '## 学生卷', ''];
+  items.forEach((it, i) => {
+    head.push(`${i + 1}. ${it.q}${it.focus === 'vocabulary' ? '' : ''}`);
+    it.options.forEach((o, j) => head.push(`   ${letters[j]}. ${o}`));
+    head.push('');
+  });
+  head.push('---', '', '## 答案（教师页）', '');
+  items.forEach((it, i) => head.push(`${i + 1}. ${it.answer}${it.why ? ` —— ${it.why}` : ''}${it.focus === 'vocabulary' ? '（词汇题）' : ''}`));
+  head.push('');
+  return head.join('\n') + '\n';
+}
+
 /* ================= 批改域纯逻辑（学生产出体检：AI 批改候选裁决 + 批改稿/班级汇总组装） ================= */
 
 export type GradingNoteType = 'grammar' | 'usage' | 'structure' | 'highlight' | 'comment';
