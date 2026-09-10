@@ -18,9 +18,11 @@
  */
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { PROPER, DICT_CSV, loadKnownForms, isKnownForm, loadKbGloss } from './LayerText_AF词表与词典.mjs';
+import { loadProject, makeKnownChecker, loadKbGloss } from './LayerText_AF词表与词典.mjs';
 
-const P = (await import('./LayerText_AF词表与词典.mjs')).loadProject();
+const P = loadProject();
+const PROPER = P.PROPER;
+
 const SRC_BASE = P.原文目录;
 const OUT_BASE = P.产物目录;
 const DATE = P.日期;
@@ -28,8 +30,9 @@ const DRY = process.argv.includes('--dry');
 const CN = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十'];
 const TAGS = ['A层85', 'M层75', 'B层60'];
 
-const KNOWN_FORMS = loadKnownForms();
-const KB = loadKbGloss();
+// 与 QC 同一套已知判定（否则出现「我删了、引擎却还判它生词」，覆盖率两边打架）
+const isKnown = await makeKnownChecker(P);
+const KB = loadKbGloss(P.知识库路径);
 const KB_WORDS = new Set(KB.keys());
 
 /** 教师确认过的 KB 释义修正（KB 值在原语境里明显不对的少数例外） */
@@ -104,7 +107,7 @@ for (const [w, glosses] of stat) {
   if (PROPER.includes(w)) { removeSet.add(w); why.set(w, ['专名', total]); continue; }
   if (KB_WORDS.has(w)) { canonical.set(w, GLOSS_OVERRIDE.get(w) ?? KB.get(w).zh); continue; }
   if (w === 'chapter') { removeSet.add(w); why.set(w, ['标题残留', total]); continue; }
-  if (isKnownForm(w, KNOWN_FORMS)) { removeSet.add(w); why.set(w, ['词表已知', total]); continue; }
+  if (isKnown(w)) { removeSet.add(w); why.set(w, ['词表已知', total]); continue; }
   const best = [...glosses.entries()].sort((a, b) => b[1] - a[1] || a[0].length - b[0].length)[0][0];
   canonical.set(w, best);
 }
@@ -156,7 +159,7 @@ if (!DRY) {
   for (const [w, zh] of [...canonical].sort((a, b) => a[0].localeCompare(b[0]))) {
     rows.push([w, zh, KB_WORDS.has(w) ? '教师知识库' : '归一（多数票）']);
   }
-  writeFileSync(DICT_CSV, '\uFEFF' + rows.map((r) => r.join(',')).join('\n') + '\n', 'utf-8');
+  writeFileSync(P.词典路径, '\uFEFF' + rows.map((r) => r.join(',')).join('\n') + '\n', 'utf-8');
 }
 
 /* ── 报告 ── */
@@ -171,6 +174,6 @@ console.log(`加注总数：${totalAnn} → ${totalAnn - removed.reduce((a, b) =
 console.log(`删除构成：${Object.entries(byWhy).map(([k, v]) => `${k} ${v} 次`).join(' / ')}`);
 console.log(`归一释义词型：${[...canonical.keys()].filter((w) => !KB_WORDS.has(w)).length} 个（另 ${[...canonical.keys()].filter((w) => KB_WORDS.has(w)).length} 个来自教师知识库）`);
 console.log(`修复前同词多义词型：${multi} 个`);
-console.log(`\n词典 → ${DICT_CSV}${DRY ? '（DRY 未写）' : ''}`);
+console.log(`\n词典 → ${P.词典路径}${DRY ? '（DRY 未写）' : ''}`);
 console.log('\n=== 删除清单（按次数）===');
 console.log(removed.map((r) => `${r.w}×${r.n}(${r.why})`).join(', '));

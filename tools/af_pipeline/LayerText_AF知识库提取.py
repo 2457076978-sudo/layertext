@@ -9,16 +9,45 @@
 """
 import csv
 import glob
+import json
 import os
 import re
 import shutil
 import sys
 from collections import Counter
 from datetime import datetime
+from pathlib import Path
 
-WS = '/Users/wayne/Desktop/工作文档库/01-教学工作/名著阅读工作区_AnimalFarm/调适工作区'
-OUT = '/Users/wayne/Desktop/工作文档库/01-教学工作/名著阅读工作区_AnimalFarm/知识文件/AF审校知识库_v1.csv'
+# ── 项目配置：唯一入口（2026-09-10 修复：原先写死 Animal Farm 的绝对路径，换书即断）──
+# 优先级：环境变量 LAYERTEXT_PROJECT → 当前目录向上找 调适项目_*.json → ~/.layertext.project
+def _find_project():
+    env = os.environ.get('LAYERTEXT_PROJECT')
+    if env and Path(env).exists():
+        return Path(env)
+    cur = Path.cwd()
+    for _ in range(5):
+        hits = sorted(cur.glob('调适项目_*.json'))
+        if hits:
+            return hits[0]
+        if cur.parent == cur:
+            break
+        cur = cur.parent
+    pointer = Path.home() / '.layertext.project'
+    if pointer.exists():
+        p = Path(pointer.read_text(encoding='utf-8').strip())
+        if p.exists():
+            return p
+    raise SystemExit(
+        '找不到 调适项目_*.json。请设环境变量 LAYERTEXT_PROJECT，或在工作区目录下运行本脚本。'
+    )
+
+
+PROJECT = _find_project()
+CFG = json.loads(PROJECT.read_text(encoding='utf-8'))
+WS = CFG['调适工作区']
+OUT = (CFG.get('书级') or {}).get('知识库') or str(Path(WS).parent / '知识文件' / '知识库.csv')
 FORCE = '--force' in sys.argv   # --force = 允许条目缩水（默认禁止，见文末护栏）
+print(f'项目配置：{PROJECT}\n调适工作区：{WS}\n知识库输出：{OUT}')
 
 # ① 注释词对：word（中文）——旧三版产物全文扫
 notes = Counter()
@@ -88,7 +117,10 @@ if not FORCE and (len(notes) < len(existing_notes) or len(swaps) < len(existing_
              f'换词倾向 {len(swaps)}<{len(existing_swaps)}）—— 疑似来源缺失。确要缩水请显式加 --force')
 
 if os.path.exists(OUT):
-    bak = f'{OUT}.bak_{datetime.now():%Y%m%d_%H%M%S}'
+    # 备份进 _历史/，不和正本挤在一个目录（规范：历史版本进 _历史/）
+    hist = Path(OUT).parent / '_历史'
+    hist.mkdir(exist_ok=True)
+    bak = hist / f'{Path(OUT).stem}.bak_{datetime.now():%Y%m%d_%H%M%S}.csv'
     shutil.copy2(OUT, bak)
     print(f'旧库已备份 → {bak}')
 

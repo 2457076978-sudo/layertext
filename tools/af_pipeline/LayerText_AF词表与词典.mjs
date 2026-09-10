@@ -9,20 +9,41 @@
  *   教师知识库（AF审校知识库_v1.csv 加注词）= 最高优先，永远保留
  *   专名（PROPER）= 不计生词、不加注
  */
-import { readFileSync, writeFileSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { readFileSync, writeFileSync, existsSync, readdirSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-/** 引擎目录：优先从项目配置读，其次环境变量，最后兜底本机默认 */
-export let LTR = process.env.LAYERTEXT_ENGINE ?? '/Users/wayne/Desktop/工作文档库/05-网站与AI工作区/LayerText';
-export const VWS = '/Users/wayne/Desktop/工作文档库/01-教学工作/名著阅读工作区_AnimalFarm';
-export const KF = join(VWS, '知识文件');
-export const KB_CSV = join(KF, 'AF审校知识库_v1.csv');
-export const VOCAB_CSV = join(KF, '已知词汇库_v0.7.csv');
-export const DICT_CSV = join(KF, 'AF注释词典_v1.csv');
+/** 引擎目录：本文件在 <引擎>/tools/af_pipeline/ 下，由自身位置推出，不写死绝对路径。
+ *  可用环境变量 LAYERTEXT_ENGINE 或项目配置的 `引擎目录` 覆盖。 */
+const HERE = dirname(fileURLToPath(import.meta.url));
+export let LTR = process.env.LAYERTEXT_ENGINE ?? join(HERE, '..', '..');
 
-/** 项目配置（可换书）：所有路径与书级配置的唯一入口。
- *  换一本名著只需改这个 JSON，或设环境变量 LAYERTEXT_PROJECT 指向新配置。 */
-export const PROJECT_JSON = process.env.LAYERTEXT_PROJECT ?? join(VWS, '调适项目_AnimalFarm.json');
+/** 找一个项目的配置：环境变量 LAYERTEXT_PROJECT 优先；
+ *  否则从当前目录向上逐级找 `调适项目_*.json`（最多 5 层）。
+ *  2026-09-10 修复：原先这里写死了 Animal Farm 的绝对路径，是"换一本书第一步就断"的根源。 */
+export const PROJECT_POINTER = join(process.env.HOME ?? '.', '.layertext.project');
+
+export function findProjectFile(start = process.cwd()) {
+  // ① 环境变量最优先
+  if (process.env.LAYERTEXT_PROJECT) return process.env.LAYERTEXT_PROJECT;
+  // ② 从当前目录向上找 调适项目_*.json
+  let cur = start.replace(/\/+$/, '');
+  for (let i = 0; i < 5 && cur && cur !== '/'; i++) {
+    try {
+      const hit = readdirSync(cur).find((f) => /^调适项目_.*\.json$/.test(f));
+      if (hit) return join(cur, hit);
+    } catch { /* 目录不可读就往上走 */ }
+    cur = cur.replace(/\/[^/]+$/, '');
+  }
+  // ③ 上次用过的项目（脚本每次成功载入后写下的指针，免去每次 cd 或 export）
+  try {
+    if (existsSync(PROJECT_POINTER)) {
+      const last = readFileSync(PROJECT_POINTER, 'utf-8').trim();
+      if (last && existsSync(last)) return last;
+    }
+  } catch { /* 指针坏了就当没有 */ }
+  return null;
+}
 
 /** 读专名表（一行一名，忽略 # 注释与空行） */
 export function loadProper(path) {
@@ -34,12 +55,24 @@ export function loadProper(path) {
 
 /** 读项目配置 → 展开成脚本直接可用的常量（含专名表内容）
  *  这样脚本里不再出现任何绝对路径，也不再各自维护 PROPER。 */
-export function loadProject(path = PROJECT_JSON) {
+export function loadProject(path = findProjectFile()) {
+  if (!path) {
+    throw new Error(
+      '找不到 调适项目_*.json。三种解法任选：\n' +
+      '  ① 设环境变量 LAYERTEXT_PROJECT=/绝对路径/调适项目_我的书.json\n' +
+      '  ② 在工作区目录（或在它的子目录）里运行脚本\n' +
+      '  ③ 传 --project /绝对路径/调适项目_我的书.json（管线脚本支持）',
+    );
+  }
+  if (!existsSync(path)) throw new Error(`项目配置不存在：${path}`);
+  // 记下"上次用的项目"，下次在任何目录下跑都不用再设环境变量
+  try { writeFileSync(PROJECT_POINTER, path + '\n', 'utf-8'); } catch { /* 只读环境就算了 */ }
   const d = JSON.parse(readFileSync(path, 'utf-8'));
   const 书级 = d.书级 ?? {};
   if (d.引擎目录) LTR = d.引擎目录;
   return {
     ...d,
+    配置路径: path,
     引擎目录: d.引擎目录 ?? LTR,
     专名表路径: 书级.专名表,
     知识库路径: 书级.知识库,
@@ -48,22 +81,13 @@ export function loadProject(path = PROJECT_JSON) {
   };
 }
 
-/** AF 专名：人物/动物/地名/作品名（QC 不计 OOV，改写不加注）
- *  ⚠️ 已迁到 知识文件/专名_AnimalFarm.txt（每本书一份）；此处仅保留兜底默认值。
- *  2026-09-10 补 clover/squealer/mollie——原三份拷贝均漏，Squealer 曾注出 4 种不同意思。 */
-export const PROPER = [
-  'jones', 'major', 'snowball', 'napoleon', 'benjamin', 'muriel', 'bluebell', 'jessie', 'pincher',
-  'boxer', 'moses', 'pilkington', 'frederick', 'minimus', 'whymper', 'manor', 'willingdon',
-  'beauty', 'england', 'ireland', 'animal farm', 'clover', 'squealer', 'mollie',
-];
-
 const readCsvWords = (p, col = 0) =>
   readFileSync(p, 'utf-8').replace(/^\uFEFF/, '').split('\n').slice(1)
     .map((l) => l.split(',')[col]?.trim().toLowerCase())
     .filter(Boolean);
 
 /** 已知词 + 规则屈折展开。正向生成而非反向剥后缀——反向剥会把 hissing→his、butting→but、manes→man。 */
-export function loadKnownForms() {
+export function loadKnownForms(P) {
   const base = new Set();
   for (const rel of ['assets/wordlists/curriculum_2022_level3_1600.txt', 'assets/wordlists/curriculum_2022_amendment.txt']) {
     const p = join(LTR, rel);
@@ -73,7 +97,7 @@ export function loadKnownForms() {
       if (w) base.add(w);
     }
   }
-  for (const w of readCsvWords(VOCAB_CSV)) base.add(w);
+  if (P?.词库) for (const w of readCsvWords(P.词库)) base.add(w);
   const forms = new Set(base);
   const V = 'aeiou';
   for (const w of base) {
@@ -113,8 +137,18 @@ export async function loadLexicon(P) {
   });
 }
 
+/** 引擎口径的"已知"判定（与 QC 完全同一套：不规则形 + 后缀还原）。
+ *  2026-09-10 修复：修复脚本原先用 loadKnownForms 的规则展开（给每个词加 ly/s/ed…），
+ *  比引擎宽 —— 于是它删掉了引擎仍判为 OOV 的词的注释（如 curiously / nightly），
+ *  覆盖率随之下跌，两边规则互相打架。现在两边共用同一个判定。 */
+export async function makeKnownChecker(P) {
+  const { hit } = await import(`${P.引擎目录}/dist/src/core/textpipe.js`);
+  const LEX = await loadLexicon(P);
+  return (w) => hit(String(w).toLowerCase(), LEX.known);
+}
+
 /** 教师知识库加注词 → 释义（值含"复现/复数/比较级"者为流程标记，不是释义） */
-export function loadKbGloss(path = KB_CSV) {
+export function loadKbGloss(path) {
   const m = new Map();
   if (!existsSync(path)) return m;
   for (const line of readFileSync(path, 'utf-8').replace(/^\uFEFF/, '').split('\n').slice(1)) {
@@ -129,7 +163,7 @@ export function loadKbGloss(path = KB_CSV) {
 }
 
 /** 统一注释词典（word → 中文释义）：跨章同词同义的正本 */
-export function loadDict(path = DICT_CSV) {
+export function loadDict(path) {
   const m = new Map();
   if (!existsSync(path)) return m;
   for (const line of readFileSync(path, 'utf-8').replace(/^\uFEFF/, '').split('\n').slice(1)) {
@@ -139,8 +173,9 @@ export function loadDict(path = DICT_CSV) {
   return m;
 }
 
-/** 新词回写词典，保持跨章一致（下次遇到同词直接用既有释义） */
-export function appendDict(entries, path = DICT_CSV) {
+/** 新词回写词典，保持跨章一致（下次遇到同词直接用既有释义）。path 必传（词典路径来自项目配置） */
+export function appendDict(entries, path) {
+  if (!path) throw new Error('appendDict 需要词典路径（来自项目配置的 书级.词典）');
   const m = loadDict(path);
   let added = 0;
   for (const [w, zh] of entries) {

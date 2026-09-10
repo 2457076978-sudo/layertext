@@ -8,27 +8,34 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
-const WS = '/Users/wayne/Desktop/工作文档库/01-教学工作/名著阅读工作区_AnimalFarm/调适工作区';
-const OUT = join(WS, '原文重制_M50');
+/* 2026-09-10 修复：原先这里写死了 Animal Farm 的绝对路径、也不读项目配置，
+ * 于是"换一本书"在第一步（原文规范化）就断。现在全部从 调适项目_*.json 读，
+ * 输入文件名可配（默认沿用本项目的历史命名，不影响已有工作区）。 */
+const P = (await import('./LayerText_AF词表与词典.mjs')).loadProject();
+const WS = P.调适工作区;
+const OUT = P.原文目录;
+const SRC_CLEAN = P.原文基线清理版名 ?? '原文基线_清理对齐版.md';
+const SRC_RAW = P.原文基线重建稿名 ?? '原文基线_重建稿.txt';
+const CH_COUNT = Number(P.章数 ?? 10);
 const CN = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十'];
 const wc = (t) => (t.match(/[A-Za-z][A-Za-z'-]*/g) ?? []).length;
 
 mkdirSync(OUT, { recursive: true });
 const report = [];
 
-for (let i = 1; i <= 10; i++) {
+for (let i = 1; i <= CH_COUNT; i++) {
   const ch = `第${CN[i - 1]}章`;
   const dir = join(WS, ch);
   const outDir = join(OUT, ch);
   mkdirSync(outDir, { recursive: true });
-  const cleaned = join(dir, '原文基线_清理对齐版.md');
+  const cleaned = join(dir, SRC_CLEAN);
   let md;
   if (existsSync(cleaned)) {
     // 第一章：人工清理版内容原样，补齐 Chapter 标记（锚定行首 [P01]，引擎 splitChapter 需要）
     const raw2 = readFileSync(cleaned, 'utf-8');
     md = /^## Chapter /m.test(raw2) ? raw2 : raw2.replace(/^(\[P01\])/m, `## Chapter One\n\n$1`);
   } else {
-    const raw = readFileSync(join(dir, '原文基线_重建稿.txt'), 'utf-8');
+    const raw = readFileSync(join(dir, SRC_RAW), 'utf-8');
     // 句标记 [S###] 提取 + 轻清理（Chapter N 粘连、句内重复 OCR 残留交由 AI 语感修复，指令中说明）
     const sents = [...raw.matchAll(/\[S\d+\]\s*([\s\S]*?)(?=\[S\d+\]|$)/g)].map((m) =>
       m[1].replace(/\s+/g, ' ').replace(/(Chapter \d+)(?=[A-Z])/g, '$1 ').trim(),

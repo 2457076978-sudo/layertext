@@ -35,6 +35,12 @@ const tierArg = tiers.join(',') === 'A,M,B' ? 'ALL' : tiers.join(',');
 /** 步骤定义：顺序敏感，不要调整 */
 const STEPS = [
   {
+    id: '规范化', script: 'LayerText_AF重制_预处理与规则.mjs',
+    args: [],
+    note: '原文 → [P##] 分段 md（含缺空格/OCR 章节名残留修补；无 API）',
+    needsApi: false,
+  },
+  {
     id: '生成', script: 'LayerText_AF三档生成.mjs',
     args: [tierArg, ...(chapters ? [chapters] : [])],
     note: '逐段改写（守恒）+ 修剪轮 + 知识库注入（**消耗 API 额度**）',

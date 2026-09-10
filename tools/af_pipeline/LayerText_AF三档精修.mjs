@@ -21,13 +21,14 @@ const { splitChapter, extractParas, sentsOf } = await import(`${REPO}/dist/src/c
 const { runQc } = await import(`${REPO}/dist/src/core/qc.js`);
 const { alignSentencePairs } = await import(`${REPO}/dist/src/core/align.js`);
 // 词表/词典集中一份（2026-09-10：三份拷贝各漏 clover/squealer/mollie，才注出"三叶草""告密者"）
-const { PROPER, isKnownForm, loadKnownForms, loadDict, appendDict, loadLexicon } = await import('./LayerText_AF词表与词典.mjs');
+const { makeKnownChecker, loadDict, appendDict, loadLexicon } = await import('./LayerText_AF词表与词典.mjs');
+const PROPER = P.PROPER;
 const LEX = await loadLexicon(P);
-const KNOWN_FORMS = loadKnownForms();
+const isKnown = await makeKnownChecker(P); // 与 QC 同一套已知口径
 // 2026-09-10 修复：此处原先漏了 DICT 的定义（loadDict 只 import 未调用），
 // 一旦遇到"有 OOV 的章节"就 ReferenceError；而主循环把异常吞掉只打一个 ✗，
 // 于是失败章节从报表里消失 —— A 层第 7/8/9 章加注覆盖率只剩 2% 就是这么漏出去的。
-const DICT = loadDict();
+const DICT = loadDict(P.词典路径);
 const NEVER_ANNOTATE = new Set(['chapter']); // 正文里的 "Chapter N" 标题残留，不加注
 
 const TAGS = { A: 'A层85', M: 'M层75', B: 'B层60' };
@@ -65,7 +66,7 @@ async function refineChapter(tk, tag, i) {
   const qc0 = runQc(md, LEX, { tier: tk, fileName: path.split('/').pop() });
   const oov = [...new Set(qc0.oov)].filter((w) =>
     w.length > 2 && !PROPER.includes(w) && !NEVER_ANNOTATE.has(w)
-    && !isKnownForm(w, KNOWN_FORMS) && !new RegExp(`${w}（`).test(md));
+    && !isKnown(w) && !new RegExp(`${w}（`).test(md));
   const glosses = new Map();
   const missing = [];
   for (const w of oov) {
@@ -87,7 +88,7 @@ async function refineChapter(tk, tag, i) {
         if (typeof zh === 'string' && /[\u4e00-\u9fff]/.test(zh)) glosses.set(w.toLowerCase(), zh);
       }
       // 新词回写词典：下次遇到同一词直接用既有释义，杜绝跨章一词多义
-      appendDict([...glosses].filter(([w]) => !DICT.has(w)));
+      appendDict([...glosses].filter(([w]) => !DICT.has(w)), P.词典路径);
     } catch {
       /* 注释失败不阻塞 */
     }

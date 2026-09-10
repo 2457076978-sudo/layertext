@@ -18,28 +18,44 @@ import { basename, join, extname } from 'node:path';
 const SCHEMA_VERSION = '1';
 
 /* ────────────────────────── 类型识别 ────────────────────────── */
-/** 按文件名 + 内容嗅探判定数据类型（规范里 6 个对象） */
+/** 判类型：**内容优先，文件名只作兜底**。
+ *  2026-09-10 修复：原先"分层"靠文件名 `/^分层/` 命中，于是派生的 `分层名单_v0.2.csv`
+ *  （逐生名单，CSV）被当成"分层"（JSON）去解析，`--all` 在真实目录上必然报一条假失败。
+ *  真实世界里"名字像"和"内容是"经常不是一回事，所以先看内容。 */
 function detectType(file, text) {
   const n = basename(file);
-  if (/^词库|已知词汇库/.test(n)) return '词库';
-  if (/^分层/.test(n)) return '分层';
-  if (/^画像/.test(n)) return '画像';
-  if (/^知识库|审校知识库/.test(n)) return '知识库';
-  if (/^词典|注释词典/.test(n)) return '词典';
-  if (/^专名/.test(n)) return '专名';
-  // 内容嗅探
   const head = text.slice(0, 2000);
+  const firstLine = head.split('\n')[0].replace(/^\uFEFF/, '').trim();
+  // ① 内容嗅探（不依赖文件名）
   if (head.trimStart().startsWith('{')) {
     if (head.includes('"groups"') || head.includes('"targets"')) return '分层';
     if (head.includes('"students"')) return '画像';
     return null;
   }
-  const firstLine = head.split('\n')[0].replace(/^\uFEFF/, '').trim();
   if (firstLine.startsWith('词,类型,词性')) return '词库';
   if (firstLine.startsWith('类型,词,值')) return '知识库';
   if (firstLine.startsWith('词,释义')) return '词典';
-  if (extname(file) === '.txt' && /^[a-z][a-z '-]*$/m.test(head)) return '专名';
+  // ② 文件名兜底（只对"没有表头可嗅探"的类型：分层/画像/专名）
+  if (/^分层.*\.json$/.test(n)) return '分层';
+  if (/^画像.*\.json$/.test(n)) return '画像';
+  if (extname(file) === '.txt') {
+    if (/专名/.test(n)) return '专名';
+    // 一行一名、且规模像"专名表"（课标1600 那种整册词表不算，它是词表不是专名表）
+    const lines = head.split('\n').map((x) => x.trim()).filter((x) => x && !x.startsWith('#'));
+    if (lines.length && lines.length <= 400 && lines.every((l) => /^[a-z][a-z '-]*$/.test(l))) return '专名';
+  }
   return null;
+}
+
+/** 目录扫描时该不该跳过：历史版本、备份、派生名单都不该报错——
+ *  它们不是"当前正本"，报出来只会淹没有效信息（2026-09-10 修：真目录 --all 一片红）。 */
+function shouldSkip(name) {
+  if (name.startsWith('.')) return true;
+  if (/\.bak[_0-9]*/.test(name)) return true;
+  if (/历史版本|_历史|_归档|备份/.test(name)) return true;
+  // 派生件（由正本生成，不是正本）：分层名单、已学词表、台账
+  if (/^分层名单|^已学词|^台账|^三档汇总/.test(name)) return true;
+  return false;
 }
 
 /* ────────────────────────── 通用工具 ────────────────────────── */
@@ -168,7 +184,9 @@ function validateBookCsv(text, kind) {
       if (!['加注词', '换词倾向'].includes(t)) errs.push(ERR('取值非法', `${kind} 第${line}行.类型`, `「${t}」，允许：加注词 / 换词倾向`));
       if (!w) errs.push(ERR('必填缺失', `${kind} 第${line}行.词`, '为空'));
       if (w && w !== w.toLowerCase()) warns.push(ERR('建议小写', `${kind} 第${line}行.词`, `「${w}」应小写`));
-      if (w) { const key = `${t}:${w}`; if (seen.has(key)) warns.push(ERR('重复', `${kind} 第${line}行`, `「${t}:${w}」已出现`)); seen.add(key); }
+      // 2026-09-10 统一口径：同型同词重复 = 错误（面板也是这么判的，2026-09-10 之前这里只给警告，
+      // 于是"知识库里 harness 有两条不同释义"在命令行看着没事、在 App 里却直接冻结整个标签页）
+      if (w) { const key = `${t}:${w}`; if (seen.has(key)) errs.push(ERR('重复', `${kind} 第${line}行`, `「${t}:${w}」已出现（同型同词只能有一行）`)); seen.add(key); }
     });
     return { errs, warns, summary: { 条目数: rows.length - 1 } };
   }
@@ -229,13 +247,19 @@ if (!targets.length) {
 }
 
 const files = [];
+const skipped = [];
 for (const t of targets) {
   if (statSync(t).isDirectory()) {
     for (const f of readdirSync(t)) {
       if (!/\.(csv|json|txt)$/i.test(f)) continue;
+      if (shouldSkip(f)) { skipped.push(f); continue; }
       const full = join(t, f);
-      const ty = forcedType ?? detectType(full, readFileSync(full, 'utf-8'));
+      let ty;
+      try {
+        ty = forcedType ?? detectType(full, readFileSync(full, 'utf-8'));
+      } catch { continue; }
       if (ty) files.push({ full, ty });
+      else skipped.push(f);
     }
   } else files.push({ full: t, ty: forcedType });
 }
@@ -244,7 +268,7 @@ const results = files.map(({ full, ty }) => runOne(full, ty));
 const bad = results.filter((r) => r.errs.length);
 
 if (asJson) {
-  console.log(JSON.stringify({ 通过: results.length - bad.length, 失败: bad.length, 结果: results }, null, 1));
+  console.log(JSON.stringify({ 通过: results.length - bad.length, 失败: bad.length, 结果: results, 跳过: skipped }, null, 1));
 } else {
   for (const r of results) {
     const mark = r.errs.length ? '✗' : '✓';
@@ -252,6 +276,10 @@ if (asJson) {
     console.log(`${mark} [${r.type}] ${basename(r.file)}${sum ? '  —— ' + sum : ''}`);
     r.errs.forEach((e, i) => console.log(`    ${i + 1}. [${e.kind}] ${e.where}：${e.msg}`));
     r.warns.forEach((e) => console.log(`    ⚠ [${e.kind}] ${e.where}：${e.msg}`));
+  }
+  // 历史版本/备份/派生件不算"失败"，但也别让人以为它们被漏检了
+  if (skipped.length) {
+    console.log(`\n（跳过 ${skipped.length} 个：历史版本 / 备份 / 派生件 / 非数据文件——它们不是当前正本）`);
   }
   console.log(`\n合计 ${results.length} 个文件：通过 ${results.length - bad.length}，失败 ${bad.length}`);
 }

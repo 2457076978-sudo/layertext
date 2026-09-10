@@ -60,8 +60,8 @@ const TARGET = (() => {
 
 const { runQc } = await import(`${REPO}/dist/src/core/qc.js`);
 const LEX = await loadLexicon(P);
-const DICT = loadDict();
-const KB = loadKbGloss();
+const DICT = loadDict(P.词典路径);
+const KB = loadKbGloss(P.知识库路径);
 const NEVER_ANNOTATE = new Set(['chapter']);
 const wc = (t) => (t.match(/[A-Za-z][A-Za-z'-]*/g) ?? []).length;
 
@@ -181,7 +181,7 @@ for (const tk of tiers) {
         // 注释右括号后补空格，否则 "sleet（雨夹雪)and" 这类粘连会留给读者
         md = md.replace(/([）)])(?=[A-Za-z])/g, '$1 ').replace(/ {2,}/g, ' ');
         writeFileSync(path, md, 'utf-8');
-        appendDict(newEntries);
+        appendDict(newEntries, P.词典路径);
         for (const [w, zh] of newEntries) DICT.set(w, zh);
       }
 
