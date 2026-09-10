@@ -1268,6 +1268,27 @@
       #grade-pop.open {
         display: block;
       }
+      #rev-pop {
+        display: none;
+        position: fixed;
+        z-index: 57;
+        width: 620px;
+        max-width: 94vw;
+        max-height: 84vh;
+        overflow: auto;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        box-shadow: 0 8px 30px rgba(15, 23, 42, 0.14);
+        padding: 16px;
+        font-size: 13px;
+        left: 50%;
+        top: 6%;
+        transform: translateX(-50%);
+      }
+      #rev-pop.open {
+        display: block;
+      }
       #batch-pop {
         display: none;
         position: fixed;

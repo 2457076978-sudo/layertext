@@ -302,6 +302,12 @@ export async function buildGradingPrompt(vars: { student: string; vocabNote: str
   return composePrompt(tpl, vars);
 }
 
+/** 定向复习材料 system（review_material 模板：词汇置换+队列词定向复现+目标语法点） */
+export async function buildRevSystemPrompt(vars: { words: string; grammar: string; instructions: string; vocabRule: string }): Promise<string> {
+  const tpl = (await loadPrompt('review_material')).body;
+  return composePrompt(tpl, vars);
+}
+
 /** 读后检测题生成 user 消息（AI 出候选，教师勾选定卷；词汇题优先复现队列词） */
 export async function buildReadingQuizPrompt(vars: { chapter: string; words: string }): Promise<string> {
   const tpl = (await loadPrompt('reading_quiz')).body;

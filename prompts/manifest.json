@@ -1,5 +1,5 @@
 {
-  "setVersion": "v1.4",
+  "setVersion": "v1.5",
   "prompts": {
     "system_simplify": {
       "version": "v1.1",
@@ -35,9 +35,19 @@
       "version": "v1.0",
       "file": "reading_quiz.md",
       "desc": "读后检测题生成 user 模板（占位符 {{chapter}}/{{words}}）：理解/推断/词汇三型选择题候选，教师勾选定卷；词汇题优先复现队列词"
+    },
+    "review_material": {
+      "version": "v1.0",
+      "file": "review_material.md",
+      "desc": "定向复习材料 system（占位符 {{words}}/{{grammar}}/{{instructions}}/{{vocabRule}}）：作业/教材→班级口径置换+队列词定向复现+目标语法点融入"
     }
   },
   "changelog": [
+    {
+      "version": "v1.5",
+      "date": "2026-09-10",
+      "note": "新增 review_material（定向复习）：作业/教材改写为复习材料，队列词定向复现 8~12 个+目标语法点自然融入（组合拳'生成侧定向注入'落地）"
+    },
     {
       "version": "v1.4",
       "date": "2026-09-10",

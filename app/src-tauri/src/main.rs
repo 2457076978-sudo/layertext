@@ -642,6 +642,11 @@ fn main() {
                 .item(&mi_grade_one)
                 .item(&mi_grade_class)
                 .build()?;
+            let mi_rev = MenuItemBuilder::with_id(
+                "rev-material",
+                "定向复习材料…（作业/教材→复现注入+语法点）",
+            )
+            .build(app)?;
             let qc_menu = SubmenuBuilder::new(app, "质检")
                 .item(&mi_run)
                 .item(&mi_draft)
@@ -649,6 +654,7 @@ fn main() {
                 .item(&mi_cls)
                 .item(&mi_sync)
                 .item(&mi_anki)
+                .item(&mi_rev)
                 .separator()
                 .item(&mi_ai)
                 .build()?;

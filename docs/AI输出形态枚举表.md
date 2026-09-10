@@ -40,6 +40,7 @@
 | 24 | 映射值是中文（如"七诫"，AI 把"简单词"答成中文）——hasProseChinese ≥4 字防线漏过短中文 | **已防**：hasAnyChinese 单汉字即拒（值过滤+查找双重）；测试 gloss_map.test.ts | ③④ | 已防 |
 | 25 | **批改候选形态**（09-10 新增 AI 批改功能）：type 不在五类白名单 / original 在学生原文中定位不到（AI 编造或改写了学生句子）/ note 空缺 | **已防（09-10）**：parseGradingItems 裁决（type 白名单 grammar/usage/structure/highlight/comment；非 comment 类 original 必须可定位，宽容匹配；note 必须非空）——不合规整条拒收+计数明示，绝不进批改稿；comment 类无 original；测试 suggest_order_schema.test.ts | ③ | 已防 |
 | 26 | **检测题候选形态**（09-10 新增读后检测题）：题干空/选项不足 3 或超 5 个/答案字母越界指向不存在选项/focus 白名单外 | **已防（09-10）**：parseQuizItems 裁决——不合规整题拒收+计数明示，绝不进检测卷（默认勾选可逐题取消）；测试 suggest_order_schema.test.ts | ③ | 已防 |
+| 27 | **定向复习生成形态**（09-10 新增，散文输出）：输出被翻译成中文 / 丢失 [P##] 段标记（同 #12 整章改写曾踩） | **已防**：prompt 显式"输出英文禁止中文+保留段标记"+cleanRevSeg 段标记补回+生成后自动体检（生词率/句长）+教师走查；目标语法达成由引擎三项计数明示（被动/定从/过去完成），其余语法点教师过目 | ③④ | 已防 |
 
 ## 三、使用规则
 
