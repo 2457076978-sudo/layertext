@@ -159,18 +159,37 @@ async function renderShelfInner(el: HTMLElement): Promise<void> {
   const books = await loadShelf();
   const covers = new Map<string, string | null>();
   await Promise.all(books.map(async (b) => covers.set(b.目录, await coverDataUrl(b.目录))));
-  renderShelfChrome(el, books);
+  renderShelfChrome(el, books, covers);
   renderShelfGrid(el, books, covers);
   bindShelfChrome(el, books, covers);
 }
 
-/** 书架页骨架（继续上次 / 标题 / 工具行 / 分组条 / 正文容器 / 脚注）——进书架渲染一次 */
-function renderShelfChrome(el: HTMLElement, books: ShelfBook[]): void {
+/** 书架页骨架（继续上次 hero / 标题 / 工具行 / 分组条 / 正文容器 / 脚注）——进书架渲染一次 */
+function renderShelfChrome(el: HTMLElement, books: ShelfBook[], covers: Map<string, string | null>): void {
   const groups = shelfGroupsOf(books);
   const ls = S.appConfig.lastSession;
+  // 首屏 hero：上次在读的书（封面+书名+工作区章名+审校进度+一键继续）——打开 App 第一眼=你的阅读工作台
+  const heroBook = ls?.files?.length ? books.find((b) => b.目录 === ls.bookDir) : undefined;
+  const heroHtml = heroBook
+    ? (() => {
+        const img = covers.get(heroBook.目录);
+        const prog = S.appConfig.progress?.[heroBook.目录];
+        const pct = prog ? progressPct(prog.chapters.length, prog.total) : 0;
+        const lastFile = ls!.files[Math.min(ls!.activeIdx, ls!.files.length - 1)]?.path.split('/').pop() ?? '';
+        return `<div class="shelf-hero" id="shelf-resume" title="回到上次编辑的章节">
+      <div class="hero-cover${img ? ' has-img' : ''}" style="${img ? `background-image:url(${img})` : `background:${shelfColor(heroBook.名)}`}"></div>
+      <div class="hero-info">
+        <div class="hero-title">${esc(heroBook.名)}</div>
+        <div class="hero-sub">${esc(ls!.workspace ? ls!.workspace + ' · ' : '')}${esc(lastFile)} <span class="dim">（${esc(ls!.savedAt)}）</span></div>
+        <div class="hero-progress" title="审校进度：${pct}%"><i style="width:${pct}%"></i></div>
+      </div>
+      <button class="hero-go"><svg class="ico"><use href="#i-play"/></svg>继续上次编辑</button>
+    </div>`;
+      })()
+    : '';
   el.innerHTML = `
     <div class="shelf">
-      ${ls?.files?.length ? `<div class="shelf-resume" id="shelf-resume"><svg class="ico"><use href="#i-play"/></svg>继续上次编辑：${esc(ls.workspace ? ls.workspace + ' · ' : '')}${esc(ls.files[Math.min(ls.activeIdx, ls.files.length - 1)]?.path.split('/').pop() ?? '')} <span class="dim">（${esc(ls.savedAt)}）</span></div>` : ''}
+      ${heroHtml}
       <div class="shelf-h"><svg class="ico"><use href="#i-books"/></svg>我的书架</div>
       <div class="shelf-tools">
         <input type="search" id="shelf-q" placeholder="搜索书名 / 分组…" value="${esc(S.shelfQ)}"/>

@@ -29,11 +29,67 @@ const VIEW_MAP = [
 
 export type ViewName = 'text' | 'report' | 'suggest' | 'diff' | 'align' | 'board' | 'dossier' | 'retro';
 
+/** 一级三组（按教师任务流）：读=阅读与版本比对 / 检=体检与书级状态 / 改=修订处理与回顾 */
+export const VIEW_GROUPS: { label: string; hint: string; views: readonly ViewName[] }[] = [
+  { label: '读', hint: '阅读与版本比对：正文审校 · 逐句对照 · 版本对比', views: ['text', 'align', 'diff'] },
+  { label: '检', hint: '体检与书级状态：质检报告 · 看板 · 审校档案', views: ['report', 'board', 'dossier'] },
+  { label: '改', hint: '修订处理与回顾：修订建议 · 复盘', views: ['suggest', 'retro'] },
+];
+
+const SUB_LABELS: Record<ViewName, string> = {
+  text: '正文',
+  align: '逐句对照',
+  diff: '版本对比',
+  report: '报告',
+  board: '看板',
+  dossier: '档案',
+  suggest: '建议',
+  retro: '复盘',
+};
+
+const groupOf = (v: ViewName): { label: string; hint: string; views: readonly ViewName[] } =>
+  VIEW_GROUPS.find((g) => g.views.includes(v)) ?? VIEW_GROUPS[0]!;
+
+/** 每组最近视图（会话级记忆：点一级组回到上次所在页） */
+const lastOfGroup: Record<string, ViewName> = {};
+
 export function switchView(root: Document, name: ViewName): void {
   for (const [id, pane] of VIEW_MAP) {
-    root.getElementById(id)!.classList.toggle('active', id === `tab-${name}`);
+    root.getElementById(id)?.classList.toggle('active', id === `tab-${name}`); // 旧 tab-* 兼容（测试 DOM 用；生产已容器化）
     root.getElementById(pane)!.classList.toggle('active', pane === `pane-${name}`);
   }
+  lastOfGroup[groupOf(name).label] = name;
+  syncViewTabs(root, name);
+}
+
+/** 同步两级页签渲染（一级组高亮 + 组内二级；容器不存在时静默——happy-dom 旧测试不受影响） */
+export function syncViewTabs(root: Document, active: ViewName): void {
+  const g = groupOf(active);
+  const groupsEl = root.getElementById('vt-groups');
+  const subEl = root.getElementById('vt-sub');
+  if (!groupsEl || !subEl) return;
+  groupsEl.innerHTML = VIEW_GROUPS.map(
+    (x) => `<button class="vt-g${x.label === g.label ? ' active' : ''}" data-vt-group="${x.label}" title="${x.hint}">${x.label}</button>`,
+  ).join('');
+  subEl.innerHTML =
+    g.views.length > 1
+      ? g.views.map((v) => `<button class="vt-s${v === active ? ' active' : ''}" data-vt-view="${v}">${SUB_LABELS[v]}</button>`).join('')
+      : '';
+}
+
+/** 两级页签事件委托（一级=回该组上次视图；二级=切具体视图）——main 侧唯一绑定入口 */
+export function bindViewTabs(root: Document, go: (v: ViewName) => void): void {
+  root.getElementById('vt-groups')?.addEventListener('click', (e) => {
+    const label = (e.target as HTMLElement).closest('[data-vt-group]')?.getAttribute('data-vt-group');
+    if (!label) return;
+    const g = VIEW_GROUPS.find((x) => x.label === label)!;
+    go(lastOfGroup[label] ?? g.views[0]!);
+  });
+  root.getElementById('vt-sub')?.addEventListener('click', (e) => {
+    const v = (e.target as HTMLElement).closest('[data-vt-view]')?.getAttribute('data-vt-view');
+    if (v) go(v as ViewName);
+  });
+  syncViewTabs(root, 'text');
 }
 
 /* ---------- 版本对比（双版本逐段 diff：红=仅左侧版本，绿=已修改/仅右侧版本） ---------- */

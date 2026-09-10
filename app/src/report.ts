@@ -42,10 +42,13 @@ import { buildPlotPointsPrompt, buildReadingQuizPrompt, simplifyMaxLen } from '.
 import { extractParas, sentsOf, splitChapter, tokenizeTxt } from '../../src/core/textpipe.js';
 import { parseZipfTable, triageOov } from '../../src/core/wordfreq.js';
 import zipfTsv from '../../assets/wordfreq/en_zipf.tsv?raw';
+import aoaTsv from '../../assets/wordfreq/en_aoa.tsv?raw';
 import { sentenceRisks } from '../../src/core/risks.js';
 
-/** zipf 词频先验（wordfreq 导出，纯离线）：OOV 分诊候选——高频未收=疑似漏收，低频=真·生词；不碰判定 */
+/** 词频/习得年龄先验（wordfreq + Kuperman 2012 AoA 常模，纯离线）：OOV 双信号分诊——高频且在常模内=疑似漏收，
+ *  高频但常模外（专名/衍生词）降级待核；低频=真·生词。不碰判定。 */
 const ZIPF_TABLE = parseZipfTable(zipfTsv);
+const AOA_TABLE = parseZipfTable(aoaTsv);
 
 /** 初步诊断：在正文里找某词（词形还原口径）第一次出现的位置 */
 function locateWordFirst(session: FileSession, tok: string): { pi: number; si: number; wi: number; raw: string } | null {
@@ -107,7 +110,7 @@ export function renderReportPane(s: FileSession): void {
   const risks = riskSentenceList(s);
 
   /* 生词清单：每词三个动作位——词频先验分诊（疑似漏收置顶）/ 标记简化（进标记清单走 AI）/ 计入已学词（不再标红） */
-  const triaged = oov.map((w) => triageOov(w, ZIPF_TABLE));
+  const triaged = oov.map((w) => triageOov(w, ZIPF_TABLE, AOA_TABLE));
   const suspects = triaged.filter((t) => t.triage === 'suspect').sort((a, b) => (b.zipf ?? 0) - (a.zipf ?? 0));
   const oovRows = [...suspects, ...triaged.filter((t) => t.triage !== 'suspect')]
     .slice(0, 80)
@@ -115,12 +118,15 @@ export function renderReportPane(s: FileSession): void {
       const w = t.word;
       const marked = s.review.marks.some((m) => m.level === 'word' && (m.word ?? '').toLowerCase() === w);
       const learned = S.currentKnown.has(w);
+      const aoaNote = t.aoa !== null ? ` · AoA ${t.aoa.toFixed(1)}` : '';
       const freqCell =
         t.triage === 'suspect'
-          ? `<span class="chip warn-chip">⚠ 疑似漏收</span> <span class="dim">zipf ${t.zipf!.toFixed(1)}</span>`
-          : t.zipf !== null
-            ? `<span class="dim">zipf ${t.zipf.toFixed(1)} · 中频</span>`
-            : '<span class="dim">低频 · 真生词</span>';
+          ? `<span class="chip warn-chip">⚠ 疑似漏收</span> <span class="dim">zipf ${t.zipf!.toFixed(1)}${aoaNote}岁</span>`
+          : t.zipf !== null && t.triage === 'mid' && t.label.includes('常模外')
+            ? `<span class="dim">zipf ${t.zipf.toFixed(1)} · 高频但常模外（多为专名，按需核对）</span>`
+            : t.zipf !== null
+              ? `<span class="dim">zipf ${t.zipf.toFixed(1)}${aoaNote} · 中频</span>`
+              : '<span class="dim">低频 · 真生词</span>';
       return `<tr>
       <td style="font-weight:600">${esc(w)}</td>
       <td>${freqCell}</td>

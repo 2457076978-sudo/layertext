@@ -11,7 +11,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { lexiconFromWords } from '../src/core/lexicon.js';
 import { buildMcpLexicon, toolQcText } from '../src/core/mcpTools.js';
-import { MID_ZIPF, parseZipfTable, SUSPECT_ZIPF, triageOov, TRIAGE_RANK, zipfOf } from '../src/core/wordfreq.js';
+import { aoaOf, MID_ZIPF, parseZipfTable, SUSPECT_ZIPF, triageOov, TRIAGE_RANK, zipfOf } from '../src/core/wordfreq.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const TSV = readFileSync(join(ROOT, 'assets', 'wordfreq', 'en_zipf.tsv'), 'utf-8');
@@ -45,6 +45,26 @@ test('triageOov：三档判定与教研语言标签', () => {
   assert.equal(rare.triage, 'rare');
   assert.equal(rare.zipf, null);
   assert.match(rare.label, /真生词/);
+});
+
+test('AoA 双信号分诊（Kuperman 2012 常模）：高频且在常模内才亮疑似漏收，常模外专名降级降噪', () => {
+  const zt = parseZipfTable(TSV);
+  const aoaPath = join(ROOT, 'assets', 'wordfreq', 'en_aoa.tsv');
+  const at = parseZipfTable(readFileSync(aoaPath, 'utf-8'));
+  // aoaOf：家族兜底（running→run 在常模）
+  assert.notEqual(aoaOf('running', at), null);
+  // 双确认：government zipf 5.6 + AoA 8.5 在常模 → suspect 且 label 带习得年龄
+  const gov = triageOov('government', zt, at);
+  assert.equal(gov.triage, 'suspect');
+  assert.ok(gov.aoa !== null && Math.abs(gov.aoa - 8.5) < 0.2, `aoa=${gov.aoa}`);
+  assert.match(gov.label, /岁习得/);
+  // 降噪：harry zipf 4.7 但常模查无（人名不在 30k 实词常模）→ 降级 mid'高频·常模外'
+  const harry = triageOov('harry', zt, at);
+  assert.equal(harry.triage, 'mid', `harry zipf=${harry.zipf} aoa=${harry.aoa}`);
+  assert.equal(harry.aoa, null);
+  assert.match(harry.label, /常模外/);
+  // 向后兼容：未提供 AoA 表时维持单信号（harry 仍 suspect——旧口径不回归）
+  assert.equal(triageOov('harry', zt).triage, 'suspect');
 });
 
 test('阈值与档位序常量：suspect ≥ 4.0 > mid ≥ 3.0，档位递增', () => {

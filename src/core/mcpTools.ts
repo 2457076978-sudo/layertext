@@ -52,14 +52,16 @@ export function toolQcText(
   oovLimit = 50,
   reinforceWords?: string[],
   zipfTable?: ZipfTable,
+  aoaTable?: ZipfTable,
 ): Record<string, unknown> {
   const md = /[P]\d+\]/.test(text) ? `# qc\n\n## Chapter One\n\n${text}` : wrapAsChapter(text);
   const r = runQc(md, lex, { tier: 'M', fileName: 'mcp', ...(reinforceWords ? { reinforceWords } : {}) });
   const oovDetail = [...new Set(r.oov)].slice(0, oovLimit).map((w) => {
     const item: Record<string, unknown> = { word: w, pending: pendHit(w, lex.pending) };
     if (zipfTable) {
-      const t = triageOov(w, zipfTable);
+      const t = triageOov(w, zipfTable, aoaTable);
       item.zipf = t.zipf;
+      item.aoa = t.aoa;
       item.分诊 = t.label;
     }
     return item;

@@ -74,10 +74,11 @@ function fsrsMain(argv: string[]): void {
 const BUNDLED_WORDLIST = 'assets/wordlists/curriculum_2022_level3_1600.txt';
 const AMENDMENT_WORDLIST = 'assets/wordlists/curriculum_2022_amendment.txt'; // 数词/星期/月份等存档缺失块（见文件头注释）
 const BUNDLED_ZIPF = 'assets/wordfreq/en_zipf.tsv'; // wordfreq 导出（tools/export_zipf.py），OOV 疑似漏收分诊先验
+const BUNDLED_AOA = 'assets/wordfreq/en_aoa.tsv'; // Kuperman 2012 AoA 常模（tools/export_aoa.py），双信号降噪
 
-/** zipf 词频先验表：找到才启用 OOV 分诊列，缺失时报告保持旧 schema */
-function bundledZipfTable(): ZipfTable | undefined {
-  const p = findAssetPath(BUNDLED_ZIPF);
+/** 词频/习得年龄先验表：找到才启用 OOV 分诊列，缺失时报告保持旧 schema */
+function bundledTable(rel: string): ZipfTable | undefined {
+  const p = findAssetPath(rel);
   return p ? parseZipfTable(readFileSync(p, 'utf-8')) : undefined;
 }
 
@@ -141,10 +142,11 @@ function main(): void {
   const report = toLegacyReport(result);
 
   // zipf 分诊（调研〇-3 第一级）：只加报告字段，不动引擎 schema 与判定
-  const zipf = bundledZipfTable();
+  const zipf = bundledTable(BUNDLED_ZIPF);
+  const aoa = bundledTable(BUNDLED_AOA);
   const triaged = zipf
     ? (report['OOV词(去重)'] as string[])
-        .map((w) => triageOov(w, zipf))
+        .map((w) => triageOov(w, zipf, aoa))
         .sort((a, b) => TRIAGE_RANK[a.triage] - TRIAGE_RANK[b.triage] || (b.zipf ?? 0) - (a.zipf ?? 0))
     : undefined;
   const outReport = { ...report, ...(triaged ? { OOV分诊: triaged } : {}) };

@@ -321,6 +321,47 @@
         background: var(--brand);
         border-color: var(--brand);
       }
+      /* 两级页签：一级组=分段控件（灰槽白浮块），二级=细页签 */
+      .vt-groups {
+        display: flex;
+        gap: 3px;
+        padding: 3px;
+        background: var(--seg-slot);
+        border-radius: 10px;
+      }
+      .vt-groups .vt-g {
+        border: none;
+        padding: 4px 16px;
+        border-radius: 8px;
+        font-size: 13px;
+        font-weight: 500;
+        color: var(--muted);
+        background: transparent;
+      }
+      .vt-groups .vt-g.active {
+        background: var(--panel);
+        color: var(--ink);
+        box-shadow: 0 1px 3px rgba(15, 23, 42, 0.12);
+      }
+      .vt-sub {
+        display: flex;
+        gap: 2px;
+        align-self: center;
+        margin-left: 6px;
+      }
+      .vt-sub .vt-s {
+        border: none;
+        padding: 3px 10px;
+        border-radius: 7px;
+        font-size: 12px;
+        color: var(--muted);
+        background: transparent;
+      }
+      .vt-sub .vt-s.active {
+        color: var(--brand);
+        background: color-mix(in srgb, var(--brand) 10%, transparent);
+        font-weight: 600;
+      }
       .pane {
         flex: 1;
         overflow: auto;
@@ -2079,22 +2120,75 @@
         overflow: hidden;
         text-overflow: ellipsis;
       }
-      .shelf-resume {
-        background: var(--accent);
-        color: var(--accent-ink);
-        border-radius: 8px;
-        padding: 8px 14px;
-        font-size: 13.5px;
+      /* 首屏 hero：上次在读的书（封面+书名+进度+一键继续） */
+      .shelf-hero {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        background: var(--panel-glass);
+        border: 1px solid var(--glass-line);
+        border-radius: 14px;
+        padding: 12px 16px;
+        margin-bottom: 14px;
         cursor: pointer;
-        margin-bottom: 12px;
-        display: inline-block;
-        max-width: 100%;
+        box-shadow: var(--glass-shadow);
+        transition: transform 0.15s ease;
+      }
+      .shelf-hero:hover {
+        transform: translateY(-1px);
+      }
+      .shelf-hero .hero-cover {
+        width: 52px;
+        height: 70px;
+        border-radius: 6px;
+        background-size: cover;
+        background-position: center;
+        flex: none;
+        box-shadow: 0 2px 8px rgba(15, 23, 42, 0.18);
+      }
+      .shelf-hero .hero-info {
+        flex: 1;
+        min-width: 0;
+      }
+      .shelf-hero .hero-title {
+        font-size: 15px;
+        font-weight: 600;
+        color: var(--ink);
+        margin-bottom: 2px;
+      }
+      .shelf-hero .hero-sub {
+        font-size: 12px;
+        color: var(--muted);
+        margin-bottom: 6px;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
       }
-      .shelf-resume:hover {
-        background: var(--accent-hover);
+      .shelf-hero .hero-progress {
+        height: 4px;
+        border-radius: 2px;
+        background: var(--seg-slot);
+        overflow: hidden;
+        max-width: 220px;
+      }
+      .shelf-hero .hero-progress i {
+        display: block;
+        height: 100%;
+        background: var(--accent);
+        border-radius: 2px;
+      }
+      .shelf-hero .hero-go {
+        flex: none;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        background: var(--accent);
+        color: var(--accent-ink);
+        border: none;
+        border-radius: 9px;
+        padding: 8px 14px;
+        font-size: 13px;
+        font-weight: 500;
       }
       /* 版本选择页（两级导航：点书 → 选版本 → 进工作区） */
       .ver-sel {
@@ -3076,22 +3170,9 @@
           <button id="tab-toc" title="全书章节目录与本章书签（再点或 Esc 关闭）">
             <svg class="ico"><use href="#i-list" /></svg>目录
           </button>
-          <button id="tab-text" class="active" title="点词/拖选做标记的主战场——生词红色、风险句有角标">正文审校</button>
-          <button id="tab-report" title="本章体检数字与逐条可勾选的诊断台（生词→标记/入词库）">质检报告</button>
-          <button id="tab-suggest" title="AI 给出的修改建议清单（含被防线拦下、定位失败的条目），逐条 ✓ 采纳或放弃">
-            <svg class="ico"><use href="#i-annotate" /></svg>修订建议
-          </button>
-          <button id="tab-diff" title="当前章与历史版本的段落红绿对照">版本对比</button>
-          <button id="tab-align" title="基准版（如原文）与当前章行对行核对：左丢什么、右加什么，机器核数字与专名">
-            <svg class="ico"><use href="#i-columns" /></svg>逐句对照
-          </button>
-          <button id="tab-board" title="全书审校看板：每章门禁/标记/生词率/建议采纳率——还剩多少活一眼看清">
-            <svg class="ico"><use href="#i-chart" /></svg>看板
-          </button>
-          <button id="tab-dossier" title="审校过程档案：指标对照+逐句对照+决策记录，一键成卷（论文素材）">
-            <svg class="ico"><use href="#i-doc" /></svg>档案
-          </button>
-          <button id="tab-retro" title="AI 建议采纳率台账：哪类建议常被拒——该改提示词还是改判读">复盘</button>
+          <!-- 两级页签（读/检/改 × 组内二级，widgets.ts 渲染）：8 个平铺页签按教师任务流收敛 -->
+          <div class="vt-groups" id="vt-groups"></div>
+          <div class="vt-sub" id="vt-sub"></div>
         </div>
         <section id="pane-text" class="pane active">
           <div class="legend">

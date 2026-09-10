@@ -17,7 +17,7 @@ import {
   decodeAuto,
 } from './pure.js';
 import { parseEpubChapters, epubChapterMd } from './bookpure.js';
-import { renderModePill, switchView as switchViewDom, type ViewName } from './widgets.js';
+import { renderModePill, switchView as switchViewDom, bindViewTabs, type ViewName } from './widgets.js';
 import { S, esc } from './state.js';
 import { $, setStatus, toast, pop, hidePop } from './uikit.js';
 import { showSyncMarksDialog, syncPop, hideSyncPop } from './pipew.js';
@@ -149,8 +149,7 @@ export function syncChrome(): void {
   for (const id of ['grp-chapter', 'grp-edit']) document.getElementById(id)!.style.display = hasChapter ? '' : 'none';
   $('tab-toc').style.display = s ? '' : 'none'; // 书架/版本页无章节概念，目录按钮收起
   // 看板/档案是书级视图，书架也能进；仅正文场景整行收起
-  const activeTab = document.querySelector('.viewtabs button.active') as HTMLElement | null;
-  const bookView = !!activeTab && activeTab.id !== 'tab-text';
+  const bookView = curView !== 'text';
   (document.querySelector('.viewtabs') as HTMLElement).style.display = !hasChapter && !bookView ? 'none' : 'flex';
 }
 
@@ -158,7 +157,7 @@ export function renderAll(): void {
   renderFileTabs();
   const s = activeSession();
   if (!s) {
-    switchViewDom(document, 'text'); // 回正文窗格=书架首页（清掉残留的书级视图）
+    switchView('text'); // 回正文窗格=书架首页（清掉残留的书级视图；经唯一入口同步 curView）
     void renderShelf(); // 首页=书架（示例+我的书；点书进入工作区）
     syncChrome();
     $('pane-report').innerHTML = '<div class="empty"><b>打开课文会自动体检</b><br/>生词率、句长、难句自动数好，报告页每条可勾选处理</div>';
@@ -293,38 +292,33 @@ async function pushRecent(fileName: string, sourcePath: string | null): Promise<
   await saveConfig();
 }
 
-/* ---------- 视图切换（实现在 widgets.ts，可 DOM 级测试） ---------- */
+/* ---------- 视图切换（实现在 widgets.ts，可 DOM 级测试）——唯一入口：钩子（懒渲染）+ 切换 + chrome 同步 ---------- */
+
+/** 进入各视图的懒渲染钩子（原分散在 8 个 tab 绑定里，收敛到唯一入口） */
+const VIEW_HOOKS: Partial<Record<ViewName, () => void>> = {
+  diff: () => renderDiff(0, Math.min(1, S.sessions.length - 1)),
+  align: () => renderAlignPane(),
+  board: () => void renderBoardPane(),
+  dossier: () => void renderDossierPane(),
+  retro: () => void renderRetroPane(),
+};
+
+let curView: ViewName = 'text';
 
 export function switchView(name: ViewName): void {
+  curView = name;
+  VIEW_HOOKS[name]?.();
   switchViewDom(document, name);
   syncChrome();
 }
 
+export function currentView(): ViewName {
+  return curView;
+}
+
 /* ---------- 事件绑定 ---------- */
 
-$('tab-text').addEventListener('click', () => switchView('text'));
-$('tab-report').addEventListener('click', () => switchView('report'));
-$('tab-suggest').addEventListener('click', () => switchView('suggest'));
-$('tab-diff').addEventListener('click', () => {
-  renderDiff(0, Math.min(1, S.sessions.length - 1));
-  switchView('diff');
-});
-$('tab-align').addEventListener('click', () => {
-  renderAlignPane();
-  switchView('align');
-});
-$('tab-board').addEventListener('click', () => {
-  void renderBoardPane();
-  switchView('board');
-});
-$('tab-dossier').addEventListener('click', () => {
-  void renderDossierPane();
-  switchView('dossier');
-});
-$('tab-retro').addEventListener('click', () => {
-  void renderRetroPane();
-  switchView('retro');
-});
+bindViewTabs(document, switchView);
 
 /* ---------- 示例菜单 ---------- */
 

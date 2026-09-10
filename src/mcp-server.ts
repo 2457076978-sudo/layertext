@@ -34,10 +34,18 @@ function bundledWordlists(): string[] {
   return files.map((f) => readFileSync(f, 'utf-8'));
 }
 
-/** zipf 词频先验表（wordfreq 导出，纯离线）——OOV"疑似漏收"分诊候选；缺失时跳过分诊列 */
+/** 词频/习得年龄先验表（wordfreq + Kuperman 2012 AoA，纯离线）——OOV"疑似漏收"双信号分诊；缺失时跳过分诊列 */
 function bundledZipfTable(): ZipfTable | undefined {
   try {
     return parseZipfTable(readFileSync(join(ROOT, 'assets', 'wordfreq', 'en_zipf.tsv'), 'utf-8'));
+  } catch {
+    return undefined;
+  }
+}
+
+function bundledAoaTable(): ZipfTable | undefined {
+  try {
+    return parseZipfTable(readFileSync(join(ROOT, 'assets', 'wordfreq', 'en_aoa.tsv'), 'utf-8'));
   } catch {
     return undefined;
   }
@@ -64,6 +72,7 @@ async function main(): Promise<void> {
   const opts = parseArgs(process.argv.slice(2));
   const lex = buildMcpLexicon(opts, bundledWordlists());
   const zipf = bundledZipfTable();
+  const aoa = bundledAoaTable();
 
   const server = new McpServer(
     { name: 'layertext-qc', version: '1.0.0' },
@@ -84,7 +93,7 @@ async function main(): Promise<void> {
         reinforce: z.array(z.string()).optional().describe('已学词集/复现队列（词形家族按词种计命中）'),
       }),
     },
-    async ({ text, reinforce }) => ({ content: [{ type: 'text', text: JSON.stringify(toolQcText(text, lex, 50, reinforce, zipf), null, 1) }] }),
+    async ({ text, reinforce }) => ({ content: [{ type: 'text', text: JSON.stringify(toolQcText(text, lex, 50, reinforce, zipf, aoa), null, 1) }] }),
   );
 
   server.registerTool(
