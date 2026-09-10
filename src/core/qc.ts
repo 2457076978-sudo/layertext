@@ -56,6 +56,11 @@ export interface QcResult {
   pendingHits: number;     // ⑨ 待定词 token 命中（保守口径风险）
   oov: string[];           // OOV 词（未去重）
   gates: { passiveOk: boolean; relclOk: boolean }; // A 层解禁门
+  // ---- ⑪ 加注覆盖率（2026-09-10 新增）：该注的词注了没有 ----
+  annotationCoverage: number; // 已注词型 / 应注词型（0-1）
+  annotatable: number;        // 应注词型数（OOV 去重、去两字母词）
+  annotated: number;          // 已注词型数
+  annotMissing: string[];     // 未注词型清单（闸门报警与补注工具的依据）
   // ---- ⑩ 复现指标（feature/reinforce；仅当 reinforceWords 提供时存在，保证旧报告 schema 不变） ----
   reinforceQueue?: number;     // 队列词数
   reinforceHits?: number;      // 命中队列的词种数
@@ -148,6 +153,20 @@ export function runQc(md: string, lex: Lexicon, opts: QcOptions): QcResult {
   const newWordRate = new Set(toks).size ? new Set(oov).size / new Set(toks).size : 0;
   const pendingHits = toks.reduce((n, t) => (pendHit(t, lex.pending) ? n + 1 : n), 0);
 
+  // ---- ⑪ 加注覆盖率：OOV 词型里有多少已按 `word（中文）` 注出 ----
+  //  这是"检测 → 加注"闭环的闸门：引擎判定该注的词，产物里到底注了没有。
+  //  背景：2026-09-10 发现 A 层第 7/8/9 章加注覆盖率只有 2%（其余章 62-78%），
+  //  而当时所有报表只统计"注了多少处"，没有"该注多少"，缺口因此完全隐形。
+  //  专名不计（buildLexicon 已并入已知，不会进 oov）；两字母以内的词不计（a/an/it 之类）。
+  const annotable = [...new Set(oov)].filter((w) => w.length > 2);
+  //  连字符复合词要拆开记：`blood-curdling（凝结…）` 已把 curdling 注出，
+  //  若只记整串，curdling 会被永远判成"该注没注"，补注工具也就永远补不上。
+  const annotatedWords = new Set(
+    [...body.matchAll(/([A-Za-z][A-Za-z'-]*)（/g)].flatMap((m) => (m[1] ?? '').toLowerCase().split('-')).filter(Boolean),
+  );
+  const annotMissing = annotable.filter((w) => !annotatedWords.has(w));
+  const annotationCoverage = annotable.length ? (annotable.length - annotMissing.length) / annotable.length : 1;
+
   // ---- ⑩ 复现词命中（队列词的词形家族计一次命中；token 次数计重复强度） ----
   let reinforceHits = 0;
   let reinforceTokens = 0;
@@ -189,6 +208,10 @@ export function runQc(md: string, lex: Lexicon, opts: QcOptions): QcResult {
       passiveOk: opts.tier !== 'A' || chno === null || chno >= (opts.tierGates?.passiveFromCh ?? 5),
       relclOk: opts.tier !== 'A' || chno === null || chno >= (opts.tierGates?.relclFromCh ?? 8),
     },
+    annotationCoverage,
+    annotatable: annotable.length,
+    annotated: annotable.length - annotMissing.length,
+    annotMissing,
     ...(hasReinforce
       ? { reinforceQueue: reinforceList.length, reinforceHits, reinforceTokens, reinforceHitList }
       : {}),

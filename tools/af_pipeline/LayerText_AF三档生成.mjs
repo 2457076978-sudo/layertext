@@ -1,0 +1,193 @@
+#!/usr/bin/env node
+/** AF 三档重制生成（Wayne 拍板 2026-09-10）：三版篇幅=原文 85%/75%/60%，审校知识库注入
+ * 用法：node LayerText_AF三档生成.mjs <A|M|B|ALL> [章号如1或1,2 或空=全部] [--dry]
+ * 产物：调适工作区/重制三版/第X章/原文_{层}{比例}_{日期}.md
+ * 知识库：知识文件/AF审校知识库_v1.csv（55 加注词对=学生不会的词须加注；36 换词倾向=优先避开/换简单说法）
+ */
+import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
+import { execSync } from 'node:child_process';
+import { join } from 'node:path';
+
+const SHARED = await import('./LayerText_AF词表与词典.mjs');
+const P = SHARED.loadProject();
+const { loadLexicon } = SHARED;
+const REPO = P.引擎目录;
+const WS = P.调适工作区;
+const SRC_BASE = P.原文目录; // 规范化原文（245 段）所在
+const OUT_BASE = P.产物目录;
+const VOCAB = P.词库;
+const KB = P.知识库路径;
+const DATE = P.日期;
+
+const MODEL = 'deepseek-chat'; // 非思考型（v4-flash 思考型复杂指令失控两次实证）
+const CFG = JSON.parse(readFileSync(`${process.env.HOME}/.layertext.json`, 'utf-8'));
+const KEY = execSync('security find-generic-password -s layertext.apikey -w').toString().trim();
+const { splitChapter } = await import(`${REPO}/dist/src/core/textpipe.js`);
+const { runQc } = await import(`${REPO}/dist/src/core/qc.js`);
+// 词表 + 本书专名（专名不计 OOV）——2026-09-10：原先只喂词库，Napoleon 等被算成生词
+const LEX = await loadLexicon(P);
+
+const CN = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十'];
+const wc = (t) => (t.match(/[A-Za-z][A-Za-z'-]*/g) ?? []).length;
+
+/** 三档：比例=占原文词数百分比；maxLen=分层句长（A20/M16/B14 定稿口径）；retryLine=段级重试线 */
+const TIERS = {
+  A: { key: 'A', label: 'A层（挑战）', ratio: 0.85, maxLen: 20, retryLine: 0.73, clsTag: 'A层85' },
+  M: { key: 'M', label: 'M层（中层）', ratio: 0.75, maxLen: 16, retryLine: 0.63, clsTag: 'M层75' },
+  B: { key: 'B', label: 'B层（基础）', ratio: 0.6, maxLen: 14, retryLine: 0.48, clsTag: 'B层60' },
+};
+
+/* ---------- 知识库 ---------- */
+const kbNotes = new Map(); // word → 释义（教师认可的加注对，过滤"复现"等非释义值）
+const kbSwaps = [];
+{
+  const rows = readFileSync(KB, 'utf-8').replace(/^\uFEFF/, '').split('\n').slice(1);
+  for (const line of rows) {
+    const [type, word, val, n] = line.split(',');
+    if (!word) continue;
+    if (type === '加注词' && val && val !== '复现') kbNotes.set(word.toLowerCase(), { zh: val, n: Number(n) || 1 });
+    else if (type === '换词倾向') kbSwaps.push([word, Number(n) || 1]);
+  }
+}
+const NOTE_TABLE = [...kbNotes.entries()]
+  .sort((a, b) => b[1].n - a[1].n)
+  .slice(0, 120) // system 预算：top 120（按出现频次）
+  .map(([w, v]) => `${w}（${v.zh}）`)
+  .join('、');
+const SWAP_TABLE = kbSwaps.slice(0, 36).map(([w]) => w).join('、');
+
+const PROPER = P.PROPER;
+
+function systemPrompt(t) {
+  return `你是初中英语原著分层简化的审校助手（${t.label}）。词汇边界：优先用《义务教育英语课程标准》三级（约1600词）；专有名词不变。
+
+【篇幅守恒（本次任务核心）】改写=同义转换，不是压缩删减：细节、修饰、氛围描写一律保留转述，只换学生能懂的说法。本档目标：全篇词数约为原文的 ${Math.round(t.ratio * 100)}%——每段输出词数应约为该段原文的 ${Math.round(t.ratio * 100)}%（允差 ±10 个百分点）。
+${t.key === 'B' ? '- B 档允许适度删减次要细节与重复描写（情节与因果零丢失），词汇换成最基础的说法，优先压低生词率。\n' : ''}${t.key === 'A' ? '- A 档最贴原文：保留较多原表达，只处理真正的难词难句。\n' : ''}
+【句法黑名单（引语内原话除外）】被动→主动；定语从句→拆短句或形容词前置；过去完成→一般过去时+before/after 明示先后。直接引语只降词不降句式（引号原样保留）。情节零丢失。
+
+【教师审校知识库（历史成果，必须遵守）】
+1. 以下词经教师确认为学生不会的词——若在改写中保留，必须紧跟 word（中文）格式加注，释义沿用：
+${NOTE_TABLE}
+2. 以下词教师曾多次换掉——改写时优先换简单说法或删减改述，不要原样保留：${SWAP_TABLE}
+
+输出：保持输入段落的 [P##] 标记原样开头，直接输出该段简化文本（纯英文），除 word（中文）注释外禁止任何中文。不要任何解释。`;
+}
+
+async function callChat(messages, maxTokens = 2500) {
+  const body = (extra) => JSON.stringify({ model: MODEL, max_tokens: maxTokens, messages, ...extra });
+  const resp = await fetch(`${CFG.baseUrl}/chat/completions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${KEY}` },
+    body: body({}),
+  });
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${(await resp.text()).slice(0, 200)}`);
+  const data = await resp.json();
+  return (data.choices?.[0]?.message?.content ?? '').trim();
+}
+
+const cleanSeg = (text, marker) => {
+  let t = text.trim().replace(/^```[a-z]*\s*/i, '').replace(/```\s*$/, '');
+  if (!t.includes('[P')) t = marker + ' ' + t;
+  return t.trim();
+};
+
+async function runChapter(i, t) {
+  const ch = `第${CN[i - 1]}章`;
+  const src = join(SRC_BASE, ch, '原文_规范化.md');
+  if (!existsSync(src)) throw new Error(`${ch} 缺规范化原文`);
+  const md = readFileSync(src, 'utf-8');
+  const chLine = md.match(/^## Chapter \w+.*$/m)?.[0] ?? `## Chapter ${['One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten'][i - 1]}`;
+  const header = md.slice(0, md.indexOf(chLine)) || '';
+  const segs = splitChapter(md).body.match(/\[P\d+\][\s\S]*?(?=\[P\d+\]|$)/g) ?? [];
+  if (!segs.length) throw new Error(`${ch} 未找到 [P##] 段落`);
+  const system = systemPrompt(t);
+  const out = [];
+  let retried = 0;
+  for (let k = 0; k < segs.length; k++) {
+    const srcW = wc(segs[k]);
+    const prevTail = out.length ? out[out.length - 1].slice(-500) : '（本章开头）';
+    const userMsg = `前文（已简化，供语气与指代衔接参考）：\n…${prevTail}\n\n请把以下段落改写为${t.label}版本（本段原文 ${srcW} 词，目标输出约 ${Math.round((srcW * t.ratio) / 5) * 5} 词，±10%）：\n${segs[k].trim()}\n输出：保持 [P##] 标记开头，直接输出改写文本。`;
+    const marker = segs[k].match(/\[P\d+\]/)[0];
+    const content = await callChat([{ role: 'system', content: system }, { role: 'user', content: userMsg }]);
+    let revised = cleanSeg(content, marker);
+    // 修剪轮：改写模型有"删减阻抗"（实测三档全高于目标 12-20pp）——超标的段做一次纯删减任务
+    const targetW = Math.round(srcW * t.ratio);
+    if (srcW >= 20 && wc(revised) > srcW * (t.ratio + 0.08)) {
+      const c2 = await callChat([
+        { role: 'system', content: system },
+        {
+          role: 'user',
+          content: `下面是一段${t.label}改写稿（${wc(revised)} 词），超出篇幅目标。请修剪到约 ${targetW} 词（原文 ${srcW} 词）：删掉次要细节、重复描写、可从上下文推出的信息；情节、因果、人物动作一条不能丢；保留的词汇与句式要求不变（词库边界/黑名单/注释格式）。只输出修剪后的段落（保持 [P##] 标记开头）：\n\n${revised}`,
+        },
+      ]);
+      const trimmed = cleanSeg(c2, marker);
+      // 采纳离目标更近的一版
+      if (Math.abs(wc(trimmed) - targetW) < Math.abs(wc(revised) - targetW)) revised = trimmed;
+      retried++;
+    }
+    if (srcW >= 20 && wc(revised) < srcW * t.retryLine) {
+      const c2 = await callChat([
+        { role: 'system', content: system },
+        { role: 'user', content: userMsg },
+        { role: 'assistant', content },
+        { role: 'user', content: `你上一版只有 ${wc(revised)} 词，偏离目标（约 ${Math.round(srcW * t.ratio)} 词）太远。${t.key === 'B' ? '只删次要细节，情节因果必须完整' : '同义转换不是压缩，保留全部细节只换说法'}。重写这一段。输出：保持 [P##] 标记开头，直接输出改写文本。` },
+      ]);
+      const revised2 = cleanSeg(c2, marker);
+      // 采纳离目标更近的一版
+      const d1 = Math.abs(wc(revised) - srcW * t.ratio);
+      const d2 = Math.abs(wc(revised2) - srcW * t.ratio);
+      if (d2 < d1) revised = revised2;
+      retried++;
+    }
+    out.push(revised);
+    process.stdout.write(`  ${ch}${t.key} 段 ${k + 1}/${segs.length}（${srcW}→${wc(revised)}）\r`);
+  }
+  const outDir = join(OUT_BASE, ch);
+  mkdirSync(outDir, { recursive: true });
+  const newMd = `${header}${chLine}\n\n${out.join('\n\n')}\n`;
+  const outPath = join(outDir, `原文_${t.clsTag}_${DATE}.md`);
+  writeFileSync(outPath, newMd, 'utf-8');
+  const srcWords = wc(md.split('## 词句卡')[0]);
+  const outWords = wc(newMd.split('## 词句卡')[0]);
+  const qc = runQc(newMd, LEX, { tier: 'M', fileName: outPath.split('/').pop(), properNouns: PROPER });
+  return { tier: t.key, ch, srcWords, outWords, ratio: outWords / srcWords, retried, segs: segs.length, qc, outPath };
+}
+
+/* ---------- 主流程 ---------- */
+const args = process.argv.slice(2);
+const dry = args.includes('--dry');
+let tiers = args.filter((a) => /^[AMB]$/.test(a));
+if (!tiers.length) tiers = ['A', 'M', 'B'];
+let chapters = args.filter((a) => /^\d/.test(a)).flatMap((a) => a.split(',').map(Number));
+if (!chapters.length) chapters = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+if (dry) {
+  console.log('计划：', tiers.join('/'), '章', chapters.join(','));
+  process.exit(0);
+}
+const results = [];
+for (const tk of tiers) {
+  for (const i of chapters) {
+    console.log(`▶ ${tk} 第${CN[i - 1]}章`);
+    try {
+      results.push(await runChapter(i, TIERS[tk]));
+    } catch (e) {
+      console.error(`  ✗ ${e.message}`);
+    }
+  }
+}
+const lines = ['# AF 三档重制（85/75/60）· 汇总报告', '', `知识库：加注词 ${kbNotes.size} 对（top120 注入）/ 换词倾向 ${kbSwaps.length} 词`, '', '| 层 | 章 | 原文词数 | 产物词数 | 占比 | 目标 | 守恒重试 | 生词率 | 均长 | 被动/定从/过去完成/超长 |', '|---|---|---|---|---|---|---|---|---|---|'];
+for (const r of results) {
+  const target = TIERS[r.tier].ratio;
+  const off = Math.abs(r.ratio - target) > 0.12 ? ' ⚠偏' : '';
+  lines.push(`| ${r.tier} | ${r.ch} | ${r.srcWords} | ${r.outWords} | ${(r.ratio * 100).toFixed(0)}%${off} | ${Math.round(target * 100)}% | ${r.retried}/${r.segs} | ${(r.qc.newWordRate * 100).toFixed(1)}% | ${r.qc.avgLenNarrRaw.toFixed(1)} | ${r.qc.passive}/${r.qc.relcl}/${r.qc.pastperf}/${r.qc.over20} |`);
+}
+const byT = {};
+for (const r of results) {
+  (byT[r.tier] ??= { s: 0, o: 0 });
+  byT[r.tier].s += r.srcWords;
+  byT[r.tier].o += r.outWords;
+}
+lines.push('');
+for (const [k, v] of Object.entries(byT)) lines.push(`${k} 层合计：${v.s} → ${v.o}（${((v.o / v.s) * 100).toFixed(0)}%）`);
+writeFileSync(join(OUT_BASE, `三档汇总_${DATE}.md`), lines.join('\n'), 'utf-8');
+console.log('\n' + lines.join('\n'));
