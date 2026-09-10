@@ -11,6 +11,21 @@ fn read_text_file(path: String) -> Result<String, String> {
     std::fs::read_to_string(&path).map_err(|e| e.to_string())
 }
 
+/// 构建指纹（版权举证用）：git commit + 构建时间，由 build.rs 编译期注入（见 docs/维权.md）。
+/// 官方 Release 每个构建唯一；盗版者自行重编译的指纹与官方发布记录对不上。诊断包含此字段。
+#[tauri::command]
+fn get_build_id() -> String {
+    build_id()
+}
+
+/// 编译期注入的构建指纹；未注入（如极简环境）时退化为版本号
+fn build_id() -> String {
+    match option_env!("LAYERTEXT_BUILD_ID") {
+        Some(id) => format!("{}|{}", env!("CARGO_PKG_VERSION"), id),
+        None => format!("{}|unmarked", env!("CARGO_PKG_VERSION")),
+    }
+}
+
 /// 本地词典（macOS Dictionary Services / 牛津英汉）：查词返回首个中文义项，零网络零 AI
 #[cfg(target_os = "macos")]
 mod dict {
@@ -586,35 +601,40 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_http::init())
         .setup(|app| {
-            // ---- 原生菜单栏 ----
+            // ---- 原生菜单栏（低频项收子菜单：导入/导出/诊断各一组，高频保持平铺） ----
             let mi_open = MenuItemBuilder::with_id("file-open", "打开章节文件…")
                 .accelerator("CmdOrCtrl+O")
                 .build(app)?;
             let mi_demo = MenuItemBuilder::with_id("file-demo", "载入示例…").build(app)?;
-            let mi_vocab = MenuItemBuilder::with_id("conf-vocab", "导入自定义词库…").build(app)?;
-            let mi_terms = MenuItemBuilder::with_id("conf-terms", "导入术语表…").build(app)?;
-            let mi_proper = MenuItemBuilder::with_id("conf-proper", "导入专名表…").build(app)?;
-            let mi_exp = MenuItemBuilder::with_id("marks-export", "导出标记…").build(app)?;
-            let mi_imp = MenuItemBuilder::with_id("marks-import", "导入标记…").build(app)?;
+            let mi_vocab = MenuItemBuilder::with_id("conf-vocab", "自定义词库…").build(app)?;
+            let mi_terms = MenuItemBuilder::with_id("conf-terms", "术语表…").build(app)?;
+            let mi_proper = MenuItemBuilder::with_id("conf-proper", "专名表…").build(app)?;
+            let mi_exp = MenuItemBuilder::with_id("marks-export", "标记…").build(app)?;
+            let mi_imp = MenuItemBuilder::with_id("marks-import", "标记…").build(app)?;
             let sep1 = PredefinedMenuItem::separator(app)?;
             let sep2 = PredefinedMenuItem::separator(app)?;
             let sep3 = PredefinedMenuItem::separator(app)?;
 
+            let import_menu = SubmenuBuilder::new(app, "导入…")
+                .item(&mi_vocab)
+                .item(&mi_terms)
+                .item(&mi_proper)
+                .item(&mi_imp)
+                .build()?;
+            let export_menu = SubmenuBuilder::new(app, "导出…")
+                .item(&mi_exp)
+                .text("export-docx", "Word 版（含章末词句卡）…")
+                .text("export-tts", "朗读音频（AIFF，系统语音）…")
+                .build()?;
             let file_menu = SubmenuBuilder::new(app, "文件")
                 .item(&mi_open)
                 .item(&mi_demo)
                 .item(&sep1)
-                .item(&mi_vocab)
-                .item(&mi_terms)
-                .item(&mi_proper)
                 .text("book-config", "保存为本书配置（词库/约定随文件夹）")
                 .text("rewrite-rules", "书级改写规则…（人名替换/叙事视角）")
                 .item(&sep2)
-                .item(&mi_exp)
-                .item(&mi_imp)
-                .separator()
-                .text("export-docx", "导出 Word 版（含章末词句卡）…")
-                .text("export-tts", "导出朗读音频（AIFF，系统语音）…")
+                .item(&import_menu)
+                .item(&export_menu)
                 .build()?;
 
             let mi_run = MenuItemBuilder::with_id("qc-run", "重新质检本章")
@@ -670,22 +690,26 @@ fn main() {
                 .fullscreen()
                 .build()?;
 
+            let diag_menu = SubmenuBuilder::new(app, "诊断")
+                .text("export-diag", "导出诊断包…（出错记录打包，可发给开发者；不含你的书稿内容）")
+                .text("diag-test", "测试诊断包（故意制造一条错误记录，验证打包正常）")
+                .build()?;
             let help_menu = SubmenuBuilder::new(app, "帮助")
                 .text("help-usage", "使用说明")
                 .text("help-key", "如何获取 AI 的 Key（新手向）")
                 .text("help-qc", "QC 指标说明")
                 .separator()
-                .text("export-diag", "导出诊断包…（出错记录打包，可发给开发者；不含你的书稿内容）")
-                .text("diag-test", "测试诊断包（故意制造一条错误记录，验证打包正常）")
-                .separator()
                 .text("help-example-dir", "打开本地示例文件夹")
+                .separator()
+                .item(&diag_menu)
                 .build()?;
 
             let app_menu = SubmenuBuilder::new(app, "LayerText")
                 .about(Some(tauri::menu::AboutMetadataBuilder::new()
                     .name(Some("LayerText 分层读"))
-                    .version(Some("1.1.0"))
+                    .version(Some(env!("CARGO_PKG_VERSION"))) // 构建期从 Cargo.toml 注入（与 package.json 由 check_versions 门禁对齐）
                     .authors(Some(vec!["Wayne & LayerText contributors".to_string()]))
+                    .copyright(Some("© 2026 Wayne · PolyForm Noncommercial 1.0.0（教师/学校免费，商用需授权）"))
                     .comments(Some("分层英语文本简化与审校工作台 · AI 只出候选，教师握定稿权 · 数据全在本机"))
                     .build()))
                 .text("ai-settings", "AI 设置…")
@@ -741,6 +765,7 @@ fn main() {
             read_text_file,
             read_file_base64,
             write_text_file,
+            get_build_id,
             dict_lookup_zh,
             reports_dir,
             examples_dir,

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+// © 2026 Wayne（LayerText 作者）。本文件为判定引擎核心，实现级指纹已在案（docs/维权.md）。
 /**
  * LayerText · 文本管线：章节解析、分句、分词、词形还原命中判定
  *
