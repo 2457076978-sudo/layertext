@@ -36,6 +36,7 @@
  *   node LayerText_AF会话改写.mjs --tier A                    # 跑完一层全书
  *   node LayerText_AF会话改写.mjs --tier A --resume           # 中断后续跑（同一条命令即可）
  *   node LayerText_AF会话改写.mjs --tier M --scope chapter    # 换成"一章一个会话"
+ *   node LayerText_AF会话改写.mjs --tier A --window 40         # 会话滚动窗口（默认 30 段；0=不滚动）
  *
  * 产物：与其它生成脚本完全一致（产物目录/第X章/原文_<层>_<日期>.md），
  *       因此下游 精修 → 补注 → 修复 → 复核 → 台账 一个字都不用改。
@@ -83,6 +84,11 @@ const CH_IDS = arg('--chapters', '')
   : CN.slice(0, Number(P.章数 ?? 10)).map((_, i) => i + 1);
 const TOOL_ROUNDS = Number(arg('--tool-rounds', '2'));   // 「查词」往返上限
 const QC_ROUNDS = Number(arg('--qc-rounds', '2'));       // 本地复检回流上限
+/** 会话滚动窗口：保留最近多少「段」的逐段对话（0 = 不滚动，全历史）。
+ *  审查报告 §二：「一本书一条无限增长会话」不应成为唯一模式——上下文累积会带来
+ *  注意力稀释、截断和恢复困难；而原实现只在章末追加 5 行摘要，**却没有实际删除历史**。
+ *  报告给的建议粒度是"按章或 20–40 段"，所以默认 30 段。 */
+const WINDOW = Number(arg('--window', '30'))
 const BASELINE = P.情节底线 ?? '调适工作区/规则与底线/全书情节底线_v0.1.md';
 /** 自检用假模型：long=永远超长（必不过）｜exact=按目标词数精确回放原文（必过）｜其他=字面返回。
  *  有了它，"门禁真的拦得住"这件事才能被自动化断言，而不靠人肉试。 */
@@ -208,8 +214,11 @@ function loadSession() {
   const done = new Set();
   const warnings = [];
   let stats = { calls: 0, in: 0, out: 0, cached: 0 };
+  let carryAt = -1;   // 最后一个 window 事件之后的消息才是"当前窗口"
+  let lastCarry = '';
   for (const l of lines) {
     let o; try { o = JSON.parse(l); } catch { continue; }
+    if (o.t === 'window') { carryAt = messages.length; lastCarry = o.carry ?? ''; continue; }
     if (o.t === 'msg') {
       // tool_calls / tool_call_id 必须一起还原：少了它们，重建出来的会话里
       // 会留下"助手发了工具调用但没有工具回复"的非法回合，--resume 直接被 API 拒。
@@ -224,7 +233,10 @@ function loadSession() {
     else if (o.t === 'warning') warnings.push(o);
     else if (o.t === 'stats') stats = o.v;
   }
-  return { messages, done, stats, warnings };
+  // 会话滚动事件：`--resume` 重建时必须**重放同样的裁剪**，否则续跑后的上下文
+  // 比全新一轮长得多（同一份日志会给出两种不同的会话），注意力稀释又回来了。
+  const windowed = carryAt >= 0 ? messages.slice(carryAt) : messages;
+  return { messages: windowed, done, stats, warnings, carryText: lastCarry };
 }
 const logLine = (o) => { mkdirSync(SESSION_DIR, { recursive: true }); appendFileSync(sessionFile(), JSON.stringify(o) + '\n', 'utf-8'); };
 /** 推一条消息进会话，**同时写进事件日志**（否则 --resume 会丢上下文——首版就踩了这个坑） */
@@ -238,6 +250,34 @@ function warn(kind, message, extra = {}) {
   logLine(ev);
   state.warnings.push(ev);
   console.warn(`⚠ ${message}`);
+}
+
+/* ────────────────────── 会话滚动窗口（审查报告 §二） ────────────────────── */
+/** 窗口之间只传**结构化状态**（专名表、已采纳术语、章摘要、改写约束），而不是全部历史。
+ *  专名表与改写约束来自开场提示词（全程不变，本身就是缓存命中前缀），
+ *  这里补的是"开场之后才产生"的三样：已处理到哪、章摘要、运行中新配的释义。 */
+let pendingCarry = '';
+function carryState() {
+  return [
+    `【结转上下文】逐段对话已滚动归档（会话保留最近 ${WINDOW} 段）。以下是全部需要延续的状态：`,
+    `已处理到：${state.carry?.last || '（刚开始）'}`,
+    `已注词：${state.annotated?.size ?? 0} 个，**全篇只注一次**——已经注过的词本段绝对不要再注（若本段出现了，我会另行列出）。`,
+    state.carry?.章摘要?.length ? `已完成章节摘要：\n${state.carry.章摘要.map(([c, t]) => `· ${c}：${String(t).replace(/\n/g, ' ')}`).join('\n')}` : '',
+    newDictEntries.length ? `运行中新配的释义（统一词典增量，加注时优先用这些）：\n${newDictEntries.map(([w, zh]) => `${w}\t${zh}`).join('\n')}` : '',
+    '改写约束与开场完全一致，未变：篇幅守恒（同义转换不是压缩）、句法黑名单、加注格式 `word（中文）`。',
+  ].filter(Boolean).join('\n');
+}
+/** 超窗就把开场之后的历史整段换掉。开场（system）**一个字节都不动** —— 它是缓存命中的前缀。 */
+function rollWindow() {
+  if (!WINDOW || messages.length <= 1) return;
+  const nonSystem = messages.length - 1;
+  if (nonSystem <= WINDOW * 2) return;
+  const carry = carryState();
+  messages.splice(1, messages.length - 1);
+  pendingCarry = carry;
+  logLine({ t: 'window', carry, dropped: nonSystem });
+  state.carry = state.carry ?? { 章摘要: [], last: '' };
+  console.log(`\n↻ 会话滚动：保留开场 + 结转状态，归档 ${nonSystem} 条逐段历史（此前每段都拖着全书对话，注意力被稀释）`);
 }
 
 /* ────────────────────── API（带用量记账 + 自检假模型） ────────────────────── */
@@ -407,7 +447,13 @@ async function rewriteSegment(messages, seg, chLabel, k, total, annotatedSoFar, 
   ].filter(Boolean).join('\n');
 
   const inputHash = sha(`${PROMPT_VERSION}|${seg}|${target}|${T.maxLen}`);
-  pushMsg(messages, 'user', `${chLabel} · 第 ${k + 1}/${total} 段\n\n${facts}\n\n【原文段落】\n${seg.trim()}\n\n请改写这一段。`);
+  const carry = pendingCarry;
+  pendingCarry = '';
+  pushMsg(
+    messages,
+    'user',
+    `${carry ? carry + '\n\n' : ''}${chLabel} · 第 ${k + 1}/${total} 段\n\n${facts}\n\n【原文段落】\n${seg.trim()}\n\n请改写这一段。`,
+  );
   let first = await callChat(messages, 3000, LOOKUP_TOOL);
   let text = first.text;
   const callUsage = [first.usage];
@@ -522,6 +568,9 @@ if (DRY) { console.log('\n（--dry，未调 API、未写文件）'); process.exi
 
 const state = RESUME ? loadSession() : { messages: [], done: new Set(), stats: { calls: 0, in: 0, out: 0, cached: 0 }, warnings: [] };
 if (!state.warnings) state.warnings = [];
+state.carry = { 章摘要: [], last: '', ...(state.carry ?? {}) };
+// 续跑时把最后一个 window 事件的结转状态接回来（重放同样的裁剪）
+pendingCarry = state.carryText ?? '';
 const messages = state.messages.length ? state.messages : [{ role: 'system', content: system }];
 if (!state.messages.length) logLine({ t: 'msg', role: 'system', content: system });
 
@@ -560,6 +609,7 @@ for (const { i } of chSegs) {
   for (let k = 0; k < segList.length; k++) {
     const key = `${ch}#${k}`;
     if (state.done.has(key)) { process.stdout.write(`· ${ch} ${k + 1}/${segList.length} 已完成\r`); continue; }
+    rollWindow();
     try {
       const { status, body, verdict, attempts, qcRounds, usage, inputHash, strippedAnnotations, reinforceHints } = await rewriteSegment(
         messages, srcText(k), ch, k, segList.length, state.annotated, segList[k].id,
@@ -623,6 +673,8 @@ for (const { i } of chSegs) {
     pushMsg(messages, 'user', `本章（${ch}）已处理完。请用 5 行以内总结：本章人物如何称呼、你采用了哪些简化手法、以及需要后续保持一致的地方。只输出这 5 行摘要。`);
     const r = await callChat(messages, 400);
     pushMsg(messages, 'assistant', r.text);
+    state.carry.章摘要.push([ch, r.text.replace(/\n/g, ' ')]);
+    state.carry.last = `${ch} 已处理完`;
     state.stats.calls++; state.stats.in += r.usage.in; state.stats.out += r.usage.out; state.stats.cached += r.usage.cached;
     console.log(`\n📌 ${ch} 摘要：${r.text.replace(/\n/g, ' / ').slice(0, 100)}…`);
   } catch (e) {

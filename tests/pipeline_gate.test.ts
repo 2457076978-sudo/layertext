@@ -46,6 +46,14 @@ function makeTwoChapterProject(): { root: string; json: string } {
   return { root, json };
 }
 
+/** 多段项目：验证会话滚动窗口（报告 §二：「一本书一条无限增长会话」不应是唯一模式） */
+function makeManySegmentProject(n: number): { root: string; json: string } {
+  const { root, json } = makeProject();
+  const segs = Array.from({ length: n }, (_, i) => `[P${String(i + 1).padStart(2, '0')}] The boy ran to the red barn and saw a small dog.`).join(' ');
+  writeFileSync(join(root, '原文', '第一章', '原文_规范化.md'), `## Chapter One\n\n${segs}\n`, 'utf-8');
+  return { root, json };
+}
+
 function makeProject(): { root: string; json: string } {
   const root = mkdtempSync(join(tmpdir(), 'lt-gate-'));
   const w = (...p: string[]): string => join(root, ...p);
@@ -249,4 +257,38 @@ test('查词走严格 schema 的 tool call：往返成功、事件日志留下 t
   assert.equal(msgs.some((m) => m.role === 'tool' && m.tool_call_id === 'call_1'), true, '工具回复必须带 tool_call_id 且进日志');
   assert.equal(msgs.some((m) => m.role === 'assistant' && Array.isArray(m.tool_calls)), true, '带 tool_calls 的助手回合也要进日志');
   assert.match(readFileSync(join(root, '产物', '第一章', `原文_${TAG}_${DATE}_工具.md`), 'utf-8'), /barn（/);
+});
+
+test('会话滚动窗口：超出窗口就归档历史、只结转结构化状态，且这一轮照样跑完', () => {
+  const { root, json } = makeManySegmentProject(6);
+  const r = spawnSync(process.execPath, [SCRIPT, '--tier', 'A', '--chapters', '1', '--out', '滚动', '--window', '1'], {
+    cwd: REPO, encoding: 'utf-8',
+    env: { ...process.env, LAYERTEXT_FAKE_LLM: 'exact', LAYERTEXT_PROJECT: json, LAYERTEXT_ENGINE: REPO },
+  });
+  assert.equal(r.status, 0, r.stderr);
+  const log = readFileSync(join(root, '调适', '_会话', `${TAG}_滚动.jsonl`), 'utf-8')
+    .split('\n').filter(Boolean).map((l) => JSON.parse(l) as Record<string, unknown>);
+  const wins = log.filter((o) => o.t === 'window');
+  assert.equal(wins.length >= 1, true, '超出窗口必须留下 window 事件（否则无从知道历史被归档过）');
+  assert.match(String(wins[0].carry), /结转上下文/);
+  assert.match(String(wins[0].carry), /全篇只注一次/, '结转里必须带"已注词"这条约束');
+  assert.equal(log.filter((o) => o.t === 'done').length, 6, '六段都要完成');
+
+  // 续跑：必须重放同样的裁剪，重建出合法会话（否则等于"同一份日志两种上下文"）
+  const r2 = spawnSync(process.execPath, [SCRIPT, '--tier', 'A', '--chapters', '1', '--out', '滚动', '--window', '1', '--resume'], {
+    cwd: REPO, encoding: 'utf-8',
+    env: { ...process.env, LAYERTEXT_FAKE_LLM: 'exact', LAYERTEXT_PROJECT: json, LAYERTEXT_ENGINE: REPO },
+  });
+  assert.equal(r2.status, 0, `滚动后的续跑必须能跑通，实得 ${r2.status}\n${r2.stderr}`);
+});
+
+test('不滚动（--window 0）时行为与从前一致：不留 window 事件', () => {
+  const { root, json } = makeManySegmentProject(4);
+  const r = spawnSync(process.execPath, [SCRIPT, '--tier', 'A', '--chapters', '1', '--out', '不滚', '--window', '0'], {
+    cwd: REPO, encoding: 'utf-8',
+    env: { ...process.env, LAYERTEXT_FAKE_LLM: 'exact', LAYERTEXT_PROJECT: json, LAYERTEXT_ENGINE: REPO },
+  });
+  assert.equal(r.status, 0, r.stderr);
+  const log = readFileSync(join(root, '调适', '_会话', `${TAG}_不滚.jsonl`), 'utf-8');
+  assert.equal(log.includes('"t":"window"'), false);
 });
