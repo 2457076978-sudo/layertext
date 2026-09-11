@@ -61,6 +61,8 @@ const ENV = { ...process.env, LAYERTEXT_ENGINE: REPO, LAYERTEXT_DIST: DIST };
 interface 章结论 {
   质检: {
     章: string;
+    /** 第七轮起每章带：complete = 写完的章；partial = 显式声明"还没写完"（不进全书分母） */
+    completeness?: 'complete' | 'partial';
     段数: number;
     应注词型: number;
     已注词型: number;
@@ -380,8 +382,39 @@ test('★ 反证：抹掉第七章的注，对账必须当场失败（守的是�
   }
 });
 
-test('★ 冻结工具对项目**只读**：整棵树指纹冻结前后逐字节一致', () => {
-  /* 这个工具唯一的对外承诺是"不碰真项目"。承诺要当场验：
+test('★ partial 章显式声明：进分章与覆盖、不进全书分母、点名排除（第七轮 P2）', () => {
+  /* 第十章只有 3 段——"一章还没写完"。第七轮的口径决定：它**不被静默排除**（半成品也要有人守），
+   * 而是显式标记 partial、留在覆盖里、从全书分母剔除并**点名列出**。
+   * 这里从冻好的输入重冻一份带 `--partial 10` 的样本，逐项断言这个口径真的落了地。 */
+  const { root, json } = materialize();
+  const out = mkdtempSync(join(tmpdir(), 'lt-partial-'));
+  try {
+    const r = spawnSync(process.execPath, [join(AF, 'LayerText_AF冻结回放.mjs'), '--project', json, '--out', out, '--partial', '10'], {
+      cwd: REPO,
+      encoding: 'utf-8',
+      env: ENV,
+      timeout: 300_000,
+    });
+    assert.equal(r.status, 0, `带 partial 声明的冻结没跑通：${r.stdout ?? ''}${r.stderr ?? ''}`);
+    assert.match(r.stdout ?? '', /partial 章（显式声明未写完）：第十章/);
+
+    const meta = JSON.parse(readFileSync(join(out, '期望结论.json'), 'utf-8')) as {
+      结论: { 分章: Record<string, Record<string, 章结论>>; 全书定位: Record<string, { 章数: number; 排除章?: string[] }>; 覆盖: { 章: string[] } };
+    };
+    assert.equal(meta.结论.分章.A!['第十章']!.质检.completeness, 'partial', '声明过的章要标 partial');
+    assert.equal(meta.结论.分章.A!['第一章']!.质检.completeness, 'complete', '没声明的章仍是 complete');
+    assert.equal(meta.结论.全书定位.A!.章数, 9, 'partial 章不进全书分母（10 章的书只剩 9 章）');
+    assert.deepEqual(meta.结论.全书定位.A!.排除章, ['第十章'], '排除要**点名**——静默排除就是下一个口径漏洞');
+    assert.equal(meta.结论.覆盖.章.includes('第十章'), true, 'partial 章仍在覆盖里（棘轮不许因为它退场）');
+    const cfg = JSON.parse(readFileSync(join(out, '输入', '调适项目_回放.json'), 'utf-8')) as { partialChapters: number[] };
+    assert.deepEqual(cfg.partialChapters, [10], '声明随样本冻下来——冻结与 --check 必须同一个口径');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(out, { recursive: true, force: true });
+  }
+});
+
+test('★ 冻结工具对项目**只读**：整棵树指纹冻结前后逐字节一致', () => {  /* 这个工具唯一的对外承诺是"不碰真项目"。承诺要当场验：
    *   ① 工具自己冻结前后各拍一次整棵树的指纹，不一致就 exit 3；
    *   ② 这里再用测试自己的哈希**独立**验一遍（不信工具的自证）；
    *   ③ 顺带证明"从冻好的输入重新冻结 → 结论逐字段相同"，否则回放就是假的。

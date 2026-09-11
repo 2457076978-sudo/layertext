@@ -313,6 +313,10 @@ export interface RunManifest {
   warnings: { kind: string; message: string; at: string }[];
   /** 未完成（门禁未通过）的段数——清单的"能不能交付"由它决定 */
   pendingReview: number;
+  /** 未写完的章（**显式声明**，如 `[10]`）：这些章仍被登记、仍被回放，
+   *  但不进"全书完成率"分母；发布学生版默认拒绝，除非显式放行（第七轮 P2）。
+   *  与 `pendingReview` 分工：那个守"段级门禁没过"，这个守"整章还没写完"。 */
+  partialChapters?: number[];
   /** 路径布局（报告 §三：「引擎、管线、App 仍可保留，但都只能通过 manifest 解析路径」）：
    *  · `legacy`（默认）= 沿用既有文件命名，教师已有的书与脚本一个字都不用改；
    *  · `run` = 产物按运行 ID 分目录，第二本书/第二位教师/同书多层并行时**不可能互相覆盖**。

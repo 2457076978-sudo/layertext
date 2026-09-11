@@ -117,6 +117,9 @@ export interface PublishBundle {
     version: string;
     tiers: string[];
     chapters: number[];
+    /** 未写完的章（清单显式声明过 partial 且本次发布**显式放行**了才写在这里）——
+     *  收件人必须看得见"这份包里有还没写完的章"（第七轮 P2）。 */
+    partialChapters?: number[];
     createdAt: string;
     layout: string;
   };
@@ -181,6 +184,8 @@ export interface BundleInput {
   events?: DecisionEvent[];
   /** 版本节点（只数条数） */
   versionNodes?: number;
+  /** 未写完的章（调用方已确认放行）；进包描述让收件人看得见 */
+  partialChapters?: number[];
   /** 生成时间（便于测试确定性） */
   now?: string;
 }
@@ -235,6 +240,8 @@ export function buildBundle(input: BundleInput): PublishBundle {
       version: input.manifest.version,
       tiers: [...input.manifest.tiers],
       chapters: [...input.manifest.chapters],
+      /* undefined 键 JSON.stringify 会丢——只在真有 partial 章时才写（与 entries 的字段同一纪律） */
+      ...(input.partialChapters?.length ? { partialChapters: [...input.partialChapters] } : {}),
       createdAt: input.manifest.createdAt,
       layout: input.manifest.layout,
     },

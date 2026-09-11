@@ -88,6 +88,9 @@ const CN = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十'
  * 是没法看的——报错本身要能读，否则等于没报。 */
 const chName = (ci) => `第${CN[ci - 1] ?? ci}章`;
 const chNum = (ch) => CN.indexOf(String(ch).replace(/^第|章$/g, '')) + 1;
+/** `--partial 10` / `--partial 3,10` → 章号数组（过滤非法值并去重排序——口径输入先归一） */
+const parsePartial = (raw) =>
+  [...new Set(String(raw ?? '').split(',').map((x) => Number(x.trim())).filter((n) => Number.isInteger(n) && n >= 1 && n <= CN.length))].sort((a, b) => a - b);
 const tierArgs = (s) =>
   String(s)
     .split(',')
@@ -183,7 +186,7 @@ function detectChapters(srcBase, outBase, date, tiers) {
 
 /* ────────────────────── 把输入抄进 fixture ────────────────────── */
 
-function copyInputs(P, projectPath, chapters, tiers, root) {
+function copyInputs(P, projectPath, chapters, tiers, root, partial = []) {
   const files = [];
   const put = (rel, text) => {
     const dst = join(root, '输入', rel);
@@ -221,6 +224,9 @@ function copyInputs(P, projectPath, chapters, tiers, root) {
      * 重新探测会把"样本里少了一章"这件事故自动抹平（少一章 → 少检查一章 → 依旧全绿）。 */
     章列表: chapters.map(chName),
     章数: chapters.length,
+    /* partial 章声明（`--partial 10`）随样本冻下来——冻结与 --check 必须同一个口径，
+     * 否则"冻结时不算第十章、对账时又算上"会把好样本错报成不一致。 */
+    partialChapters: partial,
     原文目录: '原文',
     产物目录: '产物',
     调适工作区: '调适',
@@ -248,7 +254,7 @@ const wc = (x) => (x.match(/[A-Za-z][A-Za-z'-]*/g) ?? []).length;
  * 不必把全书重算一遍（重算本身不慢，但报告里指到哪一章更有用）。
  * 过滤只会让结论**少算几章**，不会改变任何一章自己的数。
  */
-async function computeConclusions(root, { 章过滤 = null, 层过滤 = null } = {}) {
+async function computeConclusions(root, { 章过滤 = null, 层过滤 = null, partial = null } = {}) {
   const cfg = JSON.parse(readFileSync(join(root, '调适项目_回放.json'), 'utf-8'));
   const abs = (rel) => join(root, rel);
   /* ★ 词表构造**必须走共享模块**，不能自己 `buildLexicon({vocabCsvTexts:[…]})`。
@@ -282,6 +288,10 @@ async function computeConclusions(root, { 章过滤 = null, 层过滤 = null } =
   const 层列表 = 层过滤 ? 全部层.filter((t) => 层过滤.includes(t)) : 全部层;
   const 全部章 = cfg.章列表 ?? detectChapters(P.原文目录, P.产物目录, cfg.日期, 层列表).map(chName);
   const 章列表 = 章过滤 ? 全部章.filter((c) => 章过滤.includes(c)) : 全部章.slice();
+  /* partial 章（**显式声明**"这一章还没写完"，如 `--partial 10`）：进分章结论、进覆盖，
+   * 但**不进全书分母**——半成品以 3/223 的权重混进"全书"数，正是"守着半成品
+   * 还以为守着全书"的口径漏洞（第七轮 P2）。声明落在 cfg 里，冻结与 --check 同一口径。 */
+  const partialSet = new Set((partial ?? cfg.partialChapters ?? []).map(Number));
 
   /* 覆盖：每章 × 每层要么有结论、要么在缺失清单里。
    * `缺失` 与冻结时**同一套算法**（probe）算出来，所以 `--check` 会重算它，
@@ -320,6 +330,7 @@ async function computeConclusions(root, { 章过滤 = null, 层过滤 = null } =
     const 分章轴 = {};
     const 全书源 = [];
     const 全书产物 = [];
+    const 排除章 = [];
 
     for (const ch of 章列表) {
       const srcPath = join(P.原文目录, ch, '原文_规范化.md');
@@ -332,8 +343,12 @@ async function computeConclusions(root, { 章过滤 = null, 层过滤 = null } =
       const outSegs = segsOf(outMd).map((s) => s.trim());
       const srcWords = srcSegs.reduce((n, s) => n + wc(s), 0);
       const outWords = outSegs.reduce((n, s) => n + wc(s), 0);
-      全书源.push(srcMd);
-      全书产物.push(outMd);
+      const isPartial = partialSet.has(chNum(ch));
+      if (isPartial) 排除章.push(ch);
+      else {
+        全书源.push(srcMd);
+        全书产物.push(outMd);
+      }
 
       // 段级门禁：**逐段**跑，把每条规则命中几次记下来
       const perRule = {};
@@ -365,6 +380,7 @@ async function computeConclusions(root, { 章过滤 = null, 层过滤 = null } =
        * 而报表上"加注条数"照样是个不小的数，于是没人看出问题。 */
       const 质检 = {
         章: ch,
+        completeness: isPartial ? 'partial' : 'complete',
         段数: srcSegs.length,
         原文词数: qSrc.words,
         产物词数: qOut.words,
@@ -417,6 +433,9 @@ async function computeConclusions(root, { 章过滤 = null, 层过滤 = null } =
       const posAll = positioningOf(qSrcAll, qOutAll);
       out.全书定位[t] = {
         章数: 全书源.length,
+        /* 排除的 partial 章**点名列出**——静默排除就是下一个口径漏洞：
+         * 看到全书数的人必须同时看到"这个数不含哪几章、为什么"。 */
+        ...(排除章.length ? { 排除章 } : {}),
         阅读负荷下降: Math.round(posAll.load.value * 100),
         理解支架覆盖率: Math.round(posAll.scaffolding.value * 100),
         原文生词率: Number((qSrcAll.newWordRate * 100).toFixed(1)),
@@ -468,6 +487,8 @@ async function runCheck() {
         .split(',')
         .map((x) => chName(Number(x.trim())))
     : null;
+  // partial 声明优先级：命令行 > 样本 cfg 里冻下来的那份
+  const partial = has('--partial') ? parsePartial(arg('--partial')) : null;
 
   /* 指到样本里没有的章节 → **当场失败**，不返回"对上了"。
    * 不写这一条的话 `--chapters 99` 会一章都比、一章都不差，然后打印 ✓：
@@ -478,7 +499,7 @@ async function runCheck() {
     process.exit(2);
   }
 
-  const { out } = await computeConclusions(join(root, '输入'), { 章过滤: 章过滤列表, 层过滤 });
+  const { out } = await computeConclusions(join(root, '输入'), { 章过滤: 章过滤列表, 层过滤, partial });
   const 层列表 = 层过滤 ?? want.层;
   const 章列表 = 章过滤列表 ?? 冻结章;
   const 局部 = 章过滤列表 !== null || 层过滤 !== null;
@@ -542,17 +563,22 @@ if (探测.缺失.length) {
 }
 
 mkdirSync(join(OUT_ROOT, '输入'), { recursive: true });
-const files = copyInputs(P, projectPath, chapters, tiers, OUT_ROOT);
+/* partial 章**显式声明**（如 `--partial 10`）：这一章还没写完，仍进样本、仍被守，
+ * 但不进全书分母，也不会被当成"完成了的一章"（第七轮 P2 的口径决定）。 */
+const partial = has('--partial') ? parsePartial(arg('--partial')) : [];
+if (partial.length) console.log(` partial 章（显式声明未写完）：${partial.map(chName).join('、')}——进分章与覆盖，不进全书分母`);
+const files = copyInputs(P, projectPath, chapters, tiers, OUT_ROOT, partial);
 const 字节 = files.reduce((n, f) => n + Buffer.byteLength(readFileSync(join(OUT_ROOT, '输入', f), 'utf-8')), 0);
 console.log(` 输入快照 ${files.length} 个文件 / ${(字节 / 1024).toFixed(0)}KB（**全份**，不做精简——精简会引入一个要永远重新验证的等价性问题）`);
 
-const { out, LEX } = await computeConclusions(join(OUT_ROOT, '输入'));
+const { out, LEX } = await computeConclusions(join(OUT_ROOT, '输入'), { partial });
 const meta = {
   schemaVersion: 2,
   说明:
     '真项目回放层的冻结结论。**这些数就是项目报给教师的那些数**（SENT-01 命中数、阅读负荷下降、理解支架覆盖率、每章加注覆盖率、风险队列构成）。' +
     '它们此前没有任何东西在守：一次重构让某个数悄悄变一点点，没人会发现，直到有人拿它去写论文。' +
-    'schemaVersion 2 把覆盖面从"第一章"扩到"全书每一章"——上一轮出事的是第七/八/九章，恰好是当时没有守的那三章。',
+    'schemaVersion 2 把覆盖面从"第一章"扩到"全书每一章"——上一轮出事的是第七/八/九章，恰好是当时没有守的那三章。' +
+    '第七轮起每章质检带 completeness（partial = 显式声明"这章还没写完"，不进全书分母但仍在覆盖里）。',
   冻结自: basename(projectPath),
   章: chapters.map(chName),
   层: tiers,
@@ -573,7 +599,7 @@ for (const t of tiers) {
   const w = out.全书定位[t];
   if (c?.质检) console.log(` ${t} 层（第一章）：篇幅 ${c.篇幅比}｜超长句 ${c.超长句总数} 句｜加注覆盖率 ${c.质检.加注覆盖率}%｜生词率 ${c.质检.原文生词率}% → ${c.质检.生词率}%`);
   if (out.定位两条轴[t]) console.log(`        第一章两条轴：阅读负荷下降 ${out.定位两条轴[t].阅读负荷下降}%｜理解支架覆盖率 ${out.定位两条轴[t].理解支架覆盖率}%`);
-  if (w) console.log(`        全书两条轴（${w.章数} 章）：阅读负荷下降 ${w.阅读负荷下降}%｜理解支架覆盖率 ${w.理解支架覆盖率}%（${w.已注词型}/${w.应注词型} 词型）`);
+  if (w) console.log(`        全书两条轴（${w.章数} 章${w.排除章?.length ? `，partial 未计入：${w.排除章.join('、')}` : ''}）：阅读负荷下降 ${w.阅读负荷下降}%｜理解支架覆盖率 ${w.理解支架覆盖率}%（${w.已注词型}/${w.应注词型} 词型）`);
   const 每章 = Object.entries(out.分章[t]).map(([ch, r]) => `${ch} ${r.质检.加注覆盖率}%(${r.质检.已注词型}/${r.质检.应注词型})`);
   if (每章.length) console.log(`        每章加注覆盖率：${每章.join('｜')}`);
 }

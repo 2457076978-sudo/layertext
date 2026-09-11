@@ -142,7 +142,19 @@ function doExport() {
     const text = readIf(R.decision({ tier: t }));
     if (text) events.push(...parseDecisionLog(text).events);
   }
-  const bundle = buildBundle({ manifest: m, files, events });
+  /* partial 章（清单显式声明"还没写完"）的学生版**默认不发**：学生版是要交到学生手上的读物，
+   * 半成品读物的危害不是"少一章"，而是学生读到一半没了、还以为书写完了。
+   * 显式 --allow-partial 放行时，partial 章写进包描述——收件人必须看得见（第七轮 P2）。 */
+  const partialSet = new Set(m.partialChapters ?? []);
+  const chNumOf = (name) => SHARED.chapterNames(P).indexOf(String(name)) + 1;
+  const partialStudents = partialSet.size ? files.filter((f) => f.kind === '学生版' && f.chapter && partialSet.has(chNumOf(f.chapter))) : [];
+  if (partialStudents.length && !process.argv.includes('--allow-partial')) {
+    console.error(`✗ 清单声明了 partial 章（未写完），其中 ${partialStudents.length} 份学生版默认拒绝发布：`);
+    for (const f of partialStudents) console.error(`   ✗ ${f.path}｜${f.chapter} 还没写完`);
+    console.error('  确认要发半成品：加 --allow-partial（partial 章会写进包描述，收件人可见）。');
+    process.exit(2);
+  }
+  const bundle = buildBundle({ manifest: m, files, events, ...(partialStudents.length ? { partialChapters: m.partialChapters } : {}) });
 
   /* 写包走 staging + 自检 + 原子替换：自检不过，最终目录一个字都不动；
    * 替换时旧目录整个让位——重复导出后目录内容严格等于本次清单，

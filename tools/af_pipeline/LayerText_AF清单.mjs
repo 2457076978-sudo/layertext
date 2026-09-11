@@ -96,6 +96,11 @@ const CH_IDS = arg('--chapters', '')
       .map((x) => Number(x.trim()))
       .filter((n) => n >= 1 && n <= 10)
   : CN.slice(0, Number(P.章数 ?? 10)).map((_, i) => i + 1);
+/** `--partial-chapter 10` / `--partial-chapter 3,10` → 章号数组（去重排序；空串 = 清空声明）。
+ *  partial 是**口径声明**不是技术判定（第五轮对照表："要不要排除在全书口径外是口径决定"），
+ *  所以只接受显式给的章号，不做任何"段数少就算没写完"的猜测。 */
+const parsePartialChapters = (raw) =>
+  [...new Set(String(raw ?? '').split(',').map((x) => Number(x.trim())).filter((n) => Number.isInteger(n) && n >= 1 && n <= CN.length))].sort((a, b) => a - b);
 /* 教师名**原样读进来，写下去之前一律归一成稳定 ID**（总计划阶段 3「Teacher 有稳定 ID」）。
  *
  * 原来这里就是一个自由字符串，于是 `--teacher wayne` / `--teacher Wayne` / `--teacher 'wayne '`
@@ -333,6 +338,8 @@ if (has('--new')) {
     owner: { pid: process.pid, host: hostname() },
     layout: LAYOUT,
   });
+  /* partial 章可以在建清单时一并声明（也可以事后 --partial-chapter 单独改） */
+  if (has('--partial-chapter')) m.partialChapters = parsePartialChapters(arg('--partial-chapter'));
   /* 教师身份这件事里"值得留档"的部分进清单的账（`verifyManifest` 会把它们逐条报出来）：
    * 归一化改过写法、名录里没有这个名字、以及与名录里某个人**只差一两个字符**（疑似拼错）。
    * 只打印不落账，等于把"这本书上悄悄出现了第二个教师"留到对不上账的那天。 */
@@ -419,6 +426,27 @@ if (has('--teachers') || has('--list-teachers')) {
     console.error('✗ 列不出来：引擎里读不到 teachers.js（先 npx tsc -p tsconfig.json 重建引擎）。');
     process.exit(1);
   }
+  process.exit(0);
+}
+
+/* ────────────────────── 声明未写完的章（partial） ──────────────────────
+ * `--partial-chapter 10`：第十章还没写完。它**仍被登记、仍被回放**——半成品也要有人守——
+ * 但不进"全书完成率"分母；发布学生版默认拒绝 partial 章，除非显式放行（第七轮 P2）。
+ * 语义是**整组替换**：这次给了什么，清单上记的就是什么（声明式口径，幂等，可清空）。 */
+if (has('--partial-chapter')) {
+  const cur2 = loadManifest();
+  if (!cur2) {
+    console.error('✗ 还没有运行清单，partial 声明无处可写。先 `--new` 建清单（--new 时也可一并给 --partial-chapter）。');
+    process.exit(2);
+  }
+  const list = parsePartialChapters(arg('--partial-chapter'));
+  cur2.manifest.partialChapters = list;
+  cur2.manifest.updatedAt = new Date().toISOString();
+  writeFileSync(cur2.path, JSON.stringify(cur2.manifest, null, 2), 'utf-8');
+  console.log('════ AF 运行清单 · partial 章声明 ════');
+  console.log(` 运行 ID：${cur2.manifest.runId}`);
+  console.log(list.length ? ` partial 章：${list.map((n) => `第${CN[n - 1] ?? n}章`).join('、')}——仍登记、仍回放，不进全书分母；发布学生版默认拒绝` : ' 已清空 partial 声明（所有章按完成口径计）');
+  console.log(` ✓ ${cur2.path}`);
   process.exit(0);
 }
 
@@ -615,6 +643,7 @@ const tinfo = await SHARED.resolveTeacher(P, m.teacher);
 console.log(` 教师身份：${tinfo.id}（${tinfo.resolution?.status ?? tinfo.why}）${tinfo.id !== m.teacher ? `——清单里记的是「${m.teacher}」，按稳定 ID 算作「${tinfo.id}」` : ''}`);
 if (!tinfo.available) console.warn(` ⚠ ${tinfo.notes?.[0] ?? '教师身份无法归一化'}`);
 console.log(` 模型 ${m.model.name}（温度 ${m.model.temperature}）｜提示词 ${m.model.promptVersion}`);
+if (m.partialChapters?.length) console.log(` ⚠ partial 章（未写完，不进全书分母，学生版默认拒发）：${m.partialChapters.map((n) => `第${CN[n - 1] ?? n}章`).join('、')}`);
 console.log(` 词表快照 ${m.lexicon.version}｜输入 ${m.inputs.length} 项｜产物 ${s.artifactCount} 件｜待复核 ${s.pendingReview} 段`);
 console.log(` 词表正本：${describeStoreState(SHARED.lexiconStoreState(P), m)}`);
 console.log(` 步骤：${m.steps.map((x) => `${x.ok ? '✓' : '✗'}${x.id}`).join(' ') || '（还没跑）'}`);

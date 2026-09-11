@@ -277,3 +277,24 @@ test('★ 决定条数：三层各一条决定 → decisionCount = 3，层键与
   const desc = JSON.parse(readFileSync(join(root, '产物', '_运行', runId, `发布包_${runId}`, '发布包.json'), 'utf-8')) as { decisionCount: number };
   assert.equal(desc.decisionCount, 3, `三层各一条决定要数成 3（每一层都计入），实得 ${desc.decisionCount}`);
 });
+
+test('★ partial 章的学生版默认拒发；--allow-partial 放行且包描述声明（第七轮 P2）', () => {
+  const { root, json, runId, run } = makeProject();
+  // 生成第一章的学生版并登记（第一章是这本"书"唯一的章，把它声明成 partial）
+  assert.equal(run('LayerText_AF学生版.mjs', ['--tier', 'A', '--chapters', '1', '--title', 'Animal Farm · Chapter One']).status, 0);
+  assert.equal(run('LayerText_AF清单.mjs', ['--stamp', '--step', '学生版']).status, 0);
+  assert.equal(run('LayerText_AF清单.mjs', ['--partial-chapter', '1']).status, 0);
+
+  const dir = join(root, '产物', '_运行', runId, `发布包_${runId}`);
+  const denied = runBundle(json, []);
+  assert.equal(denied.status, 2, denied.out);
+  assert.match(denied.out, /partial|还没写完/);
+  assert.match(denied.out, /--allow-partial/);
+  assert.equal(existsSync(dir), false, '拒绝时不写任何文件');
+
+  const allowed = runBundle(json, ['--allow-partial']);
+  assert.equal(allowed.status, 0, allowed.out);
+  const desc = JSON.parse(readFileSync(join(dir, '发布包.json'), 'utf-8')) as { run: { partialChapters?: number[] }; entries: { kind: string }[] };
+  assert.deepEqual(desc.run.partialChapters, [1], '放行的 partial 章要写进包描述——收件人必须看得见');
+  assert.equal(desc.entries.some((e) => e.kind === '学生版'), true);
+});

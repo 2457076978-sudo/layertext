@@ -189,6 +189,13 @@ test('★ 学生版的派生关系随登记进包：源稿身份、生成器与�
   assert.equal(ok.ok, true, ok.problems.map((p) => p.message).join('；'));
 });
 
+test('★ 放行的 partial 章写进包描述 run.partialChapters；没有就不写这个键（第七轮 P2）', () => {
+  const b = buildBundle({ manifest: manifest(), files: FILES, partialChapters: [10] });
+  assert.deepEqual(b.run.partialChapters, [10], '收件人必须看得见"这份包里有还没写完的章"');
+  const clean = buildBundle({ manifest: manifest(), files: FILES });
+  assert.equal('partialChapters' in clean.run, false, '没有 partial 章不写这个键——空数组也是一种声明，不该凭空出现');
+});
+
 test('★ 导入核对：该有的都在、内容哈希对得上', () => {
   const b = buildBundle({ manifest: manifest(), files: FILES });
   const ok = verifyBundle(
