@@ -11,6 +11,8 @@
  *   node LayerText_AF管线.mjs --only 复核            # 只跑某一步
  *   node LayerText_AF管线.mjs --dry                 # 只打印计划
  *   node LayerText_AF管线.mjs --project ../x/调适项目_别的书.json
+ *   node LayerText_AF管线.mjs --no-manifest             # 不建运行清单（不推荐：会丢掉"这次跑的是什么"的记录）
+ *   node LayerText_AF管线.mjs --teacher wayne           # 运行清单里的教师 ID
  *
  * 项目配置（路径/词库/书级配置/教材进度）全部从 调适项目_*.json 读，脚本内不写死。
  */
@@ -114,13 +116,28 @@ plan.forEach((s, i) => console.log(`  ${i + 1}. ${s.id}  —  ${s.note}`));
 
 if (has('--dry')) { console.log('\n（--dry，未执行）'); process.exit(0); }
 
+/** 清单脚本：一次运行的全部身份信息与产物状态都记在它下面（审查报告 §三的"只能重构一处"）。
+ *  run() 只负责起进程；每步跑完都回清单里盖一个章——这样"跑成功了吗"只有一个答案来源。 */
+const tierArgOf = () => ['--tier', tiers.join(','), ...(chapters ? ['--chapters', chapters] : [])];
+const runScript = (script, args) => spawnSync(process.execPath, [join(HERE, script), ...args], { stdio: 'inherit', env: process.env });
+
+if (!has('--no-manifest')) {
+  console.log('\n──────── 清单（建） ────────');
+  const m = runScript('LayerText_AF清单.mjs', ['--new', ...tierArgOf(), '--teacher', arg('--teacher', process.env.LAYERTEXT_TEACHER ?? process.env.USER ?? 'unknown')]);
+  if (m.status !== 0) { console.error('\n✗ 清单建立失败，管线中止（没有清单就没有"这次跑的是什么"的记录）。'); process.exit(1); }
+}
+
 const results = [];
+const stamp = (id, ok, sec) => {
+  if (has('--no-manifest')) return;
+  runScript('LayerText_AF清单.mjs', ['--stamp', ...tierArgOf(), '--step', id, '--sec', String(sec), '--ok', ok ? '1' : '0']);
+};
 for (const s of plan) {
   const path = join(HERE, s.script);
   if (!existsSync(path)) { console.error(`\n✗ 缺脚本：${s.script}`); process.exit(1); }
   // 补注脚本用 --tier/--chapters（与生成/精修的 A,M 位置参数不同），在这里转换
   const stepArgs = ['补注', '修复', '复核', '台账', '风险队列', '决定汇总'].includes(s.id)
-    ? ['--tier', tiers.join(','), ...(chapters ? ['--chapters', chapters] : [])]
+    ? tierArgOf()
     : s.args;
   console.log(`\n──────── ${s.id} ────────`);
   const t0 = Date.now();
@@ -128,6 +145,7 @@ for (const s of plan) {
   const sec = ((Date.now() - t0) / 1000).toFixed(1);
   const ok = r.status === 0;
   results.push({ id: s.id, ok, sec });
+  stamp(s.id, ok, sec);
   if (!ok) {
     console.error(`\n✗ ${s.id} 失败（退出码 ${r.status}），管线中止。`);
     break;
@@ -138,5 +156,16 @@ for (const s of plan) {
 console.log('\n════ 汇总 ════');
 results.forEach((r) => console.log(`  ${r.ok ? '✓' : '✗'} ${r.id}  ${r.sec}s`));
 const failed = results.filter((r) => !r.ok).length;
-console.log(failed ? `\n✗ ${failed} 步失败` : `\n✓ 全部 ${results.length} 步完成`);
-process.exit(failed ? 1 : 0);
+if (failed) {
+  console.log(`\n✗ ${failed} 步失败`);
+  process.exit(1);
+}
+
+// 收尾校验：产物齐不齐、输入有没有变过、有没有未完成段落——**一次运行只有一个结论**
+if (!has('--no-manifest')) {
+  console.log('\n──────── 清单（校验） ────────');
+  const v = runScript('LayerText_AF清单.mjs', ['--verify', ...tierArgOf()]);
+  if (v.status !== 0) { console.error('\n✗ 清单校验未通过：产物不可当完成品（详见上面的硬问题）。'); process.exit(1); }
+}
+console.log(`\n✓ 全部 ${results.length} 步完成`);
+process.exit(0);
