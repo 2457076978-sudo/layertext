@@ -79,19 +79,13 @@ const oovOf = (seg) => {
   }
 };
 
-/** 运行身份 + 路径解析：与命令行其它脚本、App 面板共用同一套规则
- *  （报告 §三：「都只能通过 manifest 解析路径」——谁自己拼字符串，谁就是下一个撞名点）。 */
-function runIdentity(outBase) {
-  try {
-    const ptr = JSON.parse(readFileSync(join(outBase, '_运行', '清单_最新.json'), 'utf-8'));
-    const m = JSON.parse(readFileSync(ptr.path, 'utf-8'));
-    return { layout: m.layout ?? 'legacy', runId: m.runId, teacher: m.teacher };
-  } catch {
-    return { layout: 'legacy', runId: '', teacher: process.env.USER ?? 'unknown' };
-  }
-}
-
-const RUN = runIdentity(OUT_BASE);
+/** 运行身份 + 路径解析：与命令行其它脚本、App 面板共用**同一个** `readRunIdentity`
+ *  （报告 §三：「都只能通过 manifest 解析路径」——谁自己拼字符串、谁自己读指针，
+ *   谁就是下一个撞名点/身份被换掉的入口）。 */
+const TEACHER = arg('--teacher', process.env.LAYERTEXT_TEACHER ?? process.env.USER ?? 'unknown');
+const RUN = await SHARED.readRunIdentity({ out: OUT_BASE, work: P.调适工作区 }, { teacher: TEACHER, tier: TAGS[TIERS[0]] ?? TIERS[0] }, { runId: arg('--run', undefined) });
+if (RUN.warning) console.warn(`\n⚠ ${RUN.warning}`);
+console.log(`运行身份：${RUN.source}｜${RUN.teacher}｜${RUN.runId || '（无）'}`);
 const R = makeResolver(RUN.layout, { out: OUT_BASE, work: P.调适工作区 }, { runId: RUN.runId, tier: TAGS[TIERS[0]] ?? TIERS[0], date: DATE });
 
 console.log('════ AF 段级风险队列 ════');

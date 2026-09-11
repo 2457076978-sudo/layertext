@@ -384,3 +384,61 @@ export function loadTextbookLearned(project) {
   }
   return learned;
 }
+
+/* ────────────────────── 运行身份：**唯一**的解析入口 ────────────────────── */
+
+/**
+ * 读运行身份。**所有脚本与 App 都从这里拿**，谁也不再自己读指针。
+ *
+ * 为什么要有这一个函数：原来 `会话改写.mjs` / `风险队列.mjs` / `决定汇总.mjs` / App 面板
+ * 各自写了一遍"读 清单_最新.json → 再读它指的那份清单"。四份实现读的是**同一个全局指针**，
+ * 于是两位教师同时跑同一本书的不同层级时，后跑者覆盖先跑者，先跑者的进程接着读到
+ * **对方的 runId**，把产物写进对方的运行私有目录——而两边都报告成功。
+ *
+ * 现在：先读按 (教师, 层级) 分片的那份指针；全局"最近一次"只在教师与层级都对得上时才用；
+ * 对不上就**拒绝采用**并响亮说明。判断逻辑在引擎的 `chooseIdentity`（有单测），
+ * 这里只负责读盘。
+ *
+ * @param {{out:string, work:string}} roots
+ * @param {{teacher?:string, tier?:string}} want  我这次是谁、跑哪一层
+ * @param {{runId?:string}} [opts]              显式指定（`--run` / `LAYERTEXT_RUN`）
+ */
+export async function readRunIdentity(roots, want = {}, opts = {}) {
+  const M = await import(`${LTR}/dist/src/core/manifest.js`);
+  const runDir = join(roots.out, '_运行');
+  const readPtr = (name) => {
+    try {
+      const raw = JSON.parse(readFileSync(join(runDir, name), 'utf-8'));
+      if (!raw?.path) return null;
+      // 指针只记"指向谁"；layout/teacher/tier 以**清单本身**为准。
+      // 清单读不到 → 整份指针视为读不到：坏指针不许半途生效，半生效比彻底失效更危险。
+      const m = JSON.parse(readFileSync(raw.path, 'utf-8'));
+      return {
+        path: raw.path,
+        runId: m.runId ?? raw.runId ?? '',
+        layout: m.layout ?? raw.layout ?? 'legacy',
+        teacher: m.teacher ?? raw.teacher ?? 'unknown',
+        tier: m.tier ?? raw.tier,
+        updatedAt: raw.updatedAt,
+      };
+    } catch {
+      return null;
+    }
+  };
+  /* 层级名统一成**标签**（`A` → `A层85`）再算指针文件名。
+   * 清单里记的是层键（`A`），而脚本与面板手里的是标签（`A层85`）——
+   * 不归一就会出现"写的时候叫 清单_wayne_A.json、读的时候找 清单_wayne_A层85.json"，
+   * 表现是**分片指针明明写了却永远读不到**，于是静默退回"最近一次"，
+   * 而这次修复的全部意义恰恰是不再依赖"最近一次"。 */
+  const tierTag = want.tier ? M.tierTagOf(want.tier) : undefined;
+  const wantNorm = { ...want, tier: tierTag };
+  const fallbackRunId = `${tierTag ?? 'unknown'}-${want.teacher ?? process.env.USER ?? 'unknown'}`;
+  const choice = M.chooseIdentity({
+    want: wantNorm,
+    explicitRunId: opts.runId ?? process.env.LAYERTEXT_RUN,
+    scoped: want.teacher || tierTag ? readPtr(M.pointerNameOf({ teacher: want.teacher ?? 'unknown', tier: tierTag })) : null,
+    latest: readPtr(M.LATEST_POINTER_NAME),
+    fallbackRunId,
+  });
+  return { ...choice.identity, source: choice.source, warning: choice.warning };
+}

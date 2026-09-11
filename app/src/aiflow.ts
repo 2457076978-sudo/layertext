@@ -6,11 +6,23 @@
 import { invoke } from '@tauri-apps/api/core';
 import { S, esc } from './state.js';
 import { $, setStatus, toast, pop, hidePop, showSummaryPop } from './uikit.js';
-import { activeSession, flashApplied, persistEdit, chatUntilJson, switchView } from './main.js';
+import { activeSession, flashApplied, chatUntilJson, switchView } from './main.js';
 import { renderReader, sidebarHandlers, updateMarkBadge } from './reader.js';
 import { renderSidebar, scheduleSave } from './review.js';
 import { CHANGELOG_HEADER, typeLabel, type FileSession, type Mark, type Suggestion } from './types.js';
-import { csvCell, estTokens, hasProseChinese, locateOriginal, normalizeZhNotes, pickSingleRewrite, remapWarns, resolveSuggestionTarget, stripMarkdownNoise, remapMarks, validSuggestionText } from './pure.js';
+import {
+  csvCell,
+  estTokens,
+  hasProseChinese,
+  locateOriginal,
+  normalizeZhNotes,
+  pickSingleRewrite,
+  remapWarns,
+  resolveSuggestionTarget,
+  stripMarkdownNoise,
+  remapMarks,
+  validSuggestionText,
+} from './pure.js';
 import { extractParas, sentsOf, splitChapter } from '../../src/core/textpipe.js';
 import { checkRevisedText } from './pure.js';
 import type { LedgerRow } from '../../src/core/adoption.js';
@@ -23,6 +35,7 @@ import { applyZhAnnotations, applyWordSimplifications } from './pipew.js';
 import { buildAppPolicy } from './rewritegate.js';
 import { checkRewrite } from '../../src/core/rewrite.js';
 import { findProjectConfig } from './datapanel.js';
+import { adoptMessage, adoptRewrite } from './adoptrewrite.js';
 
 export /**
  * 请求 AI 修订候选。
@@ -71,7 +84,7 @@ async function gateRewriteCandidate(revised: string, source: string) {
   const s = activeSession();
   if (!s) return null;
   try {
-    const cfg = s.sourcePath ? (await findProjectConfig(s.sourcePath.replace(/\/[^/]*$/, '')))?.config ?? null : null;
+    const cfg = s.sourcePath ? ((await findProjectConfig(s.sourcePath.replace(/\/[^/]*$/, '')))?.config ?? null) : null;
     const { policy } = await buildAppPolicy({
       currentText: s.md,
       sourcePath: s.sourcePath ?? null,
@@ -313,9 +326,74 @@ export async function acceptSuggestion(g: Suggestion, opts: { scene?: string; ou
   g.si = target.si;
   g.original = target.original;
   g.revised = normalizeZhNotes(g.revised); // 生词注释统一全角紧贴（word（中文））
-  s.md = s.md.slice(0, target.at) + g.revised + s.md.slice(target.at + g.original.length);
 
-  // 标记对齐 + 对应标记清除 + 落盘
+  /* ★ 写正文走**引擎里唯一那个事务**（`src/core/version.ts` 的 `applyChange`），
+   *   不再 `persistEdit(s.md)` 整份覆盖。旧路径有三个口子（《工程优化总计划》阶段 1）：
+   *     ① 采纳时**不复判门禁**——"生成候选"那一刻的判定被当成永远成立；
+   *     ② 没有 `baseVersion`——编辑器里的内容与盘上不一致时会静默覆盖别处的改动；
+   *     ③ 没有版本节点——"这一段现在这样是哪来的"答不出来，也无从重放。
+   *   三条在 `adoptRewrite` 里一起封掉：门禁当闸、baseVersion 当并发校验、事务出父版本。
+   *   门禁**在写入这一刻重跑**（不是拿生成候选时的那份结论），因为中间隔了多久没人知道。 */
+  const targetPi = target.pi;
+  if (targetPi === undefined) {
+    // 没有段落号就没有"改哪一段"——宁可退回建议页，也不猜一个段
+    setStatus('这条建议没定位到段落号，未直写正文（请到「修订建议」页逐条处理）', 'err');
+    return false;
+  }
+  /* 门禁**在写入这一刻重跑**。刻意**不**回退到 `g.gate` 那份缓存结论：
+   * 缓存结论是"生成候选那一刻"的判断，而写入发生在之后——
+   * 拿旧结论给新时刻背书，正是要封的那个口子。
+   * 重跑不成就返回 null，`guardFromRewrite` 会拦下（"检查出错"绝不允许变成"放行"）。 */
+  const verdict = await gateRewriteCandidate(g.revised, g.original);
+  const adopt = await adoptRewrite(
+    {
+      read: (p) => invoke<string>('read_text_file', { path: p }),
+      write: (p, c) => invoke('write_text_file', { path: p, content: c }).then(() => undefined),
+      backup: async (p, c) => {
+        // 首改前留一份"原始备份"（与 persistEdit 同一约定），有备份就不覆盖
+        const dir = p.slice(0, p.lastIndexOf('/'));
+        const bak = `${dir}/${p.slice(p.lastIndexOf('/') + 1).replace(/\.(md|txt|markdown)$/i, '')}_原始备份.md`;
+        try {
+          await invoke<string>('read_text_file', { path: bak });
+        } catch {
+          await invoke('write_text_file', { path: bak, content: c });
+        }
+      },
+      now: () => new Date().toISOString(),
+    },
+    {
+      sessionText: s.md,
+      sourcePath: s.sourcePath ?? null,
+      pi: targetPi,
+      original: g.original,
+      revised: g.revised,
+      itemId: g.markId || `句子@P${String(targetPi + 1).padStart(2, '0')}`,
+      verdict,
+      config: (await findProjectConfig(s.sourcePath ? s.sourcePath.replace(/\/[^/]*$/, '') : ''))?.config ?? null,
+      teacherId: (S.appConfig as { teacherId?: string }).teacherId ?? 'unknown',
+      tier: 'A层85',
+      promptVersion: await promptSetVersion(),
+    },
+  );
+  if (adopt.status !== 'applied') {
+    const m = adoptMessage(adopt);
+    setStatus(m.text, 'err');
+    toast(m.text, 'err');
+    return false; // 建议留在列表里，卡片不消失
+  }
+  /* 事务已经把文件写好，这里只同步**内存里的会话**——不再整份覆盖写盘。
+   * 文本按事务实际写进去的那一段重算，而不是按 `target.at` 自己拼一遍：
+   * 自己拼一遍就又有"判 A 写 B"的机会了。 */
+  const before = s.md;
+  const { undoStack } = s as { undoStack?: string[] };
+  if (undoStack) {
+    undoStack.push(before);
+    if (undoStack.length > 50) undoStack.shift();
+  }
+  const srcPath = s.sourcePath;
+  if (srcPath) s.md = await invoke<string>('read_text_file', { path: srcPath });
+
+  // 标记对齐 + 对应标记清除
   const removed = s.review.marks.filter((m) => m.id === g.markId);
   s.review.marks = s.review.marks.filter((m) => m.id !== g.markId);
   // 词被本次改写替换掉的词标记一并完成（如 bleated→made soft sounds 后，bleated 标记不再残留成幽灵）
@@ -329,7 +407,7 @@ export async function acceptSuggestion(g: Suggestion, opts: { scene?: string; ou
   const outDir = s.sourcePath ? s.sourcePath.slice(0, s.sourcePath.lastIndexOf('/')) : await invoke<string>('reports_dir');
   const logPath = `${outDir}/变更日志_AI审核.csv`;
   try {
-    const savedTo = await persistEdit(s, s.md);
+    const savedTo = s.sourcePath ?? '';
     let csv = '';
     try {
       csv = await invoke<string>('read_text_file', { path: logPath });

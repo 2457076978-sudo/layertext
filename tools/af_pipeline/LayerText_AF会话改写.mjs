@@ -220,18 +220,12 @@ ${vocabBlock}
  * 规模崩点的复发点：第二本书/第二位教师/同书多层并行时路径会撞，而脚本照常报告成功。
  * 布局由清单决定：legacy 逐字符复现既有命名（不破坏教师已有工作流），
  * run 把每类产物收进 `_运行/<runId>/`（跨运行不可能撞名）。 */
-const MANIFEST_POINTER = join(OUT_BASE, '_运行', '清单_最新.json');
-function runIdentity() {
-  try {
-    const ptr = JSON.parse(readFileSync(MANIFEST_POINTER, 'utf-8'));
-    const m = JSON.parse(readFileSync(ptr.path, 'utf-8'));
-    return { layout: m.layout ?? 'legacy', runId: m.runId, teacher: m.teacher, from: '清单' };
-  } catch {
-    // 没建过清单（单独跑本脚本）：退回 legacy 布局 + 一个由身份信息拼出的运行 ID
-    return { layout: 'legacy', runId: `${TAG}-${process.env.USER ?? 'unknown'}`, teacher: process.env.USER ?? 'unknown', from: '（无清单，按 legacy 布局）' };
-  }
-}
-const RUN = runIdentity();
+/* 运行身份走**共享的那一个**解析入口。原来这里是本文件自己读全局 `清单_最新.json`——
+ * 四个人各读一遍同一个全局指针，正是"两位教师并发时互相读到对方 runId"的成因。
+ * 详见 `LayerText_AF词表与词典.mjs` 的 `readRunIdentity`。 */
+const TEACHER = arg('--teacher', process.env.LAYERTEXT_TEACHER ?? process.env.USER ?? 'unknown');
+const RUN = await SHARED.readRunIdentity({ out: OUT_BASE, work: P.调适工作区 }, { teacher: TEACHER, tier: TAG }, { runId: arg('--run', undefined) });
+if (RUN.warning) console.warn(`\n⚠ ${RUN.warning}`);
 const R = makeResolver(RUN.layout, { out: OUT_BASE, work: P.调适工作区 }, { runId: RUN.runId, tier: TAG, date: DATE, suffix: SUFFIX });
 const sessionFile = () => R.session({ scope: SCOPE, vocab: VOCAB });
 const REVIEW_DIR = R.dir('待复核', { chapter: '第X章', segId: 'P00' });
@@ -613,7 +607,7 @@ const { system, vb, db } = buildOpener();
 const openerTokens = Math.round(system.length / 3.2);
 console.log(`会话开场：${system.length} 字符 ≈ ${openerTokens} tokens（词汇表 ${vb.n} 词 / 词典 ${db.n} 条）`);
 console.log(`会话文件：${sessionFile()}${RESUME ? '（续跑）' : ''}`);
-console.log(`路径布局：${RUN.layout}${RUN.layout === 'legacy' ? '（沿用既有命名）' : `（运行私有目录 ${RUN.runId}）`}｜运行身份来自：${RUN.from}`);
+console.log(`路径布局：${RUN.layout}${RUN.layout === 'legacy' ? '（沿用既有命名）' : `（运行私有目录 ${RUN.runId}）`}｜运行身份来自：${RUN.source}（教师 ${RUN.teacher}）`);
 
 // 预算估算
 const chSegs = CH_IDS.map((i) => {
@@ -651,7 +645,13 @@ if (!state.annotated) {
   state.annotated = new Set();
   const allCh = CN.slice(0, Number(P.章数 ?? 10));
   for (const cn of allCh) {
-    const p0 = join(OUT_BASE, `第${cn}章`, `原文_${TAG}_${DATE}${SUFFIX}.md`);
+    /* ★ 必须走 Resolver。这里原来是 `join(OUT_BASE, `第${cn}章`, `原文_${TAG}_${DATE}${SUFFIX}.md`)`——
+     *  同一个文件里第 670 行的产物路径走 `R.any('正文')`，而账本这一处手拼。
+     *  在 `--layout run` 下 `R.any('正文')` 指向 `_运行/<runId>/正文/…`，手拼的那条永远不存在：
+     *  `existsSync` 全 false → **账本一个词都没读回来 → 跨章去重静默失效 →
+     *  同一个词被反复加注**，而脚本照常报告成功。
+     *  这正是"文件命名约定"那个规模崩点的典型样子：不报错、结果错。 */
+    const p0 = R.any('正文', { chapter: `第${cn}章` });
     if (!existsSync(p0)) continue;
     for (const m of readFileSync(p0, 'utf-8').matchAll(/([A-Za-z][A-Za-z'-]*)（[^）]{1,24}）/g)) state.annotated.add(m[1].toLowerCase());
   }

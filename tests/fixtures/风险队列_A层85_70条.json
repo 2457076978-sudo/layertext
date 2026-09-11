@@ -1,0 +1,5126 @@
+{
+  "schemaVersion": 1,
+  "书名": "Animal Farm",
+  "层级": [
+    "A"
+  ],
+  "章节": [
+    1
+  ],
+  "生成时间": "2026-09-11T12:37:39.137Z",
+  "规则表": {
+    "LEN-01": {
+      "id": "LEN-01",
+      "category": "语言",
+      "severity": "blocker",
+      "weight": 6,
+      "probability": 1,
+      "label": "篇幅偏离目标"
+    },
+    "SENT-01": {
+      "id": "SENT-01",
+      "category": "语言",
+      "severity": "blocker",
+      "weight": 8,
+      "probability": 1,
+      "label": "超长句"
+    },
+    "ANNO-01": {
+      "id": "ANNO-01",
+      "category": "加注",
+      "severity": "blocker",
+      "weight": 10,
+      "probability": 1,
+      "label": "超纲词漏注"
+    },
+    "ZH-01": {
+      "id": "ZH-01",
+      "category": "格式",
+      "severity": "blocker",
+      "weight": 11,
+      "probability": 1,
+      "label": "正文混入中文"
+    },
+    "ANNO-02": {
+      "id": "ANNO-02",
+      "category": "加注",
+      "severity": "warn",
+      "weight": 5,
+      "probability": 0.9,
+      "label": "同词重复注释"
+    },
+    "ANNO-03": {
+      "id": "ANNO-03",
+      "category": "加注",
+      "severity": "warn",
+      "weight": 9,
+      "probability": 0.7,
+      "label": "释义与统一词典冲突"
+    },
+    "FACT-01": {
+      "id": "FACT-01",
+      "category": "事实",
+      "severity": "warn",
+      "weight": 22,
+      "probability": 0.6,
+      "label": "数字变化/丢失"
+    },
+    "FACT-02": {
+      "id": "FACT-02",
+      "category": "事实",
+      "severity": "warn",
+      "weight": 20,
+      "probability": 0.6,
+      "label": "专名缺失"
+    },
+    "AST-01": {
+      "id": "AST-01",
+      "category": "格式",
+      "severity": "warn",
+      "weight": 16,
+      "probability": 0.9,
+      "label": "段标记缺失/重复/跳号"
+    },
+    "AST-02": {
+      "id": "AST-02",
+      "category": "加注",
+      "severity": "warn",
+      "weight": 9,
+      "probability": 0.8,
+      "label": "同词多义（一份产物里同词不同释义）"
+    },
+    "AST-03": {
+      "id": "AST-03",
+      "category": "加注",
+      "severity": "warn",
+      "weight": 6,
+      "probability": 1,
+      "label": "注释畸形（嵌套/括号不配对）"
+    }
+  },
+  "摘要": {
+    "total": 70,
+    "blockers": 67,
+    "byRule": {
+      "FACT-02": 2,
+      "ANNO-01": 44,
+      "SENT-01": 19,
+      "LEN-01": 4,
+      "ANNO-02": 1
+    },
+    "byCategory": {
+      "事实": 2,
+      "加注": 45,
+      "语言": 23
+    },
+    "estimatedMinutes": 37.8
+  },
+  "一小时路径": {
+    "预算": 60,
+    "超预算": false,
+    "建议": "队列估时 37.8 分钟，在 60 分钟预算内，按阶段顺序走即可。",
+    "阶段": [
+      {
+        "id": "overview",
+        "title": "看统计与最危险队列项",
+        "budget": 10,
+        "count": 5,
+        "note": "先看 summary 与排在最前面的几条，判断这一层整体是否可信"
+      },
+      {
+        "id": "facts",
+        "title": "处理事实/专名/数字差异",
+        "budget": 25,
+        "count": 2,
+        "note": "逐条回原文核对；这是唯一机器判不准、后果又最重的一类"
+      },
+      {
+        "id": "anno",
+        "title": "处理全部漏注与超纲释义",
+        "budget": 15,
+        "count": 44,
+        "note": "对照统一词典，一键采纳或改释义（改完进词典，后面章节自动一致）"
+      },
+      {
+        "id": "spot",
+        "title": "抽查每章首尾及高风险段",
+        "budget": 10,
+        "count": 24,
+        "note": "剩下的语言类问题按风险顺序扫，低风险润色可以不看"
+      }
+    ]
+  },
+  "未完成段落": [],
+  "章节产物": {
+    "第一章": "/Users/wayne/Desktop/工作文档库/01-教学工作/名著阅读工作区_AnimalFarm/调适工作区/重制三版/第一章/原文_A层85_2026-09-10.md"
+  },
+  "队列": [
+    {
+      "ruleId": "FACT-02",
+      "category": "事实",
+      "severity": "warn",
+      "consequence": 20,
+      "probability": 0.6,
+      "risk": 12,
+      "book": "Animal Farm",
+      "tier": "A",
+      "chapter": "第一章",
+      "segIndex": 2,
+      "segLabel": "第一章 第3段",
+      "detail": {
+        "signals": [
+          "Presently"
+        ],
+        "source": "[P03] At one end of the big barn, on a sort of raised platform, Major was already ensconced on his bed of straw, under a lantern which hung from a beam. He was twelve years old and had lately grown rather stout, but he was still a majestic-looking pig, with a wise and benevolent appearance in spite ",
+        "rewritten": "[P03] At one end of the big barn, on a raised platform（舞台）, Major was already in his bed of straw（稻草）, under a lantern hanging from a beam. He was twelve years old and had grown rather fat lately, but he was still a majestic（威严的）-looking pig, with a wise and kind appearance even though his tushes（獠牙",
+        "signal": "Presently",
+        "numberWord": null
+      },
+      "id": "第一章#2:FACT-02:Presently",
+      "title": "原文的「Presently」在改写里找不到",
+      "sourceSentence": "Presently, as the other animals began to arrive, he lay down comfortably on his side.",
+      "rewrittenSentence": "Soon, as the other animals began to arrive, he lay down comfortably on his side.",
+      "context": {
+        "prev": "He was twelve years old and had lately grown rather stout, but he was still a majestic looking pig, with a wise and benevolent appearance in spite of the fact that his tushes had never been cut. ",
+        "next": ""
+      },
+      "plot": {
+        "score": 0.167,
+        "level": "低",
+        "hits": [
+          "角色/地名：major"
+        ],
+        "parts": [
+          {
+            "label": "底线原文锚点",
+            "hits": [],
+            "weight": 3
+          },
+          {
+            "label": "角色/地名",
+            "hits": [
+              "major"
+            ],
+            "weight": 1.2
+          },
+          {
+            "label": "数字",
+            "hits": [],
+            "weight": 1
+          },
+          {
+            "label": "因果连接词",
+            "hits": [],
+            "weight": 0.8
+          },
+          {
+            "label": "章节转折位置",
+            "hits": [],
+            "weight": 0.6
+          }
+        ]
+      }
+    },
+    {
+      "ruleId": "FACT-02",
+      "category": "事实",
+      "severity": "warn",
+      "consequence": 20,
+      "probability": 0.6,
+      "risk": 12,
+      "book": "Animal Farm",
+      "tier": "A",
+      "chapter": "第一章",
+      "segIndex": 6,
+      "segLabel": "第一章 第7段",
+      "detail": {
+        "signals": [
+          "Remove"
+        ],
+        "source": "[P07] \"That, comrades, is the answer to all our problems. It is summed up in a single word—Man. Remove Man from the scene, and the root cause of hunger and overwork is abolished for ever.\"\n\n",
+        "rewritten": "[P07] \"That, comrades, is the answer to all our problems. It is all in one word—Man. Take Man away, and the cause of hunger and too much work is gone for ever.\"",
+        "signal": "Remove",
+        "numberWord": null
+      },
+      "id": "第一章#6:FACT-02:Remove",
+      "title": "原文的「Remove」在改写里找不到",
+      "sourceSentence": "Remove Man from the scene, and the root cause of hunger and overwork is abolished for ever.\"",
+      "rewrittenSentence": "",
+      "context": {
+        "prev": "It is summed up in a single word Man. ",
+        "next": ""
+      },
+      "plot": {
+        "score": 0,
+        "level": "低",
+        "hits": [],
+        "parts": [
+          {
+            "label": "底线原文锚点",
+            "hits": [],
+            "weight": 3
+          },
+          {
+            "label": "角色/地名",
+            "hits": [],
+            "weight": 1.2
+          },
+          {
+            "label": "数字",
+            "hits": [],
+            "weight": 1
+          },
+          {
+            "label": "因果连接词",
+            "hits": [],
+            "weight": 0.8
+          },
+          {
+            "label": "章节转折位置",
+            "hits": [],
+            "weight": 0.6
+          }
+        ]
+      }
+    },
+    {
+      "ruleId": "ANNO-01",
+      "category": "加注",
+      "severity": "blocker",
+      "consequence": 10,
+      "probability": 1,
+      "risk": 10,
+      "book": "Animal Farm",
+      "tier": "A",
+      "chapter": "第一章",
+      "segIndex": 1,
+      "segLabel": "第一章 第2段",
+      "detail": {
+        "missing": [
+          "previous",
+          "exhibited",
+          "highly"
+        ],
+        "word": "exhibited"
+      },
+      "id": "第一章#1:ANNO-01:exhibited",
+      "title": "超纲词 exhibited 没有加注",
+      "sourceSentence": "Old Major (so he was always called, though the name under which he had been exhibited was Willingdon Beauty) was so highly regarded on the farm that everyone was quite ready to lose an hour's sleep in order to hear what he had to say.",
+      "rewrittenSentence": "Old Major, also called Willingdon Beauty, was so highly regarded on the farm that everyone was quite ready to lose an hour's sleep to hear what he had to say.",
+      "context": {
+        "prev": "It had been agreed that they should all meet in the big barn as soon as Mr. Jones was safely out of the way. ",
+        "next": ""
+      },
+      "plot": {
+        "score": 1,
+        "level": "高",
+        "hits": [
+          "底线原文锚点：willingdon beauty",
+          "角色/地名：jones",
+          "角色/地名：major",
+          "角色/地名：willingdon",
+          "角色/地名：beauty",
+          "因果连接词：in order to",
+          "章节转折位置：章首/章尾"
+        ],
+        "parts": [
+          {
+            "label": "底线原文锚点",
+            "hits": [
+              "willingdon beauty"
+            ],
+            "weight": 3
+          },
+          {
+            "label": "角色/地名",
+            "hits": [
+              "jones",
+              "major",
+              "willingdon",
+              "beauty"
+            ],
+            "weight": 1.2
+          },
+          {
+            "label": "数字",
+            "hits": [],
+            "weight": 1
+          },
+          {
+            "label": "因果连接词",
+            "hits": [
+              "in order to"
+            ],
+            "weight": 0.8
+          },
+          {
+            "label": "章节转折位置",
+            "hits": [
+              "章首/章尾"
+            ],
+            "weight": 0.6
+          }
+        ]
+      }
+    },
+    {
+      "ruleId": "ANNO-01",
+      "category": "加注",
+      "severity": "blocker",
+      "consequence": 10,
+      "probability": 1,
+      "risk": 10,
+      "book": "Animal Farm",
+      "tier": "A",
+      "chapter": "第一章",
+      "segIndex": 1,
+      "segLabel": "第一章 第2段",
+      "detail": {
+        "missing": [
+          "previous",
+          "exhibited",
+          "highly"
+        ],
+        "word": "highly"
+      },
+      "id": "第一章#1:ANNO-01:highly",
+      "title": "超纲词 highly 没有加注",
+      "sourceSentence": "Old Major (so he was always called, though the name under which he had been exhibited was Willingdon Beauty) was so highly regarded on the farm that everyone was quite ready to lose an hour's sleep in order to hear what he had to say.",
+      "rewrittenSentence": "Old Major, also called Willingdon Beauty, was so highly regarded on the farm that everyone was quite ready to lose an hour's sleep to hear what he had to say.",
+      "context": {
+        "prev": "They had agreed to meet in the big barn（谷仓） as soon as Mr. Jones was safely out of the way. ",
+        "next": ""
+      },
+      "plot": {
+        "score": 1,
+        "level": "高",
+        "hits": [
+          "底线原文锚点：willingdon beauty",
+          "角色/地名：jones",
+          "角色/地名：major",
+          "角色/地名：willingdon",
+          "角色/地名：beauty",
+          "因果连接词：in order to",
+          "章节转折位置：章首/章尾"
+        ],
+        "parts": [
+          {
+            "label": "底线原文锚点",
+            "hits": [
+              "willingdon beauty"
+            ],
+            "weight": 3
+          },
+          {
+            "label": "角色/地名",
+            "hits": [
+              "jones",
+              "major",
+              "willingdon",
+              "beauty"
+            ],
+            "weight": 1.2
+          },
+          {
+            "label": "数字",
+            "hits": [],
+            "weight": 1
+          },
+          {
+            "label": "因果连接词",
+            "hits": [
+              "in order to"
+            ],
+            "weight": 0.8
+          },
+          {
+            "label": "章节转折位置",
+            "hits": [
+              "章首/章尾"
+            ],
+            "weight": 0.6
+          }
+        ]
+      }
+    },
+    {
+      "ruleId": "ANNO-01",
+      "category": "加注",
+      "severity": "blocker",
+      "consequence": 10,
+      "probability": 1,
+      "risk": 10,
+      "book": "Animal Farm",
+      "tier": "A",
+      "chapter": "第一章",
+      "segIndex": 1,
+      "segLabel": "第一章 第2段",
+      "detail": {
+        "missing": [
+          "previous",
+          "exhibited",
+          "highly"
+        ],
+        "word": "previous"
+      },
+      "id": "第一章#1:ANNO-01:previous",
+      "title": "超纲词 previous 没有加注",
+      "sourceSentence": "Word had gone round during the day that old Major, the prize Middle White boar, had had a strange dream on the previous night and wished to communicate it to the other animals. ",
+      "rewrittenSentence": "Word had gone round that old Major, the prize Middle White boar（公猪）, had had a strange dream and wished to tell the other animals about it. ",
+      "context": {
+        "prev": "As soon as the light in the bedroom went out there was a stirring and a fluttering all through the farm buildings. ",
+        "next": "It had been agreed that they should all meet in the big barn as soon as Mr. Jones was safely out of the way. "
+      },
+      "plot": {
+        "score": 1,
+        "level": "高",
+        "hits": [
+          "底线原文锚点：willingdon beauty",
+          "角色/地名：jones",
+          "角色/地名：major",
+          "角色/地名：willingdon",
+          "角色/地名：beauty",
+          "因果连接词：in order to",
+          "章节转折位置：章首/章尾"
+        ],
+        "parts": [
+          {
+            "label": "底线原文锚点",
+            "hits": [
+              "willingdon beauty"
+            ],
+            "weight": 3
+          },
+          {
+            "label": "角色/地名",
+            "hits": [
+              "jones",
+              "major",
+              "willingdon",
+              "beauty"
+            ],
+            "weight": 1.2
+          },
+          {
+            "label": "数字",
+            "hits": [],
+            "weight": 1
+          },
+          {
+            "label": "因果连接词",
+            "hits": [
+              "in order to"
+            ],
+            "weight": 0.8
+          },
+          {
+            "label": "章节转折位置",
+            "hits": [
+              "章首/章尾"
+            ],
+            "weight": 0.6
+          }
+        ]
+      }
+    },
+    {
+      "ruleId": "ANNO-01",
+      "category": "加注",
+      "severity": "blocker",
+      "consequence": 10,
+      "probability": 1,
+      "risk": 10,
+      "book": "Animal Farm",
+      "tier": "A",
+      "chapter": "第一章",
+      "segIndex": 3,
+      "segLabel": "第一章 第4段",
+      "detail": {
+        "missing": [
+          "straw",
+          "platform",
+          "setting",
+          "vast",
+          "concealed",
+          "approaching",
+          "enormous",
+          "universal"
+        ],
+        "word": "approaching"
+      },
+      "id": "第一章#3:ANNO-01:approaching",
+      "title": "超纲词 approaching 没有加注",
+      "sourceSentence": "Clover was a stout motherly mare approaching middle life, who had never quite got her figure back after her fourth foal. ",
+      "rewrittenSentence": "Clover was a stout（肥胖的） motherly mare（母马） near middle life, who never got her figure back after her fourth foal（马驹）. ",
+      "context": {
+        "prev": "The two cart horses, Boxer and Clover, came in together, walking very slowly and setting down their vast hairy hoofs with great care lest there should be some small animal concealed in the straw. ",
+        "next": "Boxer was enormous... "
+      },
+      "plot": {
+        "score": 1,
+        "level": "高",
+        "hits": [
+          "角色/地名：benjamin",
+          "角色/地名：muriel",
+          "角色/地名：bluebell",
+          "角色/地名：jessie",
+          "角色/地名：pincher",
+          "角色/地名：boxer",
+          "角色/地名：clover"
+        ],
+        "parts": [
+          {
+            "label": "底线原文锚点",
+            "hits": [],
+            "weight": 3
+          },
+          {
+            "label": "角色/地名",
+            "hits": [
+              "benjamin",
+              "muriel",
+              "bluebell",
+              "jessie",
+              "pincher",
+              "boxer",
+              "clover"
+            ],
+            "weight": 1.2
+          },
+          {
+            "label": "数字",
+            "hits": [],
+            "weight": 1
+          },
+          {
+            "label": "因果连接词",
+            "hits": [],
+            "weight": 0.8
+          },
+          {
+            "label": "章节转折位置",
+            "hits": [],
+            "weight": 0.6
+          }
+        ]
+      }
+    },
+    {
+      "ruleId": "ANNO-01",
+      "category": "加注",
+      "severity": "blocker",
+      "consequence": 10,
+      "probability": 1,
+      "risk": 10,
+      "book": "Animal Farm",
+      "tier": "A",
+      "chapter": "第一章",
+      "segIndex": 3,
+      "segLabel": "第一章 第4段",
+      "detail": {
+        "missing": [
+          "straw",
+          "platform",
+          "setting",
+          "vast",
+          "concealed",
+          "approaching",
+          "enormous",
+          "universal"
+        ],
+        "word": "concealed"
+      },
+      "id": "第一章#3:ANNO-01:concealed",
+      "title": "超纲词 concealed 没有加注",
+      "sourceSentence": "The two cart horses, Boxer and Clover, came in together, walking very slowly and setting down their vast hairy hoofs with great care lest there should be some small animal concealed in the straw. ",
+      "rewrittenSentence": "The two cart horses, Boxer and Clover, came in together, walking slowly and setting down their big hairy hoof（蹄） with care in case some small animal hid in the straw. ",
+      "context": {
+        "prev": "The hens perched themselves on the window sills, the pigeons fluttered up to the rafters, the sheep and cows lay down behind the pigs and began to chew. ",
+        "next": "Clover was a stout motherly mare approaching middle life, who had never quite got her figure back after her fourth foal. "
+      },
+      "plot": {
+        "score": 1,
+        "level": "高",
+        "hits": [
+          "角色/地名：benjamin",
+          "角色/地名：muriel",
+          "角色/地名：bluebell",
+          "角色/地名：jessie",
+          "角色/地名：pincher",
+          "角色/地名：boxer",
+          "角色/地名：clover"
+        ],
+        "parts": [
+          {
+            "label": "底线原文锚点",
+            "hits": [],
+            "weight": 3
+          },
+          {
+            "label": "角色/地名",
+            "hits": [
+              "benjamin",
+              "muriel",
+              "bluebell",
+              "jessie",
+              "pincher",
+              "boxer",
+              "clover"
+            ],
+            "weight": 1.2
+          },
+          {
+            "label": "数字",
+            "hits": [],
+            "weight": 1
+          },
+          {
+            "label": "因果连接词",
+            "hits": [],
+            "weight": 0.8
+          },
+          {
+            "label": "章节转折位置",
+            "hits": [],
+            "weight": 0.6
+          }
+        ]
+      }
+    },
+    {
+      "ruleId": "ANNO-01",
+      "category": "加注",
+      "severity": "blocker",
+      "consequence": 10,
+      "probability": 1,
+      "risk": 10,
+      "book": "Animal Farm",
+      "tier": "A",
+      "chapter": "第一章",
+      "segIndex": 3,
+      "segLabel": "第一章 第4段",
+      "detail": {
+        "missing": [
+          "straw",
+          "platform",
+          "setting",
+          "vast",
+          "concealed",
+          "approaching",
+          "enormous",
+          "universal"
+        ],
+        "word": "enormous"
+      },
+      "id": "第一章#3:ANNO-01:enormous",
+      "title": "超纲词 enormous 没有加注",
+      "sourceSentence": "First came the three dogs, Bluebell, Jessie, and Pincher, and then the pigs, who settled down in the straw immediately in front of the platform. The hens perched themselves on the window-sills, the pigeons fluttered up to the rafters, the sheep and cows lay down behind the pigs and began to chew. The two cart-horses, Boxer and Clover, came in together, walking very slowly and setting down their vast hairy hoofs with great care lest there should be some small animal concealed in the straw. Clover was a stout motherly mare approaching middle life, who had never quite got her figure back after her fourth foal. Boxer was enormous... not much intelligence, but universal respect for his steady character and tremendous powers of work. After the horses came Muriel, the white goat, and Benjamin, the donkey. Benjamin was the oldest animal on the farm, and the worst tempered. He seldom talked, and when he did, it was usually to make some cynical remark. Last of all came the cat, who looked round, as usual, for the warmest place.",
+      "rewrittenSentence": "",
+      "context": {
+        "prev": "Clover was a stout motherly mare approaching middle life, who had never quite got her figure back after her fourth foal. ",
+        "next": "not much intelligence, but universal respect for his steady character and tremendous powers of work. "
+      },
+      "plot": {
+        "score": 1,
+        "level": "高",
+        "hits": [
+          "角色/地名：benjamin",
+          "角色/地名：muriel",
+          "角色/地名：bluebell",
+          "角色/地名：jessie",
+          "角色/地名：pincher",
+          "角色/地名：boxer",
+          "角色/地名：clover"
+        ],
+        "parts": [
+          {
+            "label": "底线原文锚点",
+            "hits": [],
+            "weight": 3
+          },
+          {
+            "label": "角色/地名",
+            "hits": [
+              "benjamin",
+              "muriel",
+              "bluebell",
+              "jessie",
+              "pincher",
+              "boxer",
+              "clover"
+            ],
+            "weight": 1.2
+          },
+          {
+            "label": "数字",
+            "hits": [],
+            "weight": 1
+          },
+          {
+            "label": "因果连接词",
+            "hits": [],
+            "weight": 0.8
+          },
+          {
+            "label": "章节转折位置",
+            "hits": [],
+            "weight": 0.6
+          }
+        ]
+      }
+    },
+    {
+      "ruleId": "ANNO-01",
+      "category": "加注",
+      "severity": "blocker",
+      "consequence": 10,
+      "probability": 1,
+      "risk": 10,
+      "book": "Animal Farm",
+      "tier": "A",
+      "chapter": "第一章",
+      "segIndex": 3,
+      "segLabel": "第一章 第4段",
+      "detail": {
+        "missing": [
+          "straw",
+          "platform",
+          "setting",
+          "vast",
+          "concealed",
+          "approaching",
+          "enormous",
+          "universal"
+        ],
+        "word": "platform"
+      },
+      "id": "第一章#3:ANNO-01:platform",
+      "title": "超纲词 platform 没有加注",
+      "sourceSentence": "First came the three dogs, Bluebell, Jessie, and Pincher, and then the pigs, who settled down in the straw immediately in front of the platform. ",
+      "rewrittenSentence": "First came the three dogs, Bluebell, Jessie, and Pincher, then the pigs, who settled in the straw before the platform. ",
+      "context": {
+        "prev": "",
+        "next": "The hens perched on the window sills, the pigeons fluttered（飘动） up to the rafters（椽子）, the sheep and cows lay behind the pigs and began to chew（咀嚼）. "
+      },
+      "plot": {
+        "score": 1,
+        "level": "高",
+        "hits": [
+          "角色/地名：benjamin",
+          "角色/地名：muriel",
+          "角色/地名：bluebell",
+          "角色/地名：jessie",
+          "角色/地名：pincher",
+          "角色/地名：boxer",
+          "角色/地名：clover"
+        ],
+        "parts": [
+          {
+            "label": "底线原文锚点",
+            "hits": [],
+            "weight": 3
+          },
+          {
+            "label": "角色/地名",
+            "hits": [
+              "benjamin",
+              "muriel",
+              "bluebell",
+              "jessie",
+              "pincher",
+              "boxer",
+              "clover"
+            ],
+            "weight": 1.2
+          },
+          {
+            "label": "数字",
+            "hits": [],
+            "weight": 1
+          },
+          {
+            "label": "因果连接词",
+            "hits": [],
+            "weight": 0.8
+          },
+          {
+            "label": "章节转折位置",
+            "hits": [],
+            "weight": 0.6
+          }
+        ]
+      }
+    },
+    {
+      "ruleId": "ANNO-01",
+      "category": "加注",
+      "severity": "blocker",
+      "consequence": 10,
+      "probability": 1,
+      "risk": 10,
+      "book": "Animal Farm",
+      "tier": "A",
+      "chapter": "第一章",
+      "segIndex": 3,
+      "segLabel": "第一章 第4段",
+      "detail": {
+        "missing": [
+          "straw",
+          "platform",
+          "setting",
+          "vast",
+          "concealed",
+          "approaching",
+          "enormous",
+          "universal"
+        ],
+        "word": "setting"
+      },
+      "id": "第一章#3:ANNO-01:setting",
+      "title": "超纲词 setting 没有加注",
+      "sourceSentence": "The two cart horses, Boxer and Clover, came in together, walking very slowly and setting down their vast hairy hoofs with great care lest there should be some small animal concealed in the straw. ",
+      "rewrittenSentence": "The two cart horses, Boxer and Clover, came in together, walking slowly and setting down their big hairy hoof（蹄） with care in case some small animal hid in the straw. ",
+      "context": {
+        "prev": "The hens perched on the window sills, the pigeons fluttered（飘动） up to the rafters（椽子）, the sheep and cows lay behind the pigs and began to chew（咀嚼）. ",
+        "next": "Clover was a stout（肥胖的） motherly mare（母马） near middle life, who never got her figure back after her fourth foal（马驹）. "
+      },
+      "plot": {
+        "score": 1,
+        "level": "高",
+        "hits": [
+          "角色/地名：benjamin",
+          "角色/地名：muriel",
+          "角色/地名：bluebell",
+          "角色/地名：jessie",
+          "角色/地名：pincher",
+          "角色/地名：boxer",
+          "角色/地名：clover"
+        ],
+        "parts": [
+          {
+            "label": "底线原文锚点",
+            "hits": [],
+            "weight": 3
+          },
+          {
+            "label": "角色/地名",
+            "hits": [
+              "benjamin",
+              "muriel",
+              "bluebell",
+              "jessie",
+              "pincher",
+              "boxer",
+              "clover"
+            ],
+            "weight": 1.2
+          },
+          {
+            "label": "数字",
+            "hits": [],
+            "weight": 1
+          },
+          {
+            "label": "因果连接词",
+            "hits": [],
+            "weight": 0.8
+          },
+          {
+            "label": "章节转折位置",
+            "hits": [],
+            "weight": 0.6
+          }
+        ]
+      }
+    },
+    {
+      "ruleId": "ANNO-01",
+      "category": "加注",
+      "severity": "blocker",
+      "consequence": 10,
+      "probability": 1,
+      "risk": 10,
+      "book": "Animal Farm",
+      "tier": "A",
+      "chapter": "第一章",
+      "segIndex": 3,
+      "segLabel": "第一章 第4段",
+      "detail": {
+        "missing": [
+          "straw",
+          "platform",
+          "setting",
+          "vast",
+          "concealed",
+          "approaching",
+          "enormous",
+          "universal"
+        ],
+        "word": "straw"
+      },
+      "id": "第一章#3:ANNO-01:straw",
+      "title": "超纲词 straw 没有加注",
+      "sourceSentence": "First came the three dogs, Bluebell, Jessie, and Pincher, and then the pigs, who settled down in the straw immediately in front of the platform. ",
+      "rewrittenSentence": "First came the three dogs, Bluebell, Jessie, and Pincher, then the pigs, who settled in the straw before the platform. ",
+      "context": {
+        "prev": "",
+        "next": "The hens perched on the window sills, the pigeons fluttered（飘动） up to the rafters（椽子）, the sheep and cows lay behind the pigs and began to chew（咀嚼）. "
+      },
+      "plot": {
+        "score": 1,
+        "level": "高",
+        "hits": [
+          "角色/地名：benjamin",
+          "角色/地名：muriel",
+          "角色/地名：bluebell",
+          "角色/地名：jessie",
+          "角色/地名：pincher",
+          "角色/地名：boxer",
+          "角色/地名：clover"
+        ],
+        "parts": [
+          {
+            "label": "底线原文锚点",
+            "hits": [],
+            "weight": 3
+          },
+          {
+            "label": "角色/地名",
+            "hits": [
+              "benjamin",
+              "muriel",
+              "bluebell",
+              "jessie",
+              "pincher",
+              "boxer",
+              "clover"
+            ],
+            "weight": 1.2
+          },
+          {
+            "label": "数字",
+            "hits": [],
+            "weight": 1
+          },
+          {
+            "label": "因果连接词",
+            "hits": [],
+            "weight": 0.8
+          },
+          {
+            "label": "章节转折位置",
+            "hits": [],
+            "weight": 0.6
+          }
+        ]
+      }
+    },
+    {
+      "ruleId": "ANNO-01",
+      "category": "加注",
+      "severity": "blocker",
+      "consequence": 10,
+      "probability": 1,
+      "risk": 10,
+      "book": "Animal Farm",
+      "tier": "A",
+      "chapter": "第一章",
+      "segIndex": 3,
+      "segLabel": "第一章 第4段",
+      "detail": {
+        "missing": [
+          "straw",
+          "platform",
+          "setting",
+          "vast",
+          "concealed",
+          "approaching",
+          "enormous",
+          "universal"
+        ],
+        "word": "universal"
+      },
+      "id": "第一章#3:ANNO-01:universal",
+      "title": "超纲词 universal 没有加注",
+      "sourceSentence": "not much intelligence, but universal respect for his steady character and tremendous powers of work. ",
+      "rewrittenSentence": "Boxer was huge, not much intelligence, but everyone respected him for his steady（平稳） character and tremendous（极大的） powers of work. ",
+      "context": {
+        "prev": "Boxer was enormous... ",
+        "next": "After the horses came Muriel, the white goat, and Benjamin, the donkey. "
+      },
+      "plot": {
+        "score": 1,
+        "level": "高",
+        "hits": [
+          "角色/地名：benjamin",
+          "角色/地名：muriel",
+          "角色/地名：bluebell",
+          "角色/地名：jessie",
+          "角色/地名：pincher",
+          "角色/地名：boxer",
+          "角色/地名：clover"
+        ],
+        "parts": [
+          {
+            "label": "底线原文锚点",
+            "hits": [],
+            "weight": 3
+          },
+          {
+            "label": "角色/地名",
+            "hits": [
+              "benjamin",
+              "muriel",
+              "bluebell",
+              "jessie",
+              "pincher",
+              "boxer",
+              "clover"
+            ],
+            "weight": 1.2
+          },
+          {
+            "label": "数字",
+            "hits": [],
+            "weight": 1
+          },
+          {
+            "label": "因果连接词",
+            "hits": [],
+            "weight": 0.8
+          },
+          {
+            "label": "章节转折位置",
+            "hits": [],
+            "weight": 0.6
+          }
+        ]
+      }
+    },
+    {
+      "ruleId": "ANNO-01",
+      "category": "加注",
+      "severity": "blocker",
+      "consequence": 10,
+      "probability": 1,
+      "risk": 10,
+      "book": "Animal Farm",
+      "tier": "A",
+      "chapter": "第一章",
+      "segIndex": 3,
+      "segLabel": "第一章 第4段",
+      "detail": {
+        "missing": [
+          "straw",
+          "platform",
+          "setting",
+          "vast",
+          "concealed",
+          "approaching",
+          "enormous",
+          "universal"
+        ],
+        "word": "vast"
+      },
+      "id": "第一章#3:ANNO-01:vast",
+      "title": "超纲词 vast 没有加注",
+      "sourceSentence": "The two cart horses, Boxer and Clover, came in together, walking very slowly and setting down their vast hairy hoofs with great care lest there should be some small animal concealed in the straw. ",
+      "rewrittenSentence": "The two cart horses, Boxer and Clover, came in together, walking slowly and setting down their big hairy hoof（蹄） with care in case some small animal hid in the straw. ",
+      "context": {
+        "prev": "The hens perched themselves on the window sills, the pigeons fluttered up to the rafters, the sheep and cows lay down behind the pigs and began to chew. ",
+        "next": "Clover was a stout motherly mare approaching middle life, who had never quite got her figure back after her fourth foal. "
+      },
+      "plot": {
+        "score": 1,
+        "level": "高",
+        "hits": [
+          "角色/地名：benjamin",
+          "角色/地名：muriel",
+          "角色/地名：bluebell",
+          "角色/地名：jessie",
+          "角色/地名：pincher",
+          "角色/地名：boxer",
+          "角色/地名：clover"
+        ],
+        "parts": [
+          {
+            "label": "底线原文锚点",
+            "hits": [],
+            "weight": 3
+          },
+          {
+            "label": "角色/地名",
+            "hits": [
+              "benjamin",
+              "muriel",
+              "bluebell",
+              "jessie",
+              "pincher",
+              "boxer",
+              "clover"
+            ],
+            "weight": 1.2
+          },
+          {
+            "label": "数字",
+            "hits": [],
+            "weight": 1
+          },
+          {
+            "label": "因果连接词",
+            "hits": [],
+            "weight": 0.8
+          },
+          {
+            "label": "章节转折位置",
+            "hits": [],
+            "weight": 0.6
+          }
+        ]
+      }
+    },
+    {
+      "ruleId": "ANNO-01",
+      "category": "加注",
+      "severity": "blocker",
+      "consequence": 10,
+      "probability": 1,
+      "risk": 10,
+      "book": "Animal Farm",
+      "tier": "A",
+      "chapter": "第一章",
+      "segIndex": 11,
+      "segLabel": "第一章 第12段",
+      "detail": {
+        "missing": [
+          "beasts",
+          "succession"
+        ],
+        "word": "beasts"
+      },
+      "id": "第一章#11:ANNO-01:beasts",
+      "title": "超纲词 beasts 没有加注",
+      "sourceSentence": "Old Major cleared his throat and began to sing: \"Beasts of England, beasts of Ireland, beasts of every land and clime, hearken to my joyful tidings of the golden future time.\" ",
+      "rewrittenSentence": "Old Major cleared his throat and sang: \"Beasts of England, beasts of Ireland, beasts of every land and clime（地方）, hearken（倾听） to my joyful tidings（消息） of the golden future time.\" ",
+      "context": {
+        "prev": "",
+        "next": "The animals took it up and sang five times in a row（连续）; in the excitement, seven times."
+      },
+      "plot": {
+        "score": 0.917,
+        "level": "高",
+        "hits": [
+          "底线原文锚点：beasts of england",
+          "角色/地名：major",
+          "角色/地名：england",
+          "角色/地名：ireland"
+        ],
+        "parts": [
+          {
+            "label": "底线原文锚点",
+            "hits": [
+              "beasts of england"
+            ],
+            "weight": 3
+          },
+          {
+            "label": "角色/地名",
+            "hits": [
+              "major",
+              "england",
+              "ireland"
+            ],
+            "weight": 1.2
+          },
+          {
+            "label": "数字",
+            "hits": [],
+            "weight": 1
+          },
+          {
+            "label": "因果连接词",
+            "hits": [],
+            "weight": 0.8
+          },
+          {
+            "label": "章节转折位置",
+            "hits": [],
+            "weight": 0.6
+          }
+        ]
+      }
+    },
+    {
+      "ruleId": "ANNO-01",
+      "category": "加注",
+      "severity": "blocker",
+      "consequence": 10,
+      "probability": 1,
+      "risk": 10,
+      "book": "Animal Farm",
+      "tier": "A",
+      "chapter": "第一章",
+      "segIndex": 11,
+      "segLabel": "第一章 第12段",
+      "detail": {
+        "missing": [
+          "beasts",
+          "succession"
+        ],
+        "word": "succession"
+      },
+      "id": "第一章#11:ANNO-01:succession",
+      "title": "超纲词 succession 没有加注",
+      "sourceSentence": "they sang it five times in succession... ",
+      "rewrittenSentence": "",
+      "context": {
+        "prev": "the animals took it up... ",
+        "next": "in the excitement, they sang it seven times."
+      },
+      "plot": {
+        "score": 0.917,
+        "level": "高",
+        "hits": [
+          "底线原文锚点：beasts of england",
+          "角色/地名：major",
+          "角色/地名：england",
+          "角色/地名：ireland"
+        ],
+        "parts": [
+          {
+            "label": "底线原文锚点",
+            "hits": [
+              "beasts of england"
+            ],
+            "weight": 3
+          },
+          {
+            "label": "角色/地名",
+            "hits": [
+              "major",
+              "england",
+              "ireland"
+            ],
+            "weight": 1.2
+          },
+          {
+            "label": "数字",
+            "hits": [],
+            "weight": 1
+          },
+          {
+            "label": "因果连接词",
+            "hits": [],
+            "weight": 0.8
+          },
+          {
+            "label": "章节转折位置",
+            "hits": [],
+            "weight": 0.6
+          }
+        ]
+      }
+    },
+    {
+      "ruleId": "ANNO-01",
+      "category": "加注",
+      "severity": "blocker",
+      "consequence": 10,
+      "probability": 1,
+      "risk": 10,
+      "book": "Animal Farm",
+      "tier": "A",
+      "chapter": "第一章",
+      "segIndex": 0,
+      "segLabel": "第一章 第1段",
+      "detail": {
+        "missing": [
+          "scullery"
+        ],
+        "word": "scullery"
+      },
+      "id": "第一章#0:ANNO-01:scullery",
+      "title": "超纲词 scullery 没有加注",
+      "sourceSentence": "With the ring of light from his lantern dancing from side to side, he lurched across the yard, kicked off his boots at the back door, drew himself a last glass of beer from the barrel in the scullery, and made his way up to bed, where Mrs. Jones was already snoring.",
+      "rewrittenSentence": "With the ring of light from his lantern dancing from side to side, he lurched（踉跄着走） across the yard, kicked off his boots at the back door, drew himself a last glass of beer from the barrel（桶）, and made his way up to bed, where Mrs. Jones was already snoring.",
+      "context": {
+        "prev": "Mr. Jones, of the Manor Farm, had locked the hen houses for the night, but was too drunk to remember to shut the pop holes. ",
+        "next": ""
+      },
+      "plot": {
+        "score": 0.833,
+        "level": "高",
+        "hits": [
+          "底线原文锚点：manor farm",
+          "角色/地名：jones",
+          "角色/地名：manor",
+          "章节转折位置：章首/章尾"
+        ],
+        "parts": [
+          {
+            "label": "底线原文锚点",
+            "hits": [
+              "manor farm"
+            ],
+            "weight": 3
+          },
+          {
+            "label": "角色/地名",
+            "hits": [
+              "jones",
+              "manor"
+            ],
+            "weight": 1.2
+          },
+          {
+            "label": "数字",
+            "hits": [],
+            "weight": 1
+          },
+          {
+            "label": "因果连接词",
+            "hits": [],
+            "weight": 0.8
+          },
+          {
+            "label": "章节转折位置",
+            "hits": [
+              "章首/章尾"
+            ],
+            "weight": 0.6
+          }
+        ]
+      }
+    },
+    {
+      "ruleId": "ANNO-01",
+      "category": "加注",
+      "severity": "blocker",
+      "consequence": 10,
+      "probability": 1,
+      "risk": 10,
+      "book": "Animal Farm",
+      "tier": "A",
+      "chapter": "第一章",
+      "segIndex": 10,
+      "segLabel": "第一章 第11段",
+      "detail": {
+        "missing": [
+          "relates"
+        ],
+        "word": "relates"
+      },
+      "id": "第一章#10:ANNO-01:relates",
+      "title": "超纲词 relates 没有加注",
+      "sourceSentence": "Major relates that as a young pig his mother and the other sows sang an old tune, Beasts of England, of which he knows only the tune and three words... ",
+      "rewrittenSentence": "Major said that as a young pig his mother and the other sows（母猪） sang an old tune, Beasts（野兽） of England, and he knows only the tune and three words... ",
+      "context": {
+        "prev": "",
+        "next": "\"It is time that I passed it on to you.\""
+      },
+      "plot": {
+        "score": 0.75,
+        "level": "高",
+        "hits": [
+          "底线原文锚点：beasts of england",
+          "角色/地名：major",
+          "角色/地名：england"
+        ],
+        "parts": [
+          {
+            "label": "底线原文锚点",
+            "hits": [
+              "beasts of england"
+            ],
+            "weight": 3
+          },
+          {
+            "label": "角色/地名",
+            "hits": [
+              "major",
+              "england"
+            ],
+            "weight": 1.2
+          },
+          {
+            "label": "数字",
+            "hits": [],
+            "weight": 1
+          },
+          {
+            "label": "因果连接词",
+            "hits": [],
+            "weight": 0.8
+          },
+          {
+            "label": "章节转折位置",
+            "hits": [],
+            "weight": 0.6
+          }
+        ]
+      }
+    },
+    {
+      "ruleId": "ANNO-01",
+      "category": "加注",
+      "severity": "blocker",
+      "consequence": 10,
+      "probability": 1,
+      "risk": 10,
+      "book": "Animal Farm",
+      "tier": "A",
+      "chapter": "第一章",
+      "segIndex": 8,
+      "segLabel": "第一章 第9段",
+      "detail": {
+        "missing": [
+          "resemble",
+          "conquered",
+          "adopt",
+          "vices",
+          "engage",
+          "tyrannise"
+        ],
+        "word": "adopt"
+      },
+      "id": "第一章#8:ANNO-01:adopt",
+      "title": "超纲词 adopt 没有加注",
+      "sourceSentence": "Even when you have conquered him, do not adopt his vices. ",
+      "rewrittenSentence": "Even when you have beaten him, do not take his bad ways. ",
+      "context": {
+        "prev": "And remember also that in fighting against Man, we must not come to resemble him. ",
+        "next": "No animal must ever live in a house, or sleep in a bed, or wear clothes, or drink alcohol, or smoke tobacco, or touch money, or engage in trade. "
+      },
+      "plot": {
+        "score": 0.528,
+        "level": "中",
+        "hits": [
+          "底线原文锚点：all animals are equal",
+          "因果连接词：so that"
+        ],
+        "parts": [
+          {
+            "label": "底线原文锚点",
+            "hits": [
+              "all animals are equal"
+            ],
+            "weight": 3
+          },
+          {
+            "label": "角色/地名",
+            "hits": [],
+            "weight": 1.2
+          },
+          {
+            "label": "数字",
+            "hits": [],
+            "weight": 1
+          },
+          {
+            "label": "因果连接词",
+            "hits": [
+              "so that"
+            ],
+            "weight": 0.8
+          },
+          {
+            "label": "章节转折位置",
+            "hits": [],
+            "weight": 0.6
+          }
+        ]
+      }
+    },
+    {
+      "ruleId": "ANNO-01",
+      "category": "加注",
+      "severity": "blocker",
+      "consequence": 10,
+      "probability": 1,
+      "risk": 10,
+      "book": "Animal Farm",
+      "tier": "A",
+      "chapter": "第一章",
+      "segIndex": 8,
+      "segLabel": "第一章 第9段",
+      "detail": {
+        "missing": [
+          "resemble",
+          "conquered",
+          "adopt",
+          "vices",
+          "engage",
+          "tyrannise"
+        ],
+        "word": "conquered"
+      },
+      "id": "第一章#8:ANNO-01:conquered",
+      "title": "超纲词 conquered 没有加注",
+      "sourceSentence": "Even when you have conquered him, do not adopt his vices. ",
+      "rewrittenSentence": "Even when you have beaten him, do not take his bad ways. ",
+      "context": {
+        "prev": "And remember also that in fighting against Man, we must not come to resemble him. ",
+        "next": "No animal must ever live in a house, or sleep in a bed, or wear clothes, or drink alcohol, or smoke tobacco, or touch money, or engage in trade. "
+      },
+      "plot": {
+        "score": 0.528,
+        "level": "中",
+        "hits": [
+          "底线原文锚点：all animals are equal",
+          "因果连接词：so that"
+        ],
+        "parts": [
+          {
+            "label": "底线原文锚点",
+            "hits": [
+              "all animals are equal"
+            ],
+            "weight": 3
+          },
+          {
+            "label": "角色/地名",
+            "hits": [],
+            "weight": 1.2
+          },
+          {
+            "label": "数字",
+            "hits": [],
+            "weight": 1
+          },
+          {
+            "label": "因果连接词",
+            "hits": [
+              "so that"
+            ],
+            "weight": 0.8
+          },
+          {
+            "label": "章节转折位置",
+            "hits": [],
+            "weight": 0.6
+          }
+        ]
+      }
+    },
+    {
+      "ruleId": "ANNO-01",
+      "category": "加注",
+      "severity": "blocker",
+      "consequence": 10,
+      "probability": 1,
+      "risk": 10,
+      "book": "Animal Farm",
+      "tier": "A",
+      "chapter": "第一章",
+      "segIndex": 8,
+      "segLabel": "第一章 第9段",
+      "detail": {
+        "missing": [
+          "resemble",
+          "conquered",
+          "adopt",
+          "vices",
+          "engage",
+          "tyrannise"
+        ],
+        "word": "engage"
+      },
+      "id": "第一章#8:ANNO-01:engage",
+      "title": "超纲词 engage 没有加注",
+      "sourceSentence": "No animal must ever live in a house, or sleep in a bed, or wear clothes, or drink alcohol, or smoke tobacco, or touch money, or engage in trade. ",
+      "rewrittenSentence": "No animal must ever live in a house, or sleep in a bed, or wear clothes, or drink alcohol（酒精）, or smoke tobacco（烟草）, or touch money, or do trade. ",
+      "context": {
+        "prev": "Even when you have conquered him, do not adopt his vices. ",
+        "next": "All the habits of Man are evil. "
+      },
+      "plot": {
+        "score": 0.528,
+        "level": "中",
+        "hits": [
+          "底线原文锚点：all animals are equal",
+          "因果连接词：so that"
+        ],
+        "parts": [
+          {
+            "label": "底线原文锚点",
+            "hits": [
+              "all animals are equal"
+            ],
+            "weight": 3
+          },
+          {
+            "label": "角色/地名",
+            "hits": [],
+            "weight": 1.2
+          },
+          {
+            "label": "数字",
+            "hits": [],
+            "weight": 1
+          },
+          {
+            "label": "因果连接词",
+            "hits": [
+              "so that"
+            ],
+            "weight": 0.8
+          },
+          {
+            "label": "章节转折位置",
+            "hits": [],
+            "weight": 0.6
+          }
+        ]
+      }
+    },
+    {
+      "ruleId": "ANNO-01",
+      "category": "加注",
+      "severity": "blocker",
+      "consequence": 10,
+      "probability": 1,
+      "risk": 10,
+      "book": "Animal Farm",
+      "tier": "A",
+      "chapter": "第一章",
+      "segIndex": 8,
+      "segLabel": "第一章 第9段",
+      "detail": {
+        "missing": [
+          "resemble",
+          "conquered",
+          "adopt",
+          "vices",
+          "engage",
+          "tyrannise"
+        ],
+        "word": "resemble"
+      },
+      "id": "第一章#8:ANNO-01:resemble",
+      "title": "超纲词 resemble 没有加注",
+      "sourceSentence": "And remember also that in fighting against Man, we must not come to resemble him. ",
+      "rewrittenSentence": "And remember also that in fighting against Man, we must not become like him. ",
+      "context": {
+        "prev": "Whatever goes upon four legs, or has wings, is a friend. ",
+        "next": "Even when you have conquered him, do not adopt his vices. "
+      },
+      "plot": {
+        "score": 0.528,
+        "level": "中",
+        "hits": [
+          "底线原文锚点：all animals are equal",
+          "因果连接词：so that"
+        ],
+        "parts": [
+          {
+            "label": "底线原文锚点",
+            "hits": [
+              "all animals are equal"
+            ],
+            "weight": 3
+          },
+          {
+            "label": "角色/地名",
+            "hits": [],
+            "weight": 1.2
+          },
+          {
+            "label": "数字",
+            "hits": [],
+            "weight": 1
+          },
+          {
+            "label": "因果连接词",
+            "hits": [
+              "so that"
+            ],
+            "weight": 0.8
+          },
+          {
+            "label": "章节转折位置",
+            "hits": [],
+            "weight": 0.6
+          }
+        ]
+      }
+    },
+    {
+      "ruleId": "ANNO-01",
+      "category": "加注",
+      "severity": "blocker",
+      "consequence": 10,
+      "probability": 1,
+      "risk": 10,
+      "book": "Animal Farm",
+      "tier": "A",
+      "chapter": "第一章",
+      "segIndex": 8,
+      "segLabel": "第一章 第9段",
+      "detail": {
+        "missing": [
+          "resemble",
+          "conquered",
+          "adopt",
+          "vices",
+          "engage",
+          "tyrannise"
+        ],
+        "word": "tyrannise"
+      },
+      "id": "第一章#8:ANNO-01:tyrannise",
+      "title": "超纲词 tyrannise 没有加注",
+      "sourceSentence": "And, above all, no animal must ever tyrannise over his own kind... ",
+      "rewrittenSentence": "And, above all, no animal must ever be a tyrant（暴君） over his own kind... ",
+      "context": {
+        "prev": "All the habits of Man are evil. ",
+        "next": "All animals are equal.\""
+      },
+      "plot": {
+        "score": 0.528,
+        "level": "中",
+        "hits": [
+          "底线原文锚点：all animals are equal",
+          "因果连接词：so that"
+        ],
+        "parts": [
+          {
+            "label": "底线原文锚点",
+            "hits": [
+              "all animals are equal"
+            ],
+            "weight": 3
+          },
+          {
+            "label": "角色/地名",
+            "hits": [],
+            "weight": 1.2
+          },
+          {
+            "label": "数字",
+            "hits": [],
+            "weight": 1
+          },
+          {
+            "label": "因果连接词",
+            "hits": [
+              "so that"
+            ],
+            "weight": 0.8
+          },
+          {
+            "label": "章节转折位置",
+            "hits": [],
+            "weight": 0.6
+          }
+        ]
+      }
+    },
+    {
+      "ruleId": "ANNO-01",
+      "category": "加注",
+      "severity": "blocker",
+      "consequence": 10,
+      "probability": 1,
+      "risk": 10,
+      "book": "Animal Farm",
+      "tier": "A",
+      "chapter": "第一章",
+      "segIndex": 8,
+      "segLabel": "第一章 第9段",
+      "detail": {
+        "missing": [
+          "resemble",
+          "conquered",
+          "adopt",
+          "vices",
+          "engage",
+          "tyrannise"
+        ],
+        "word": "vices"
+      },
+      "id": "第一章#8:ANNO-01:vices",
+      "title": "超纲词 vices 没有加注",
+      "sourceSentence": "Even when you have conquered him, do not adopt his vices. ",
+      "rewrittenSentence": "Even when you have beaten him, do not take his bad ways. ",
+      "context": {
+        "prev": "And remember also that in fighting against Man, we must not come to resemble him. ",
+        "next": "No animal must ever live in a house, or sleep in a bed, or wear clothes, or drink alcohol, or smoke tobacco, or touch money, or engage in trade. "
+      },
+      "plot": {
+        "score": 0.528,
+        "level": "中",
+        "hits": [
+          "底线原文锚点：all animals are equal",
+          "因果连接词：so that"
+        ],
+        "parts": [
+          {
+            "label": "底线原文锚点",
+            "hits": [
+              "all animals are equal"
+            ],
+            "weight": 3
+          },
+          {
+            "label": "角色/地名",
+            "hits": [],
+            "weight": 1.2
+          },
+          {
+            "label": "数字",
+            "hits": [],
+            "weight": 1
+          },
+          {
+            "label": "因果连接词",
+            "hits": [
+              "so that"
+            ],
+            "weight": 0.8
+          },
+          {
+            "label": "章节转折位置",
+            "hits": [],
+            "weight": 0.6
+          }
+        ]
+      }
+    },
+    {
+      "ruleId": "ANNO-01",
+      "category": "加注",
+      "severity": "blocker",
+      "consequence": 10,
+      "probability": 1,
+      "risk": 10,
+      "book": "Animal Farm",
+      "tier": "A",
+      "chapter": "第一章",
+      "segIndex": 5,
+      "segLabel": "第一章 第6段",
+      "detail": {
+        "missing": [
+          "dwell",
+          "comrades",
+          "consumes",
+          "prevent"
+        ],
+        "word": "comrades"
+      },
+      "id": "第一章#5:ANNO-01:comrades",
+      "title": "超纲词 comrades 没有加注",
+      "sourceSentence": "No, comrades, a thousand times no! ",
+      "rewrittenSentence": "No, comrades, a thousand times no! ",
+      "context": {
+        "prev": "Is it because our land is so poor that it cannot give a decent（像样） life to those who live on it? ",
+        "next": "The soil of England is fertile（肥沃）... "
+      },
+      "plot": {
+        "score": 0.444,
+        "level": "中",
+        "hits": [
+          "角色/地名：clover",
+          "角色/地名：england",
+          "因果连接词：because"
+        ],
+        "parts": [
+          {
+            "label": "底线原文锚点",
+            "hits": [],
+            "weight": 3
+          },
+          {
+            "label": "角色/地名",
+            "hits": [
+              "clover",
+              "england"
+            ],
+            "weight": 1.2
+          },
+          {
+            "label": "数字",
+            "hits": [],
+            "weight": 1
+          },
+          {
+            "label": "因果连接词",
+            "hits": [
+              "because"
+            ],
+            "weight": 0.8
+          },
+          {
+            "label": "章节转折位置",
+            "hits": [],
+            "weight": 0.6
+          }
+        ]
+      }
+    },
+    {
+      "ruleId": "ANNO-01",
+      "category": "加注",
+      "severity": "blocker",
+      "consequence": 10,
+      "probability": 1,
+      "risk": 10,
+      "book": "Animal Farm",
+      "tier": "A",
+      "chapter": "第一章",
+      "segIndex": 5,
+      "segLabel": "第一章 第6段",
+      "detail": {
+        "missing": [
+          "dwell",
+          "comrades",
+          "consumes",
+          "prevent"
+        ],
+        "word": "consumes"
+      },
+      "id": "第一章#5:ANNO-01:consumes",
+      "title": "超纲词 consumes 没有加注",
+      "sourceSentence": "Man is the only creature that consumes without producing. ",
+      "rewrittenSentence": "Man is the only creature（生物） that eats without producing. ",
+      "context": {
+        "prev": "It is summed up in a single word Man. ",
+        "next": "He does not give milk, he does not lay eggs, he is too weak to pull the plough, he cannot run fast enough to catch rabbits. "
+      },
+      "plot": {
+        "score": 0.444,
+        "level": "中",
+        "hits": [
+          "角色/地名：clover",
+          "角色/地名：england",
+          "因果连接词：because"
+        ],
+        "parts": [
+          {
+            "label": "底线原文锚点",
+            "hits": [],
+            "weight": 3
+          },
+          {
+            "label": "角色/地名",
+            "hits": [
+              "clover",
+              "england"
+            ],
+            "weight": 1.2
+          },
+          {
+            "label": "数字",
+            "hits": [],
+            "weight": 1
+          },
+          {
+            "label": "因果连接词",
+            "hits": [
+              "because"
+            ],
+            "weight": 0.8
+          },
+          {
+            "label": "章节转折位置",
+            "hits": [],
+            "weight": 0.6
+          }
+        ]
+      }
+    },
+    {
+      "ruleId": "ANNO-01",
+      "category": "加注",
+      "severity": "blocker",
+      "consequence": 10,
+      "probability": 1,
+      "risk": 10,
+      "book": "Animal Farm",
+      "tier": "A",
+      "chapter": "第一章",
+      "segIndex": 5,
+      "segLabel": "第一章 第6段",
+      "detail": {
+        "missing": [
+          "dwell",
+          "comrades",
+          "consumes",
+          "prevent"
+        ],
+        "word": "dwell"
+      },
+      "id": "第一章#5:ANNO-01:dwell",
+      "title": "超纲词 dwell 没有加注",
+      "sourceSentence": "Is it because this land of ours is so poor that it cannot afford a decent life to those who dwell upon it? ",
+      "rewrittenSentence": "Is it because our land is so poor that it cannot give a decent（像样） life to those who live on it? ",
+      "context": {
+        "prev": "\"But is this simply part of the order of nature? ",
+        "next": "No, comrades, a thousand times no! "
+      },
+      "plot": {
+        "score": 0.444,
+        "level": "中",
+        "hits": [
+          "角色/地名：clover",
+          "角色/地名：england",
+          "因果连接词：because"
+        ],
+        "parts": [
+          {
+            "label": "底线原文锚点",
+            "hits": [],
+            "weight": 3
+          },
+          {
+            "label": "角色/地名",
+            "hits": [
+              "clover",
+              "england"
+            ],
+            "weight": 1.2
+          },
+          {
+            "label": "数字",
+            "hits": [],
+            "weight": 1
+          },
+          {
+            "label": "因果连接词",
+            "hits": [
+              "because"
+            ],
+            "weight": 0.8
+          },
+          {
+            "label": "章节转折位置",
+            "hits": [],
+            "weight": 0.6
+          }
+        ]
+      }
+    },
+    {
+      "ruleId": "ANNO-01",
+      "category": "加注",
+      "severity": "blocker",
+      "consequence": 10,
+      "probability": 1,
+      "risk": 10,
+      "book": "Animal Farm",
+      "tier": "A",
+      "chapter": "第一章",
+      "segIndex": 5,
+      "segLabel": "第一章 第6段",
+      "detail": {
+        "missing": [
+          "dwell",
+          "comrades",
+          "consumes",
+          "prevent"
+        ],
+        "word": "prevent"
+      },
+      "id": "第一章#5:ANNO-01:prevent",
+      "title": "超纲词 prevent 没有加注",
+      "sourceSentence": "He sets them to work, he gives back to them the bare minimum that will prevent them from starving, and the rest he keeps for himself. ",
+      "rewrittenSentence": "He sets them to work, he gives back only the bare（仅够） minimum（最低） to keep them from starving（挨饿）, and the rest he keeps for himself. ",
+      "context": {
+        "prev": "Yet he is lord of all the animals. ",
+        "next": "Our labour tills the soil, our dung fertilises it, and yet there is not one of us that owns more than his bare skin. "
+      },
+      "plot": {
+        "score": 0.444,
+        "level": "中",
+        "hits": [
+          "角色/地名：clover",
+          "角色/地名：england",
+          "因果连接词：because"
+        ],
+        "parts": [
+          {
+            "label": "底线原文锚点",
+            "hits": [],
+            "weight": 3
+          },
+          {
+            "label": "角色/地名",
+            "hits": [
+              "clover",
+              "england"
+            ],
+            "weight": 1.2
+          },
+          {
+            "label": "数字",
+            "hits": [],
+            "weight": 1
+          },
+          {
+            "label": "因果连接词",
+            "hits": [
+              "because"
+            ],
+            "weight": 0.8
+          },
+          {
+            "label": "章节转折位置",
+            "hits": [],
+            "weight": 0.6
+          }
+        ]
+      }
+    },
+    {
+      "ruleId": "ANNO-01",
+      "category": "加注",
+      "severity": "blocker",
+      "consequence": 10,
+      "probability": 1,
+      "risk": 10,
+      "book": "Animal Farm",
+      "tier": "A",
+      "chapter": "第一章",
+      "segIndex": 13,
+      "segLabel": "第一章 第14段",
+      "detail": {
+        "missing": [
+          "charge",
+          "barn",
+          "straw"
+        ],
+        "word": "barn"
+      },
+      "id": "第一章#13:ANNO-01:barn",
+      "title": "超纲词 barn 没有加注",
+      "sourceSentence": "The pellets buried themselves in the wall of the barn and the meeting broke up hurriedly. ",
+      "rewrittenSentence": "The pellets（颗粒） hit the barn wall and the meeting broke up. ",
+      "context": {
+        "prev": "Jones seized his gun and fired number 6 shot into the darkness. ",
+        "next": "Everyone fled to his own sleeping place. "
+      },
+      "plot": {
+        "score": 0.389,
+        "level": "中",
+        "hits": [
+          "角色/地名：jones",
+          "数字：6",
+          "章节转折位置：章首/章尾"
+        ],
+        "parts": [
+          {
+            "label": "底线原文锚点",
+            "hits": [],
+            "weight": 3
+          },
+          {
+            "label": "角色/地名",
+            "hits": [
+              "jones"
+            ],
+            "weight": 1.2
+          },
+          {
+            "label": "数字",
+            "hits": [
+              "6"
+            ],
+            "weight": 1
+          },
+          {
+            "label": "因果连接词",
+            "hits": [],
+            "weight": 0.8
+          },
+          {
+            "label": "章节转折位置",
+            "hits": [
+              "章首/章尾"
+            ],
+            "weight": 0.6
+          }
+        ]
+      }
+    },
+    {
+      "ruleId": "ANNO-01",
+      "category": "加注",
+      "severity": "blocker",
+      "consequence": 10,
+      "probability": 1,
+      "risk": 10,
+      "book": "Animal Farm",
+      "tier": "A",
+      "chapter": "第一章",
+      "segIndex": 13,
+      "segLabel": "第一章 第14段",
+      "detail": {
+        "missing": [
+          "charge",
+          "barn",
+          "straw"
+        ],
+        "word": "charge"
+      },
+      "id": "第一章#13:ANNO-01:charge",
+      "title": "超纲词 charge 没有加注",
+      "sourceSentence": "Jones seized his gun, and let fly a charge of number 6 shot into the darkness. ",
+      "rewrittenSentence": "Jones seized his gun and fired number 6 shot into the darkness. ",
+      "context": {
+        "prev": "",
+        "next": "The pellets buried themselves in the wall of the barn and the meeting broke up hurriedly. "
+      },
+      "plot": {
+        "score": 0.389,
+        "level": "中",
+        "hits": [
+          "角色/地名：jones",
+          "数字：6",
+          "章节转折位置：章首/章尾"
+        ],
+        "parts": [
+          {
+            "label": "底线原文锚点",
+            "hits": [],
+            "weight": 3
+          },
+          {
+            "label": "角色/地名",
+            "hits": [
+              "jones"
+            ],
+            "weight": 1.2
+          },
+          {
+            "label": "数字",
+            "hits": [
+              "6"
+            ],
+            "weight": 1
+          },
+          {
+            "label": "因果连接词",
+            "hits": [],
+            "weight": 0.8
+          },
+          {
+            "label": "章节转折位置",
+            "hits": [
+              "章首/章尾"
+            ],
+            "weight": 0.6
+          }
+        ]
+      }
+    },
+    {
+      "ruleId": "ANNO-01",
+      "category": "加注",
+      "severity": "blocker",
+      "consequence": 10,
+      "probability": 1,
+      "risk": 10,
+      "book": "Animal Farm",
+      "tier": "A",
+      "chapter": "第一章",
+      "segIndex": 13,
+      "segLabel": "第一章 第14段",
+      "detail": {
+        "missing": [
+          "charge",
+          "barn",
+          "straw"
+        ],
+        "word": "straw"
+      },
+      "id": "第一章#13:ANNO-01:straw",
+      "title": "超纲词 straw 没有加注",
+      "sourceSentence": "The birds jumped on to their perches, the animals settled down in the straw, and the whole farm was asleep in a moment.",
+      "rewrittenSentence": "The birds jumped on to their perches, the animals settled in the straw, and the whole farm was asleep in a moment.",
+      "context": {
+        "prev": "Everyone fled to his own sleeping place. ",
+        "next": ""
+      },
+      "plot": {
+        "score": 0.389,
+        "level": "中",
+        "hits": [
+          "角色/地名：jones",
+          "数字：6",
+          "章节转折位置：章首/章尾"
+        ],
+        "parts": [
+          {
+            "label": "底线原文锚点",
+            "hits": [],
+            "weight": 3
+          },
+          {
+            "label": "角色/地名",
+            "hits": [
+              "jones"
+            ],
+            "weight": 1.2
+          },
+          {
+            "label": "数字",
+            "hits": [
+              "6"
+            ],
+            "weight": 1
+          },
+          {
+            "label": "因果连接词",
+            "hits": [],
+            "weight": 0.8
+          },
+          {
+            "label": "章节转折位置",
+            "hits": [
+              "章首/章尾"
+            ],
+            "weight": 0.6
+          }
+        ]
+      }
+    },
+    {
+      "ruleId": "ANNO-01",
+      "category": "加注",
+      "severity": "blocker",
+      "consequence": 10,
+      "probability": 1,
+      "risk": 10,
+      "book": "Animal Farm",
+      "tier": "A",
+      "chapter": "第一章",
+      "segIndex": 4,
+      "segLabel": "第一章 第5段",
+      "detail": {
+        "missing": [
+          "capable"
+        ],
+        "word": "capable"
+      },
+      "id": "第一章#4:ANNO-01:capable",
+      "title": "超纲词 capable 没有加注",
+      "sourceSentence": "We are born, we are given just so much food as will keep the breath in our bodies, and those of us who are capable of it are forced to work to the last atom of our strength... ",
+      "rewrittenSentence": "We are born, we are given just so much food as will keep the breath in our bodies, and those of us who can are forced to work to the last atom（原子） of our strength... ",
+      "context": {
+        "prev": "Let us face it: our lives are miserable, laborious, and short. ",
+        "next": "No animal in England knows the meaning of happiness or leisure after he is a year old. "
+      },
+      "plot": {
+        "score": 0.333,
+        "level": "中",
+        "hits": [
+          "角色/地名：major",
+          "角色/地名：england"
+        ],
+        "parts": [
+          {
+            "label": "底线原文锚点",
+            "hits": [],
+            "weight": 3
+          },
+          {
+            "label": "角色/地名",
+            "hits": [
+              "major",
+              "england"
+            ],
+            "weight": 1.2
+          },
+          {
+            "label": "数字",
+            "hits": [],
+            "weight": 1
+          },
+          {
+            "label": "因果连接词",
+            "hits": [],
+            "weight": 0.8
+          },
+          {
+            "label": "章节转折位置",
+            "hits": [],
+            "weight": 0.6
+          }
+        ]
+      }
+    },
+    {
+      "ruleId": "ANNO-01",
+      "category": "加注",
+      "severity": "blocker",
+      "consequence": 10,
+      "probability": 1,
+      "risk": 10,
+      "book": "Animal Farm",
+      "tier": "A",
+      "chapter": "第一章",
+      "segIndex": 2,
+      "segLabel": "第一章 第3段",
+      "detail": {
+        "missing": [
+          "barn",
+          "ensconced",
+          "stout",
+          "benevolent",
+          "spite",
+          "presently"
+        ],
+        "word": "barn"
+      },
+      "id": "第一章#2:ANNO-01:barn",
+      "title": "超纲词 barn 没有加注",
+      "sourceSentence": "At one end of the big barn, on a sort of raised platform, Major was already ensconced on his bed of straw, under a lantern which hung from a beam. ",
+      "rewrittenSentence": "At one end of the big barn, on a raised platform（舞台）, Major was already in his bed of straw（稻草）, under a lantern hanging from a beam. ",
+      "context": {
+        "prev": "",
+        "next": "He was twelve years old and had grown rather fat lately, but he was still a majestic（威严的） looking pig, with a wise and kind appearance even though his tushes（獠牙） had never been cut. "
+      },
+      "plot": {
+        "score": 0.167,
+        "level": "低",
+        "hits": [
+          "角色/地名：major"
+        ],
+        "parts": [
+          {
+            "label": "底线原文锚点",
+            "hits": [],
+            "weight": 3
+          },
+          {
+            "label": "角色/地名",
+            "hits": [
+              "major"
+            ],
+            "weight": 1.2
+          },
+          {
+            "label": "数字",
+            "hits": [],
+            "weight": 1
+          },
+          {
+            "label": "因果连接词",
+            "hits": [],
+            "weight": 0.8
+          },
+          {
+            "label": "章节转折位置",
+            "hits": [],
+            "weight": 0.6
+          }
+        ]
+      }
+    },
+    {
+      "ruleId": "ANNO-01",
+      "category": "加注",
+      "severity": "blocker",
+      "consequence": 10,
+      "probability": 1,
+      "risk": 10,
+      "book": "Animal Farm",
+      "tier": "A",
+      "chapter": "第一章",
+      "segIndex": 2,
+      "segLabel": "第一章 第3段",
+      "detail": {
+        "missing": [
+          "barn",
+          "ensconced",
+          "stout",
+          "benevolent",
+          "spite",
+          "presently"
+        ],
+        "word": "benevolent"
+      },
+      "id": "第一章#2:ANNO-01:benevolent",
+      "title": "超纲词 benevolent 没有加注",
+      "sourceSentence": "He was twelve years old and had lately grown rather stout, but he was still a majestic looking pig, with a wise and benevolent appearance in spite of the fact that his tushes had never been cut. ",
+      "rewrittenSentence": "He was twelve years old and had grown rather fat lately, but he was still a majestic（威严的） looking pig, with a wise and kind appearance even though his tushes（獠牙） had never been cut. ",
+      "context": {
+        "prev": "At one end of the big barn, on a sort of raised platform, Major was already ensconced on his bed of straw, under a lantern which hung from a beam. ",
+        "next": "Presently, as the other animals began to arrive, he lay down comfortably on his side."
+      },
+      "plot": {
+        "score": 0.167,
+        "level": "低",
+        "hits": [
+          "角色/地名：major"
+        ],
+        "parts": [
+          {
+            "label": "底线原文锚点",
+            "hits": [],
+            "weight": 3
+          },
+          {
+            "label": "角色/地名",
+            "hits": [
+              "major"
+            ],
+            "weight": 1.2
+          },
+          {
+            "label": "数字",
+            "hits": [],
+            "weight": 1
+          },
+          {
+            "label": "因果连接词",
+            "hits": [],
+            "weight": 0.8
+          },
+          {
+            "label": "章节转折位置",
+            "hits": [],
+            "weight": 0.6
+          }
+        ]
+      }
+    },
+    {
+      "ruleId": "ANNO-01",
+      "category": "加注",
+      "severity": "blocker",
+      "consequence": 10,
+      "probability": 1,
+      "risk": 10,
+      "book": "Animal Farm",
+      "tier": "A",
+      "chapter": "第一章",
+      "segIndex": 2,
+      "segLabel": "第一章 第3段",
+      "detail": {
+        "missing": [
+          "barn",
+          "ensconced",
+          "stout",
+          "benevolent",
+          "spite",
+          "presently"
+        ],
+        "word": "ensconced"
+      },
+      "id": "第一章#2:ANNO-01:ensconced",
+      "title": "超纲词 ensconced 没有加注",
+      "sourceSentence": "At one end of the big barn, on a sort of raised platform, Major was already ensconced on his bed of straw, under a lantern which hung from a beam. ",
+      "rewrittenSentence": "At one end of the big barn, on a raised platform（舞台）, Major was already in his bed of straw（稻草）, under a lantern hanging from a beam. ",
+      "context": {
+        "prev": "",
+        "next": "He was twelve years old and had lately grown rather stout, but he was still a majestic looking pig, with a wise and benevolent appearance in spite of the fact that his tushes had never been cut. "
+      },
+      "plot": {
+        "score": 0.167,
+        "level": "低",
+        "hits": [
+          "角色/地名：major"
+        ],
+        "parts": [
+          {
+            "label": "底线原文锚点",
+            "hits": [],
+            "weight": 3
+          },
+          {
+            "label": "角色/地名",
+            "hits": [
+              "major"
+            ],
+            "weight": 1.2
+          },
+          {
+            "label": "数字",
+            "hits": [],
+            "weight": 1
+          },
+          {
+            "label": "因果连接词",
+            "hits": [],
+            "weight": 0.8
+          },
+          {
+            "label": "章节转折位置",
+            "hits": [],
+            "weight": 0.6
+          }
+        ]
+      }
+    },
+    {
+      "ruleId": "ANNO-01",
+      "category": "加注",
+      "severity": "blocker",
+      "consequence": 10,
+      "probability": 1,
+      "risk": 10,
+      "book": "Animal Farm",
+      "tier": "A",
+      "chapter": "第一章",
+      "segIndex": 2,
+      "segLabel": "第一章 第3段",
+      "detail": {
+        "missing": [
+          "barn",
+          "ensconced",
+          "stout",
+          "benevolent",
+          "spite",
+          "presently"
+        ],
+        "word": "presently"
+      },
+      "id": "第一章#2:ANNO-01:presently",
+      "title": "超纲词 presently 没有加注",
+      "sourceSentence": "Presently, as the other animals began to arrive, he lay down comfortably on his side.",
+      "rewrittenSentence": "Soon, as the other animals began to arrive, he lay down comfortably on his side.",
+      "context": {
+        "prev": "He was twelve years old and had lately grown rather stout, but he was still a majestic looking pig, with a wise and benevolent appearance in spite of the fact that his tushes had never been cut. ",
+        "next": ""
+      },
+      "plot": {
+        "score": 0.167,
+        "level": "低",
+        "hits": [
+          "角色/地名：major"
+        ],
+        "parts": [
+          {
+            "label": "底线原文锚点",
+            "hits": [],
+            "weight": 3
+          },
+          {
+            "label": "角色/地名",
+            "hits": [
+              "major"
+            ],
+            "weight": 1.2
+          },
+          {
+            "label": "数字",
+            "hits": [],
+            "weight": 1
+          },
+          {
+            "label": "因果连接词",
+            "hits": [],
+            "weight": 0.8
+          },
+          {
+            "label": "章节转折位置",
+            "hits": [],
+            "weight": 0.6
+          }
+        ]
+      }
+    },
+    {
+      "ruleId": "ANNO-01",
+      "category": "加注",
+      "severity": "blocker",
+      "consequence": 10,
+      "probability": 1,
+      "risk": 10,
+      "book": "Animal Farm",
+      "tier": "A",
+      "chapter": "第一章",
+      "segIndex": 2,
+      "segLabel": "第一章 第3段",
+      "detail": {
+        "missing": [
+          "barn",
+          "ensconced",
+          "stout",
+          "benevolent",
+          "spite",
+          "presently"
+        ],
+        "word": "spite"
+      },
+      "id": "第一章#2:ANNO-01:spite",
+      "title": "超纲词 spite 没有加注",
+      "sourceSentence": "He was twelve years old and had lately grown rather stout, but he was still a majestic looking pig, with a wise and benevolent appearance in spite of the fact that his tushes had never been cut. ",
+      "rewrittenSentence": "He was twelve years old and had grown rather fat lately, but he was still a majestic（威严的） looking pig, with a wise and kind appearance even though his tushes（獠牙） had never been cut. ",
+      "context": {
+        "prev": "At one end of the big barn, on a sort of raised platform, Major was already ensconced on his bed of straw, under a lantern which hung from a beam. ",
+        "next": "Presently, as the other animals began to arrive, he lay down comfortably on his side."
+      },
+      "plot": {
+        "score": 0.167,
+        "level": "低",
+        "hits": [
+          "角色/地名：major"
+        ],
+        "parts": [
+          {
+            "label": "底线原文锚点",
+            "hits": [],
+            "weight": 3
+          },
+          {
+            "label": "角色/地名",
+            "hits": [
+              "major"
+            ],
+            "weight": 1.2
+          },
+          {
+            "label": "数字",
+            "hits": [],
+            "weight": 1
+          },
+          {
+            "label": "因果连接词",
+            "hits": [],
+            "weight": 0.8
+          },
+          {
+            "label": "章节转折位置",
+            "hits": [],
+            "weight": 0.6
+          }
+        ]
+      }
+    },
+    {
+      "ruleId": "ANNO-01",
+      "category": "加注",
+      "severity": "blocker",
+      "consequence": 10,
+      "probability": 1,
+      "risk": 10,
+      "book": "Animal Farm",
+      "tier": "A",
+      "chapter": "第一章",
+      "segIndex": 2,
+      "segLabel": "第一章 第3段",
+      "detail": {
+        "missing": [
+          "barn",
+          "ensconced",
+          "stout",
+          "benevolent",
+          "spite",
+          "presently"
+        ],
+        "word": "stout"
+      },
+      "id": "第一章#2:ANNO-01:stout",
+      "title": "超纲词 stout 没有加注",
+      "sourceSentence": "He was twelve years old and had lately grown rather stout, but he was still a majestic looking pig, with a wise and benevolent appearance in spite of the fact that his tushes had never been cut. ",
+      "rewrittenSentence": "He was twelve years old and had grown rather fat lately, but he was still a majestic（威严的） looking pig, with a wise and kind appearance even though his tushes（獠牙） had never been cut. ",
+      "context": {
+        "prev": "At one end of the big barn, on a sort of raised platform, Major was already ensconced on his bed of straw, under a lantern which hung from a beam. ",
+        "next": "Presently, as the other animals began to arrive, he lay down comfortably on his side."
+      },
+      "plot": {
+        "score": 0.167,
+        "level": "低",
+        "hits": [
+          "角色/地名：major"
+        ],
+        "parts": [
+          {
+            "label": "底线原文锚点",
+            "hits": [],
+            "weight": 3
+          },
+          {
+            "label": "角色/地名",
+            "hits": [
+              "major"
+            ],
+            "weight": 1.2
+          },
+          {
+            "label": "数字",
+            "hits": [],
+            "weight": 1
+          },
+          {
+            "label": "因果连接词",
+            "hits": [],
+            "weight": 0.8
+          },
+          {
+            "label": "章节转折位置",
+            "hits": [],
+            "weight": 0.6
+          }
+        ]
+      }
+    },
+    {
+      "ruleId": "ANNO-01",
+      "category": "加注",
+      "severity": "blocker",
+      "consequence": 10,
+      "probability": 1,
+      "risk": 10,
+      "book": "Animal Farm",
+      "tier": "A",
+      "chapter": "第一章",
+      "segIndex": 6,
+      "segLabel": "第一章 第7段",
+      "detail": {
+        "missing": [
+          "comrades",
+          "summed",
+          "remove",
+          "overwork",
+          "abolished"
+        ],
+        "word": "abolished"
+      },
+      "id": "第一章#6:ANNO-01:abolished",
+      "title": "超纲词 abolished 没有加注",
+      "sourceSentence": "Remove Man from the scene, and the root cause of hunger and overwork is abolished for ever.\"",
+      "rewrittenSentence": "",
+      "context": {
+        "prev": "It is summed up in a single word Man. ",
+        "next": ""
+      },
+      "plot": {
+        "score": 0,
+        "level": "低",
+        "hits": [],
+        "parts": [
+          {
+            "label": "底线原文锚点",
+            "hits": [],
+            "weight": 3
+          },
+          {
+            "label": "角色/地名",
+            "hits": [],
+            "weight": 1.2
+          },
+          {
+            "label": "数字",
+            "hits": [],
+            "weight": 1
+          },
+          {
+            "label": "因果连接词",
+            "hits": [],
+            "weight": 0.8
+          },
+          {
+            "label": "章节转折位置",
+            "hits": [],
+            "weight": 0.6
+          }
+        ]
+      }
+    },
+    {
+      "ruleId": "ANNO-01",
+      "category": "加注",
+      "severity": "blocker",
+      "consequence": 10,
+      "probability": 1,
+      "risk": 10,
+      "book": "Animal Farm",
+      "tier": "A",
+      "chapter": "第一章",
+      "segIndex": 6,
+      "segLabel": "第一章 第7段",
+      "detail": {
+        "missing": [
+          "comrades",
+          "summed",
+          "remove",
+          "overwork",
+          "abolished"
+        ],
+        "word": "comrades"
+      },
+      "id": "第一章#6:ANNO-01:comrades",
+      "title": "超纲词 comrades 没有加注",
+      "sourceSentence": "\"That, comrades, is the answer to all our problems. ",
+      "rewrittenSentence": "\"That, comrades, is the answer to all our problems. ",
+      "context": {
+        "prev": "",
+        "next": "It is all in one word Man. "
+      },
+      "plot": {
+        "score": 0,
+        "level": "低",
+        "hits": [],
+        "parts": [
+          {
+            "label": "底线原文锚点",
+            "hits": [],
+            "weight": 3
+          },
+          {
+            "label": "角色/地名",
+            "hits": [],
+            "weight": 1.2
+          },
+          {
+            "label": "数字",
+            "hits": [],
+            "weight": 1
+          },
+          {
+            "label": "因果连接词",
+            "hits": [],
+            "weight": 0.8
+          },
+          {
+            "label": "章节转折位置",
+            "hits": [],
+            "weight": 0.6
+          }
+        ]
+      }
+    },
+    {
+      "ruleId": "ANNO-01",
+      "category": "加注",
+      "severity": "blocker",
+      "consequence": 10,
+      "probability": 1,
+      "risk": 10,
+      "book": "Animal Farm",
+      "tier": "A",
+      "chapter": "第一章",
+      "segIndex": 6,
+      "segLabel": "第一章 第7段",
+      "detail": {
+        "missing": [
+          "comrades",
+          "summed",
+          "remove",
+          "overwork",
+          "abolished"
+        ],
+        "word": "overwork"
+      },
+      "id": "第一章#6:ANNO-01:overwork",
+      "title": "超纲词 overwork 没有加注",
+      "sourceSentence": "Remove Man from the scene, and the root cause of hunger and overwork is abolished for ever.\"",
+      "rewrittenSentence": "",
+      "context": {
+        "prev": "It is summed up in a single word Man. ",
+        "next": ""
+      },
+      "plot": {
+        "score": 0,
+        "level": "低",
+        "hits": [],
+        "parts": [
+          {
+            "label": "底线原文锚点",
+            "hits": [],
+            "weight": 3
+          },
+          {
+            "label": "角色/地名",
+            "hits": [],
+            "weight": 1.2
+          },
+          {
+            "label": "数字",
+            "hits": [],
+            "weight": 1
+          },
+          {
+            "label": "因果连接词",
+            "hits": [],
+            "weight": 0.8
+          },
+          {
+            "label": "章节转折位置",
+            "hits": [],
+            "weight": 0.6
+          }
+        ]
+      }
+    },
+    {
+      "ruleId": "ANNO-01",
+      "category": "加注",
+      "severity": "blocker",
+      "consequence": 10,
+      "probability": 1,
+      "risk": 10,
+      "book": "Animal Farm",
+      "tier": "A",
+      "chapter": "第一章",
+      "segIndex": 6,
+      "segLabel": "第一章 第7段",
+      "detail": {
+        "missing": [
+          "comrades",
+          "summed",
+          "remove",
+          "overwork",
+          "abolished"
+        ],
+        "word": "remove"
+      },
+      "id": "第一章#6:ANNO-01:remove",
+      "title": "超纲词 remove 没有加注",
+      "sourceSentence": "Remove Man from the scene, and the root cause of hunger and overwork is abolished for ever.\"",
+      "rewrittenSentence": "",
+      "context": {
+        "prev": "It is summed up in a single word Man. ",
+        "next": ""
+      },
+      "plot": {
+        "score": 0,
+        "level": "低",
+        "hits": [],
+        "parts": [
+          {
+            "label": "底线原文锚点",
+            "hits": [],
+            "weight": 3
+          },
+          {
+            "label": "角色/地名",
+            "hits": [],
+            "weight": 1.2
+          },
+          {
+            "label": "数字",
+            "hits": [],
+            "weight": 1
+          },
+          {
+            "label": "因果连接词",
+            "hits": [],
+            "weight": 0.8
+          },
+          {
+            "label": "章节转折位置",
+            "hits": [],
+            "weight": 0.6
+          }
+        ]
+      }
+    },
+    {
+      "ruleId": "ANNO-01",
+      "category": "加注",
+      "severity": "blocker",
+      "consequence": 10,
+      "probability": 1,
+      "risk": 10,
+      "book": "Animal Farm",
+      "tier": "A",
+      "chapter": "第一章",
+      "segIndex": 6,
+      "segLabel": "第一章 第7段",
+      "detail": {
+        "missing": [
+          "comrades",
+          "summed",
+          "remove",
+          "overwork",
+          "abolished"
+        ],
+        "word": "summed"
+      },
+      "id": "第一章#6:ANNO-01:summed",
+      "title": "超纲词 summed 没有加注",
+      "sourceSentence": "It is summed up in a single word Man. ",
+      "rewrittenSentence": "",
+      "context": {
+        "prev": "\"That, comrades, is the answer to all our problems. ",
+        "next": "Remove Man from the scene, and the root cause of hunger and overwork is abolished for ever.\""
+      },
+      "plot": {
+        "score": 0,
+        "level": "低",
+        "hits": [],
+        "parts": [
+          {
+            "label": "底线原文锚点",
+            "hits": [],
+            "weight": 3
+          },
+          {
+            "label": "角色/地名",
+            "hits": [],
+            "weight": 1.2
+          },
+          {
+            "label": "数字",
+            "hits": [],
+            "weight": 1
+          },
+          {
+            "label": "因果连接词",
+            "hits": [],
+            "weight": 0.8
+          },
+          {
+            "label": "章节转折位置",
+            "hits": [],
+            "weight": 0.6
+          }
+        ]
+      }
+    },
+    {
+      "ruleId": "ANNO-01",
+      "category": "加注",
+      "severity": "blocker",
+      "consequence": 10,
+      "probability": 1,
+      "risk": 10,
+      "book": "Animal Farm",
+      "tier": "A",
+      "chapter": "第一章",
+      "segIndex": 7,
+      "segLabel": "第一章 第8段",
+      "detail": {
+        "missing": [
+          "comrades",
+          "straw",
+          "beneath"
+        ],
+        "word": "beneath"
+      },
+      "id": "第一章#7:ANNO-01:beneath",
+      "title": "超纲词 beneath 没有加注",
+      "sourceSentence": "but I know, as surely as I see this straw beneath my feet, that sooner or later justice will be done. ",
+      "rewrittenSentence": "but I know, as surely as I see this straw under my feet, that late（迟早） justice will be done. ",
+      "context": {
+        "prev": "I do not know when that Rebellion will come, it might be in a week or in a hundred years... ",
+        "next": "Fix your eyes on that, comrades... "
+      },
+      "plot": {
+        "score": 0,
+        "level": "低",
+        "hits": [],
+        "parts": [
+          {
+            "label": "底线原文锚点",
+            "hits": [],
+            "weight": 3
+          },
+          {
+            "label": "角色/地名",
+            "hits": [],
+            "weight": 1.2
+          },
+          {
+            "label": "数字",
+            "hits": [],
+            "weight": 1
+          },
+          {
+            "label": "因果连接词",
+            "hits": [],
+            "weight": 0.8
+          },
+          {
+            "label": "章节转折位置",
+            "hits": [],
+            "weight": 0.6
+          }
+        ]
+      }
+    },
+    {
+      "ruleId": "ANNO-01",
+      "category": "加注",
+      "severity": "blocker",
+      "consequence": 10,
+      "probability": 1,
+      "risk": 10,
+      "book": "Animal Farm",
+      "tier": "A",
+      "chapter": "第一章",
+      "segIndex": 7,
+      "segLabel": "第一章 第8段",
+      "detail": {
+        "missing": [
+          "comrades",
+          "straw",
+          "beneath"
+        ],
+        "word": "comrades"
+      },
+      "id": "第一章#7:ANNO-01:comrades",
+      "title": "超纲词 comrades 没有加注",
+      "sourceSentence": "\"And remember, comrades, your resolution... ",
+      "rewrittenSentence": "\"And remember, comrades, your resolution... ",
+      "context": {
+        "prev": "",
+        "next": "I do not know when that Rebellion（造反） will come, in a week or in a hundred years... "
+      },
+      "plot": {
+        "score": 0,
+        "level": "低",
+        "hits": [],
+        "parts": [
+          {
+            "label": "底线原文锚点",
+            "hits": [],
+            "weight": 3
+          },
+          {
+            "label": "角色/地名",
+            "hits": [],
+            "weight": 1.2
+          },
+          {
+            "label": "数字",
+            "hits": [],
+            "weight": 1
+          },
+          {
+            "label": "因果连接词",
+            "hits": [],
+            "weight": 0.8
+          },
+          {
+            "label": "章节转折位置",
+            "hits": [],
+            "weight": 0.6
+          }
+        ]
+      }
+    },
+    {
+      "ruleId": "ANNO-01",
+      "category": "加注",
+      "severity": "blocker",
+      "consequence": 10,
+      "probability": 1,
+      "risk": 10,
+      "book": "Animal Farm",
+      "tier": "A",
+      "chapter": "第一章",
+      "segIndex": 7,
+      "segLabel": "第一章 第8段",
+      "detail": {
+        "missing": [
+          "comrades",
+          "straw",
+          "beneath"
+        ],
+        "word": "straw"
+      },
+      "id": "第一章#7:ANNO-01:straw",
+      "title": "超纲词 straw 没有加注",
+      "sourceSentence": "but I know, as surely as I see this straw beneath my feet, that sooner or later justice will be done. ",
+      "rewrittenSentence": "but I know, as surely as I see this straw under my feet, that late（迟早） justice will be done. ",
+      "context": {
+        "prev": "I do not know when that Rebellion（造反） will come, in a week or in a hundred years... ",
+        "next": "Fix your eyes on that, comrades... "
+      },
+      "plot": {
+        "score": 0,
+        "level": "低",
+        "hits": [],
+        "parts": [
+          {
+            "label": "底线原文锚点",
+            "hits": [],
+            "weight": 3
+          },
+          {
+            "label": "角色/地名",
+            "hits": [],
+            "weight": 1.2
+          },
+          {
+            "label": "数字",
+            "hits": [],
+            "weight": 1
+          },
+          {
+            "label": "因果连接词",
+            "hits": [],
+            "weight": 0.8
+          },
+          {
+            "label": "章节转折位置",
+            "hits": [],
+            "weight": 0.6
+          }
+        ]
+      }
+    },
+    {
+      "ruleId": "ANNO-01",
+      "category": "加注",
+      "severity": "blocker",
+      "consequence": 10,
+      "probability": 1,
+      "risk": 10,
+      "book": "Animal Farm",
+      "tier": "A",
+      "chapter": "第一章",
+      "segIndex": 9,
+      "segLabel": "第一章 第10段",
+      "detail": {
+        "missing": [
+          "comrades"
+        ],
+        "word": "comrades"
+      },
+      "id": "第一章#9:ANNO-01:comrades",
+      "title": "超纲词 comrades 没有加注",
+      "sourceSentence": "\"And now, comrades, I will tell you about my dream of last night... ",
+      "rewrittenSentence": "\"And now, comrades, I will tell you about my dream of last night... ",
+      "context": {
+        "prev": "",
+        "next": "it was a dream of the earth as it will be when Man has vanished（消失）... "
+      },
+      "plot": {
+        "score": 0,
+        "level": "低",
+        "hits": [],
+        "parts": [
+          {
+            "label": "底线原文锚点",
+            "hits": [],
+            "weight": 3
+          },
+          {
+            "label": "角色/地名",
+            "hits": [],
+            "weight": 1.2
+          },
+          {
+            "label": "数字",
+            "hits": [],
+            "weight": 1
+          },
+          {
+            "label": "因果连接词",
+            "hits": [],
+            "weight": 0.8
+          },
+          {
+            "label": "章节转折位置",
+            "hits": [],
+            "weight": 0.6
+          }
+        ]
+      }
+    },
+    {
+      "ruleId": "SENT-01",
+      "category": "语言",
+      "severity": "blocker",
+      "consequence": 8,
+      "probability": 1,
+      "risk": 8,
+      "book": "Animal Farm",
+      "tier": "A",
+      "chapter": "第一章",
+      "segIndex": 1,
+      "segLabel": "第一章 第2段",
+      "detail": {
+        "maxLen": 20,
+        "sentences": [
+          "As soon as the light in the bedroom went out, there was a stirring（搅动） and a fluttering（飘动） all through the farm buildings. ",
+          "Word had gone round that old Major, the prize Middle White boar（公猪）, had had a strange dream and wished to tell the other animals about it. ",
+          "Old Major, also called Willingdon Beauty, was so highly regarded on the farm that everyone was quite ready to lose an hour's sleep to hear what he had to say."
+        ],
+        "sentence": "As soon as the light in the bedroom went out, there was a stirring（搅动） and a fluttering（飘动） all through the farm buildings. ",
+        "index": 0
+      },
+      "id": "第一章#1:SENT-01:0",
+      "title": "改写句 22 词，超过本层上限 20 词",
+      "sourceSentence": "",
+      "rewrittenSentence": "As soon as the light in the bedroom went out, there was a stirring（搅动） and a fluttering（飘动） all through the farm buildings. ",
+      "context": {
+        "prev": "",
+        "next": ""
+      },
+      "plot": {
+        "score": 1,
+        "level": "高",
+        "hits": [
+          "底线原文锚点：willingdon beauty",
+          "角色/地名：jones",
+          "角色/地名：major",
+          "角色/地名：willingdon",
+          "角色/地名：beauty",
+          "因果连接词：in order to",
+          "章节转折位置：章首/章尾"
+        ],
+        "parts": [
+          {
+            "label": "底线原文锚点",
+            "hits": [
+              "willingdon beauty"
+            ],
+            "weight": 3
+          },
+          {
+            "label": "角色/地名",
+            "hits": [
+              "jones",
+              "major",
+              "willingdon",
+              "beauty"
+            ],
+            "weight": 1.2
+          },
+          {
+            "label": "数字",
+            "hits": [],
+            "weight": 1
+          },
+          {
+            "label": "因果连接词",
+            "hits": [
+              "in order to"
+            ],
+            "weight": 0.8
+          },
+          {
+            "label": "章节转折位置",
+            "hits": [
+              "章首/章尾"
+            ],
+            "weight": 0.6
+          }
+        ]
+      }
+    },
+    {
+      "ruleId": "SENT-01",
+      "category": "语言",
+      "severity": "blocker",
+      "consequence": 8,
+      "probability": 1,
+      "risk": 8,
+      "book": "Animal Farm",
+      "tier": "A",
+      "chapter": "第一章",
+      "segIndex": 1,
+      "segLabel": "第一章 第2段",
+      "detail": {
+        "maxLen": 20,
+        "sentences": [
+          "As soon as the light in the bedroom went out, there was a stirring（搅动） and a fluttering（飘动） all through the farm buildings. ",
+          "Word had gone round that old Major, the prize Middle White boar（公猪）, had had a strange dream and wished to tell the other animals about it. ",
+          "Old Major, also called Willingdon Beauty, was so highly regarded on the farm that everyone was quite ready to lose an hour's sleep to hear what he had to say."
+        ],
+        "sentence": "Word had gone round that old Major, the prize Middle White boar（公猪）, had had a strange dream and wished to tell the other animals about it. ",
+        "index": 1
+      },
+      "id": "第一章#1:SENT-01:1",
+      "title": "改写句 26 词，超过本层上限 20 词",
+      "sourceSentence": "",
+      "rewrittenSentence": "Word had gone round that old Major, the prize Middle White boar（公猪）, had had a strange dream and wished to tell the other animals about it. ",
+      "context": {
+        "prev": "",
+        "next": ""
+      },
+      "plot": {
+        "score": 1,
+        "level": "高",
+        "hits": [
+          "底线原文锚点：willingdon beauty",
+          "角色/地名：jones",
+          "角色/地名：major",
+          "角色/地名：willingdon",
+          "角色/地名：beauty",
+          "因果连接词：in order to",
+          "章节转折位置：章首/章尾"
+        ],
+        "parts": [
+          {
+            "label": "底线原文锚点",
+            "hits": [
+              "willingdon beauty"
+            ],
+            "weight": 3
+          },
+          {
+            "label": "角色/地名",
+            "hits": [
+              "jones",
+              "major",
+              "willingdon",
+              "beauty"
+            ],
+            "weight": 1.2
+          },
+          {
+            "label": "数字",
+            "hits": [],
+            "weight": 1
+          },
+          {
+            "label": "因果连接词",
+            "hits": [
+              "in order to"
+            ],
+            "weight": 0.8
+          },
+          {
+            "label": "章节转折位置",
+            "hits": [
+              "章首/章尾"
+            ],
+            "weight": 0.6
+          }
+        ]
+      }
+    },
+    {
+      "ruleId": "SENT-01",
+      "category": "语言",
+      "severity": "blocker",
+      "consequence": 8,
+      "probability": 1,
+      "risk": 8,
+      "book": "Animal Farm",
+      "tier": "A",
+      "chapter": "第一章",
+      "segIndex": 1,
+      "segLabel": "第一章 第2段",
+      "detail": {
+        "maxLen": 20,
+        "sentences": [
+          "As soon as the light in the bedroom went out, there was a stirring（搅动） and a fluttering（飘动） all through the farm buildings. ",
+          "Word had gone round that old Major, the prize Middle White boar（公猪）, had had a strange dream and wished to tell the other animals about it. ",
+          "Old Major, also called Willingdon Beauty, was so highly regarded on the farm that everyone was quite ready to lose an hour's sleep to hear what he had to say."
+        ],
+        "sentence": "Old Major, also called Willingdon Beauty, was so highly regarded on the farm that everyone was quite ready to lose an hour's sleep to hear what he had to say.",
+        "index": 2
+      },
+      "id": "第一章#1:SENT-01:2",
+      "title": "改写句 30 词，超过本层上限 20 词",
+      "sourceSentence": "",
+      "rewrittenSentence": "Old Major, also called Willingdon Beauty, was so highly regarded on the farm that everyone was quite ready to lose an hour's sleep to hear what he had to say.",
+      "context": {
+        "prev": "",
+        "next": ""
+      },
+      "plot": {
+        "score": 1,
+        "level": "高",
+        "hits": [
+          "底线原文锚点：willingdon beauty",
+          "角色/地名：jones",
+          "角色/地名：major",
+          "角色/地名：willingdon",
+          "角色/地名：beauty",
+          "因果连接词：in order to",
+          "章节转折位置：章首/章尾"
+        ],
+        "parts": [
+          {
+            "label": "底线原文锚点",
+            "hits": [
+              "willingdon beauty"
+            ],
+            "weight": 3
+          },
+          {
+            "label": "角色/地名",
+            "hits": [
+              "jones",
+              "major",
+              "willingdon",
+              "beauty"
+            ],
+            "weight": 1.2
+          },
+          {
+            "label": "数字",
+            "hits": [],
+            "weight": 1
+          },
+          {
+            "label": "因果连接词",
+            "hits": [
+              "in order to"
+            ],
+            "weight": 0.8
+          },
+          {
+            "label": "章节转折位置",
+            "hits": [
+              "章首/章尾"
+            ],
+            "weight": 0.6
+          }
+        ]
+      }
+    },
+    {
+      "ruleId": "SENT-01",
+      "category": "语言",
+      "severity": "blocker",
+      "consequence": 8,
+      "probability": 1,
+      "risk": 8,
+      "book": "Animal Farm",
+      "tier": "A",
+      "chapter": "第一章",
+      "segIndex": 3,
+      "segLabel": "第一章 第4段",
+      "detail": {
+        "maxLen": 20,
+        "sentences": [
+          "The hens perched on the window sills, the pigeons fluttered（飘动） up to the rafters（椽子）, the sheep and cows lay behind the pigs and began to chew（咀嚼）. ",
+          "The two cart horses, Boxer and Clover, came in together, walking slowly and setting down their big hairy hoof（蹄） with care in case some small animal hid in the straw. "
+        ],
+        "sentence": "The hens perched on the window sills, the pigeons fluttered（飘动） up to the rafters（椽子）, the sheep and cows lay behind the pigs and began to chew（咀嚼）. ",
+        "index": 0
+      },
+      "id": "第一章#3:SENT-01:0",
+      "title": "改写句 26 词，超过本层上限 20 词",
+      "sourceSentence": "",
+      "rewrittenSentence": "The hens perched on the window sills, the pigeons fluttered（飘动） up to the rafters（椽子）, the sheep and cows lay behind the pigs and began to chew（咀嚼）. ",
+      "context": {
+        "prev": "",
+        "next": ""
+      },
+      "plot": {
+        "score": 1,
+        "level": "高",
+        "hits": [
+          "角色/地名：benjamin",
+          "角色/地名：muriel",
+          "角色/地名：bluebell",
+          "角色/地名：jessie",
+          "角色/地名：pincher",
+          "角色/地名：boxer",
+          "角色/地名：clover"
+        ],
+        "parts": [
+          {
+            "label": "底线原文锚点",
+            "hits": [],
+            "weight": 3
+          },
+          {
+            "label": "角色/地名",
+            "hits": [
+              "benjamin",
+              "muriel",
+              "bluebell",
+              "jessie",
+              "pincher",
+              "boxer",
+              "clover"
+            ],
+            "weight": 1.2
+          },
+          {
+            "label": "数字",
+            "hits": [],
+            "weight": 1
+          },
+          {
+            "label": "因果连接词",
+            "hits": [],
+            "weight": 0.8
+          },
+          {
+            "label": "章节转折位置",
+            "hits": [],
+            "weight": 0.6
+          }
+        ]
+      }
+    },
+    {
+      "ruleId": "SENT-01",
+      "category": "语言",
+      "severity": "blocker",
+      "consequence": 8,
+      "probability": 1,
+      "risk": 8,
+      "book": "Animal Farm",
+      "tier": "A",
+      "chapter": "第一章",
+      "segIndex": 3,
+      "segLabel": "第一章 第4段",
+      "detail": {
+        "maxLen": 20,
+        "sentences": [
+          "The hens perched on the window sills, the pigeons fluttered（飘动） up to the rafters（椽子）, the sheep and cows lay behind the pigs and began to chew（咀嚼）. ",
+          "The two cart horses, Boxer and Clover, came in together, walking slowly and setting down their big hairy hoof（蹄） with care in case some small animal hid in the straw. "
+        ],
+        "sentence": "The two cart horses, Boxer and Clover, came in together, walking slowly and setting down their big hairy hoof（蹄） with care in case some small animal hid in the straw. ",
+        "index": 1
+      },
+      "id": "第一章#3:SENT-01:1",
+      "title": "改写句 30 词，超过本层上限 20 词",
+      "sourceSentence": "",
+      "rewrittenSentence": "The two cart horses, Boxer and Clover, came in together, walking slowly and setting down their big hairy hoof（蹄） with care in case some small animal hid in the straw. ",
+      "context": {
+        "prev": "",
+        "next": ""
+      },
+      "plot": {
+        "score": 1,
+        "level": "高",
+        "hits": [
+          "角色/地名：benjamin",
+          "角色/地名：muriel",
+          "角色/地名：bluebell",
+          "角色/地名：jessie",
+          "角色/地名：pincher",
+          "角色/地名：boxer",
+          "角色/地名：clover"
+        ],
+        "parts": [
+          {
+            "label": "底线原文锚点",
+            "hits": [],
+            "weight": 3
+          },
+          {
+            "label": "角色/地名",
+            "hits": [
+              "benjamin",
+              "muriel",
+              "bluebell",
+              "jessie",
+              "pincher",
+              "boxer",
+              "clover"
+            ],
+            "weight": 1.2
+          },
+          {
+            "label": "数字",
+            "hits": [],
+            "weight": 1
+          },
+          {
+            "label": "因果连接词",
+            "hits": [],
+            "weight": 0.8
+          },
+          {
+            "label": "章节转折位置",
+            "hits": [],
+            "weight": 0.6
+          }
+        ]
+      }
+    },
+    {
+      "ruleId": "SENT-01",
+      "category": "语言",
+      "severity": "blocker",
+      "consequence": 8,
+      "probability": 1,
+      "risk": 8,
+      "book": "Animal Farm",
+      "tier": "A",
+      "chapter": "第一章",
+      "segIndex": 11,
+      "segLabel": "第一章 第12段",
+      "detail": {
+        "maxLen": 20,
+        "sentences": [
+          " Old Major cleared his throat and sang: \"Beasts of England, beasts of Ireland, beasts of every land and clime（地方）, hearken（倾听） to my joyful tidings（消息） of the golden future time.\" The animals took it up and sang five times in a row（连续）; in the excitement, seven times."
+        ],
+        "sentence": " Old Major cleared his throat and sang: \"Beasts of England, beasts of Ireland, beasts of every land and clime（地方）, hearken（倾听） to my joyful tidings（消息） of the golden future time.\" The animals took it up and sang five times in a row（连续）; in the excitement, seven times.",
+        "index": 0
+      },
+      "id": "第一章#11:SENT-01:0",
+      "title": "改写句 46 词，超过本层上限 20 词",
+      "sourceSentence": "",
+      "rewrittenSentence": " Old Major cleared his throat and sang: \"Beasts of England, beasts of Ireland, beasts of every land and clime（地方）, hearken（倾听） to my joyful tidings（消息） of the golden future time.\" The animals took it up and sang five times in a row（连续）; in the excitement, seven times.",
+      "context": {
+        "prev": "",
+        "next": ""
+      },
+      "plot": {
+        "score": 0.917,
+        "level": "高",
+        "hits": [
+          "底线原文锚点：beasts of england",
+          "角色/地名：major",
+          "角色/地名：england",
+          "角色/地名：ireland"
+        ],
+        "parts": [
+          {
+            "label": "底线原文锚点",
+            "hits": [
+              "beasts of england"
+            ],
+            "weight": 3
+          },
+          {
+            "label": "角色/地名",
+            "hits": [
+              "major",
+              "england",
+              "ireland"
+            ],
+            "weight": 1.2
+          },
+          {
+            "label": "数字",
+            "hits": [],
+            "weight": 1
+          },
+          {
+            "label": "因果连接词",
+            "hits": [],
+            "weight": 0.8
+          },
+          {
+            "label": "章节转折位置",
+            "hits": [],
+            "weight": 0.6
+          }
+        ]
+      }
+    },
+    {
+      "ruleId": "SENT-01",
+      "category": "语言",
+      "severity": "blocker",
+      "consequence": 8,
+      "probability": 1,
+      "risk": 8,
+      "book": "Animal Farm",
+      "tier": "A",
+      "chapter": "第一章",
+      "segIndex": 0,
+      "segLabel": "第一章 第1段",
+      "detail": {
+        "maxLen": 20,
+        "sentences": [
+          "Mr. Jones, of the Manor Farm, had locked the hen houses for the night, but was too drunk to remember the pop holes. ",
+          "With the ring of light from his lantern dancing from side to side, he lurched（踉跄着走） across the yard, kicked off his boots at the back door, drew himself a last glass of beer from the barrel（桶）, and made his way up to bed, where Mrs. Jones was already snoring."
+        ],
+        "sentence": "Mr. Jones, of the Manor Farm, had locked the hen houses for the night, but was too drunk to remember the pop holes. ",
+        "index": 0
+      },
+      "id": "第一章#0:SENT-01:0",
+      "title": "改写句 23 词，超过本层上限 20 词",
+      "sourceSentence": "",
+      "rewrittenSentence": "Mr. Jones, of the Manor Farm, had locked the hen houses for the night, but was too drunk to remember the pop holes. ",
+      "context": {
+        "prev": "",
+        "next": ""
+      },
+      "plot": {
+        "score": 0.833,
+        "level": "高",
+        "hits": [
+          "底线原文锚点：manor farm",
+          "角色/地名：jones",
+          "角色/地名：manor",
+          "章节转折位置：章首/章尾"
+        ],
+        "parts": [
+          {
+            "label": "底线原文锚点",
+            "hits": [
+              "manor farm"
+            ],
+            "weight": 3
+          },
+          {
+            "label": "角色/地名",
+            "hits": [
+              "jones",
+              "manor"
+            ],
+            "weight": 1.2
+          },
+          {
+            "label": "数字",
+            "hits": [],
+            "weight": 1
+          },
+          {
+            "label": "因果连接词",
+            "hits": [],
+            "weight": 0.8
+          },
+          {
+            "label": "章节转折位置",
+            "hits": [
+              "章首/章尾"
+            ],
+            "weight": 0.6
+          }
+        ]
+      }
+    },
+    {
+      "ruleId": "SENT-01",
+      "category": "语言",
+      "severity": "blocker",
+      "consequence": 8,
+      "probability": 1,
+      "risk": 8,
+      "book": "Animal Farm",
+      "tier": "A",
+      "chapter": "第一章",
+      "segIndex": 0,
+      "segLabel": "第一章 第1段",
+      "detail": {
+        "maxLen": 20,
+        "sentences": [
+          "Mr. Jones, of the Manor Farm, had locked the hen houses for the night, but was too drunk to remember the pop holes. ",
+          "With the ring of light from his lantern dancing from side to side, he lurched（踉跄着走） across the yard, kicked off his boots at the back door, drew himself a last glass of beer from the barrel（桶）, and made his way up to bed, where Mrs. Jones was already snoring."
+        ],
+        "sentence": "With the ring of light from his lantern dancing from side to side, he lurched（踉跄着走） across the yard, kicked off his boots at the back door, drew himself a last glass of beer from the barrel（桶）, and made his way up to bed, where Mrs. Jones was already snoring.",
+        "index": 1
+      },
+      "id": "第一章#0:SENT-01:1",
+      "title": "改写句 49 词，超过本层上限 20 词",
+      "sourceSentence": "",
+      "rewrittenSentence": "With the ring of light from his lantern dancing from side to side, he lurched（踉跄着走） across the yard, kicked off his boots at the back door, drew himself a last glass of beer from the barrel（桶）, and made his way up to bed, where Mrs. Jones was already snoring.",
+      "context": {
+        "prev": "",
+        "next": ""
+      },
+      "plot": {
+        "score": 0.833,
+        "level": "高",
+        "hits": [
+          "底线原文锚点：manor farm",
+          "角色/地名：jones",
+          "角色/地名：manor",
+          "章节转折位置：章首/章尾"
+        ],
+        "parts": [
+          {
+            "label": "底线原文锚点",
+            "hits": [
+              "manor farm"
+            ],
+            "weight": 3
+          },
+          {
+            "label": "角色/地名",
+            "hits": [
+              "jones",
+              "manor"
+            ],
+            "weight": 1.2
+          },
+          {
+            "label": "数字",
+            "hits": [],
+            "weight": 1
+          },
+          {
+            "label": "因果连接词",
+            "hits": [],
+            "weight": 0.8
+          },
+          {
+            "label": "章节转折位置",
+            "hits": [
+              "章首/章尾"
+            ],
+            "weight": 0.6
+          }
+        ]
+      }
+    },
+    {
+      "ruleId": "SENT-01",
+      "category": "语言",
+      "severity": "blocker",
+      "consequence": 8,
+      "probability": 1,
+      "risk": 8,
+      "book": "Animal Farm",
+      "tier": "A",
+      "chapter": "第一章",
+      "segIndex": 10,
+      "segLabel": "第一章 第11段",
+      "detail": {
+        "maxLen": 20,
+        "sentences": [
+          "Major said that as a young pig his mother and the other sows（母猪） sang an old tune, Beasts（野兽） of England, and he knows only the tune and three words... "
+        ],
+        "sentence": "Major said that as a young pig his mother and the other sows（母猪） sang an old tune, Beasts（野兽） of England, and he knows only the tune and three words... ",
+        "index": 0
+      },
+      "id": "第一章#10:SENT-01:0",
+      "title": "改写句 29 词，超过本层上限 20 词",
+      "sourceSentence": "",
+      "rewrittenSentence": "Major said that as a young pig his mother and the other sows（母猪） sang an old tune, Beasts（野兽） of England, and he knows only the tune and three words... ",
+      "context": {
+        "prev": "",
+        "next": ""
+      },
+      "plot": {
+        "score": 0.75,
+        "level": "高",
+        "hits": [
+          "底线原文锚点：beasts of england",
+          "角色/地名：major",
+          "角色/地名：england"
+        ],
+        "parts": [
+          {
+            "label": "底线原文锚点",
+            "hits": [
+              "beasts of england"
+            ],
+            "weight": 3
+          },
+          {
+            "label": "角色/地名",
+            "hits": [
+              "major",
+              "england"
+            ],
+            "weight": 1.2
+          },
+          {
+            "label": "数字",
+            "hits": [],
+            "weight": 1
+          },
+          {
+            "label": "因果连接词",
+            "hits": [],
+            "weight": 0.8
+          },
+          {
+            "label": "章节转折位置",
+            "hits": [],
+            "weight": 0.6
+          }
+        ]
+      }
+    },
+    {
+      "ruleId": "SENT-01",
+      "category": "语言",
+      "severity": "blocker",
+      "consequence": 8,
+      "probability": 1,
+      "risk": 8,
+      "book": "Animal Farm",
+      "tier": "A",
+      "chapter": "第一章",
+      "segIndex": 8,
+      "segLabel": "第一章 第9段",
+      "detail": {
+        "maxLen": 20,
+        "sentences": [
+          "No animal must ever live in a house, or sleep in a bed, or wear clothes, or drink alcohol（酒精）, or smoke tobacco（烟草）, or touch money, or do trade. "
+        ],
+        "sentence": "No animal must ever live in a house, or sleep in a bed, or wear clothes, or drink alcohol（酒精）, or smoke tobacco（烟草）, or touch money, or do trade. ",
+        "index": 0
+      },
+      "id": "第一章#8:SENT-01:0",
+      "title": "改写句 28 词，超过本层上限 20 词",
+      "sourceSentence": "",
+      "rewrittenSentence": "No animal must ever live in a house, or sleep in a bed, or wear clothes, or drink alcohol（酒精）, or smoke tobacco（烟草）, or touch money, or do trade. ",
+      "context": {
+        "prev": "",
+        "next": ""
+      },
+      "plot": {
+        "score": 0.528,
+        "level": "中",
+        "hits": [
+          "底线原文锚点：all animals are equal",
+          "因果连接词：so that"
+        ],
+        "parts": [
+          {
+            "label": "底线原文锚点",
+            "hits": [
+              "all animals are equal"
+            ],
+            "weight": 3
+          },
+          {
+            "label": "角色/地名",
+            "hits": [],
+            "weight": 1.2
+          },
+          {
+            "label": "数字",
+            "hits": [],
+            "weight": 1
+          },
+          {
+            "label": "因果连接词",
+            "hits": [
+              "so that"
+            ],
+            "weight": 0.8
+          },
+          {
+            "label": "章节转折位置",
+            "hits": [],
+            "weight": 0.6
+          }
+        ]
+      }
+    },
+    {
+      "ruleId": "SENT-01",
+      "category": "语言",
+      "severity": "blocker",
+      "consequence": 8,
+      "probability": 1,
+      "risk": 8,
+      "book": "Animal Farm",
+      "tier": "A",
+      "chapter": "第一章",
+      "segIndex": 5,
+      "segLabel": "第一章 第6段",
+      "detail": {
+        "maxLen": 20,
+        "sentences": [
+          "Is it because our land is so poor that it cannot give a decent（像样） life to those who live on it? ",
+          "He does not give milk, he does not lay eggs, he is too weak to pull the plough, he cannot run fast enough to catch rabbits. ",
+          "He sets them to work, he gives back only the bare（仅够） minimum（最低） to keep them from starving（挨饿）, and the rest he keeps for himself. ",
+          "Our labour（劳作） tills the soil, our dung（粪便） fertilises（施肥） it, and yet not one of us owns more than his bare skin（皮肤）. "
+        ],
+        "sentence": "Is it because our land is so poor that it cannot give a decent（像样） life to those who live on it? ",
+        "index": 0
+      },
+      "id": "第一章#5:SENT-01:0",
+      "title": "改写句 21 词，超过本层上限 20 词",
+      "sourceSentence": "",
+      "rewrittenSentence": "Is it because our land is so poor that it cannot give a decent（像样） life to those who live on it? ",
+      "context": {
+        "prev": "",
+        "next": ""
+      },
+      "plot": {
+        "score": 0.444,
+        "level": "中",
+        "hits": [
+          "角色/地名：clover",
+          "角色/地名：england",
+          "因果连接词：because"
+        ],
+        "parts": [
+          {
+            "label": "底线原文锚点",
+            "hits": [],
+            "weight": 3
+          },
+          {
+            "label": "角色/地名",
+            "hits": [
+              "clover",
+              "england"
+            ],
+            "weight": 1.2
+          },
+          {
+            "label": "数字",
+            "hits": [],
+            "weight": 1
+          },
+          {
+            "label": "因果连接词",
+            "hits": [
+              "because"
+            ],
+            "weight": 0.8
+          },
+          {
+            "label": "章节转折位置",
+            "hits": [],
+            "weight": 0.6
+          }
+        ]
+      }
+    },
+    {
+      "ruleId": "SENT-01",
+      "category": "语言",
+      "severity": "blocker",
+      "consequence": 8,
+      "probability": 1,
+      "risk": 8,
+      "book": "Animal Farm",
+      "tier": "A",
+      "chapter": "第一章",
+      "segIndex": 5,
+      "segLabel": "第一章 第6段",
+      "detail": {
+        "maxLen": 20,
+        "sentences": [
+          "Is it because our land is so poor that it cannot give a decent（像样） life to those who live on it? ",
+          "He does not give milk, he does not lay eggs, he is too weak to pull the plough, he cannot run fast enough to catch rabbits. ",
+          "He sets them to work, he gives back only the bare（仅够） minimum（最低） to keep them from starving（挨饿）, and the rest he keeps for himself. ",
+          "Our labour（劳作） tills the soil, our dung（粪便） fertilises（施肥） it, and yet not one of us owns more than his bare skin（皮肤）. "
+        ],
+        "sentence": "He does not give milk, he does not lay eggs, he is too weak to pull the plough, he cannot run fast enough to catch rabbits. ",
+        "index": 1
+      },
+      "id": "第一章#5:SENT-01:1",
+      "title": "改写句 26 词，超过本层上限 20 词",
+      "sourceSentence": "",
+      "rewrittenSentence": "He does not give milk, he does not lay eggs, he is too weak to pull the plough, he cannot run fast enough to catch rabbits. ",
+      "context": {
+        "prev": "",
+        "next": ""
+      },
+      "plot": {
+        "score": 0.444,
+        "level": "中",
+        "hits": [
+          "角色/地名：clover",
+          "角色/地名：england",
+          "因果连接词：because"
+        ],
+        "parts": [
+          {
+            "label": "底线原文锚点",
+            "hits": [],
+            "weight": 3
+          },
+          {
+            "label": "角色/地名",
+            "hits": [
+              "clover",
+              "england"
+            ],
+            "weight": 1.2
+          },
+          {
+            "label": "数字",
+            "hits": [],
+            "weight": 1
+          },
+          {
+            "label": "因果连接词",
+            "hits": [
+              "because"
+            ],
+            "weight": 0.8
+          },
+          {
+            "label": "章节转折位置",
+            "hits": [],
+            "weight": 0.6
+          }
+        ]
+      }
+    },
+    {
+      "ruleId": "SENT-01",
+      "category": "语言",
+      "severity": "blocker",
+      "consequence": 8,
+      "probability": 1,
+      "risk": 8,
+      "book": "Animal Farm",
+      "tier": "A",
+      "chapter": "第一章",
+      "segIndex": 5,
+      "segLabel": "第一章 第6段",
+      "detail": {
+        "maxLen": 20,
+        "sentences": [
+          "Is it because our land is so poor that it cannot give a decent（像样） life to those who live on it? ",
+          "He does not give milk, he does not lay eggs, he is too weak to pull the plough, he cannot run fast enough to catch rabbits. ",
+          "He sets them to work, he gives back only the bare（仅够） minimum（最低） to keep them from starving（挨饿）, and the rest he keeps for himself. ",
+          "Our labour（劳作） tills the soil, our dung（粪便） fertilises（施肥） it, and yet not one of us owns more than his bare skin（皮肤）. "
+        ],
+        "sentence": "He sets them to work, he gives back only the bare（仅够） minimum（最低） to keep them from starving（挨饿）, and the rest he keeps for himself. ",
+        "index": 2
+      },
+      "id": "第一章#5:SENT-01:2",
+      "title": "改写句 24 词，超过本层上限 20 词",
+      "sourceSentence": "",
+      "rewrittenSentence": "He sets them to work, he gives back only the bare（仅够） minimum（最低） to keep them from starving（挨饿）, and the rest he keeps for himself. ",
+      "context": {
+        "prev": "",
+        "next": ""
+      },
+      "plot": {
+        "score": 0.444,
+        "level": "中",
+        "hits": [
+          "角色/地名：clover",
+          "角色/地名：england",
+          "因果连接词：because"
+        ],
+        "parts": [
+          {
+            "label": "底线原文锚点",
+            "hits": [],
+            "weight": 3
+          },
+          {
+            "label": "角色/地名",
+            "hits": [
+              "clover",
+              "england"
+            ],
+            "weight": 1.2
+          },
+          {
+            "label": "数字",
+            "hits": [],
+            "weight": 1
+          },
+          {
+            "label": "因果连接词",
+            "hits": [
+              "because"
+            ],
+            "weight": 0.8
+          },
+          {
+            "label": "章节转折位置",
+            "hits": [],
+            "weight": 0.6
+          }
+        ]
+      }
+    },
+    {
+      "ruleId": "SENT-01",
+      "category": "语言",
+      "severity": "blocker",
+      "consequence": 8,
+      "probability": 1,
+      "risk": 8,
+      "book": "Animal Farm",
+      "tier": "A",
+      "chapter": "第一章",
+      "segIndex": 5,
+      "segLabel": "第一章 第6段",
+      "detail": {
+        "maxLen": 20,
+        "sentences": [
+          "Is it because our land is so poor that it cannot give a decent（像样） life to those who live on it? ",
+          "He does not give milk, he does not lay eggs, he is too weak to pull the plough, he cannot run fast enough to catch rabbits. ",
+          "He sets them to work, he gives back only the bare（仅够） minimum（最低） to keep them from starving（挨饿）, and the rest he keeps for himself. ",
+          "Our labour（劳作） tills the soil, our dung（粪便） fertilises（施肥） it, and yet not one of us owns more than his bare skin（皮肤）. "
+        ],
+        "sentence": "Our labour（劳作） tills the soil, our dung（粪便） fertilises（施肥） it, and yet not one of us owns more than his bare skin（皮肤）. ",
+        "index": 3
+      },
+      "id": "第一章#5:SENT-01:3",
+      "title": "改写句 21 词，超过本层上限 20 词",
+      "sourceSentence": "",
+      "rewrittenSentence": "Our labour（劳作） tills the soil, our dung（粪便） fertilises（施肥） it, and yet not one of us owns more than his bare skin（皮肤）. ",
+      "context": {
+        "prev": "",
+        "next": ""
+      },
+      "plot": {
+        "score": 0.444,
+        "level": "中",
+        "hits": [
+          "角色/地名：clover",
+          "角色/地名：england",
+          "因果连接词：because"
+        ],
+        "parts": [
+          {
+            "label": "底线原文锚点",
+            "hits": [],
+            "weight": 3
+          },
+          {
+            "label": "角色/地名",
+            "hits": [
+              "clover",
+              "england"
+            ],
+            "weight": 1.2
+          },
+          {
+            "label": "数字",
+            "hits": [],
+            "weight": 1
+          },
+          {
+            "label": "因果连接词",
+            "hits": [
+              "because"
+            ],
+            "weight": 0.8
+          },
+          {
+            "label": "章节转折位置",
+            "hits": [],
+            "weight": 0.6
+          }
+        ]
+      }
+    },
+    {
+      "ruleId": "SENT-01",
+      "category": "语言",
+      "severity": "blocker",
+      "consequence": 8,
+      "probability": 1,
+      "risk": 8,
+      "book": "Animal Farm",
+      "tier": "A",
+      "chapter": "第一章",
+      "segIndex": 13,
+      "segLabel": "第一章 第14段",
+      "detail": {
+        "maxLen": 20,
+        "sentences": [
+          "The birds jumped on to their perches, the animals settled in the straw, and the whole farm was asleep in a moment."
+        ],
+        "sentence": "The birds jumped on to their perches, the animals settled in the straw, and the whole farm was asleep in a moment.",
+        "index": 0
+      },
+      "id": "第一章#13:SENT-01:0",
+      "title": "改写句 22 词，超过本层上限 20 词",
+      "sourceSentence": "",
+      "rewrittenSentence": "The birds jumped on to their perches, the animals settled in the straw, and the whole farm was asleep in a moment.",
+      "context": {
+        "prev": "",
+        "next": ""
+      },
+      "plot": {
+        "score": 0.389,
+        "level": "中",
+        "hits": [
+          "角色/地名：jones",
+          "数字：6",
+          "章节转折位置：章首/章尾"
+        ],
+        "parts": [
+          {
+            "label": "底线原文锚点",
+            "hits": [],
+            "weight": 3
+          },
+          {
+            "label": "角色/地名",
+            "hits": [
+              "jones"
+            ],
+            "weight": 1.2
+          },
+          {
+            "label": "数字",
+            "hits": [
+              "6"
+            ],
+            "weight": 1
+          },
+          {
+            "label": "因果连接词",
+            "hits": [],
+            "weight": 0.8
+          },
+          {
+            "label": "章节转折位置",
+            "hits": [
+              "章首/章尾"
+            ],
+            "weight": 0.6
+          }
+        ]
+      }
+    },
+    {
+      "ruleId": "SENT-01",
+      "category": "语言",
+      "severity": "blocker",
+      "consequence": 8,
+      "probability": 1,
+      "risk": 8,
+      "book": "Animal Farm",
+      "tier": "A",
+      "chapter": "第一章",
+      "segIndex": 4,
+      "segLabel": "第一章 第5段",
+      "detail": {
+        "maxLen": 20,
+        "sentences": [
+          "When all had assembled（集合）, Major cleared his throat and began: \"Now, comrades（同志们）, what is the nature of this life of ours? ",
+          "We are born, we are given just so much food as will keep the breath in our bodies, and those of us who can are forced to work to the last atom（原子） of our strength... "
+        ],
+        "sentence": "When all had assembled（集合）, Major cleared his throat and began: \"Now, comrades（同志们）, what is the nature of this life of ours? ",
+        "index": 0
+      },
+      "id": "第一章#4:SENT-01:0",
+      "title": "改写句 21 词，超过本层上限 20 词",
+      "sourceSentence": "",
+      "rewrittenSentence": "When all had assembled（集合）, Major cleared his throat and began: \"Now, comrades（同志们）, what is the nature of this life of ours? ",
+      "context": {
+        "prev": "",
+        "next": ""
+      },
+      "plot": {
+        "score": 0.333,
+        "level": "中",
+        "hits": [
+          "角色/地名：major",
+          "角色/地名：england"
+        ],
+        "parts": [
+          {
+            "label": "底线原文锚点",
+            "hits": [],
+            "weight": 3
+          },
+          {
+            "label": "角色/地名",
+            "hits": [
+              "major",
+              "england"
+            ],
+            "weight": 1.2
+          },
+          {
+            "label": "数字",
+            "hits": [],
+            "weight": 1
+          },
+          {
+            "label": "因果连接词",
+            "hits": [],
+            "weight": 0.8
+          },
+          {
+            "label": "章节转折位置",
+            "hits": [],
+            "weight": 0.6
+          }
+        ]
+      }
+    },
+    {
+      "ruleId": "SENT-01",
+      "category": "语言",
+      "severity": "blocker",
+      "consequence": 8,
+      "probability": 1,
+      "risk": 8,
+      "book": "Animal Farm",
+      "tier": "A",
+      "chapter": "第一章",
+      "segIndex": 4,
+      "segLabel": "第一章 第5段",
+      "detail": {
+        "maxLen": 20,
+        "sentences": [
+          "When all had assembled（集合）, Major cleared his throat and began: \"Now, comrades（同志们）, what is the nature of this life of ours? ",
+          "We are born, we are given just so much food as will keep the breath in our bodies, and those of us who can are forced to work to the last atom（原子） of our strength... "
+        ],
+        "sentence": "We are born, we are given just so much food as will keep the breath in our bodies, and those of us who can are forced to work to the last atom（原子） of our strength... ",
+        "index": 1
+      },
+      "id": "第一章#4:SENT-01:1",
+      "title": "改写句 35 词，超过本层上限 20 词",
+      "sourceSentence": "",
+      "rewrittenSentence": "We are born, we are given just so much food as will keep the breath in our bodies, and those of us who can are forced to work to the last atom（原子） of our strength... ",
+      "context": {
+        "prev": "",
+        "next": ""
+      },
+      "plot": {
+        "score": 0.333,
+        "level": "中",
+        "hits": [
+          "角色/地名：major",
+          "角色/地名：england"
+        ],
+        "parts": [
+          {
+            "label": "底线原文锚点",
+            "hits": [],
+            "weight": 3
+          },
+          {
+            "label": "角色/地名",
+            "hits": [
+              "major",
+              "england"
+            ],
+            "weight": 1.2
+          },
+          {
+            "label": "数字",
+            "hits": [],
+            "weight": 1
+          },
+          {
+            "label": "因果连接词",
+            "hits": [],
+            "weight": 0.8
+          },
+          {
+            "label": "章节转折位置",
+            "hits": [],
+            "weight": 0.6
+          }
+        ]
+      }
+    },
+    {
+      "ruleId": "SENT-01",
+      "category": "语言",
+      "severity": "blocker",
+      "consequence": 8,
+      "probability": 1,
+      "risk": 8,
+      "book": "Animal Farm",
+      "tier": "A",
+      "chapter": "第一章",
+      "segIndex": 2,
+      "segLabel": "第一章 第3段",
+      "detail": {
+        "maxLen": 20,
+        "sentences": [
+          "At one end of the big barn, on a raised platform（舞台）, Major was already in his bed of straw（稻草）, under a lantern hanging from a beam. ",
+          "He was twelve years old and had grown rather fat lately, but he was still a majestic（威严的） looking pig, with a wise and kind appearance even though his tushes（獠牙） had never been cut. "
+        ],
+        "sentence": "At one end of the big barn, on a raised platform（舞台）, Major was already in his bed of straw（稻草）, under a lantern hanging from a beam. ",
+        "index": 0
+      },
+      "id": "第一章#2:SENT-01:0",
+      "title": "改写句 26 词，超过本层上限 20 词",
+      "sourceSentence": "",
+      "rewrittenSentence": "At one end of the big barn, on a raised platform（舞台）, Major was already in his bed of straw（稻草）, under a lantern hanging from a beam. ",
+      "context": {
+        "prev": "",
+        "next": ""
+      },
+      "plot": {
+        "score": 0.167,
+        "level": "低",
+        "hits": [
+          "角色/地名：major"
+        ],
+        "parts": [
+          {
+            "label": "底线原文锚点",
+            "hits": [],
+            "weight": 3
+          },
+          {
+            "label": "角色/地名",
+            "hits": [
+              "major"
+            ],
+            "weight": 1.2
+          },
+          {
+            "label": "数字",
+            "hits": [],
+            "weight": 1
+          },
+          {
+            "label": "因果连接词",
+            "hits": [],
+            "weight": 0.8
+          },
+          {
+            "label": "章节转折位置",
+            "hits": [],
+            "weight": 0.6
+          }
+        ]
+      }
+    },
+    {
+      "ruleId": "SENT-01",
+      "category": "语言",
+      "severity": "blocker",
+      "consequence": 8,
+      "probability": 1,
+      "risk": 8,
+      "book": "Animal Farm",
+      "tier": "A",
+      "chapter": "第一章",
+      "segIndex": 2,
+      "segLabel": "第一章 第3段",
+      "detail": {
+        "maxLen": 20,
+        "sentences": [
+          "At one end of the big barn, on a raised platform（舞台）, Major was already in his bed of straw（稻草）, under a lantern hanging from a beam. ",
+          "He was twelve years old and had grown rather fat lately, but he was still a majestic（威严的） looking pig, with a wise and kind appearance even though his tushes（獠牙） had never been cut. "
+        ],
+        "sentence": "He was twelve years old and had grown rather fat lately, but he was still a majestic（威严的） looking pig, with a wise and kind appearance even though his tushes（獠牙） had never been cut. ",
+        "index": 1
+      },
+      "id": "第一章#2:SENT-01:1",
+      "title": "改写句 33 词，超过本层上限 20 词",
+      "sourceSentence": "",
+      "rewrittenSentence": "He was twelve years old and had grown rather fat lately, but he was still a majestic（威严的） looking pig, with a wise and kind appearance even though his tushes（獠牙） had never been cut. ",
+      "context": {
+        "prev": "",
+        "next": ""
+      },
+      "plot": {
+        "score": 0.167,
+        "level": "低",
+        "hits": [
+          "角色/地名：major"
+        ],
+        "parts": [
+          {
+            "label": "底线原文锚点",
+            "hits": [],
+            "weight": 3
+          },
+          {
+            "label": "角色/地名",
+            "hits": [
+              "major"
+            ],
+            "weight": 1.2
+          },
+          {
+            "label": "数字",
+            "hits": [],
+            "weight": 1
+          },
+          {
+            "label": "因果连接词",
+            "hits": [],
+            "weight": 0.8
+          },
+          {
+            "label": "章节转折位置",
+            "hits": [],
+            "weight": 0.6
+          }
+        ]
+      }
+    },
+    {
+      "ruleId": "LEN-01",
+      "category": "语言",
+      "severity": "blocker",
+      "consequence": 6,
+      "probability": 1,
+      "risk": 6,
+      "book": "Animal Farm",
+      "tier": "A",
+      "chapter": "第一章",
+      "segIndex": 10,
+      "segLabel": "第一章 第11段",
+      "detail": {
+        "words": 40,
+        "target": 35
+      },
+      "id": "第一章#10:LEN-01:0",
+      "title": "本段 40 词，偏离目标 35 词太远",
+      "sourceSentence": "",
+      "rewrittenSentence": "",
+      "context": {
+        "prev": "",
+        "next": ""
+      },
+      "plot": {
+        "score": 0.75,
+        "level": "高",
+        "hits": [
+          "底线原文锚点：beasts of england",
+          "角色/地名：major",
+          "角色/地名：england"
+        ],
+        "parts": [
+          {
+            "label": "底线原文锚点",
+            "hits": [
+              "beasts of england"
+            ],
+            "weight": 3
+          },
+          {
+            "label": "角色/地名",
+            "hits": [
+              "major",
+              "england"
+            ],
+            "weight": 1.2
+          },
+          {
+            "label": "数字",
+            "hits": [],
+            "weight": 1
+          },
+          {
+            "label": "因果连接词",
+            "hits": [],
+            "weight": 0.8
+          },
+          {
+            "label": "章节转折位置",
+            "hits": [],
+            "weight": 0.6
+          }
+        ]
+      }
+    },
+    {
+      "ruleId": "LEN-01",
+      "category": "语言",
+      "severity": "blocker",
+      "consequence": 6,
+      "probability": 1,
+      "risk": 6,
+      "book": "Animal Farm",
+      "tier": "A",
+      "chapter": "第一章",
+      "segIndex": 8,
+      "segLabel": "第一章 第9段",
+      "detail": {
+        "words": 99,
+        "target": 83
+      },
+      "id": "第一章#8:LEN-01:0",
+      "title": "本段 99 词，偏离目标 83 词太远",
+      "sourceSentence": "",
+      "rewrittenSentence": "",
+      "context": {
+        "prev": "",
+        "next": ""
+      },
+      "plot": {
+        "score": 0.528,
+        "level": "中",
+        "hits": [
+          "底线原文锚点：all animals are equal",
+          "因果连接词：so that"
+        ],
+        "parts": [
+          {
+            "label": "底线原文锚点",
+            "hits": [
+              "all animals are equal"
+            ],
+            "weight": 3
+          },
+          {
+            "label": "角色/地名",
+            "hits": [],
+            "weight": 1.2
+          },
+          {
+            "label": "数字",
+            "hits": [],
+            "weight": 1
+          },
+          {
+            "label": "因果连接词",
+            "hits": [
+              "so that"
+            ],
+            "weight": 0.8
+          },
+          {
+            "label": "章节转折位置",
+            "hits": [],
+            "weight": 0.6
+          }
+        ]
+      }
+    },
+    {
+      "ruleId": "LEN-01",
+      "category": "语言",
+      "severity": "blocker",
+      "consequence": 6,
+      "probability": 1,
+      "risk": 6,
+      "book": "Animal Farm",
+      "tier": "A",
+      "chapter": "第一章",
+      "segIndex": 4,
+      "segLabel": "第一章 第5段",
+      "detail": {
+        "words": 105,
+        "target": 93
+      },
+      "id": "第一章#4:LEN-01:0",
+      "title": "本段 105 词，偏离目标 93 词太远",
+      "sourceSentence": "",
+      "rewrittenSentence": "",
+      "context": {
+        "prev": "",
+        "next": ""
+      },
+      "plot": {
+        "score": 0.333,
+        "level": "中",
+        "hits": [
+          "角色/地名：major",
+          "角色/地名：england"
+        ],
+        "parts": [
+          {
+            "label": "底线原文锚点",
+            "hits": [],
+            "weight": 3
+          },
+          {
+            "label": "角色/地名",
+            "hits": [
+              "major",
+              "england"
+            ],
+            "weight": 1.2
+          },
+          {
+            "label": "数字",
+            "hits": [],
+            "weight": 1
+          },
+          {
+            "label": "因果连接词",
+            "hits": [],
+            "weight": 0.8
+          },
+          {
+            "label": "章节转折位置",
+            "hits": [],
+            "weight": 0.6
+          }
+        ]
+      }
+    },
+    {
+      "ruleId": "LEN-01",
+      "category": "语言",
+      "severity": "blocker",
+      "consequence": 6,
+      "probability": 1,
+      "risk": 6,
+      "book": "Animal Farm",
+      "tier": "A",
+      "chapter": "第一章",
+      "segIndex": 9,
+      "segLabel": "第一章 第10段",
+      "detail": {
+        "words": 48,
+        "target": 55
+      },
+      "id": "第一章#9:LEN-01:0",
+      "title": "本段 48 词，偏离目标 55 词太远",
+      "sourceSentence": "",
+      "rewrittenSentence": "",
+      "context": {
+        "prev": "",
+        "next": ""
+      },
+      "plot": {
+        "score": 0,
+        "level": "低",
+        "hits": [],
+        "parts": [
+          {
+            "label": "底线原文锚点",
+            "hits": [],
+            "weight": 3
+          },
+          {
+            "label": "角色/地名",
+            "hits": [],
+            "weight": 1.2
+          },
+          {
+            "label": "数字",
+            "hits": [],
+            "weight": 1
+          },
+          {
+            "label": "因果连接词",
+            "hits": [],
+            "weight": 0.8
+          },
+          {
+            "label": "章节转折位置",
+            "hits": [],
+            "weight": 0.6
+          }
+        ]
+      }
+    },
+    {
+      "ruleId": "ANNO-02",
+      "category": "加注",
+      "severity": "warn",
+      "consequence": 5,
+      "probability": 0.9,
+      "risk": 4.5,
+      "book": "Animal Farm",
+      "tier": "A",
+      "chapter": "第一章",
+      "segIndex": 5,
+      "segLabel": "第一章 第6段",
+      "detail": {
+        "words": [
+          "labour"
+        ],
+        "word": "labour"
+      },
+      "id": "第一章#5:ANNO-02:labour",
+      "title": "同一个词 labour 注了不止一次",
+      "sourceSentence": "Because nearly the whole of the produce of our labour is stolen from us by human beings. ",
+      "rewrittenSentence": "Because nearly all the produce of our labour（劳作） is stolen from us by human beings. ",
+      "context": {
+        "prev": "Why then do we continue in this miserable（悲惨的） condition? ",
+        "next": "There, comrades, is the answer to all our problems. "
+      },
+      "plot": {
+        "score": 0.444,
+        "level": "中",
+        "hits": [
+          "角色/地名：clover",
+          "角色/地名：england",
+          "因果连接词：because"
+        ],
+        "parts": [
+          {
+            "label": "底线原文锚点",
+            "hits": [],
+            "weight": 3
+          },
+          {
+            "label": "角色/地名",
+            "hits": [
+              "clover",
+              "england"
+            ],
+            "weight": 1.2
+          },
+          {
+            "label": "数字",
+            "hits": [],
+            "weight": 1
+          },
+          {
+            "label": "因果连接词",
+            "hits": [
+              "because"
+            ],
+            "weight": 0.8
+          },
+          {
+            "label": "章节转折位置",
+            "hits": [],
+            "weight": 0.6
+          }
+        ]
+      }
+    }
+  ]
+}

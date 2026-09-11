@@ -230,7 +230,7 @@ function scanNested(raw: string): NestedHit[] {
     if (!m) continue;
     const im = raw.slice(0, inner[0]).match(/([A-Za-z][A-Za-z'-]*)$/);
     out.push({
-      start: (m.index ?? 0),
+      start: m.index ?? 0,
       end: e + 1,
       word: m[1]!,
       zh: raw.slice(s + 1, e),
@@ -346,6 +346,22 @@ export function removeAnnotation(ast: DocAst, segId: string, word: string): bool
 /** 该段是否为占位段（门禁未通过留下的空位） */
 export const isPlaceholder = (seg: SegmentNode): boolean => /<!--\s*本段未通过复检/.test(seg.raw);
 
+/**
+ * 在**指定段内**把第一处 `from` 换回 `to`（撤销用）。
+ *
+ * 为什么要有它、而不是 `doc.replace(from, to)`：
+ * 全篇替换会连带改到**别的段**里恰好相同的那处——撤销一条改动却顺手改了另一段，
+ * 属于"当时没人发现、事后查不出来"的那一类事故。撤销必须精确落在当初改的那一段里。
+ * 目标段不存在、或段里已经没有那处文本 → 返回 false，交给调用方如实报"稿件改过、未撤销"。
+ */
+export function revertInSegment(ast: DocAst, segId: string, from: string, to: string): boolean {
+  const seg = ast.segments.find((s) => s.id === segId);
+  if (!seg || !from || !seg.raw.includes(from)) return false;
+  seg.raw = seg.raw.replace(from, to);
+  seg.spans = spansOf(seg.raw);
+  return true;
+}
+
 /** 文档级修复：能确定性修的就修（嵌套注释扁平成一层、同词多义统一为首次出现的释义）。
  *  返回改了什么；改不动的留给 `issues` 里的人。 */
 export function applyRepairs(ast: DocAst): { nested: number; senses: number; remaining: DocIssue[] } {
@@ -414,7 +430,11 @@ export const sentencesOfSegment = (seg: SegmentNode): string[] => sentsOf(seg.ra
 
 /** 把原文里的一个词形归一到与 `tokenizeTxt` 相同的键（小写、去首尾引号连字符、去所有格） */
 export const normalizeToken = (t: string): string =>
-  t.toLowerCase().replace(/^['-]+/, '').replace(/['-]+$/, '').replace(/'s$/, '');
+  t
+    .toLowerCase()
+    .replace(/^['-]+/, '')
+    .replace(/['-]+$/, '')
+    .replace(/'s$/, '');
 
 /** 两个词是否属于同一词形家族（与引擎 `hit` 同一套后缀还原，避免两边口径打架） */
 export function sameWordForm(a: string, b: string): boolean {

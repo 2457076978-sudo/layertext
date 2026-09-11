@@ -16,7 +16,7 @@
  * 本模块是纯逻辑：规则 → 动作、动作 → 新文档。写盘与事件由调用方在同一事务里完成。
  */
 
-import { parseDoc, removeDuplicateAnnotations, serializeDoc, setSense, insertAnnotation, occurrenceOf, type DocAst } from './docast.js';
+import { parseDoc, removeDuplicateAnnotations, revertInSegment, serializeDoc, setSense, insertAnnotation, occurrenceOf, type DocAst } from './docast.js';
 import { parseAnnotations } from './annot.js';
 
 /** 一个风险项能做的动作类型 */
@@ -30,7 +30,16 @@ export type ActionKind =
   /** 改为统一词典的释义（释义冲突、同词多义） */
   | 'set-sense'
   /** 需要人自己到正文里处理，这里只记录决定（结构类、格式类里没法确定性修的） */
-  | 'manual';
+  | 'manual'
+  /** **撤销**：把当初那一处改动原样换回去。
+   *  它也是一个动作，于是撤销与"改"走的是**同一条事务**——
+   *  撤销不是特殊路径，否则"撤销之后的当前版本是什么"又会有第二种说法。 */
+  | 'revert'
+  /** **单句改写候选写进正文**（App 里点「✓ 采纳」）。
+   *  它跟别的动作一样是"在某一段里把 from 换成 to"，
+   *  于是它走的是同一条事务、同一道门禁闸——
+   *  这正是 v4 报告点名的残余 P0：「App 单句改写……没有词表、词典、专名和事实检查」。 */
+  | 'rewrite';
 
 export interface RuleAction {
   kind: ActionKind;
@@ -99,6 +108,10 @@ export interface ApplyArgs {
   zh?: string;
   /** ANNO-02 用：这个词在**别的段**已注过 → 本段整段去掉（而不是"保留首次"） */
   removeAll?: boolean;
+  /** `revert` 用：当初写进去的那段文本（改后） */
+  from?: string;
+  /** `revert` 用：要换回的那段文本（改前） */
+  to?: string;
 }
 
 /**
@@ -118,8 +131,12 @@ export function applyAction(action: RuleAction, args: ApplyArgs): ApplyResult {
   const ast: DocAst = parseDoc(args.doc);
   const seg = ast.segments.find((s) => s.id === args.segId);
   if (!seg) return fail('not-found', `正文里找不到段落 ${args.segId}（稿件可能已经改过）`);
+  /* 「哪个词」只有注释类动作需要。`revert`（撤销）与 `rewrite`（单句改写采纳）
+   * 定位靠的是 from/to 两段文本，不需要 word——
+   * 把这条检查放在所有分支之前，会把这两个动作一起误判成 missing-arg。 */
   const word = args.word ?? '';
-  if (!word) return fail('missing-arg', '这个动作需要"哪个词"才能执行');
+  const needsWord = action.kind === 'insert-annotation' || action.kind === 'remove-annotation' || action.kind === 'set-sense';
+  if (needsWord && !word) return fail('missing-arg', '这个动作需要"哪个词"才能执行');
 
   if (action.kind === 'insert-annotation') {
     const zh = (args.zh ?? '').trim();
@@ -151,8 +168,45 @@ export function applyAction(action: RuleAction, args: ApplyArgs): ApplyResult {
     return { ok: true, next: serializeDoc(ast), before: `${hit.word}（${hit.zh}）`, after: `${hit.word}（${zh}）`, segId: args.segId };
   }
 
+  if (action.kind === 'rewrite') {
+    const from = args.from ?? '';
+    const to = args.to ?? '';
+    if (!from) return fail('missing-arg', '改写候选没有"原句"，无从定位');
+    if (from === to) return fail('no-op', '候选与原文一字不差，没有可写的东西');
+    if (!revertInSegment(ast, args.segId, from, to)) {
+      return fail('not-found', `这一段里已经找不到原句了（稿件改过），未写入：${from.slice(0, 30)}…`);
+    }
+    return { ok: true, next: serializeDoc(ast), before: from, after: to, segId: args.segId };
+  }
+
+  if (action.kind === 'revert') {
+    const from = args.from ?? '';
+    const to = args.to ?? '';
+    if (!from) return fail('missing-arg', '撤销需要知道"当初改成了什么"，事件里没记就没法撤');
+    if (!revertInSegment(ast, args.segId, from, to)) {
+      return fail('not-found', `正文里已经找不到「${from}」了（稿件改过），未撤销`);
+    }
+    return { ok: true, next: serializeDoc(ast), before: from, after: to, segId: args.segId };
+  }
+
   return fail('unsupported', `未知动作 ${action.kind}`);
 }
+
+/** 撤销动作（`actionOf` 表里没有它：它不是"某条规则的动作"，而是对已发生改动的一次反向操作） */
+export const REVERT_ACTION: RuleAction = {
+  kind: 'revert',
+  label: '↩︎ 撤销',
+  mutates: true,
+  effect: '把当初那一处改动原样换回去，并记一条 undo 事件（历史一条不删）',
+};
+
+/** 单句改写采纳（同样不在 `actionOf` 表里：它不由规则号触发，由教师按「✓ 采纳」触发） */
+export const REWRITE_ACTION: RuleAction = {
+  kind: 'rewrite',
+  label: '✓ 采纳改写',
+  mutates: true,
+  effect: '用候选句替换原句，并记一条带版本号的决定事件',
+};
 
 /** 失败原因的人话（进界面 toast 与 rejected 事件的 reason） */
 export const failureText = (r: ApplyFail): string =>

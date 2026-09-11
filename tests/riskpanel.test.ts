@@ -215,7 +215,8 @@ test('读清单拿运行身份：run 布局下按运行私有目录找队列与�
   setRiskIo(memIo(files).io);
 
   const id = await loadRunIdentity({ outDir: '/out', workDir: '/work', sourceVersion: 's' });
-  assert.deepEqual(id, { layout: 'run', runId: RID, teacher: 'wayne' });
+  // 身份多了一个 `source`：**"我读的是哪一次运行"必须可见**，否则"读到别人的运行"这件事无法察觉
+  assert.deepEqual(id, { layout: 'run', runId: RID, teacher: 'wayne', source: '最近一次' });
 
   const r = await loadRiskQueue({ outDir: '/out', workDir: '/work', sourceVersion: 's' }, 'A');
   assert.equal(r.file?.队列.length, 1, 'run 布局下队列要从 _运行/<runId>/ 里找');

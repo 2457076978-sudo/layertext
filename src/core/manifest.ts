@@ -221,7 +221,10 @@ export function newManifest(input: NewManifestInput): RunManifest {
     input.teacher,
     input.model.promptVersion,
     input.lexicon.version,
-    input.inputs.map((i) => `${i.name}:${i.hash}`).sort().join(','),
+    input.inputs
+      .map((i) => `${i.name}:${i.hash}`)
+      .sort()
+      .join(','),
   ];
   const runId = `${slug(input.book)}-${slug(input.version)}-${input.tiers.join('') || 'ALL'}-${slug(input.teacher)}-${contentHash(idParts.join('|'))}`;
   const now = input.createdAt ?? new Date().toISOString();
@@ -410,8 +413,22 @@ export function summarizeManifest(m: RunManifest): ManifestSummary {
   };
 }
 
-
 /* ────────────────────── 路径解析：所有脚本唯一的产物路径来源 ────────────────────── */
+
+export type Tier = 'A' | 'B' | 'M';
+
+/**
+ * 层级 → 产物命名里的层级标签。**唯一口径**。
+ *
+ * 这个映射原来在 7 个管线脚本和 App 面板里各抄了一份（`{A:'A层85', M:'M层75', B:'B层60'}`）。
+ * 抄一份就意味着有一天会改到其中几份：那时"命令行写到 A、面板去 B 找"会表现成
+ * "面板说没有队列"——一种查起来极费劲、现象又毫无线索的故障。
+ * 它属于**产物命名约定**，所以和 `resolvePath` 放在一起，而不是散在各调用点。
+ */
+export const TIER_TAG: Record<string, string> = { A: 'A层85', M: 'M层75', B: 'B层60' };
+
+/** 层级标签（`A` → `A层85`）。认不出来就原样返回——不编一个假的层级名。 */
+export const tierTagOf = (tier: string): string => TIER_TAG[tier] ?? tier;
 
 export type ArtifactPathKind =
   | '正文'
@@ -424,6 +441,9 @@ export type ArtifactPathKind =
   | '复核报告'
   | '词典增量'
   | '决定日志'
+  /** 正文版本节点日志（append-only JSONL）。与 `决定日志` 并列的第二本账：
+   *  决定日志回答"谁做了什么决定"，版本日志回答"正文变成了哪一版、父版本是谁"。 */
+  | '版本日志'
   | '清单';
 
 export interface PathRequest {
@@ -451,8 +471,7 @@ export const privateDirOf = (outRoot: string, runId: string): string => `${outRo
 
 /** 会话/决定日志的文件名尾（层级 + 粒度 + 词表维度 + 后缀），两种布局共用同一套规则 */
 const logTail = (req: PathRequest): string =>
-  `${req.tier ?? ''}${req.scope && req.scope !== 'tier' && req.scope !== 'book' ? '_' + req.scope : ''}` +
-  `${req.vocab && req.vocab !== 'full' ? '_' + req.vocab : ''}${req.suffix ?? ''}.jsonl`;
+  `${req.tier ?? ''}${req.scope && req.scope !== 'tier' && req.scope !== 'book' ? '_' + req.scope : ''}` + `${req.vocab && req.vocab !== 'full' ? '_' + req.vocab : ''}${req.suffix ?? ''}.jsonl`;
 
 /**
  * **唯一的产物路径来源**。脚本不再自己拼字符串——拼字符串正是"文件命名约定与并发写入"
@@ -468,11 +487,12 @@ export function resolvePath(layout: Layout, roots: { out: string; work: string }
   const suffix = req.suffix ?? '';
   const date = req.date ?? '';
 
-  // 会话日志与决定日志在调适工作区（不是产物目录）：两种布局只差根目录
-  if (req.kind === '会话日志' || req.kind === '决定日志') {
+  // 会话日志、决定日志与版本日志在调适工作区（不是产物目录）：两种布局只差根目录
+  if (req.kind === '会话日志' || req.kind === '决定日志' || req.kind === '版本日志') {
     const tail = logTail(req);
-    if (layout === 'run') return `${privateDirOf(out, runId)}/${req.kind === '决定日志' ? '决定' : '会话'}/${tail}`;
-    return req.kind === '决定日志' ? `${work}/_决定/${tail}` : `${work}/_会话/${tail}`;
+    const sub = req.kind === '决定日志' ? '决定' : req.kind === '版本日志' ? '版本' : '会话';
+    if (layout === 'run') return `${privateDirOf(out, runId)}/${sub}/${tail}`;
+    return `${work}/_${sub}/${tail}`;
   }
 
   if (layout === 'run') {
@@ -538,16 +558,14 @@ export interface PathResolver {
   session(extra?: Partial<PathRequest>): string;
   /** 决定日志（默认走调适工作区/_决定） */
   decision(extra?: Partial<PathRequest>): string;
+  /** 版本日志（默认走调适工作区/_版本）。**正文改动的第二本账**，与决定日志配对 */
+  version(extra?: Partial<PathRequest>): string;
   layout: Layout;
   runId: string;
 }
 
 /** 面向调用方的语法糖：一次给定身份，反复取路径。脚本里**只允许**通过它拿路径。 */
-export function makeResolver(
-  layout: Layout,
-  roots: { out: string; work: string },
-  id: { runId: string; tier?: string; date?: string; suffix?: string },
-): PathResolver {
+export function makeResolver(layout: Layout, roots: { out: string; work: string }, id: { runId: string; tier?: string; date?: string; suffix?: string }): PathResolver {
   const base: PathRequest = { kind: '正文', tier: id.tier, date: id.date, suffix: id.suffix };
   return {
     layout,
@@ -556,6 +574,7 @@ export function makeResolver(
     dir: (kind, extra) => dirOfPath(resolvePath(layout, roots, id.runId, { ...base, kind, ...extra })),
     session: (extra) => resolvePath(layout, roots, id.runId, { ...base, kind: '会话日志', ...extra }),
     decision: (extra) => resolvePath(layout, roots, id.runId, { ...base, kind: '决定日志', ...extra }),
+    version: (extra) => resolvePath(layout, roots, id.runId, { ...base, kind: '版本日志', ...extra }),
   };
 }
 
@@ -572,13 +591,159 @@ export interface CollisionReport {
  */
 export function detectArtifactCollisions(manifests: { runId: string; artifacts: { path: string }[] }[]): CollisionReport {
   const owners = new Map<string, Set<string>>();
-  for (const m of manifests) for (const a of m.artifacts) {
-    if (!owners.has(a.path)) owners.set(a.path, new Set());
-    owners.get(a.path)!.add(m.runId);
-  }
+  for (const m of manifests)
+    for (const a of m.artifacts) {
+      if (!owners.has(a.path)) owners.set(a.path, new Set());
+      owners.get(a.path)!.add(m.runId);
+    }
   const collisions = [...owners]
     .filter(([, runs]) => runs.size > 1)
     .map(([path, runs]) => ({ path, runs: [...runs].sort() }))
     .sort((a, b) => (a.path < b.path ? -1 : 1));
   return { ok: collisions.length === 0, collisions };
 }
+
+/* ────────────────────── 运行身份：指针分片与选取 ────────────────────── */
+
+/**
+ * 运行身份（App 与命令行脚本共用同一个形状）。
+ * **这是"这次产物该放哪儿、该去哪儿找"的唯一答案**，任何调用方都不许自己拼。
+ */
+export interface RunIdentity {
+  layout: Layout;
+  runId: string;
+  teacher: string;
+  tier?: string;
+}
+
+/** 一份清单指针文件的内容。**它描述一次运行**，不描述"当前"——这是关键区别。 */
+export interface ManifestPointer {
+  /** 指向的清单文件绝对路径 */
+  path: string;
+  runId: string;
+  layout: Layout;
+  teacher: string;
+  tier?: string;
+  updatedAt?: string;
+}
+
+/**
+ * 文件名里安全的片段（教师名/层级标签都可能是中文，直接进文件名不难看也难查）。
+ *
+ * 把路径分隔符换成 `-` 是必须的（教师名来自环境变量，可能带 `/`）；
+ * 顺手把 `..` 压掉、把首尾的 `.` `-` 去掉，是为了**文件名本身**也不带
+ * "上一级目录"这种看起来危险的东西——`清单_..-..-etc-passwd_A层85.json`
+ * 虽然拼不出路径穿越，但谁看到它都得停下来想一想，这本身就是成本。
+ */
+export const fileSafe = (s: string): string =>
+  s
+    .replace(/[^\w\u4e00-\u9fa5.-]+/g, '-')
+    .replace(/\.{2,}/g, '.')
+    .replace(/^[.-]+|[.-]+$/g, '')
+    .trim() || 'unknown';
+
+/**
+ * 指针文件名：**按 教师 + 层级 分片**。
+ *
+ * 原来只有一份全局的 `清单_最新.json`。两个人同时跑同一本书的不同层级时，
+ * 后跑者把先跑者的身份覆盖掉，先跑者的进程接着去读到**对方的 runId**，
+ * 于是把产物写进对方的运行私有目录、或者去对方目录里找产物找不到——
+ * 而两边都报告成功。**连 `--layout run` 都挡不住**，因为它挡的是"路径撞名"，
+ * 不是"身份被换掉"。分片之后，每个 (教师, 层级) 有自己的指针，谁也覆盖不了谁。
+ */
+export const pointerNameOf = (key: { teacher: string; tier?: string }): string =>
+  `清单_${fileSafe(key.teacher)}${key.tier ? `_${fileSafe(key.tier)}` : ''}.json`;
+
+/** "最近一次运行"的索引文件名。**它只是索引**：
+ *  给人看的"最近跑过哪一次"，不是任何程序的事实源（事实源是各次运行自己的那份指针）。 */
+export const LATEST_POINTER_NAME = '清单_最新.json';
+
+/** 身份是从哪儿来的（进日志与界面，让"我读到的是哪一次运行"可见） */
+export type IdentitySource = '显式指定' | '按教师分片' | '最近一次' | '无清单（legacy）';
+
+export interface IdentityChoice {
+  identity: RunIdentity;
+  source: IdentitySource;
+  /** 用了别处的身份却说不出理由时，把可疑之处如实写出来——**它绝不静默** */
+  warning?: string;
+}
+
+/** 分片指针"认得出来"的那个教师名：空串与 `unknown` 都表示"不知道是谁"，不参与比对 */
+const knownTeacher = (t?: string): string => (t && t !== 'unknown' ? t : '');
+
+/**
+ * 选一个运行身份。纯函数——读盘由调用方做，这里只做判断。
+ *
+ * 规则（按可信度从高到低）：
+ *   ① 显式指定 `--run <runId>` / `LAYERTEXT_RUN`：最可信，写在命令行上的东西不会有歧义；
+ *   ② 按 (教师, 层级) 分片的那份指针：**并发场景下的正确答案**；
+ *   ③ 全局"最近一次"：**只在它的教师与层级都跟我们对得上时才用**。
+ *      对不上就说明我们可能拿到了别人的运行——这时宁可退回 legacy 并**响亮地说明**，
+ *      也不去写别人的目录。（`unknown` 视为"不知道"，不参与比对：App 常常拿不到教师名，
+ *      因为它不是"别人的运行"，只是"不知道自己是谁"。）
+ *   ④ 什么都没有：legacy + 由身份信息拼出的 runId（单独跑某个脚本时的正常路径）。
+ */
+/** 造一个身份。`tier` 不知道就不写这个字段——写 `tier: undefined` 会让序列化结果里多一个空键，
+ *  "有没有层级"这件事就变得要读两次才看得出来。 */
+const identityOf = (layout: Layout, runId: string, teacher: string, tier?: string): RunIdentity =>
+  tier ? { layout, runId, teacher, tier } : { layout, runId, teacher };
+
+export function chooseIdentity(input: {
+  want: { teacher?: string; tier?: string };
+  explicitRunId?: string;
+  scoped?: ManifestPointer | null;
+  latest?: ManifestPointer | null;
+  /** 没有清单时用的兜底运行 ID */
+  fallbackRunId: string;
+}): IdentityChoice {
+  const { want } = input;
+  const explicit = input.explicitRunId?.trim();
+  if (explicit) {
+    const hit = [input.scoped, input.latest].find((p) => p?.runId === explicit);
+    if (hit) return { identity: identityOf(hit.layout, hit.runId, hit.teacher, hit.tier), source: '显式指定' };
+    return {
+      identity: identityOf('run', explicit, want.teacher ?? 'unknown', want.tier),
+      source: '显式指定',
+      warning: `清单里没有这次运行（${explicit}）——按它解析路径，产物会落到只有它自己的目录里`,
+    };
+  }
+  if (input.scoped) {
+    const p = input.scoped;
+    return { identity: identityOf(p.layout, p.runId, p.teacher, p.tier ?? want.tier), source: '按教师分片' };
+  }
+  const latest = input.latest;
+  if (latest) {
+    const wt = knownTeacher(want.teacher);
+    const mismatch: string[] = [];
+    if (wt && knownTeacher(latest.teacher) && wt !== knownTeacher(latest.teacher)) {
+      mismatch.push(`教师对不上（这份清单属于「${latest.teacher}」，而我是「${want.teacher}」）`);
+    }
+    if (want.tier && latest.tier && want.tier !== latest.tier) {
+      mismatch.push(`层级对不上（这份清单是「${latest.tier}」，而我要「${want.tier}」）`);
+    }
+    if (mismatch.length) {
+      return {
+        identity: identityOf('legacy', input.fallbackRunId, want.teacher ?? 'unknown', want.tier),
+        source: '无清单（legacy）',
+        warning:
+          `「清单_最新.json」指向的不是我这次运行：${mismatch.join('；')}。` +
+          `已退回 legacy 布局（不去写别人的运行目录）。` +
+          `并发跑同一本书时请显式指定身份：--run <runId> 或 LAYERTEXT_RUN=<runId>。`,
+      };
+    }
+    return { identity: identityOf(latest.layout, latest.runId, latest.teacher, latest.tier ?? want.tier), source: '最近一次' };
+  }
+  return { identity: identityOf('legacy', input.fallbackRunId, want.teacher ?? 'unknown', want.tier), source: '无清单（legacy）' };
+}
+
+/** 指针里记的 `updatedAt` 比较用：解析不出来当 0（排序时沉底，不抛） */
+const tsOf = (p: ManifestPointer): number => {
+  const t = Date.parse(p.updatedAt ?? '');
+  return Number.isFinite(t) ? t : 0;
+};
+
+/** 多份指针里"最近一次"（给 `清单_最新.json` 与报表用）。同一时刻按 runId 定序，保证可复现。 */
+export const latestOf = (pointers: ManifestPointer[]): ManifestPointer | null =>
+  pointers.length
+    ? [...pointers].sort((a, b) => tsOf(b) - tsOf(a) || (a.runId < b.runId ? 1 : -1))[0]!
+    : null;

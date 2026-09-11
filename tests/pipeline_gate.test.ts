@@ -311,7 +311,12 @@ test('run 布局：产物收进运行私有目录，两位教师各跑一次互�
   const ridA = /运行 ID：(\S+)/.exec(a.stdout)?.[1];
   assert.ok(ridA, `没拿到运行 ID：${a.stdout}`);
 
-  const run1 = spawnSync(process.execPath, [SCRIPT, '--tier', 'A', '--chapters', '1'], {
+  /* ★ 每位教师**必须说清自己是谁**。
+   * 从前脚本是"去读全局 清单_最新.json，谁建的最后一次我就是谁"——
+   * 那正是"两位教师并发时互相读到对方身份"的成因：身份挂在一个共享可变的东西上。
+   * 现在身份按 `--teacher`/`LAYERTEXT_TEACHER`（或 `--run`）自己声明，
+   * 分片指针按 (教师, 层级) 各存一份，谁也覆盖不了谁。 */
+  const run1 = spawnSync(process.execPath, [SCRIPT, '--tier', 'A', '--chapters', '1', '--teacher', 'wayne'], {
     cwd: REPO, encoding: 'utf-8',
     env: { ...process.env, LAYERTEXT_FAKE_LLM: 'annotate', LAYERTEXT_PROJECT: json, LAYERTEXT_ENGINE: REPO },
   });
@@ -330,7 +335,7 @@ test('run 布局：产物收进运行私有目录，两位教师各跑一次互�
   assert.ok(ridB);
   assert.notEqual(ridA, ridB, '不同教师必须是不同的运行 ID');
 
-  const run2 = spawnSync(process.execPath, [SCRIPT, '--tier', 'A', '--chapters', '1'], {
+  const run2 = spawnSync(process.execPath, [SCRIPT, '--tier', 'A', '--chapters', '1', '--teacher', 'li'], {
     cwd: REPO, encoding: 'utf-8',
     env: { ...process.env, LAYERTEXT_FAKE_LLM: 'annotate', LAYERTEXT_PROJECT: json, LAYERTEXT_ENGINE: REPO },
   });
@@ -338,6 +343,29 @@ test('run 布局：产物收进运行私有目录，两位教师各跑一次互�
   const runDirB = join(root, '产物', '_运行', ridB!);
   assert.equal(existsSync(join(runDirB, '正文', '第一章', `原文_${TAG}_${DATE}.md`)), true);
   assert.equal(existsSync(join(runDirA, '正文', '第一章', `原文_${TAG}_${DATE}.md`)), true, '前一位教师的产物一个字都没被动');
+});
+
+test('★ 身份不明时**拒绝**借用别人的运行：教师对不上就退回 legacy 并响亮说明', () => {
+  const { root, json } = makeProject();
+  const a = initManifest(root, json, 'run', 'li');
+  assert.equal(a.status, 0, a.stdout);
+  const rid = /运行 ID：(\S+)/.exec(a.stdout)?.[1] ?? '';
+  assert.notEqual(rid, '', `没拿到运行 ID：${a.stdout}`);
+
+  // 机器上只有一个 li 的清单，而我是 wayne，且没说自己是 li：
+  // **不能**把 li 的运行当成自己的（那会把产物写进别人的目录），
+  // 也不能静默——要么报错要么退回 legacy 并说明。
+  const r = spawnSync(process.execPath, [SCRIPT, '--tier', 'A', '--chapters', '1', '--teacher', 'wayne'], {
+    cwd: REPO, encoding: 'utf-8',
+    env: { ...process.env, LAYERTEXT_FAKE_LLM: 'annotate', LAYERTEXT_PROJECT: json, LAYERTEXT_ENGINE: REPO },
+  });
+  const out = `${r.stdout ?? ''}${r.stderr ?? ''}`;
+  assert.match(out, /教师对不上/, `必须把"我读到的不是我的运行"说出来：${out}`);
+  assert.equal(
+    existsSync(join(root, '产物', '_运行', rid, '正文', '第一章', `原文_${TAG}_${DATE}.md`)),
+    false,
+    '**一个字节都不许写进别人的运行目录**',
+  );
 });
 
 test('legacy 布局（默认）：路径与从前逐字符一致，教师已有工作流不受影响', () => {

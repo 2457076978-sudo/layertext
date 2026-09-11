@@ -73,6 +73,28 @@ export interface DecisionEvent {
   /** 撤销指针：这条 `undo` 事件作废的是哪一条（按 `itemId + timestamp` 定位）。
    *  **撤销不删历史**——被撤销的那条仍然在日志里，只是不再算数。 */
   undoOf?: string;
+  /** 稳定事件 ID。**决定日志与版本日志靠它对得上**：
+   *  版本节点记 `eventId`，事件记 `version`，两边互为外键，缺一边就是"改了稿没记录"。 */
+  eventId?: string;
+  /** 这次决定产生的正文版本（跑过 `applyChange` 的才有；纯表态的决定没有新版本，为空） */
+  version?: string;
+  /** 这次改写的追踪 ID（`RewriteRequest.traceId`）——发布段可由 `sourceVersion + traceId` 重放 */
+  traceId?: string;
+}
+
+/** 稳定事件 ID：同一 (itemId, decision, teacherId, timestamp) 永远同一个。
+ *  时间戳精确到毫秒，同一毫秒同一人对同一条做同一个决定才会撞——那本来就是同一条。 */
+export function eventIdOf(input: { itemId: string; decision: string; teacherId: string; timestamp: string }): string {
+  const s = `${input.itemId}\u0001${input.decision}\u0001${input.teacherId}\u0001${input.timestamp}`;
+  let h1 = 0x811c9dc5;
+  let h2 = 0x01000193;
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    h1 = Math.imul(h1 ^ c, 0x01000193) >>> 0;
+    h2 = Math.imul(h2 ^ (c + i), 0x85ebca6b) >>> 0;
+  }
+  h2 = Math.imul(h2 ^ (h1 >>> 13), 0xc2b2ae35) >>> 0;
+  return `evt-${(h1.toString(16).padStart(8, '0') + h2.toString(16).padStart(8, '0')).slice(0, 12)}`;
 }
 
 export interface MakeDecisionInput extends Omit<DecisionEvent, 'schemaVersion' | 'timestamp'> {
@@ -83,11 +105,13 @@ export interface MakeDecisionInput extends Omit<DecisionEvent, 'schemaVersion' |
 export function makeDecisionEvent(input: MakeDecisionInput): DecisionEvent {
   if (!input.itemId) throw new Error('决定事件必须有 itemId（风险队列项 ID）——否则事后无法回答"这条决定是关于什么的"');
   if (!input.teacherId) throw new Error('决定事件必须有 teacherId——否则多教师并行时无法审计');
+  const timestamp = input.timestamp ?? new Date().toISOString();
   return {
     schemaVersion: DECISION_SCHEMA_VERSION,
     ...input,
+    timestamp,
+    eventId: input.eventId ?? eventIdOf({ itemId: input.itemId, decision: input.decision, teacherId: input.teacherId, timestamp }),
     ruleIds: [...new Set(input.ruleIds ?? [])],
-    timestamp: input.timestamp ?? new Date().toISOString(),
   };
 }
 

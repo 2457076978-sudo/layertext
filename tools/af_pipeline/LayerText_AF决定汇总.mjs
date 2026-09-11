@@ -42,16 +42,14 @@ const { openDecisionStore } = await import(`${REPO}/dist/src/core/decisiondb.js`
 const { productMetrics } = await import(`${REPO}/dist/src/core/productmetrics.js`);
 const { makeResolver } = await import(`${REPO}/dist/src/core/manifest.js`);
 
-function runIdentity() {
-  try {
-    const ptr = JSON.parse(readFileSync(join(P.产物目录, '_运行', '清单_最新.json'), 'utf-8'));
-    const m = JSON.parse(readFileSync(ptr.path, 'utf-8'));
-    return { layout: m.layout ?? 'legacy', runId: m.runId, teacher: m.teacher };
-  } catch {
-    return { layout: 'legacy', runId: '', teacher: process.env.USER ?? 'unknown' };
-  }
-}
-const RUN = runIdentity();
+/* 运行身份走**共享的那一个**解析入口（与其它脚本、App 面板同一条规则）。 */
+const TEACHER = arg('--teacher', process.env.LAYERTEXT_TEACHER ?? process.env.USER ?? 'unknown');
+const RUN = await SHARED.readRunIdentity(
+  { out: P.产物目录, work: P.调适工作区 },
+  { teacher: TEACHER, tier: TAGS[TIERS[0]] ?? TIERS[0] },
+  { runId: arg('--run', undefined) },
+);
+if (RUN.warning) console.warn(`\n⚠ ${RUN.warning}`);
 const resolveDecision = (tag) => makeResolver(RUN.layout, { out: P.产物目录, work: P.调适工作区 }, { runId: RUN.runId, tier: tag }).decision();
 
 const DECISION_DIR = join(P.调适工作区, '_决定');   // 索引与落库留痕仍在调适工作区（跟运行无关）

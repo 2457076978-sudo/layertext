@@ -33,10 +33,10 @@ const OUT_BASE = P.产物目录;
 const SRC_BASE = P.原文目录;
 const DATE = P.日期;
 const CN = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十'];
-const TAGS = { A: 'A层85', M: 'M层75', B: 'B层60' };
+/* 层级标签与指针命名都从引擎取——**不在脚本里再抄一份**（抄一份就会有一天改漏） */
 
 const M = await import(`${REPO}/dist/src/core/manifest.js`);
-const { buildLexiconSnapshot, refOf, newManifest, upsertArtifact, recordStep, verifyManifest, summarizeManifest, detectCollision, contentHash, verifyLexiconSnapshot, makeResolver, detectArtifactCollisions } = M;
+const { buildLexiconSnapshot, refOf, newManifest, upsertArtifact, recordStep, verifyManifest, summarizeManifest, detectCollision, contentHash, verifyLexiconSnapshot, makeResolver, detectArtifactCollisions, pointerNameOf, TIER_TAG: TAGS } = M;
 
 const argv = process.argv.slice(2);
 const arg = (n, d) => { const i = argv.indexOf(n); return i >= 0 ? argv[i + 1] : d; };
@@ -48,6 +48,16 @@ const CH_IDS = arg('--chapters', '')
 const TEACHER = arg('--teacher', process.env.LAYERTEXT_TEACHER ?? process.env.USER ?? 'unknown');
 const RUN_DIR = join(OUT_BASE, '_运行');
 const SNAP_POINTER = join(RUN_DIR, 'LexiconSnapshot.json');
+/* 指针**按 (教师, 层级) 分片**，另加一份"最近一次"作索引。
+ *
+ * 原来只有一份全局的 `清单_最新.json`。两位教师同时跑同一本书的不同层级时，
+ * 后跑者把先跑者的身份覆盖掉，先跑者的进程接着去读到**对方的 runId**，
+ * 于是产物写进对方的运行私有目录、或去对方目录里找产物找不到——而两边都报成功。
+ * `--layout run` 挡不住这个：它挡的是"路径撞名"，不是"身份被换掉"。
+ * 分片之后每个 (教师, 层级) 有自己的指针，谁也覆盖不了谁；
+ * `清单_最新.json` 退化为"给人看的最近一次"，不再是任何程序的事实源。 */
+const pointerOf = (teacher, tier) => join(RUN_DIR, pointerNameOf({ teacher, tier }));
+/** "最近一次"的索引。**它只是索引**：给人看的"最近跑过哪一次"，不是任何程序的事实源 */
 const MANIFEST_POINTER = join(RUN_DIR, '清单_最新.json');
 
 /** 路径布局：legacy（默认，沿用既有命名）｜run（产物收进 _运行/<runId>/，跨运行不会撞名）。
@@ -185,7 +195,15 @@ if (has('--new')) {
   }
   mkdirSync(RUN_DIR, { recursive: true });
   writeFileSync(existingPath, JSON.stringify(m, null, 2), 'utf-8');
-  writeFileSync(MANIFEST_POINTER, JSON.stringify({ runId: m.runId, path: existingPath }, null, 2), 'utf-8');
+  /* 分片指针：**这次运行自己的**，并发跑谁也覆盖不了谁。
+   * 层级取清单里记的那一层（同一次运行可以带多层，指针挂在第一层上——与命令行的 --tier 同序）。 */
+  /* 指针的层级名用**标签**（`A层85`）而不是层键（`A`）——读的那一侧手里是标签。
+   * 两边不统一，分片指针会写了却读不到，然后静默退回"最近一次"。 */
+  const tierTags = m.tiers.map((t) => TAGS[t] ?? t);
+  const pointer = JSON.stringify({ runId: m.runId, path: existingPath, teacher: m.teacher, tier: tierTags[0], layout: LAYOUT, updatedAt: new Date().toISOString() }, null, 2);
+  // 每层各写一份，免得"跑 A 层的人"和"跑 M 层的人"抢同一份指针
+  for (const t of tierTags) writeFileSync(pointerOf(m.teacher, t), pointer, 'utf-8');
+  writeFileSync(MANIFEST_POINTER, pointer, 'utf-8');
   console.log('════ AF 运行清单 · 新建 ════');
   console.log(` 运行 ID：${m.runId}`);
   console.log(` 书名：${m.book}｜版本：${m.version}｜层：${m.tiers.join('/')}｜教师：${m.teacher}`);

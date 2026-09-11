@@ -94,8 +94,7 @@ export const MINUTES_PER_ITEM: Record<string, number> = {
 
 /** 分句前先去掉 [P##] 段标记：段号不属于任何一句话，
  *  留在句子里会让"原句"显示成「[P03] The animals…」，也会被当成数字信号。 */
-const refsOf = (text: string): AlignSentRef[] =>
-  sentsOf(stripMarkers(text), false).map((t, si) => ({ pi: 0, si, text: t }));
+const refsOf = (text: string): AlignSentRef[] => sentsOf(stripMarkers(text), false).map((t, si) => ({ pi: 0, si, text: t }));
 
 /** 在句子数组里找含某个针的句子（词用词边界，信号用子串） */
 function findSentence(sents: string[], needle: string): number {
@@ -188,9 +187,7 @@ function expand(input: SegmentRiskInput, p: GateProblem): RiskItem[] {
     }
     case 'SENT-01':
       // 每个超长句单独一条，并把原文对位句一并给出（人要看懂这句原本是什么）
-      return list(p.detail?.sentences).map((s, i) =>
-        make(String(i), `改写句 ${s.trim().split(/\s+/).length} 词，超过本层上限 ${p.detail?.maxLen ?? ''} 词`, '', { sentence: s, index: i }, s),
-      );
+      return list(p.detail?.sentences).map((s, i) => make(String(i), `改写句 ${s.trim().split(/\s+/).length} 词，超过本层上限 ${p.detail?.maxLen ?? ''} 词`, '', { sentence: s, index: i }, s));
     case 'AST-02':
     case 'AST-03': {
       // 结构类问题定位到词（同词多义）或整段（畸形注释），与其它规则同样是"一条问题一项"
@@ -228,8 +225,7 @@ export function buildRiskQueue(
      * 在 `sentsOf` 里按 `(?<=[.!?"] )` 切成两半，含"1911"的那半只剩 `in 1911.`，
      * 于是全书最重要的那句口头禅拿到的情节分和路人甲一样。
      * 而这项先验要回答的本来就是"**这一段**值不值得先看"——按段打分既避开碎片，也更贴教师的心智。 */
-    const plotOf = (): PlotSignal | undefined =>
-      plot ? plotSignalOf(seg.source, plot.baseline, { segIndex: seg.segIndex, segCount }) : undefined;
+    const plotOf = (): PlotSignal | undefined => (plot ? plotSignalOf(seg.source, plot.baseline, { segIndex: seg.segIndex, segCount }) : undefined);
     const segPlot = plotOf();
     for (const p of seg.problems) {
       for (const it of expand(seg, p)) {
@@ -324,6 +320,11 @@ export function oneHourPlan(queue: RiskQueue, budget = 60): OneHourPlan {
  *   ③ 同章同类型（语言类问题）
  * 报告同时说了为什么不能只按规则或只按章节聚合：
  *   「按纯规则聚合会把互不相关的问题混在一起，按章节聚合则失去可批量修复性。」
+ *
+ * 2026-09（《LayerText工程优化总计划》阶段 2「任务工作台」）：三档的判据从"键相同"改成
+ * **"键真的聚起来了"**——见下面 `groupQueue` 里两处 freq 计数。老实现只看键，
+ * 于是"只出现过一次的词"也自成一档，实测把 70 条摊成 55 组（验收要求 ≤25 组）。
+ * 而第三档被第二档的守卫（`it.segIndex >= 0 && it.chapter`，几乎恒真）挡死，从来没产出过。
  */
 export type GroupKind = 'word' | 'segment-rule' | 'chapter-category';
 
@@ -385,6 +386,28 @@ export interface GroupOptions {
 export function groupQueue(items: RiskItem[], opts: GroupOptions = {}): TaskGroup[] {
   const samples = opts.samples ?? 3;
   const mutating = new Set(opts.mutatingRules ?? []);
+  /* 先数清楚前两档的键到底聚了几条——**只有真的聚起来的键才配成组**：
+   *   · 「同一个词」：词只出现一次时，这一组里就只有它自己。那不是"同一词"，
+   *     是一张普通卡片套了个组的壳。实测 `tests/fixtures/风险队列_A层85_70条.json`
+   *     （A 层第一章 70 条）里 44 条漏注有 36 个词只出现一次，老办法把这些单词各建一组，
+   *     光这一档就 39 组、全队列 55 组，直接卡死阶段 2 验收「不超过 25 个任务组」。
+   *   · 「同一段同一规则」：同理，一段里同一条规则只报了一次的，也不该自成一档。
+   * 数不够的条目**往下掉**，由第三档接住，而不是凭空多出一张卡。 */
+  const wordFreq = new Map<string, number>();
+  for (const it of items) {
+    const w = subjectKeyOf(it);
+    if (w) wordFreq.set(w, (wordFreq.get(w) ?? 0) + 1);
+  }
+  /* 第二档要在**第一档挑剩下的那批**里数，不能在全量里数：
+   * 全量里够两条、挑完只剩一条的键，建出来的还是个一条的组（实测真实样本里就有两个）。
+   * 数法算准了才有那条不变量：**凡是被前两档认领的组，一定至少两条**。 */
+  const segRuleFreq = new Map<string, number>();
+  for (const it of items) {
+    const w = subjectKeyOf(it);
+    if (w && (wordFreq.get(w) ?? 0) >= 2) continue;
+    const sk = `${it.chapter}#${it.segIndex}:${it.ruleId}`;
+    segRuleFreq.set(sk, (segRuleFreq.get(sk) ?? 0) + 1);
+  }
   const buckets = new Map<string, { kind: GroupKind; title: string; items: RiskItem[] }>();
   const push = (id: string, kind: GroupKind, title: string, it: RiskItem): void => {
     let b = buckets.get(id);
@@ -397,17 +420,25 @@ export function groupQueue(items: RiskItem[], opts: GroupOptions = {}): TaskGrou
 
   for (const it of items) {
     const word = subjectKeyOf(it);
-    if (word) {
+    if (word && (wordFreq.get(word) ?? 0) >= 2) {
       push(`word:${word}`, 'word', `同一个词：${word}`, it);
       continue;
     }
-    if (it.segIndex >= 0 && it.chapter) {
-      push(`seg:${it.chapter}#${it.segIndex}:${it.ruleId}`, 'segment-rule', `${it.segLabel} 的同类问题`, it);
+    const segKey = `${it.chapter}#${it.segIndex}:${it.ruleId}`;
+    if (it.segIndex >= 0 && it.chapter && (segRuleFreq.get(segKey) ?? 0) >= 2) {
+      push(`seg:${segKey}`, 'segment-rule', `${it.segLabel} 的同类问题`, it);
       continue;
     }
+    /* 第三档「同章同类型」：散项的家。老代码里这一支被上一支的守卫挡死（那个条件几乎恒真），
+     * 等于不存在——现在上一支只收"真的聚起来的"段规则，散项才落得到这里。 */
     push(`ch:${it.chapter}:${it.category}`, 'chapter-category', `${it.chapter} 的${it.category}类问题`, it);
   }
 
+  /* 兜底（同一条验收「不超过 25 个任务组」）：上面的桶是一次**划分**——每条只进一个桶、
+   * 桶之间不重叠，所以组数天生 ≤ 条数，不可能比条目还多；而第三档是全收的，
+   * 一批散项最多只贡献「章数 × 类别数」个组。于是组数上界 =
+   * 真的重复出现的词数 + 真的聚起来的段规则数 + 章数 × 类别数。
+   * 单章队列因此最多再多 类别数 个组，不会再出现"一条一组"的卡片流。 */
   const groups: TaskGroup[] = [];
   for (const [id, b] of buckets) {
     const sorted = [...b.items].sort(compare);
@@ -428,15 +459,129 @@ export function groupQueue(items: RiskItem[], opts: GroupOptions = {}): TaskGrou
       segments: [...new Set(sorted.map((x) => x.segLabel))],
     });
   }
-  return groups.sort(
-    (a, b) => b.topRisk - a.topRisk || b.count - a.count || (a.id < b.id ? -1 : 1),
-  );
+  return groups.sort((a, b) => b.topRisk - a.topRisk || b.count - a.count || (a.id < b.id ? -1 : 1));
 }
 
-/** 批量应用前的说明：「会改动 N 处 / 涉及 M 段 K 章」——动手之前先让人知道影响面 */
+/* ──────────────── 批量动作预览：动手之前先说清"会改哪些词、哪些段" ──────────────── */
+
+/**
+ * 来源：《LayerText工程优化总计划》阶段 2 验收 ——
+ *   「**批量动作前能列出将改变的词/段**」。
+ * `batchImpact` 只报"N 处 / M 段 / K 章"三个数，教师点下去之前**看不见具体改什么**；
+ * 而 `TaskGroup.segments` 明明已经存着段标签，只是没人把它渲染出来（本模块内部也没人用）。
+ * 这里把"影响面"从三个数升级成一份可核对的清单，界面的批量按钮与影响面那一行直接吃它。
+ */
+export interface BatchChange {
+  /** 要改动的靶子（词 / 数字 / 专名），与 `subjectOf` 同源——同一处决定在清单里只出现一次 */
+  target: string;
+  kind: ReturnType<typeof subjectOf>['kind'];
+  /** 会被改动的段（人话标签，直接进界面） */
+  segments: string[];
+  chapters: string[];
+  /** 这一处覆盖几条队列项 */
+  count: number;
+  /** 改动前的文本（`detail.source` 优先，没有就退回原句） */
+  before: string;
+  /** 改动后的文本（`detail.rewritten` 优先，没有就退回改写句） */
+  after: string;
+}
+
+export interface BatchPreview {
+  /** 能不能一键批量：**组内动作统一 + 至少一条有确定性修法**才是 true；false 时 `changes` 必为空 */
+  batchable: boolean;
+  /** 逐处改动（按组内风险顺序） */
+  changes: BatchChange[];
+  /** 会被改动的词（"将改变的词"清单） */
+  words: string[];
+  /** 会被改动的段（"将改变的段"清单） */
+  segments: string[];
+  chapters: string[];
+  /** 一句话影响面（界面标题栏） */
+  text: string;
+  /** 逐处明细（界面展开用），一行一处，含段标签 */
+  lines: string[];
+}
+
+/** 这一处的原文/改写全文：`detail` 里带了整段就用整段（比单句完整），没带就退回 item 上的原句 */
+function textPairOf(it: RiskItem): { before: string; after: string } {
+  const d = it.detail ?? {};
+  const src = typeof d.source === 'string' ? d.source : '';
+  const cur = typeof d.rewritten === 'string' ? d.rewritten : '';
+  return { before: src || it.sourceSentence, after: cur || it.rewrittenSentence };
+}
+
+/** 清单是给人扫一眼的：超长句要截短，但不能盖住"要改的是哪个词" */
+function shortTarget(v: string, max = 24): string {
+  const s = v.trim();
+  return s.length > max ? `${s.slice(0, max)}…` : s;
+}
+
+/** 按章序/段序排段标签——预览清单要跟教师翻书的顺序一致，不跟着风险分跳 */
+function segOrder(items: RiskItem[]): string[] {
+  return [...items].sort((a, b) => (a.chapter < b.chapter ? -1 : a.chapter > b.chapter ? 1 : a.segIndex - b.segIndex)).map((x) => x.segLabel);
+}
+
+export function batchPreview(g: TaskGroup): BatchPreview {
+  const empty = (text: string): BatchPreview => ({
+    batchable: false,
+    changes: [],
+    words: [],
+    segments: [],
+    chapters: [],
+    text,
+    lines: [],
+  });
+  if (!g.actionable) return empty(`这一组 ${g.count} 条都没有确定性修法，只能逐条看`);
+  /* 动作不统一时**先说不给批量**，再谈改什么：说"将改动 N 处"却连按钮都不给，
+   * 等于在界面上下一个假承诺（老 `batchImpact` 就是这么报的）。 */
+  if (!g.uniformAction) return empty(`这一组动作不统一（${g.rules.join('、')}），不给"全部应用"，请逐条看`);
+
+  // 同一个靶子（同一个词/同一个数字）出现在多个段里 → **一处**改动、多个段
+  const byTarget = new Map<string, { kind: BatchChange['kind']; target: string; items: RiskItem[] }>();
+  for (const it of g.items) {
+    const s = subjectOf(it);
+    const key = `${s.kind}:${s.value}`;
+    let b = byTarget.get(key);
+    if (!b) {
+      b = { kind: s.kind, target: s.value, items: [] };
+      byTarget.set(key, b);
+    }
+    b.items.push(it);
+  }
+  const changes: BatchChange[] = [...byTarget.values()].map((b) => {
+    const segs = segOrder(b.items);
+    const { before, after } = textPairOf(b.items[0]!);
+    return {
+      target: b.target,
+      kind: b.kind,
+      segments: [...new Set(segs)],
+      chapters: [...new Set(b.items.map((x) => x.chapter))],
+      count: b.items.length,
+      before,
+      after,
+    };
+  });
+  const segments = [...new Set(changes.flatMap((c) => c.segments))];
+  const chapters = [...new Set(changes.flatMap((c) => c.chapters))];
+  const names = changes.map((c) => `「${shortTarget(c.target)}」`);
+  return {
+    batchable: true,
+    changes,
+    words: changes.filter((c) => c.kind === 'word').map((c) => c.target),
+    segments,
+    chapters,
+    text: `将改动 ${changes.length} 处：${names.slice(0, 8).join('、')}${names.length > 8 ? ` 等 ${names.length} 处` : ''}；涉及 ${segments.length} 段、${chapters.length} 章`,
+    lines: changes.map((c) => `「${shortTarget(c.target)}」（${c.count} 条）→ ${c.segments.join('、')}`),
+  };
+}
+
+/** 批量应用前的说明：「会改动 N 处 / 涉及 M 段 K 章」——动手之前先让人知道影响面。
+ *  段/章数**取自预览**（= 批量真正会动的段），不是整组的段：批量按钮只改前者，说成后者是虚报。
+ *  没有批量动作时，返回的是"为什么没有"（没有确定性修法 / 组内动作不统一）。 */
 export function batchImpact(g: TaskGroup): string {
-  if (!g.actionable) return `这一组 ${g.count} 条都没有确定性修法，只能逐条看`;
-  return `全部应用会改动 ${g.actionable} 处，涉及 ${g.segments.length} 段、${g.chapters.length} 章`;
+  const p = batchPreview(g);
+  if (!p.batchable) return p.text;
+  return `全部应用会改动 ${g.actionable} 处，涉及 ${p.segments.length} 段、${p.chapters.length} 章`;
 }
 
 /** 「本次完成」：队列里还剩什么（报告的"明确的完成状态"）。
@@ -460,9 +605,6 @@ export function sessionState(items: RiskItem[], groups: TaskGroup[]): SessionSta
     done: remaining === 0,
     groups: groups.length,
     actionable,
-    text:
-      remaining === 0
-        ? '✓ 本次完成：队列里没有未处理的条目了'
-        : `还没完：剩 ${remaining} 条、归成 ${groups.length} 组${actionable ? `（其中 ${actionable} 条可批量）` : ''}`,
+    text: remaining === 0 ? '✓ 本次完成：队列里没有未处理的条目了' : `还没完：剩 ${remaining} 条、归成 ${groups.length} 组${actionable ? `（其中 ${actionable} 条可批量）` : ''}`,
   };
 }

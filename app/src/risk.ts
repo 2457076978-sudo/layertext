@@ -13,25 +13,17 @@
  */
 
 import { buildProposals, makeDecisionEvent, parseDecisionLog, summarizeDecisions, toDecisionLine, type DecisionEvent, type DecisionKind } from '../../src/core/decision.js';
-import { makeResolver, type Layout } from '../../src/core/manifest.js';
+import { chooseIdentity, LATEST_POINTER_NAME, makeResolver, pointerNameOf, TIER_TAG, type Layout, type ManifestPointer } from '../../src/core/manifest.js';
 import { parseDictCsv } from '../../src/core/dictmerge.js';
-import { parseDoc } from '../../src/core/docast.js';
 import { plotLine } from '../../src/core/plotweight.js';
 import { POSITIONING_LINE } from '../../src/core/positioning.js';
 import { DECISION_LABEL } from '../../src/core/decision.js';
 import { productMetrics, sessionOpenEvent } from '../../src/core/productmetrics.js';
-import { actionOf, applyAction, failureText, type RuleAction } from '../../src/core/riskaction.js';
+import { actionOf, REVERT_ACTION, type RuleAction } from '../../src/core/riskaction.js';
+import { applyChange, applyChangeBatch, currentVersionOf, parseVersionLog, recordOnly, type ChangeResult, type TxIo, type VersionTarget } from '../../src/core/version.js';
 /** 有确定性动作的规则（批量应用只在这几类上给） */
 const MUTATING_RULES = ['ANNO-01', 'ANNO-02', 'ANNO-03', 'AST-02'];
-import {
-  batchImpact,
-  groupQueue,
-  sessionState,
-  subjectOf,
-  type RiskItem,
-  type RiskQueue,
-  type TaskGroup,
-} from '../../src/core/riskqueue.js';
+import { batchImpact, batchPreview, groupQueue, sessionState, subjectOf, type RiskItem, type RiskQueue, type TaskGroup } from '../../src/core/riskqueue.js';
 import { oneHourPlan } from '../../src/core/riskqueue.js';
 import { GATE_RULES, type GateCategory } from '../../src/core/segmentgate.js';
 
@@ -42,6 +34,8 @@ export interface RiskIo {
   exists?(path: string): Promise<boolean>;
   /** 改稿前备份（可选）。给了就先备份再写——**不可逆的操作不该没有退路**。 */
   backup?(path: string, content: string): Promise<void>;
+  /** 追加一行（可选）。账本是 append-only，给了就不必 read+write 整份日志 */
+  append?(path: string, line: string): Promise<void>;
 }
 
 let io: RiskIo | null = null;
@@ -50,7 +44,8 @@ export function setRiskIo(next: RiskIo | null): void {
   io = next;
 }
 
-export const TAGS: Record<string, string> = { A: 'A层85', M: 'M层75', B: 'B层60' };
+/** 层级标签。**只有一份**，定义在 `src/core/manifest.ts`（它与 `resolvePath` 同属产物命名约定） */
+export const TAGS: Record<string, string> = TIER_TAG;
 
 /* ────────────────────── 纯逻辑 ────────────────────── */
 
@@ -109,8 +104,7 @@ export function undoneRefs(events: DecisionEvent[]): Set<string> {
  * 而他心里只有"我刚才点错了，撤销一下"。界面上的撤销键也长在最新那条上——
  * 单级撤销与界面一致，多级回退只会让"现在到底算什么状态"变得说不清。
  */
-const isResolved = (d: DecisionEvent | undefined, undone?: Set<string>): boolean =>
-  d !== undefined && TERMINAL_DECISIONS.includes(d.decision) && !(undone?.has(refOf(d)) ?? false);
+const isResolved = (d: DecisionEvent | undefined, undone?: Set<string>): boolean => d !== undefined && TERMINAL_DECISIONS.includes(d.decision) && !(undone?.has(refOf(d)) ?? false);
 
 /** 队列里还有哪些没被处理完（处理完的从待办里消失，但历史事件一条不删） */
 /** 每个项的最新一条**决定**（忽略 `undo`——它不是决定，是作废指令） */
@@ -162,11 +156,7 @@ export function decidedRows(file: RiskQueueFile, events: DecisionEvent[]): Decid
 }
 
 /** 决定行：直接喂给 decision.ts 的事件工厂（字段与报告逐项对应） */
-export function decisionLineFor(
-  item: RiskItem,
-  kind: DecisionKind,
-  opts: { teacherId: string; sourceVersion: string; reason?: string; after?: string; timestamp?: string },
-): DecisionEvent {
+export function decisionLineFor(item: RiskItem, kind: DecisionKind, opts: { teacherId: string; sourceVersion: string; reason?: string; after?: string; timestamp?: string }): DecisionEvent {
   const after = opts.after ?? (kind === 'edit' ? '' : item.rewrittenSentence || item.title);
   return makeDecisionEvent({
     itemId: item.id,
@@ -210,9 +200,7 @@ export function panelStat(file: RiskQueueFile, events: DecisionEvent[], budget =
   const items = file.队列;
   const pending = items.filter((it) => !isResolved(decided.get(it.id)));
   // 计时按"还没处理掉的"算：已经采纳的不该继续占用人工预算
-  const remainingMinutes = pending
-    .filter((it) => !isResolved(decided.get(it.id)))
-    .reduce((n, it) => n + (itemMinutes(it.ruleId) ?? 0.5), 0);
+  const remainingMinutes = pending.filter((it) => !isResolved(decided.get(it.id))).reduce((n, it) => n + (itemMinutes(it.ruleId) ?? 0.5), 0);
   const stat = summarizeDecisions(events);
   const plan = oneHourPlan({ items, summary: file.摘要 ?? { total: items.length, blockers: 0, byRule: {}, byCategory: {}, estimatedMinutes: remainingMinutes } }, budget);
   void plan;
@@ -234,8 +222,7 @@ export function panelStat(file: RiskQueueFile, events: DecisionEvent[], budget =
 }
 
 /** 与 riskqueue.MINUTES_PER_ITEM 同一口径（面板不该另写一份计时表） */
-const itemMinutes = (ruleId: string): number =>
-  ({ 'FACT-01': 2, 'FACT-02': 2, 'ANNO-01': 0.5, 'ANNO-03': 0.7, 'ANNO-02': 0.3, 'SENT-01': 0.5, 'LEN-01': 0.5, 'ZH-01': 1 })[ruleId] ?? 0.5;
+const itemMinutes = (ruleId: string): number => ({ 'FACT-01': 2, 'FACT-02': 2, 'ANNO-01': 0.5, 'ANNO-03': 0.7, 'ANNO-02': 0.3, 'SENT-01': 0.5, 'LEN-01': 0.5, 'ZH-01': 1 })[ruleId] ?? 0.5;
 
 function countByCategory(items: RiskItem[]): Partial<Record<GateCategory, number>> {
   const m: Partial<Record<GateCategory, number>> = {};
@@ -269,6 +256,8 @@ export interface RunIdentity {
   layout: Layout;
   runId: string;
   teacher: string;
+  /** 身份是从哪儿来的（`chooseIdentity` 的 `source`）——进页首，让"我读的是哪一次运行"可见 */
+  source?: string;
 }
 
 /**
@@ -276,18 +265,50 @@ export interface RunIdentity {
  * 与命令行脚本 `runIdentity()` 同一套规则，**两处口径必须一致**，
  * 否则"命令行写到了 A、面板去 B 找"会表现成"面板说没有队列"。
  */
-export async function loadRunIdentity(paths: ProjectPaths): Promise<RunIdentity> {
+export async function loadRunIdentity(paths: ProjectPaths, want?: { teacher?: string; tier?: string }): Promise<RunIdentity> {
   const fallback: RunIdentity = { layout: 'legacy', runId: '', teacher: 'unknown' };
   if (!io) return fallback;
-  try {
-    const ptr = JSON.parse(await io.read(`${paths.outDir}/_运行/清单_最新.json`)) as { path?: string };
-    if (!ptr.path) return fallback;
-    const m = JSON.parse(await io.read(ptr.path)) as { layout?: Layout; runId?: string; teacher?: string };
-    return { layout: m.layout ?? 'legacy', runId: m.runId ?? '', teacher: m.teacher ?? 'unknown' };
-  } catch {
-    return fallback;
-  }
+  const runDir = `${paths.outDir}/_运行`;
+  /* 指针文件只记"指向谁"；`layout`/`teacher`/`tier` **以清单本身为准**（两处不一致时信清单）。
+   * 指针指向的清单读不到 → 整份指针视为读不到：坏指针**不许半途生效**，
+   * 半生效比彻底失效更危险——它会让人以为一切正常。 */
+  const readPtr = async (name: string): Promise<ManifestPointer | null> => {
+    try {
+      const raw = JSON.parse(await io!.read(`${runDir}/${name}`)) as Partial<ManifestPointer>;
+      if (!raw?.path) return null;
+      const m = JSON.parse(await io!.read(raw.path)) as Partial<ManifestPointer>;
+      return {
+        path: raw.path,
+        runId: m.runId ?? raw.runId ?? '',
+        layout: m.layout ?? raw.layout ?? 'legacy',
+        teacher: m.teacher ?? raw.teacher ?? 'unknown',
+        tier: m.tier ?? raw.tier,
+        updatedAt: raw.updatedAt,
+      };
+    } catch {
+      return null;
+    }
+  };
+  /* ★ 先读**按教师+层级分片**的那份指针，全局"最近一次"只作兜底。
+   * 两份教师并发跑同一本书时，共用一份全局指针会让后跑者覆盖先跑者的身份，
+   * 于是先跑者的面板去读对方的 runId、写进对方的运行目录——而且两边都显示成功。
+   * `chooseIdentity` 会在"最近一次"的教师/层级对不上时**拒绝采用**并给出警告，
+   * 而不是把别人的运行当成自己的。 */
+  const scoped = want ? await readPtr(pointerNameOf({ teacher: want.teacher ?? 'unknown', tier: want.tier })) : null;
+  const latest = await readPtr(LATEST_POINTER_NAME);
+  const chosen = chooseIdentity({
+    want: want ?? {},
+    explicitRunId: (globalThis as { __LAYERTEXT_RUN__?: string }).__LAYERTEXT_RUN__,
+    scoped,
+    latest,
+    fallbackRunId: '',
+  });
+  if (chosen.warning) lastIdentityWarning = chosen.warning;
+  return { ...chosen.identity, source: chosen.source };
 }
+
+/** 最近一次身份选取留下的警告（面板页首要把它显示出来——**绝不静默**） */
+export let lastIdentityWarning: string | undefined;
 
 /** 面板用的一整套路径：与命令行脚本共用引擎的 `makeResolver`（不自己拼字符串） */
 export function pathsFor(paths: ProjectPaths, id: RunIdentity, tier: string, date = ''): ReturnType<typeof makeResolver> {
@@ -298,8 +319,9 @@ export async function loadRiskQueue(
   paths: ProjectPaths,
   tier: string,
   id?: RunIdentity,
+  teacher?: string,
 ): Promise<{ file: RiskQueueFile | null; events: DecisionEvent[]; error?: string; identity: RunIdentity }> {
-  const identity = id ?? (await loadRunIdentity(paths));
+  const identity = id ?? (await loadRunIdentity(paths, { teacher, tier: TAGS[tier] ?? tier }));
   if (!io) return { file: null, events: [], error: '面板 IO 未注入', identity };
   const R = pathsFor(paths, identity, tier);
   const queuePath = R.any('风险队列', { ext: '.json' });
@@ -321,14 +343,9 @@ export async function loadRiskQueue(
 }
 
 /** 追加一条不可变事件（读→拼接→写；事件日志只增不改）。路径按清单布局解析。 */
-export async function appendDecision(
-  paths: ProjectPaths,
-  tier: string,
-  event: DecisionEvent,
-  id?: RunIdentity,
-): Promise<void> {
+export async function appendDecision(paths: ProjectPaths, tier: string, event: DecisionEvent, id?: RunIdentity): Promise<void> {
   if (!io) throw new Error('面板 IO 未注入');
-  const identity = id ?? (await loadRunIdentity(paths));
+  const identity = id ?? (await loadRunIdentity(paths, { teacher: event.teacherId, tier: TAGS[tier] ?? tier }));
   const path = pathsFor(paths, identity, tier).decision();
   let prev: string;
   try {
@@ -341,8 +358,7 @@ export async function appendDecision(
 
 /* ────────────────────── DOM 渲染 ────────────────────── */
 
-const esc = (s: string): string =>
-  String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+const esc = (s: string): string => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
 const SEV_LABEL: Record<string, string> = { blocker: '不可完成', warn: '待判断' };
 
@@ -375,7 +391,7 @@ export async function renderRiskPane(
 ): Promise<{ ok: boolean; message: string }> {
   const el = input.dom.getElementById('pane-risk');
   if (!el) return { ok: false, message: '缺 pane-risk 容器' };
-  const { file, events, error, identity } = await loadRiskQueue(input.paths, input.tier);
+  const { file, events, error, identity } = await loadRiskQueue(input.paths, input.tier, undefined, input.teacherId);
   if (!file) {
     el.innerHTML = `<div class="empty"><b>还没有风险队列</b><br/>${esc(error ?? '')}<br/><span style="font-size:12px">在管线里跑「风险队列」那一步即可生成（<code>node tools/af_pipeline/LayerText_AF风险队列.mjs --tier A</code>）</span></div>`;
     return { ok: false, message: error ?? '没有队列' };
@@ -402,10 +418,7 @@ export async function renderRiskPane(
   const session = sessionState(left, groups);
   // 可观测产品指标（v4 报告「系统性偏差」一节）：全部从已有事件日志算出来，不新增埋点
   const pm = productMetrics(events);
-  const planned = oneHourPlan(
-    { items: file.队列, summary: file.摘要 },
-    budget,
-  );
+  const planned = oneHourPlan({ items: file.队列, summary: file.摘要 }, budget);
 
   const head = `
     <div class="rq-head">
@@ -416,30 +429,29 @@ export async function renderRiskPane(
         ｜误报率 <b>${(stat.falsePositiveRate * 100).toFixed(0)}%</b>
         ${stat.unfinished ? `｜<b class="rq-over">未完成段落 ${stat.unfinished}</b>` : ''}
       </div>
-      <div class="rq-advice">${esc(stat.advice)}｜路径布局 <b>${esc(identity.layout)}</b>${identity.runId ? `（${esc(identity.runId)}）` : ''}</div>
+      <div class="rq-advice">${esc(stat.advice)}｜路径布局 <b>${esc(identity.layout)}</b>${identity.runId ? `（${esc(identity.runId)}）` : ''}${identity.source ? `｜身份来源 <b>${esc(identity.source)}</b>` : ''}</div>
+      ${lastIdentityWarning ? `<div class="rq-flash">⚠ ${esc(lastIdentityWarning)}</div>` : ''}
       <div class="rq-session ${session.done ? 'rq-session-done' : ''}">${esc(session.text)}</div>
-      ${
-        pm.decisions
-          ? `<details class="rq-metrics"><summary>我这边用得怎么样（产品指标）</summary><ul>${pm.notes
-              .map((n) => `<li>${esc(n)}</li>`)
-              .join('')}</ul></details>`
-          : ''
-      }
+      ${pm.decisions ? `<details class="rq-metrics"><summary>我这边用得怎么样（产品指标）</summary><ul>${pm.notes.map((n) => `<li>${esc(n)}</li>`).join('')}</ul></details>` : ''}
       <details class="rq-budget">
         <summary>本次预算怎么排（后台估算，不是任务模型）</summary>
         <div class="rq-plan">${planned.phases.map((p) => `<span class="rq-phase">${esc(p.title)} ${p.budget}′ / ${p.items.length} 条</span>`).join('')}</div>
         <div class="rq-hint">${esc(planned.advice)}</div>
       </details>
-      ${done.length ? `<details class="rq-done"><summary>看我判过的（${done.length} 条，可撤销）</summary><div class="rq-done-list">${done
-        .map(
-          (r) => `<div class="rq-done-row${r.undone ? ' rq-done-undone' : ''}">
+      ${
+        done.length
+          ? `<details class="rq-done"><summary>看我判过的（${done.length} 条，可撤销）</summary><div class="rq-done-list">${done
+              .map(
+                (r) => `<div class="rq-done-row${r.undone ? ' rq-done-undone' : ''}">
             <span class="rq-done-label">${esc(r.label)}${r.undone ? '（已撤销）' : ''}</span>
             <span class="rq-done-pos">${esc(r.item.segLabel)}</span>
             <span class="rq-done-title">${esc(r.item.title)}</span>
             ${r.undone ? '' : `<button class="rq-btn rq-undo" data-undo="${esc(r.ref)}">↩︎ 撤销</button>`}
           </div>`,
-        )
-        .join('')}</div></details>` : ''}
+              )
+              .join('')}</div></details>`
+          : ''
+      }
     </div>`;
 
   if (!file.队列.length) {
@@ -451,9 +463,7 @@ export async function renderRiskPane(
     return { ok: true, message: '已全部处理' };
   }
 
-  const flashBar = flash
-    ? `<div class="rq-flash">⚠ ${esc(flash.text)} <span style="color:var(--muted)">（这一条仍在待办里，正文没有改动）</span></div>`
-    : '';
+  const flashBar = flash ? `<div class="rq-flash">⚠ ${esc(flash.text)} <span style="color:var(--muted)">（这一条仍在待办里，正文没有改动）</span></div>` : '';
   const card = (it: RiskItem): string => `
       <div class="rq-card${flash && flash.itemId === it.id ? ' rq-card-failed' : ''}" data-item="${esc(it.id)}">
         <div class="rq-card-head">
@@ -479,7 +489,18 @@ export async function renderRiskPane(
       </div>`;
 
   // 按任务组呈现（v4 方向第 3 条）：一条一条翻 70 张卡，到第 25 条就开始盲点了
-  const groupHtml = (g: TaskGroup, gi: number): string => `
+  const groupHtml = (g: TaskGroup, gi: number): string => {
+    /* ★ 「批量动作前能列出将改变的词/段」（阶段 2 验收）。
+     * 原来这里只有 `batchImpact` 一行计数——"改动 3 处、涉及 2 段、1 章"，
+     * 教师按下去之前**看不到究竟要改哪几个词、哪几段**。
+     * 预览默认折叠：它不该抢走卡片的注意力，但你按按钮之前一定能打开看。 */
+    const pv = batchPreview(g);
+    const preview = pv.batchable && pv.lines.length
+      ? `<details class="rq-preview"><summary>⚡ 将改动 ${pv.lines.length} 处——点开看具体改哪些词、哪些段</summary><ul>${pv.lines
+          .map((l) => `<li>${esc(l)}</li>`)
+          .join('')}</ul></details>`
+      : '';
+    return `
     <section class="rq-group" data-group="${esc(g.id)}">
       <div class="rq-group-head">
         <span class="rq-rank">${gi + 1}</span>
@@ -489,13 +510,11 @@ export async function renderRiskPane(
         ${g.uniformAction ? `<button class="rq-btn rq-btn-batch" data-batch="${esc(g.id)}" title="${esc(batchImpact(g))}">⚡ 全部应用（${g.actionable} 处）</button>` : ''}
       </div>
       <div class="rq-group-impact">${esc(batchImpact(g))}</div>
+      ${preview}
       ${g.samples.map(card).join('')}
-      ${
-        g.count > g.samples.length
-          ? `<details class="rq-more"><summary>展开这一组其余 ${g.count - g.samples.length} 条</summary>${g.items.slice(g.samples.length).map(card).join('')}</details>`
-          : ''
-      }
+      ${g.count > g.samples.length ? `<details class="rq-more"><summary>展开这一组其余 ${g.count - g.samples.length} 条</summary>${g.items.slice(g.samples.length).map(card).join('')}</details>` : ''}
     </section>`;
+  };
 
   el.innerHTML = `${head}${flashBar}<div class="rq-list">${groups.map(groupHtml).join('')}</div>`;
 
@@ -509,12 +528,9 @@ export async function renderRiskPane(
       const it = file.队列.find((x) => x.id === id);
       if (!it) return;
       t.setAttribute('disabled', 'true');
-      void appendDecision(
-        input.paths,
-        input.tier,
-        decisionLineFor(it, kind, { teacherId: input.teacherId, sourceVersion: input.paths.sourceVersion }),
-        identity,
-      ).then(() => renderRiskPane({ ...input, skipSessionOpen: true }));
+      void appendDecision(input.paths, input.tier, decisionLineFor(it, kind, { teacherId: input.teacherId, sourceVersion: input.paths.sourceVersion }), identity).then(() =>
+        renderRiskPane({ ...input, skipSessionOpen: true }),
+      );
     });
   }
   // 撤销 = 写一条新的 undo 事件（**不删历史**），并（如果是改稿动作）把正文改回去
@@ -562,6 +578,52 @@ export async function renderRiskPane(
 
 /* ────────────────────── 动作 → 事务（改正文 + 记事件，一次做完） ────────────────────── */
 
+/** 事务用的 IO 端口：就是面板那个 IO，只做类型适配——**不另开一套读写** */
+const txIo = (): TxIo => {
+  if (!io) throw new Error('面板 IO 未注入');
+  const real = io;
+  return {
+    read: (p) => real.read(p),
+    write: (p, c) => real.write(p, c),
+    append: real.append ? (p, l) => real.append!(p, l) : undefined,
+    backup: real.backup ? (p, c) => real.backup!(p, c) : undefined,
+    now: () => new Date().toISOString(),
+  };
+};
+
+/**
+ * 面板改稿时的公共入参：路径**全部**由 `makeResolver` 解析（面板不拼目录）。
+ *
+ * `baseVersion` 是这么算出来的：读版本日志 + 读正文 → `currentVersionOf`。
+ * 它不是"上一次我看到的那个版本号"的缓存——那正是两个人同时改一章时互相覆盖的成因。
+ * 每次都从盘上现算，于是"我看到的东西"与"盘上的东西"对不上时事务会当场拒绝。
+ */
+async function txTargetFor(paths: ProjectPaths, identity: RunIdentity, tier: string, docPath: string): Promise<{ versionPath: string; decisionPath: string; baseVersion: string; doc: string } | null> {
+  const R = pathsFor(paths, identity, tier);
+  let doc: string;
+  try {
+    doc = await io!.read(docPath);
+  } catch {
+    return null;
+  }
+  const log = await io!.read(R.version()).catch(() => '');
+  return {
+    versionPath: R.version(),
+    decisionPath: R.decision(),
+    baseVersion: currentVersionOf(parseVersionLog(log).nodes, doc),
+    doc,
+  };
+}
+
+/** 风险项 → 版本节点要记的位置（段号、章、规则、项 ID） */
+const versionTargetOf = (it: RiskItem, chapter: string): VersionTarget => ({
+  segId: segIdOf(it),
+  chapter,
+  ruleId: it.ruleId,
+  itemId: it.id,
+  word: typeof it.detail?.word === 'string' ? it.detail.word : undefined,
+});
+
 /** 该动作需要的"释义"从哪来：优先统一词典，退而取风险项 detail 里带的 */
 function glossFor(it: RiskItem, dict: Map<string, string>): string {
   const d = it.detail ?? {};
@@ -572,115 +634,111 @@ function glossFor(it: RiskItem, dict: Map<string, string>): string {
   return '';
 }
 
+/** 事务结果 → 面板要的 `{ok, message}`。**失败时正文一定没变**（`docTouched` 是唯一的例外，且必须炸出来） */
+const toPanelResult = (r: ChangeResult): { ok: boolean; message?: string } =>
+  r.status === 'applied'
+    ? { ok: true, message: r.message }
+    : r.docTouched
+      ? /* 回滚也失败了：稿子可能已经变了。这**不能**混在普通失败里悄悄过去 */
+        { ok: false, message: `⚠ ${r.reason}——请立刻核对正文（这一条不计入已处理）` }
+      : { ok: false, message: r.reason };
+
 /**
  * 执行一个风险动作。
  *
- * 事务语义（v4 方向）：**先读最新正文 → 校验动作在当前位置仍然成立 → 改 → 一次写完正文与事件**。
- * 任何一步不成立就只写一条 `rejected` 事件，**卡片留在队列里**——
+ * 走的是**引擎里唯一那个写正文的事务**（`src/core/version.ts` 的 `applyChange`），
+ * 面板不再自己 read→write。那条事务里做齐了四件事：
+ *   ① 核对 `baseVersion`（别人先改过就拒，**一个字符都不写**）
+ *   ② 跑动作、过闸（门禁没过也不写）
+ *   ③ 写正文
+ *   ④ 写版本节点（带父版本）+ 决定事件（带 version / eventId，两本账互为外键）
+ * 任一步不成立就只写一条 `rejected` 事件，**卡片留在队列里**——
  * 绝不允许"卡片消失了、正文没变"这种两头空。
  */
-async function runRiskAction(
-  input: RiskRenderInput,
-  file: RiskQueueFile,
-  identity: RunIdentity,
-  it: RiskItem,
-): Promise<{ ok: boolean; message?: string }> {
+async function runRiskAction(input: RiskRenderInput, file: RiskQueueFile, identity: RunIdentity, it: RiskItem): Promise<{ ok: boolean; message?: string }> {
   const action: RuleAction = actionOf(it.ruleId);
   const d = it.detail ?? {};
   const word = typeof d.word === 'string' ? d.word : typeof d.signal === 'string' ? d.signal : '';
-  /* 记一条决定。**返回 Promise，不许 `void` 掉**：
-   * 事件写失败原来是 unhandled rejection（测试当场抓到），在 App 里就是一条无人处理的红字。
-   * 记账失败必须能被调用方看见并处理——这正是"改稿必有记录"那条约束的另一半。 */
-  const mkDecision = (kind: DecisionKind, extra: Partial<Parameters<typeof decisionLineFor>[2]> = {}): Promise<void> =>
-    appendDecision(
-      input.paths,
-      input.tier,
-      decisionLineFor(it, kind, { teacherId: input.teacherId, sourceVersion: input.paths.sourceVersion, ...extra }),
-      identity,
-    );
-  /** 失败了要留痕，而且**卡片不许消失**：写 rejected 事件（它不是"已处理完"），把原因交回调用方显示 */
-  const reject = async (why: string): Promise<{ ok: false; message: string }> => {
-    try {
-      await mkDecision('rejected', { reason: why });
-    } catch {
-      // 连失败都记不上：如实告诉人（不要静默），卡片仍然留着
-      return { ok: false, message: `${why}（且失败记录未能写入日志）` };
-    }
-    return { ok: false, message: why };
-  };
-
-  // 纯表态的动作：不改正文，直接记事件
-  if (!action.mutates) {
-    try {
-      await mkDecision('accept', { reason: action.effect });
-    } catch (e) {
-      return { ok: false, message: `决定写入失败：${e instanceof Error ? e.message : String(e)}` };
-    }
-    return { ok: true };
-  }
-
-  const dict = await loadBookDict(input.paths);
+  const chapter = it.chapter;
   // 优先用队列里记的真实路径；没有才退回解析器（并说明这次是推出来的）
-  const docPath = file.章节产物?.[it.chapter] ?? pathsFor(input.paths, identity, input.tier).any('正文', { chapter: it.chapter });
-  let doc: string;
+  const docPath = file.章节产物?.[chapter] ?? pathsFor(input.paths, identity, input.tier).any('正文', { chapter });
+
+  const common = {
+    runId: identity.runId || `legacy-${input.tier}`,
+    docPath,
+    teacherId: input.teacherId,
+    sourceVersion: input.paths.sourceVersion,
+    target: versionTargetOf(it, chapter),
+  } as const;
+
   try {
-    doc = await io!.read(docPath);
-  } catch {
-    return await reject(`读不到正文（${docPath}）——产物可能被移动或删除了`);
-  }
-  const res = applyAction(action, {
-    doc,
-    segId: segIdOf(it),
-    word,
-    zh: glossFor(it, dict),
-    removeAll: it.detail?.crossSegment === true,
-  });
-  if (!res.ok) {
-    return await reject(failureText(res));
-  }
-  // 事务：备份 → 写正文 → 写事件；**事件写失败就把正文改回去**。
-  // 跨两个文件的"真原子"做不到，但可以做到"不留下改了稿却没记录"的状态——
-  // 否则就会出现最坏的一种：正文变了、日志里查不到是谁改的、撤销也无从下手。
-  try {
-    if (io!.backup) await io!.backup(docPath, doc);
-    await io!.write(docPath, res.next);
-  } catch (e) {
-    return await reject(`写入失败：${e instanceof Error ? e.message : String(e)}`);
-  }
-  try {
-    await appendDecision(
-      input.paths,
-      input.tier,
-      decisionLineFor(it, 'accept', { teacherId: input.teacherId, sourceVersion: input.paths.sourceVersion, after: res.after, reason: `${action.label}：${res.before} → ${res.after}` }),
-      identity,
+    const t = await txTargetFor(input.paths, identity, input.tier, docPath);
+    if (!t) {
+      // 正文读不到：没有"当前版本"可谈，用 `recordOnly` 写一条 rejected——
+      // 事件照样留痕、卡片照样留在待办里，**绝不静默**
+      const R = pathsFor(input.paths, identity, input.tier);
+      await recordOnly(txIo(), {
+        ...common,
+        baseVersion: 'unreadable',
+        versionPath: R.version(),
+        decisionPath: R.decision(),
+        action,
+        decision: 'rejected',
+        reason: `读不到正文（${docPath}）——产物可能被移动或删除了`,
+      });
+      return { ok: false, message: `读不到正文（${docPath}）——产物可能被移动或删除了` };
+    }
+
+    // 纯表态的动作（事实类"认可"、结构类"手动处理"）：不改正文，只记事件。
+    // **仍然走同一个入口**，所以它同样核对 baseVersion、同样回答"当时是哪一版"。
+    if (!action.mutates) {
+      return toPanelResult(
+        await recordOnly(txIo(), {
+          ...common,
+          baseVersion: t.baseVersion,
+          versionPath: t.versionPath,
+          decisionPath: t.decisionPath,
+          action,
+          decision: 'accept',
+          reason: action.effect,
+        }),
+      );
+    }
+
+    const dict = await loadBookDict(input.paths);
+    return toPanelResult(
+      await applyChange(txIo(), {
+        ...common,
+        baseVersion: t.baseVersion,
+        versionPath: t.versionPath,
+        decisionPath: t.decisionPath,
+        action,
+        word,
+        zh: glossFor(it, dict),
+        removeAll: d.crossSegment === true,
+      }),
     );
   } catch (e) {
-    // 回滚正文：宁可这次没改成，也不能让稿子带着一处"无名改动"
-    try {
-      await io!.write(docPath, doc);
-    } catch { /* 回滚也失败：至少上面的 reject 会写进日志并告诉教师 */ }
-    return await reject(`事件写入失败，已把正文改回原样：${e instanceof Error ? e.message : String(e)}`);
+    // 事务本身抛了（IO 未注入之类）——如实报，卡片留着
+    return { ok: false, message: `执行失败：${e instanceof Error ? e.message : String(e)}` };
   }
-  return { ok: true, message: `${action.label}：${res.before} → ${res.after}` };
 }
 
 /**
  * 撤销一条决定。
  *
- * 两件事，一个事务：
- *   ① 如果被撤销的是**改稿动作**，把正文按事件里记的 before/after 改回去
- *      （`after` 必须仍在原处，否则报"稿件已改过"并且**不写 undo 事件**——宁可撤销失败，也不留下假账）；
+ * 两件事，一个事务（走 `applyChange`，动作是 `revert`）：
+ *   ① 如果被撤销的是**改稿动作**，把当初那一处原样换回去
+ *      （`from` 必须仍在**原来的那一段**里，否则事务拒绝并且**不写 undo 事件**——
+ *       宁可撤销失败，也不留下假账）；
  *   ② 写一条 `undo` 事件（`undoOf` 指回被撤销的那条）——**历史一条都不删**。
  *
- * 两条写入的次序是"先改稿、后写事件"，**事件写不进去就把稿子改回来**：
- * 跨两个文件的真原子做不到，但"稿子被改了、日志里查不到、撤销也无从下手"是必须避免的。
+ * 与旧实现的差别有两处，都是真缺陷：
+ *   · 旧实现把正文改回去用的是 `doc.replace(after, before)`——**全篇**替换，
+ *     会顺手改到别的段里恰好相同的那一处。现在只在那一段里换（`revertInSegment`）。
+ *   · 旧实现自己 read→write，没有版本节点。现在撤销也是一次带父版本的正文改动。
  */
-async function undoDecision(
-  input: RiskRenderInput,
-  file: RiskQueueFile,
-  identity: RunIdentity,
-  ref: string,
-): Promise<{ ok: boolean; message?: string }> {
+async function undoDecision(input: RiskRenderInput, file: RiskQueueFile, identity: RunIdentity, ref: string): Promise<{ ok: boolean; message?: string }> {
   const all = (await loadRiskQueue(input.paths, input.tier, identity)).events;
   const target = all.find((e) => refOf(e) === ref);
   if (!target) return { ok: false, message: '找不到要撤销的那条决定（可能已被撤销过）' };
@@ -688,157 +746,108 @@ async function undoDecision(
 
   const it = file.队列.find((x) => x.id === target.itemId);
   const action = it ? actionOf(it.ruleId) : null;
-  const writeUndo = async (): Promise<void> => {
-    await appendDecision(
-      input.paths,
-      input.tier,
-      makeDecisionEvent({
-        itemId: target.itemId,
-        decision: 'undo',
-        before: target.after,
-        after: target.before,
-        reason: `撤销 ${DECISION_LABEL[target.decision] ?? target.decision}（${target.timestamp}）`,
-        ruleIds: target.ruleIds,
+  const chapter = it?.chapter ?? target.chapter ?? '';
+  const docPath = it ? (file.章节产物?.[chapter] ?? pathsFor(input.paths, identity, input.tier).any('正文', { chapter })) : '';
+  const runId = identity.runId || `legacy-${input.tier}`;
+
+  const t = docPath ? await txTargetFor(input.paths, identity, input.tier, docPath) : null;
+  if (!t) return { ok: false, message: `读不到正文，未撤销（${docPath || '队列里没记产物路径'}）` };
+
+  /* 纯表态的动作（没改过正文）：只写 undo 事件，不动正文，也不产生版本节点。 */
+  if (!it || !action?.mutates || !target.after || target.after === target.before) {
+    return toPanelResult(
+      await recordOnly(txIo(), {
+        runId,
+        baseVersion: t.baseVersion,
+        docPath,
+        versionPath: t.versionPath,
+        decisionPath: t.decisionPath,
         teacherId: input.teacherId,
         sourceVersion: input.paths.sourceVersion,
-        category: target.category,
-        subject: target.subject,
-        undoOf: ref,
+        target: { segId: it ? segIdOf(it) : 'P01', chapter, itemId: target.itemId, ruleId: target.ruleIds[0] },
+        action: REVERT_ACTION,
+        decision: 'undo',
+        undoesEvent: ref,
+        reason: `撤销 ${DECISION_LABEL[target.decision] ?? target.decision}（${target.timestamp}）`,
       }),
-      identity,
     );
-  };
-
-  // 纯表态的动作（没改过正文）：只写 undo 事件
-  if (!it || !action?.mutates || !target.after || target.after === target.before) {
-    try {
-      await writeUndo();
-    } catch (e) {
-      return { ok: false, message: `撤销事件写入失败：${e instanceof Error ? e.message : String(e)}` };
-    }
-    return { ok: true };
   }
 
-  const docPath = file.章节产物?.[it.chapter] ?? pathsFor(input.paths, identity, input.tier).any('正文', { chapter: it.chapter });
-  let doc: string;
-  try {
-    doc = await io!.read(docPath);
-  } catch {
-    return { ok: false, message: `读不到正文（${docPath}），未撤销` };
-  }
-  const segId = segIdOf(it);
-  const ast = parseDoc(doc);
-  const seg = ast.segments.find((x) => x.id === segId);
-  if (!seg || !seg.raw.includes(target.after)) {
-    return { ok: false, message: `正文里已经找不到「${target.after}」了（稿件改过），未撤销` };
-  }
-  try {
-    if (io!.backup) await io!.backup(docPath, doc);
-    await io!.write(docPath, doc.replace(target.after, target.before));
-  } catch (e) {
-    return { ok: false, message: `撤销写入失败：${e instanceof Error ? e.message : String(e)}` };
-  }
-  try {
-    await writeUndo();
-  } catch (e) {
-    // 撤销事件写不进去 → 把正文改回来（不然就是"稿子被改了、日志里没有"）
-    try {
-      await io!.write(docPath, doc);
-    } catch { /* 回滚也失败：下面如实报 */ }
-    return { ok: false, message: `撤销事件写入失败，已把正文改回原样：${e instanceof Error ? e.message : String(e)}` };
-  }
-  return { ok: true };
+  return toPanelResult(
+    await applyChange(txIo(), {
+      runId,
+      baseVersion: t.baseVersion,
+      docPath,
+      versionPath: t.versionPath,
+      decisionPath: t.decisionPath,
+      teacherId: input.teacherId,
+      sourceVersion: input.paths.sourceVersion,
+      target: { segId: segIdOf(it), chapter, itemId: target.itemId, ruleId: target.ruleIds[0] },
+      action: REVERT_ACTION,
+      decision: 'undo',
+      undoesEvent: ref,
+      from: target.after,
+      to: target.before,
+    }),
+  );
 }
-
 
 /**
  * 批量应用一个组。
  *
  * 报告第 3 条要的"全部应用"在这里落地。语义上它**不是**"把 N 条一次记完"，
  * 而是"把同一类改动一次做完"——所以：
- *   · 逐条执行**同一个** `applyAction`（不另写一条批量路径，避免两套口径）；
- *   · **按章聚合写盘**：一章只读一次、写一次（否则 12 条就是 12 次读改写，慢且更容易出岔）；
+ *   · 逐条执行**同一个** `applyAction`（经 `applyChangeBatch`，不另写一条批量路径）；
+ *   · 按章聚合、**一章一次事务**（不是在面板里循环调 N 次单条事务）：
+ *     一章只读一次、写一次、出一**条**版本节点，事件逐条记；
  *   · 任一条失败**不静默跳过**：那一条写 `rejected`、留在待办，其余照做，最后如实报告几成几败。
  * 返回 `ok` 只在**全部成功**时为真——部分成功也算没做完。
- *
- * 写入次序：**先在内存里跑完整章 → 写正文 → 写事件**；事件写失败就把正文回滚。
- * 反过来（先写事件后写正文）会留下"日志里有、稿子没变"的假账，那比失败更糟。
  */
-async function runBatchApply(
-  input: RiskRenderInput,
-  file: RiskQueueFile,
-  identity: RunIdentity,
-  group: TaskGroup,
-): Promise<{ ok: boolean; message?: string }> {
+async function runBatchApply(input: RiskRenderInput, file: RiskQueueFile, identity: RunIdentity, group: TaskGroup): Promise<{ ok: boolean; message?: string }> {
   if (!group.uniformAction) return { ok: false, message: '这一组的动作不统一，只能逐条处理' };
+  const dict = await loadBookDict(input.paths);
   const byChapter = new Map<string, RiskItem[]>();
   for (const it of group.items) {
     if (!byChapter.has(it.chapter)) byChapter.set(it.chapter, []);
     byChapter.get(it.chapter)!.push(it);
   }
+
   let doneCount = 0;
   let failedCount = 0;
   const firstError: string[] = [];
   for (const [chapter, items] of byChapter) {
     const docPath = file.章节产物?.[chapter] ?? pathsFor(input.paths, identity, input.tier).any('正文', { chapter });
-    let doc: string;
-    try {
-      doc = await io!.read(docPath);
-    } catch {
+    const t = await txTargetFor(input.paths, identity, input.tier, docPath);
+    if (!t) {
       failedCount += items.length;
       if (!firstError.length) firstError.push(`读不到正文（${docPath}）`);
-      for (const it of items) {
-        await appendDecision(input.paths, input.tier, decisionLineFor(it, 'rejected', { teacherId: input.teacherId, sourceVersion: input.paths.sourceVersion, reason: `批量：读不到正文（${docPath}）` }), identity);
-      }
       continue;
     }
-    const dict = await loadBookDict(input.paths);
-    let cur = doc;
-    const applied: { it: RiskItem; before: string; after: string; label: string }[] = [];
-    for (const it of items) {
-      const action = actionOf(it.ruleId);
-      const res = applyAction(action, {
-        doc: cur,
-        segId: segIdOf(it),
+    const r = await applyChangeBatch(txIo(), {
+      runId: identity.runId || `legacy-${input.tier}`,
+      baseVersion: t.baseVersion,
+      docPath,
+      versionPath: t.versionPath,
+      decisionPath: t.decisionPath,
+      teacherId: input.teacherId,
+      sourceVersion: input.paths.sourceVersion,
+      // 批量来源必须留痕：事后分得清"我一条条点的"还是"我按了全部应用"
+      reasonPrefix: '批量',
+      steps: items.map((it) => ({
+        target: versionTargetOf(it, chapter),
+        action: actionOf(it.ruleId),
         word: typeof it.detail?.word === 'string' ? it.detail.word : '',
         zh: glossFor(it, dict),
         removeAll: it.detail?.crossSegment === true,
-      });
-      if (!res.ok) {
-        failedCount++;
-        if (!firstError.length) firstError.push(failureText(res));
-        await appendDecision(input.paths, input.tier, decisionLineFor(it, 'rejected', { teacherId: input.teacherId, sourceVersion: input.paths.sourceVersion, reason: `批量：${failureText(res)}` }), identity);
-        continue;
-      }
-      cur = res.next;
-      applied.push({ it, before: res.before, after: res.after, label: action.label });
-    }
-    if (cur !== doc) {
-      try {
-        if (io!.backup) await io!.backup(docPath, doc);
-        await io!.write(docPath, cur);
-      } catch (e) {
-        // 正文没落盘 → 这一章的条目全部 rejected（绝不能显示成已办）
-        failedCount += applied.length;
-        if (!firstError.length) firstError.push(`写入失败：${e instanceof Error ? e.message : String(e)}`);
-        for (const a of applied) {
-          await appendDecision(input.paths, input.tier, decisionLineFor(a.it, 'rejected', { teacherId: input.teacherId, sourceVersion: input.paths.sourceVersion, reason: `批量：写入失败（${e instanceof Error ? e.message : String(e)}）` }), identity);
-        }
-        continue;
-      }
-    }
-    // 正文已落盘，再写事件；事件写失败 → 回滚正文，保持"改稿必有记录"
-    try {
-      for (const a of applied) {
-        await appendDecision(input.paths, input.tier, decisionLineFor(a.it, 'accept', { teacherId: input.teacherId, sourceVersion: input.paths.sourceVersion, after: a.after, reason: `批量${a.label}：${a.before} → ${a.after}` }), identity);
-        doneCount++;
-      }
-    } catch (e) {
-      try {
-        await io!.write(docPath, doc);
-      } catch { /* 回滚也失败：下面如实报 */ }
-      failedCount += applied.length;
-      if (!firstError.length) firstError.push(`事件写入失败，已把正文改回原样：${e instanceof Error ? e.message : String(e)}`);
+      })),
+    });
+    if (r.status === 'applied') {
+      doneCount += r.applied;
+      failedCount += r.rejected;
+      if (r.rejected && !firstError.length) firstError.push(r.rejectedItems[0]?.reason ?? '有若干条未能执行');
+    } else {
+      failedCount += r.applied + r.rejected || items.length;
+      if (!firstError.length) firstError.push(r.reason);
     }
   }
   const message = `全部应用：成功 ${doneCount} 处，失败 ${failedCount} 处${firstError.length ? `（${firstError[0]}）` : ''}`;
