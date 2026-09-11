@@ -109,7 +109,7 @@ function collectFiles(manifest) {
       skipped.push({ id: a.id || artifactIdOf(a), path: a.path, reason: '清单登记了但它不在盘上（可能已被清理）' });
       continue;
     }
-    out.push({ path: a.path, id: a.id || artifactIdOf(a), kind: a.kind, tier: a.tier, chapter: a.chapter, text: readFileSync(abs, 'utf-8') });
+    out.push({ path: a.path, id: a.id || artifactIdOf(a), kind: a.kind, tier: a.tier, chapter: a.chapter, derivedFrom: a.derivedFrom, text: readFileSync(abs, 'utf-8') });
   }
   return { files: out, skipped };
 }

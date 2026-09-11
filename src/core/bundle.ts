@@ -28,7 +28,7 @@
  * 纯逻辑：不读文件、不写文件。文件由调用方读进来（IO 在 `tools/` 与 App 两侧各不相同）。
  */
 
-import { artifactIdOf, artifactLabelOf, contentHash, type ArtifactIdentity, type ArtifactKind, type RunManifest } from './manifest.js';
+import { artifactIdOf, artifactLabelOf, contentHash, type ArtifactIdentity, type ArtifactKind, type RunArtifact, type RunManifest } from './manifest.js';
 import type { DecisionEvent } from './decision.js';
 
 export const BUNDLE_SCHEMA_VERSION = 1;
@@ -92,6 +92,9 @@ export interface BundleEntry {
   chapter?: string;
   bytes: number;
   hash: string;
+  /** 派生关系（学生版这类"从另一件产物减出来的"）——原样随清单登记进包。
+   *  收件人据此回答"这份读物是从哪份工作稿、按哪版规则减出来的"（第七轮 P1-⑥）。 */
+  derivedFrom?: RunArtifact['derivedFrom'];
 }
 
 export interface ExcludedEntry {
@@ -173,7 +176,7 @@ export function publishReadiness(manifest: RunManifest): PublishReadiness {
 export interface BundleInput {
   manifest: RunManifest;
   /** 待入包的文件（路径相对产物目录 + 内容 + **产物身份**） */
-  files: { path: string; id?: string; kind: ArtifactKind; tier?: string; chapter?: string; text: string }[];
+  files: { path: string; id?: string; kind: ArtifactKind; tier?: string; chapter?: string; derivedFrom?: RunArtifact['derivedFrom']; text: string }[];
   /** 决定事件（只数条数，不进包内容） */
   events?: DecisionEvent[];
   /** 版本节点（只数条数） */
@@ -220,6 +223,7 @@ export function buildBundle(input: BundleInput): PublishBundle {
     if (id) entry.id = id;
     if (f.tier) entry.tier = f.tier;
     if (f.chapter) entry.chapter = f.chapter;
+    if (f.derivedFrom) entry.derivedFrom = f.derivedFrom;
     entries.push(entry);
   }
 

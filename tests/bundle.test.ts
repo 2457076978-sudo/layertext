@@ -158,6 +158,37 @@ test('★ 包里的每一件都带产物身份（路径只说明它在包里的�
   assert.notEqual(other.entries[0]!.id, first.id);
 });
 
+test('★ 学生版的派生关系随登记进包：源稿身份、生成器与规则版本一样不少（第七轮 P1-⑥）', () => {
+  const b = buildBundle({
+    manifest: manifest(),
+    files: [
+      ...FILES,
+      {
+        path: '_运行/r1/学生版/第一章/学生版_A层85_2026-09-11.md',
+        kind: '学生版' as const,
+        tier: 'A层85',
+        chapter: '第一章',
+        derivedFrom: {
+          sourceId: artifactIdOf({ kind: '正文', tier: 'A层85', chapter: '第一章' }) ?? '',
+          sourcePath: FILES[0]!.path,
+          transformer: 'LayerText_AF学生版@1.2.1',
+          ruleVersion: 1,
+          dropSections: ['词句卡'],
+        },
+        text: '# Animal Farm · Chapter One\n\nThe boy ran to the red barn（谷仓）.\n',
+      },
+    ],
+  });
+  const stu = b.entries.find((e) => e.kind === '学生版')!;
+  assert.ok(stu.derivedFrom, '学生版条目要带派生关系');
+  assert.equal(stu.derivedFrom!.sourceId, artifactIdOf({ kind: '正文', tier: 'A层85', chapter: '第一章' }), '源稿身份与正文条目同一个值');
+  assert.equal(stu.derivedFrom!.ruleVersion, 1);
+  assert.deepEqual(stu.derivedFrom!.dropSections, ['词句卡']);
+  // 核对不受影响：派生关系是登记事实，不参与哈希与身份自洽检查
+  const ok = verifyBundle(b, b.entries.map((e) => ({ path: e.path, text: FILES.concat([]).find((f) => f.path === e.path)?.text ?? '# Animal Farm · Chapter One\n\nThe boy ran to the red barn（谷仓）.\n' })));
+  assert.equal(ok.ok, true, ok.problems.map((p) => p.message).join('；'));
+});
+
 test('★ 导入核对：该有的都在、内容哈希对得上', () => {
   const b = buildBundle({ manifest: manifest(), files: FILES });
   const ok = verifyBundle(

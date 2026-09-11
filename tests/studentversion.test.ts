@@ -273,10 +273,18 @@ test('★ 学生版登记进清单、进得了发布包（否则"发布学生版
   const runId = /运行 ID：(\S+)/.exec(summary.out)?.[1] ?? '';
   assert.ok(runId, `清单摘要里要能读到运行 ID：${summary.out}`);
   const manifestPath = join(root, '产物', '_运行', `清单_${runId}.json`);
-  const m = JSON.parse(readFileSync(manifestPath, 'utf-8')) as { artifacts: { kind: string; path: string }[] };
+  const m = JSON.parse(readFileSync(manifestPath, 'utf-8')) as { artifacts: { kind: string; path: string; id?: string; derivedFrom?: { sourceId: string; sourcePath: string; transformer: string; ruleVersion: number; dropSections: string[] } }[] };
   const stuArtifacts = m.artifacts.filter((a) => a.kind === '学生版');
   assert.equal(stuArtifacts.length, 1, `学生版要被登记进清单，实得 ${JSON.stringify(m.artifacts.map((a) => a.kind))}`);
   assert.match(stuArtifacts[0]!.path, /学生版_A层85_2026-01-01\.md$/);
+  // 派生关系随登记写下：源稿是哪一件、谁在哪个版本下减的（第七轮 P1-⑥）
+  const df = stuArtifacts[0]!.derivedFrom;
+  assert.ok(df, '学生版登记要带 derivedFrom（从哪份稿、按哪版规则减出来的）');
+  const bodyArtifact = m.artifacts.find((a) => a.kind === '正文');
+  assert.equal(df!.sourceId, bodyArtifact?.id, '源稿身份与正文那条登记同一个值');
+  assert.match(df!.transformer, /^LayerText_AF学生版@/, '生成器要带版本');
+  assert.equal(df!.ruleVersion, 1);
+  assert.deepEqual(df!.dropSections, ['词句卡']);
 
   // ④ 导出发布包 → 学生版必须在里面（它是真正要交到学生手上的那一件）
   const exp = run('LayerText_AF发布包.mjs', []);

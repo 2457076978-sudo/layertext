@@ -159,6 +159,22 @@ export interface RunArtifact {
   updatedAt?: string;
   /** needs-review 时的原因（规则号），人一眼知道为什么不算完成 */
   reason?: string;
+  /** 派生关系（第七轮 P1-⑥）。学生版是**从教师工作稿减出来的**，不是独立产物：
+   *  只记"谁生成"不记"从哪一件减、按哪版规则减"，另一个团队拿到包就回答不了
+   *  "这段话为什么少了"——`derivedFrom` 就是那半句答案。属于**登记事实**而非身份成分，
+   *  与 `id` 同路：旧清单不迁移，读取时按同规则算得出。 */
+  derivedFrom?: {
+    /** 源稿（正文）的产物身份——登记时与正文那条同值 */
+    sourceId: string;
+    /** 源稿在产物目录里的相对路径 */
+    sourcePath: string;
+    /** 生成器标识与版本（如 `LayerText_AF学生版@1.2.1`） */
+    transformer: string;
+    /** 过滤规则版本（引擎 `STUDENT_VERSION_SCHEMA_VERSION`） */
+    ruleVersion: number;
+    /** 实际过滤掉的内部小节（如 `['词句卡']`） */
+    dropSections: string[];
+  };
 }
 
 /* ────────────────────── 产物身份：一件产物"是什么"，与它放在哪儿无关 ────────────────────── */

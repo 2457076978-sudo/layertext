@@ -81,6 +81,10 @@ const {
   pointerNameOf,
   TIER_TAG: TAGS,
 } = M;
+/* 学生版过滤规则的版本与默认过滤节——登记 `derivedFrom` 用。
+ * 引擎是唯一口径，脚本里不抄（抄了就会有一天改漏一半）。 */
+const SV = await import(`${SHARED.distOf(REPO)}/src/core/studentversion.js`);
+const PKG_VERSION = JSON.parse(readFileSync(join(REPO, 'package.json'), 'utf-8')).version;
 
 const TIERS = arg('--tier', 'A')
   .split(',')
@@ -242,6 +246,15 @@ function scanArtifacts() {
           hash: contentHash(stuText),
           bytes: stuText.length,
           updatedAt: new Date().toISOString(),
+          /* 派生关系随登记写下（第七轮 P1-⑥）：另一团队拿到包，能回答
+           * "这份读物是从哪一份工作稿、按哪版规则减出来的"——只说"谁生成"不说"从哪减"，半句答案。 */
+          derivedFrom: {
+            sourceId: artifactIdOf({ kind: '正文', tier: t, chapter: ch }) ?? rel,
+            sourcePath: rel,
+            transformer: `LayerText_AF学生版@${PKG_VERSION}`,
+            ruleVersion: SV.STUDENT_VERSION_SCHEMA_VERSION,
+            dropSections: SV.DEFAULT_DROP_SECTIONS,
+          },
         });
       }
     }
