@@ -12,7 +12,7 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { chineseOutsideAnnotations, duplicateRate, parseAnnotations } from '../src/core/annot.js';
+import { chineseOutsideAnnotations, dedupeAnnotations, duplicateRate, makeCovers, parseAnnotations } from '../src/core/annot.js';
 import {
   GATE_RULES,
   gateSegment,
@@ -80,6 +80,64 @@ test('重复注释：同词注第二次起要算多余（正文注释唯一性�
 test('注释外的中文是格式红线（注释内的中文不算）', () => {
   assert.deepEqual(chineseOutsideAnnotations('[P01] He ran fast（快地）.') , []);
   assert.deepEqual(chineseOutsideAnnotations('[P01] 他 ran fast.'), ['他']);
+});
+
+/* ────────────────── 「一个词全篇只注一次」的口径对齐 ────────────────── */
+
+test('makeCovers：与 covers 同一口径（词形与连字符成分归一）', () => {
+  const covers = makeCovers(['Boxer', 'blood-curdling']);
+  assert.equal(covers('boxer'), true);
+  assert.equal(covers('BOXER'), true);
+  assert.equal(covers('curdling'), true, '连字符成分也算已注');
+  assert.equal(covers('windmill'), false);
+  assert.equal(makeCovers([])('anything'), false, '空集合不该把一切都判成已注');
+});
+
+test('makeCovers：注了 trembled，则 tremble / trembling 也算已注（反向也要命中）', () => {
+  const covers = makeCovers(['trembled']);
+  assert.equal(covers('tremble'), true);
+  assert.equal(covers('trembling'), true);
+});
+
+test('去重注释：别处已注过的词，本段再注会被去掉并记为教学复现候选', () => {
+  const r = dedupeAnnotations('[P01] The barn（谷仓） was red and the barn（谷仓） was old.', ['barn']);
+  assert.equal(r.body, '[P01] The barn was red and the barn was old.');
+  assert.deepEqual(r.reinforceHints, ['barn'], '去掉的是教学复现点，进词卡层而不是丢掉');
+  assert.equal(r.kept.length, 0);
+});
+
+test('去重注释：同一段里注两次同一个词，只留首次', () => {
+  const r = dedupeAnnotations('[P01] A barn（谷仓） and a barn（仓房） here.', []);
+  assert.equal(r.body, '[P01] A barn（谷仓） and a barn here.');
+  assert.equal(r.kept.length, 1);
+  assert.equal(r.kept[0].zh, '谷仓');
+  assert.equal(r.removed.length, 1);
+  assert.deepEqual(r.reinforceHints, [], '段内重复不算教学复现');
+});
+
+test('去重注释：没有重复时原样返回（幂等，不碰正文一个字节）', () => {
+  const t = '[P01] A windmill（风车） and a barn（谷仓）.';
+  const r = dedupeAnnotations(t, []);
+  assert.equal(r.body, t);
+  assert.equal(r.removed.length, 0);
+});
+
+test('去重注释：多个待删注释时下标不漂移（拼接必须一次算对）', () => {
+  const t = '[P01] barn（谷仓） here, barn（谷仓） there, windmill（风车） and windmill（风车） end.';
+  const r = dedupeAnnotations(t, []);
+  assert.equal(r.body, '[P01] barn（谷仓） here, barn there, windmill（风车） and windmill end.');
+});
+
+test('口径对齐：门禁不会因为"别处已注"而判本段漏注（提示词与判定不能打架）', () => {
+  const src = '[P01] The barn was red.';
+  const ok = gateSegment({ text: src, target: 5, maxLen: 20, oov: [], source: src });
+  assert.equal(ok.status, 'pass');
+  // 若把"别处已注"的词仍塞进 oov，就会误判漏注——这正是会话脚本必须先过滤的原因
+  const bad = gateSegment({ text: src, target: 5, maxLen: 20, oov: ['barn'], source: src });
+  assert.equal(bad.status, 'needs-review');
+  const covers = makeCovers(['barn']);
+  const filtered = gateSegment({ text: src, target: 5, maxLen: 20, oov: ['barn'].filter((w) => !covers(w)), source: src });
+  assert.equal(filtered.status, 'pass', '过滤掉"别处已注"的词之后才是正确口径');
 });
 
 /* ────────────────── 段级门禁：blocker 语义 ────────────────── */

@@ -105,6 +105,8 @@ const apiKey = () => {
 };
 
 const { gateSegment, normalizeSegmentBody } = await import(`${REPO}/dist/src/core/segmentgate.js`);
+const { makeCovers, dedupeAnnotations } = await import(`${REPO}/dist/src/core/annot.js`);
+const { LOOKUP_TOOL, collectLookups, formatLookupAnswer } = await import(`${REPO}/dist/src/core/lookuptool.js`);
 const { splitChapter } = await import(`${REPO}/dist/src/core/textpipe.js`);
 const { runQc } = await import(`${REPO}/dist/src/core/qc.js`);
 const LEX = await SHARED.loadLexicon(P);
@@ -208,7 +210,16 @@ function loadSession() {
   let stats = { calls: 0, in: 0, out: 0, cached: 0 };
   for (const l of lines) {
     let o; try { o = JSON.parse(l); } catch { continue; }
-    if (o.t === 'msg') messages.push({ role: o.role, content: o.content });
+    if (o.t === 'msg') {
+      // tool_calls / tool_call_id 必须一起还原：少了它们，重建出来的会话里
+      // 会留下"助手发了工具调用但没有工具回复"的非法回合，--resume 直接被 API 拒。
+      messages.push({
+        role: o.role,
+        content: o.content,
+        ...(o.tool_calls ? { tool_calls: o.tool_calls } : {}),
+        ...(o.tool_call_id ? { tool_call_id: o.tool_call_id } : {}),
+      });
+    }
     else if (o.t === 'done') { done.add(o.key); if (o.usage) { stats.calls++; stats.in += o.usage.in || 0; stats.out += o.usage.out || 0; stats.cached += o.usage.cached || 0; } }
     else if (o.t === 'warning') warnings.push(o);
     else if (o.t === 'stats') stats = o.v;
@@ -217,9 +228,9 @@ function loadSession() {
 }
 const logLine = (o) => { mkdirSync(SESSION_DIR, { recursive: true }); appendFileSync(sessionFile(), JSON.stringify(o) + '\n', 'utf-8'); };
 /** 推一条消息进会话，**同时写进事件日志**（否则 --resume 会丢上下文——首版就踩了这个坑） */
-function pushMsg(messages, role, content) {
-  messages.push({ role, content });
-  logLine({ t: 'msg', role, content });
+function pushMsg(messages, role, content, extra = {}) {
+  messages.push({ role, content, ...extra });
+  logLine({ t: 'msg', role, content, ...extra });
 }
 /** 吞错不许静默：warning 进事件日志并计入汇总报告（审查报告第②条） */
 function warn(kind, message, extra = {}) {
@@ -232,8 +243,10 @@ function warn(kind, message, extra = {}) {
 /* ────────────────────── API（带用量记账 + 自检假模型） ────────────────────── */
 /** 假模型：从最后一条 user 消息里还原原文段与目标词数，产出确定性的"响应"。
  *  long  = 一段 120 词的超长句（篇幅+句长双超标 → 必不过门禁）
+ *  annotate = 按目标词数回放并把超纲词全部加注（验证跨章去重）
+ *  tool   = 先发一次 lookup_words 工具调用再给正文（验证严格 schema 的查词往返）
  *  exact = 按目标词数精确回放原文（可通过门禁，用于验证"通过路径确实写了完成标记"） */
-function fakeChat(messages) {
+function fakeChat(messages, tools = null) {
   // 注意：复检回流那一轮的"最后一条 user 消息"是反馈而不是原文段，
   // 所以要取**最后一条含原文段**的消息，否则重写轮会退化成无原文的瞎写。
   const segOf = (m) => m.content.match(/【原文段落】\n([\s\S]*?)\n\n请改写这一段/)?.[1];
@@ -241,28 +254,62 @@ function fakeChat(messages) {
   const seg = withSeg ?? [...messages].reverse().find((m) => m.role === 'user')?.content ?? '';
   const target = Math.round(wc(seg) * T.ratio);
   if (FAKE_LLM === 'long') {
-    return { text: `[P01] ${Array.from({ length: 120 }, (_, i) => `word${i}`).join(' ')}.`, usage: { in: 0, out: 0, cached: 0 } };
+    return { text: `[P01] ${Array.from({ length: 120 }, (_, i) => `word${i}`).join(' ')}.`, toolCalls: [], usage: { in: 0, out: 0, cached: 0 } };
   }
   if (FAKE_LLM === 'exact') {
     const words = (seg.match(/[A-Za-z][A-Za-z'-]*/g) ?? []).filter((w) => w !== 'P');
     const head = `[P01] ${words.slice(0, Math.max(1, target - 1)).join(' ')}`;
-    return { text: head, usage: { in: 0, out: 0, cached: 0 } };
+    return { text: head, toolCalls: [], usage: { in: 0, out: 0, cached: 0 } };
   }
-  return { text: FAKE_LLM, usage: { in: 0, out: 0, cached: 0 } };
+  if (FAKE_LLM === 'annotate') {
+    // 按目标词数回放原文，并把本段的超纲词**全部**加注——用来验证
+    // 「跨章不重复注」与「本地去重」两条规则在真实路径上确实生效。
+    const md = `## Chapter One\n\n${seg}\n`;
+    const oov = [...new Set(runQc(md, LEX, { tier: TIER, fileName: 'seg.md', dict: DICT }).oov)].filter((w) => w.length > 2);
+    const words = (seg.match(/[A-Za-z][A-Za-z'-]*/g) ?? []).filter((w) => w !== 'P');
+    const kept = words.slice(0, Math.max(1, target - 1)).join(' ').replace(
+      /\b[A-Za-z][A-Za-z'-]*\b/g,
+      (w) => (oov.includes(w.toLowerCase()) ? `${w}（风车）` : w),
+    );
+    return { text: `[P01] ${kept}`, toolCalls: [], usage: { in: 0, out: 0, cached: 0 } };
+  }
+  if (FAKE_LLM === 'tool' && tools) {
+    // 第一轮发一次严格 schema 的 tool call（模拟"我不确定，问一下"），
+    // 之后的轮次给正文——用来端到端验证工具调用往返。
+    const asked = messages.some((m) => m.role === 'tool');
+    if (!asked) {
+      return {
+        text: '',
+        toolCalls: [{ id: 'call_1', type: 'function', function: { name: 'lookup_words', arguments: JSON.stringify({ words: ['barn'] }) } }],
+        usage: { in: 0, out: 0, cached: 0 },
+      };
+    }
+    const md0 = `## Chapter One\n\n${seg}\n`;
+    const oov = [...new Set(runQc(md0, LEX, { tier: TIER, fileName: 'seg.md', dict: DICT }).oov)].filter((w) => w.length > 2);
+    const words = (seg.match(/[A-Za-z][A-Za-z'-]*/g) ?? []).filter((w) => w !== 'P');
+    const body = words.slice(0, Math.max(1, target - 1)).join(' ')
+      .replace(/\b[A-Za-z][A-Za-z'-]*\b/g, (w) => (oov.includes(w.toLowerCase()) ? `${w}（风车）` : w));
+    return { text: `[P01] ${body}`, toolCalls: [], usage: { in: 0, out: 0, cached: 0 } };
+  }
+  return { text: FAKE_LLM, toolCalls: [], usage: { in: 0, out: 0, cached: 0 } };
 }
 
-async function callChat(messages, maxTokens = 3000) {
-  if (FAKE_LLM !== undefined) return fakeChat(messages);
+/** 一次对话调用。`tools` 非空时启用函数调用协议（「查词」走它，而不是正文里的文本标记）。 */
+async function callChat(messages, maxTokens = 3000, tools = null) {
+  if (FAKE_LLM !== undefined) return fakeChat(messages, tools);
+  const body = { model: MODEL, max_tokens: maxTokens, temperature: 0.3, messages };
+  if (tools) { body.tools = tools; body.tool_choice = 'auto'; }
   const resp = await fetch(`${CFG.baseUrl}/chat/completions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey()}` },
-    body: JSON.stringify({ model: MODEL, max_tokens: maxTokens, temperature: 0.3, messages }),
+    body: JSON.stringify(body),
   });
   if (!resp.ok) throw new Error(`HTTP ${resp.status}：${(await resp.text()).slice(0, 200)}`);
   const j = await resp.json();
   const u = j.usage ?? {};
   return {
     text: (j.choices?.[0]?.message?.content ?? '').trim(),
+    toolCalls: j.choices?.[0]?.message?.tool_calls ?? [],
     usage: { in: u.prompt_tokens ?? 0, out: u.completion_tokens ?? 0, cached: u.prompt_cache_hit_tokens ?? 0 },
   };
 }
@@ -280,16 +327,16 @@ function mustAnnotate(seg) {
 }
 /** 回答模型的「查词」：本地词库 → 词典 → 知识库，三处都没有就交给小模型配一个并回写词典 */
 async function answerLookup(words) {
-  const lines = [];
+  const entries = [];
   const needGloss = [];
   for (const w0 of words) {
     const w = w0.toLowerCase();
     const kb = KB.get(w);
     const dict = DICT.get(w);
-    if (dict || kb) { lines.push(`${w}：释义「${dict ?? kb.zh}」${kb ? '（教师知识库收录，必须加注）' : '（统一词典已有，按此释义加注）'}`); continue; }
+    if (dict || kb) { entries.push({ word: w, known: false, zh: dict ?? kb.zh, source: kb ? '教师知识库收录，必须加注' : '统一词典已有，按此释义加注' }); continue; }
     const q = segQc(`[P01] ${w}`).oov.includes(w);
-    if (!q) { lines.push(`${w}：已收录（学生学过）→ 不要加注`); continue; }
-    lines.push(`${w}：【待配释义】`);
+    if (!q) { entries.push({ word: w, known: true }); continue; }
+    entries.push({ word: w, known: false, zh: '', source: '待配释义' });
     needGloss.push(w);
   }
   if (needGloss.length) {
@@ -299,15 +346,14 @@ async function answerLookup(words) {
     ], 800);
     let map = {};
     try { map = JSON.parse(r.text.replace(/^[^{]*/, '').replace(/[^}]*$/, '')); } catch { warn('lookup-parse', `「查词」释义 JSON 解析失败，回退为让模型自行判断：${r.text.slice(0, 80)}`); }
-    for (let i = 0; i < lines.length; i++) {
-      const m = lines[i].match(/^([a-z'-]+)：【待配释义】$/);
-      if (!m) continue;
-      const zh = map[m[1]];
-      lines[i] = zh ? `${m[1]}：释义「${zh}」（新配，已写进统一词典）` : `${m[1]}：查不到，按你的判断配一个 2-6 字释义`;
-      if (zh) { DICT.set(m[1], zh); newDictEntries.push([m[1], zh]); }
+    for (const e of entries) {
+      if (e.known || e.zh !== '') continue;
+      const zh = map[e.word];
+      if (zh) { e.zh = zh; e.source = '新配，已写进统一词典'; DICT.set(e.word, zh); newDictEntries.push([e.word, zh]); }
+      else e.source = '查不到，按你的判断配一个 2-6 字释义';
     }
   }
-  return lines.join('\n');
+  return entries;
 }
 const newDictEntries = [];
 
@@ -320,13 +366,23 @@ function stripLookup(text) {
 /** 段级判定：篇幅 / 句长 / 漏注 / 注释外中文 是 blocker（不过就不可完成）；
  *  数字专名丢失 / 重复注释 / 释义冲突是 warn（进风险队列）。
  *  应注词型 = 原文 OOV ∪ 改写后 OOV —— 改写新引入的难词同样要注。 */
-function verifySegment(text, seg, target, srcOov, markerId) {
+function verifySegment(text, seg, target, srcOov, markerId, annotatedSoFar) {
   const body = normalizeSegmentBody(text, markerId);
   const outOov = mustAnnotate(body).oov;
   const union = [...new Set([...srcOov, ...outOov])];
-  const verdict = gateSegment({ text: body, source: seg, target, maxLen: T.maxLen, oov: union, dict: DICT, markerId });
+  // ★ 口径对齐（2026-09-11 抓到的一处自相矛盾）：
+  //   项目规则是「一个词全篇只注一次（首次出现处）」，提示词也明说
+  //   「你在这本书里已经注过这些词了，本段绝对不要再加注」——
+  //   但原先门禁拿的是"本段出现的全部超纲词"，于是第 5 章**正确地**没有重复注第 1 章的词，
+  //   反而被判成漏注。模型一边被告知别注、一边被告知漏注，永远过不了关，
+  //   而且不知道自己错在哪。现在两边共用同一个 makeCovers 判定：
+  //   门禁问的是「**本段该注的词**注了没有」，不是「本段出现的超纲词注了没有」。
+  const covers = makeCovers(annotatedSoFar ?? []);
+  const mustNow = union.filter((w) => !covers(w));
+  const verdict = gateSegment({ text: body, source: seg, target, maxLen: T.maxLen, oov: mustNow, dict: DICT, markerId });
   verdict.srcOov = srcOov;
   verdict.outOov = outOov;
+  verdict.alreadyAnnotatedElsewhere = union.filter((w) => covers(w));
   return verdict;
 }
 
@@ -352,18 +408,41 @@ async function rewriteSegment(messages, seg, chLabel, k, total, annotatedSoFar, 
 
   const inputHash = sha(`${PROMPT_VERSION}|${seg}|${target}|${T.maxLen}`);
   pushMsg(messages, 'user', `${chLabel} · 第 ${k + 1}/${total} 段\n\n${facts}\n\n【原文段落】\n${seg.trim()}\n\n请改写这一段。`);
-  let { text, usage } = await callChat(messages);
-  const callUsage = [usage];
+  let first = await callChat(messages, 3000, LOOKUP_TOOL);
+  let text = first.text;
+  const callUsage = [first.usage];
 
-  /* 「查词」往返：模型不确定就问我 */
+  /* 「查词」往返：**严格 schema 的 tool call**（审查报告 §二）。
+   * 为什么不继续用正文里的 `【查 词1 词2】` 文本标记：它逼模型在正文之外再写一行，
+   * 于是既污染正文（还得写 stripLookup 去捞），又与"纯英文、不要任何解释"的格式要求打架；
+   * 参数也没有 schema，问错了只能猜。工具调用是结构化协议：参数可严格校验，错了能明确回一句"请重发"。
+   * 文本标记路径保留为**回退**（万一某次模型没走工具协议），两条路共用同一份 answerLookup。 */
   for (let round = 0; round < TOOL_ROUNDS; round++) {
-    const { words } = stripLookup(text);
-    if (!words.length) break;
-    pushMsg(messages, 'assistant', text);
-    const answer = await answerLookup(words.slice(0, 8));
+    const { words: markerWords } = stripLookup(text);
+    const { words: toolWords, ids: callIds, errors } = collectLookups(first.toolCalls);
+    const words = [...new Set([...toolWords, ...markerWords])].slice(0, 8);
+    if (!words.length) {
+      if (errors.length) {
+        // 参数不合规：明确告诉模型哪里不合规，而不是去猜它想问什么
+        pushMsg(messages, 'assistant', text);
+        pushMsg(messages, 'user', `【工具调用参数不合规】${errors.join('；')}\n请用 lookup_words 重新提问（words 是英文单词数组，最多 8 个）。`);
+        const r = await callChat(messages, 3000, LOOKUP_TOOL);
+        text = r.text; first = r; callUsage.push(r.usage);
+        continue;
+      }
+      break;
+    }
+    pushMsg(messages, 'assistant', text, first.toolCalls?.length ? { tool_calls: first.toolCalls } : {});
+    const entries = await answerLookup(words);
+    const answer = formatLookupAnswer(entries);
+    if (callIds.length) {
+      // 标准工具协议：每个 tool_call 回一条 role:'tool' 消息（也写进事件日志，否则续跑会丢）
+      for (const id of callIds) pushMsg(messages, 'tool', answer, { tool_call_id: id });
+      logLine({ t: 'tool', words, answer });
+    }
     pushMsg(messages, 'user', `【查词结果】\n${answer}\n\n请据此输出这一段的最终正文。`);
-    const r = await callChat(messages);
-    text = r.text; callUsage.push(r.usage);
+    const r = await callChat(messages, 3000, LOOKUP_TOOL);
+    text = r.text; first = r; callUsage.push(r.usage);
   }
 
   /* 本地复检回流：不达标就让模型自己改（最多 QC_ROUNDS 轮）。
@@ -371,7 +450,7 @@ async function rewriteSegment(messages, seg, chLabel, k, total, annotatedSoFar, 
    *   ① 每一轮的产出都判定（原来只在"下一轮开始时"判定，最后一次改写从未被检）
    *   ② 循环跑满仍不过 → status='needs-review'，由调用方按"不可完成"处理 */
   const attempts = [];
-  let verdict = verifySegment(text, seg, target, srcOov, markerId);
+  let verdict = verifySegment(text, seg, target, srcOov, markerId, annotatedSoFar);
   while (verdict.status !== 'pass' && attempts.length < QC_ROUNDS) {
     attempts.push({ problems: verdict.problems.map((p) => p.ruleId), words: verdict.words });
     pushMsg(messages, 'assistant', text);
@@ -380,12 +459,16 @@ async function rewriteSegment(messages, seg, chLabel, k, total, annotatedSoFar, 
       'user',
       `【本地复检】本段未达标：\n- ${verdict.blockers.map((p) => p.message).join('\n- ')}\n请重写这一段（只输出该段正文，保持 [P##] 开头）。`,
     );
-    const r = await callChat(messages);
+    const r = await callChat(messages, 3000, LOOKUP_TOOL);
     text = r.text; callUsage.push(r.usage);
-    verdict = verifySegment(text, seg, target, srcOov, markerId);
+    verdict = verifySegment(text, seg, target, srcOov, markerId, annotatedSoFar);
   }
 
-  const body = normalizeSegmentBody(text, markerId);
+  const body0 = normalizeSegmentBody(text, markerId);
+  /* 本地统一去重注释：一个词全篇只注一次（报告 §二）。
+   * 与提示词的分工：提示词负责"尽量别重复注"，这里负责"重复了也一定注不出第二次"。
+   * 被去掉的重复注释**不是浪费** —— 它们是教学复现点，进词卡层的「复现提示」。 */
+  const { body, removed: strippedAnnotations, reinforceHints } = dedupeAnnotations(body0, annotatedSoFar);
   if (verdict.status === 'pass') {
     // 通过的段也要写进事件日志：否则 --resume 重建的会话缺助手回合，
     // 模型看到的是一串连续 user 消息（首版就踩过这个坑）。
@@ -399,7 +482,17 @@ async function rewriteSegment(messages, seg, chLabel, k, total, annotatedSoFar, 
         `已移出正文、转人工复核队列。请继续后面的段落，但不要以为本段已定稿。`,
     );
   }
-  return { status: verdict.status, body, verdict, attempts, qcRounds: attempts.length, usage: callUsage, inputHash };
+  return {
+    status: verdict.status,
+    body,
+    verdict,
+    attempts,
+    qcRounds: attempts.length,
+    usage: callUsage,
+    inputHash,
+    strippedAnnotations: strippedAnnotations.length,
+    reinforceHints,
+  };
 }
 
 /* ────────────────────── 主流程 ────────────────────── */
@@ -434,6 +527,24 @@ if (!state.messages.length) logLine({ t: 'msg', role: 'system', content: system 
 
 const failures = [];   // 读取/异常类失败
 const reviews = [];    // 门禁未通过（needs-review）——**不可完成**
+
+/* 「已注词」= 全书唯一注释的账本，必须在**开工前**从全部产物恢复。
+ * 两个"只扫一部分"的坑都踩过：
+ *   ① 只从"当前章"恢复 → --resume 从第 7 章续跑时，第 1–6 章注过的词就丢了，
+ *      于是第 7 章被要求重新注一遍（而提示词说"绝对不要"）——两处打架；
+ *   ② 只扫"本次要跑的章" → `--chapters 2` 单跑第 2 章时，第 1 章的账本完全看不见。
+ *   项目规则是「一个词**全篇**只注一次」，所以账本必须按**全书**恢复，而不是按本次范围。 */
+if (!state.annotated) {
+  state.annotated = new Set();
+  const allCh = CN.slice(0, Number(P.章数 ?? 10));
+  for (const cn of allCh) {
+    const p0 = join(OUT_BASE, `第${cn}章`, `原文_${TAG}_${DATE}${SUFFIX}.md`);
+    if (!existsSync(p0)) continue;
+    for (const m of readFileSync(p0, 'utf-8').matchAll(/([A-Za-z][A-Za-z'-]*)（[^）]{1,24}）/g)) state.annotated.add(m[1].toLowerCase());
+  }
+  if (state.annotated.size) console.log(`已注词账本：从已有产物恢复 ${state.annotated.size} 个词（跨章不再重复注）`);
+}
+
 for (const { i } of chSegs) {
   const ch = `第${CN[i - 1]}章`;
   const src = join(SRC_BASE, ch, '原文_规范化.md');
@@ -446,17 +557,11 @@ for (const { i } of chSegs) {
   const outPath = join(OUT_BASE, ch, `原文_${TAG}_${DATE}${SUFFIX}.md`);
   const existing = existsSync(outPath) ? readFileSync(outPath, 'utf-8') : null;
   const outSegs = existing ? (splitChapter(existing).body.match(/\[P\d+\][\s\S]*?(?=\[P\d+\]|$)/g) ?? []) : [];
-  // 已注词清单（跨章累计）：从已有产物恢复，作为模型的"外部记忆"
-  if (!state.annotated) {
-    state.annotated = new Set();
-    if (existing) for (const m of existing.matchAll(/([A-Za-z][A-Za-z'-]*)（[^）]{1,24}）/g)) state.annotated.add(m[1].toLowerCase());
-  }
-
   for (let k = 0; k < segList.length; k++) {
     const key = `${ch}#${k}`;
     if (state.done.has(key)) { process.stdout.write(`· ${ch} ${k + 1}/${segList.length} 已完成\r`); continue; }
     try {
-      const { status, body, verdict, attempts, qcRounds, usage, inputHash } = await rewriteSegment(
+      const { status, body, verdict, attempts, qcRounds, usage, inputHash, strippedAnnotations, reinforceHints } = await rewriteSegment(
         messages, srcText(k), ch, k, segList.length, state.annotated, segList[k].id,
       );
       const u = usage.reduce((a, c) => ({ in: a.in + c.in, out: a.out + c.out, cached: a.cached + c.cached }), { in: 0, out: 0, cached: 0 });
@@ -473,6 +578,7 @@ for (const { i } of chSegs) {
           source: srcText(k).trim(), body, status,
           blockers: verdict.blockers, warns: verdict.warns, attempts,
           inputHash, promptVersion: PROMPT_VERSION, model: MODEL,
+          response: body.slice(0, 2000),
           annotation: verdict.annotation, words: verdict.words, target: verdict.target,
         };
         mkdirSync(REVIEW_DIR, { recursive: true });
@@ -482,10 +588,23 @@ for (const { i } of chSegs) {
         reviews.push(rec);
         console.error(`\n✗ ${ch} 第${k + 1}段 复检未通过（${verdict.blockers.map((p) => p.ruleId).join('、')}）→ 已隔离，未写入正文`);
       } else {
+        // 账本按**去重后**的正文记：重复注释已被本地清掉，首次注处才是正本
         for (const m of body.matchAll(/([A-Za-z][A-Za-z'-]*)（[^）]{1,24}）/g)) state.annotated.add(m[1].toLowerCase());
         outSegs[k] = body;
         state.done.add(key);
-        logLine({ t: 'done', key, usage: u, rounds: qcRounds, status, inputHash, promptVersion: PROMPT_VERSION, rules: verdict.warns.map((p) => p.ruleId) });
+        logLine({
+          t: 'done', key, usage: u, rounds: qcRounds, status, inputHash, promptVersion: PROMPT_VERSION,
+          rules: verdict.warns.map((p) => p.ruleId),
+          // 报告要求的可复现信息：输入哈希 + 提示词版本 + 本次响应（截断存，够定位是哪一版写的）
+          response: body.slice(0, 2000),
+          strippedAnnotations, reinforceHints,
+        });
+        if (reinforceHints.length) {
+          // 教学复现点：不进正文注释，交给词卡层（报告 §二：复现提示要与正文注释分开）
+          state.reinforce ??= new Set();
+          for (const w of reinforceHints) state.reinforce.add(w);
+          logLine({ t: 'reinforce', key, words: reinforceHints });
+        }
       }
       // 每段落盘（截断只丢一段，不丢整章）。未通过的段留空位——空位是可见的，
       // 而"把没过的段写进去"是不可见的，后者正是 P0 要杜绝的。

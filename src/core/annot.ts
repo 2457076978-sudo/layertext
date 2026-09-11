@@ -148,6 +148,88 @@ export function annotatedKeys(text: string): Set<string> {
   return parseAnnotations(text).keys;
 }
 
+/**
+ * 用一组"已经注过的词"造一个覆盖判定器，口径与 `AnnotationIndex.covers` **完全一致**。
+ *
+ * 为什么必须共用同一个口径：项目的规则是「一个词全篇只注一次（首次出现处）」。
+ * 于是门禁问的必须是「**本段该注的词注了没有**」，而不是「本段出现的所有超纲词注了没有」——
+ * 后者会让"第 5 章正确地没有重复注第 1 章注过的词"被判成漏注，
+ * 而提示词同时又要求「已经注过的词绝对不要再加注」。两边打架时模型永远过不了关，
+ * 而且它不知道自己错在哪。这个判定器就是让两边对齐的那一处。
+ */
+export function makeCovers(keys: Iterable<string>): (word: string) => boolean {
+  const direct = new Set<string>();
+  const family = new Set<string>();
+  for (const k of keys) {
+    const key = String(k).toLowerCase();
+    if (!key) continue;
+    for (const c of familyOf(key)) family.add(c);
+    for (const p of partKeys(key)) direct.add(p);
+    direct.add(key);
+  }
+  return (word: string): boolean => {
+    const key = word.toLowerCase();
+    if (direct.has(key) || family.has(key)) return true;
+    // 反向：OOV 是屈折形、已注的是原形
+    return suffixCandidates(key).some((c) => direct.has(c) || family.has(c));
+  };
+}
+
+/**
+ * 本地统一去重注释：**一个词全篇只注一次**，重复处只保留首次。
+ *
+ * 为什么不能只靠提示词：模型跨章会忘（它只看到摘要），而"重复注释"是判定不合格的。
+ * 与其让它重写，不如在本地做一次确定性清理——同一件事用规则做掉，比用提示词求它可靠得多。
+ * 被去掉的那些**不是浪费**：它们是教学复现点，进 `reinforceHints`，
+ * 由词卡层/「复现提示」承担，不占正文注释（报告 §二 的明确要求）。
+ */
+export interface DedupeResult {
+  /** 去重后的正文（重复注释已还原为裸词） */
+  body: string;
+  /** 保留下来的注释（每个词型一处） */
+  kept: Annotation[];
+  /** 被去掉的重复注释 */
+  removed: Annotation[];
+  /** 因为"别处已注"而被去掉的词 —— 教学复现候选，进词卡层 */
+  reinforceHints: string[];
+}
+
+export function dedupeAnnotations(text: string, alreadySeen: Iterable<string> = []): DedupeResult {
+  const covers = makeCovers(alreadySeen);
+  const idx = parseAnnotations(text);
+  const kept: Annotation[] = [];
+  const removed: Annotation[] = [];
+  const seenHere = new Set<string>();
+  const drops = new Set<number>(); // 要删掉的注释的字符下标
+  for (const a of idx.list) {
+    if (seenHere.has(a.key)) {
+      removed.push(a);
+      drops.add(a.index);
+      continue;
+    }
+    seenHere.add(a.key);
+    if (covers(a.key)) {
+      removed.push(a);
+      drops.add(a.index);
+      continue;
+    }
+    kept.push(a);
+  }
+  if (!drops.size) return { body: text, kept, removed, reinforceHints: [] };
+  let body = '';
+  let at = 0;
+  for (const a of removed) {
+    if (!drops.has(a.index) || a.index < at) continue;
+    body += text.slice(at, a.index) + a.word;
+    at = a.index + a.word.length + 1 + a.zh.length + 1; // word + （ + zh + ）
+  }
+  body += text.slice(at);
+  const reinforceHints = [
+    ...new Set(removed.filter((a) => covers(a.key)).map((a) => a.key)),
+  ].sort();
+  return { body, kept, removed, reinforceHints };
+}
+
 /** 重复注释率：多余注释处数 / 注释总处数（报告 §二 要求报告的指标之一）。
  *  教学复现走独立的「复现提示」标记或词卡层，不该在正文里反复注同一个词。 */
 export function duplicateRate(text: string): { total: number; extra: number; rate: number } {
