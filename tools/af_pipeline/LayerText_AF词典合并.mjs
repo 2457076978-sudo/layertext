@@ -18,11 +18,12 @@
 import { readFileSync, existsSync } from 'node:fs';
 
 const SHARED = await import('./LayerText_AF词表与词典.mjs');
+const { distOf } = SHARED;
 const P = SHARED.loadProject();
 
 const argv = process.argv.slice(2);
 const has = (n) => argv.includes(n);
-const { parseDictCsv, mergeDict, describeMerge } = await import(`${P.引擎目录}/dist/src/core/dictmerge.js`);
+const { parseDictCsv, mergeDict, describeMerge } = await import(`${distOf(P.引擎目录)}/src/core/dictmerge.js`);
 
 // 增量扫描与合并共用同一份实现（两种布局都要认），别处不要再写第二遍
 const found = SHARED.findDictDeltas(P.产物目录);

@@ -46,6 +46,7 @@ import { fileURLToPath } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SHARED = await import('./LayerText_AF词表与词典.mjs');
+const { distOf } = SHARED;
 const P = SHARED.loadProject();
 const REPO = P.引擎目录;
 const SRC_BASE = P.原文目录;
@@ -84,7 +85,7 @@ const TEMPERATURE = 0.3;
 const MAX_TOKENS = 3000;
 const PROMPT_VERSION = arg('--prompt', 'session-v3-20260911');
 
-const { makeResolver } = await import(`${REPO}/dist/src/core/manifest.js`);
+const { makeResolver } = await import(`${distOf(REPO)}/src/core/manifest.js`);
 /* ── 路径一律经清单解析（总计划阶段 3「最关键的迁移」）─────────────────────
  * 「把路径解析集中到一个 `Resolver`，**禁止业务代码拼目录**」。
  * 本脚本原来用 `join(OUT_BASE, ch, `原文_${tag}_${DATE}.md`)` 这类手拼——
@@ -106,7 +107,7 @@ const RR = (tag) => makeResolver(RUN.layout, { out: OUT_BASE, work: P.调适工�
 const R = RR(TAG);
 
 /* ────────────────────── 引擎侧模块 ────────────────────── */
-const { experimentPlan, compareCells, experimentVerdict, segmentFirstResponses } = await import(`${REPO}/dist/src/core/experiment.js`);
+const { experimentPlan, compareCells, experimentVerdict, segmentFirstResponses } = await import(`${distOf(REPO)}/src/core/experiment.js`);
 const {
   axesLines,
   assertNoComposite,
@@ -122,10 +123,10 @@ const {
   traceConclusion,
   truncationReport,
   METRIC_NAMES,
-} = await import(`${REPO}/dist/src/core/experimentrun.js`);
-const { buildLexiconSnapshot, contentHash, refOf } = await import(`${REPO}/dist/src/core/manifest.js`);
+} = await import(`${distOf(REPO)}/src/core/experimentrun.js`);
+const { buildLexiconSnapshot, contentHash, refOf } = await import(`${distOf(REPO)}/src/core/manifest.js`);
 const { segmentList } = SHARED;
-const { runQc } = await import(`${REPO}/dist/src/core/qc.js`);
+const { runQc } = await import(`${distOf(REPO)}/src/core/qc.js`);
 const LEX = await SHARED.loadLexicon(P);
 const DICT = SHARED.loadDict(P.词典路径);
 

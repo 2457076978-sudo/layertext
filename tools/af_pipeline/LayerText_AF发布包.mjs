@@ -19,14 +19,15 @@ import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, wri
 import { join, relative } from 'node:path';
 
 const SHARED = await import('./LayerText_AF词表与词典.mjs');
+const { distOf } = SHARED;
 const P = SHARED.loadProject();
 const REPO = P.引擎目录;
 const OUT_BASE = P.产物目录;
 const DATE = P.日期;
 
-const { buildBundle, provenanceOf, publishReadiness, renderProvenance, verifyBundle, BUNDLE_SCHEMA_VERSION } = await import(`${REPO}/dist/src/core/bundle.js`);
-const { artifactIdOf, makeResolver } = await import(`${REPO}/dist/src/core/manifest.js`);
-const { parseDecisionLog } = await import(`${REPO}/dist/src/core/decision.js`);
+const { buildBundle, provenanceOf, publishReadiness, renderProvenance, verifyBundle, BUNDLE_SCHEMA_VERSION } = await import(`${distOf(REPO)}/src/core/bundle.js`);
+const { artifactIdOf, makeResolver } = await import(`${distOf(REPO)}/src/core/manifest.js`);
+const { parseDecisionLog } = await import(`${distOf(REPO)}/src/core/decision.js`);
 
 /* 身份从命令行取（**不复用各脚本自己的参数助手**：定义位置各不相同） */
 const argRun = (n, d) => {

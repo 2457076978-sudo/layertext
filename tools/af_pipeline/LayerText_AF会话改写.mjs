@@ -53,6 +53,7 @@ import { execSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 
 const SHARED = await import('./LayerText_AF词表与词典.mjs');
+const { distOf } = SHARED;
 const P = SHARED.loadProject();
 const { REVIEW_PLACEHOLDER, segmentList, writeDictDelta, mergeDictIntoProject, withLock } = SHARED;
 const REPO = P.引擎目录;
@@ -138,14 +139,14 @@ const apiKey = () => {
   return _key;
 };
 
-const { gateSegment, normalizeSegmentBody } = await import(`${REPO}/dist/src/core/segmentgate.js`);
-const { makeCovers, dedupeAnnotations } = await import(`${REPO}/dist/src/core/annot.js`);
-const { LOOKUP_TOOL, collectLookups, formatLookupAnswer } = await import(`${REPO}/dist/src/core/lookuptool.js`);
-const { makeResolver } = await import(`${REPO}/dist/src/core/manifest.js`);
-const { splitChapter } = await import(`${REPO}/dist/src/core/textpipe.js`);
-const { runQc } = await import(`${REPO}/dist/src/core/qc.js`);
-const { atomicWriteFileSync: writeAtomic } = await import(`${REPO}/dist/src/core/files.js`);
-const { annotatableOf } = await import(`${REPO}/dist/src/core/segmentgate.js`);
+const { gateSegment, normalizeSegmentBody } = await import(`${distOf(REPO)}/src/core/segmentgate.js`);
+const { makeCovers, dedupeAnnotations } = await import(`${distOf(REPO)}/src/core/annot.js`);
+const { LOOKUP_TOOL, collectLookups, formatLookupAnswer } = await import(`${distOf(REPO)}/src/core/lookuptool.js`);
+const { makeResolver } = await import(`${distOf(REPO)}/src/core/manifest.js`);
+const { splitChapter } = await import(`${distOf(REPO)}/src/core/textpipe.js`);
+const { runQc } = await import(`${distOf(REPO)}/src/core/qc.js`);
+const { atomicWriteFileSync: writeAtomic } = await import(`${distOf(REPO)}/src/core/files.js`);
+const { annotatableOf } = await import(`${distOf(REPO)}/src/core/segmentgate.js`);
 /* 每一段的**追踪 ID**：与 App 侧 `RewriteRequest.traceId` 同一套算法
  * （`src/core/rewrite.ts` 的 `traceIdOf`，FNV-1a 双通道）。
  * 纪律第 4 条：「所有 AI 响应保存 prompt 版本、policy snapshot、模型和 **traceId**」——
@@ -263,7 +264,7 @@ ${vocabBlock}
 const TEACHER = arg('--teacher', process.env.LAYERTEXT_TEACHER ?? process.env.USER ?? 'unknown');
 const RUN = await SHARED.readRunIdentity({ out: OUT_BASE, work: P.调适工作区 }, { teacher: TEACHER, tier: TAG }, { runId: arg('--run', undefined) });
 
-const { traceIdOf } = await import(`${REPO}/dist/src/core/rewrite.js`);
+const { traceIdOf } = await import(`${distOf(REPO)}/src/core/rewrite.js`);
 const BOOK_VERSION = RUN.runId || `${P.书名}-${P.版本 ?? 'v1'}`;
 /* 本运行用的**词库快照版本**（纪律第 4 条要的 "policy snapshot"）。
  * 取自清单里记的那一版——清单是唯一记着"这次用哪版词库"的地方。

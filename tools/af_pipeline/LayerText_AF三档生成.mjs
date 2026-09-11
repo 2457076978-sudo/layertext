@@ -9,6 +9,7 @@ import { execSync } from 'node:child_process';
 import { join } from 'node:path';
 
 const SHARED = await import('./LayerText_AF词表与词典.mjs');
+const { distOf } = SHARED;
 const P = SHARED.loadProject();
 const { loadLexicon } = SHARED;
 const REPO = P.引擎目录;
@@ -20,8 +21,8 @@ const DATE = P.日期;
 const MODEL = 'deepseek-chat'; // 非思考型（v4-flash 思考型复杂指令失控两次实证）
 const CFG = JSON.parse(readFileSync(`${process.env.HOME}/.layertext.json`, 'utf-8'));
 const KEY = execSync('security find-generic-password -s layertext.apikey -w').toString().trim();
-const { splitChapter } = await import(`${REPO}/dist/src/core/textpipe.js`);
-const { runQc } = await import(`${REPO}/dist/src/core/qc.js`);
+const { splitChapter } = await import(`${distOf(REPO)}/src/core/textpipe.js`);
+const { runQc } = await import(`${distOf(REPO)}/src/core/qc.js`);
 // 词表 + 本书专名（专名不计 OOV）——2026-09-10：原先只喂词库，Napoleon 等被算成生词
 const LEX = await loadLexicon(P);
 
@@ -39,8 +40,8 @@ const TIERS = {
   B: { key: 'B', label: 'B层（基础）', ratio: 0.6, maxLen: 14, retryLine: 0.48, clsTag: 'B层60' },
 };
 
-const { makeResolver, dirOfPath } = await import(`${REPO}/dist/src/core/manifest.js`);
-const { atomicWriteFileSync: writeAtomic } = await import(`${REPO}/dist/src/core/files.js`);
+const { makeResolver, dirOfPath } = await import(`${distOf(REPO)}/src/core/manifest.js`);
+const { atomicWriteFileSync: writeAtomic } = await import(`${distOf(REPO)}/src/core/files.js`);
 /* 正文与产物一律**原子写**（先写同目录临时文件再 rename）。
  * writeFileSync 的语义是「截断 → 写」，中途失败会留下**半份正文**——
  * 对教师唯一的一份稿，半份比没有更糟：没有你知道丢了，半份看起来像改坏了，

@@ -6,15 +6,19 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+/* 共享模块要**最先**导入：下面这些引擎模块路径都经 `distOf()`，
+ * 而 `distOf` 就在它里面——晚一行就是 TDZ，脚本一跑就 `ReferenceError`。 */
+const { distOf } = await import('./LayerText_AF词表与词典.mjs');
+
 const P = (await import('./LayerText_AF词表与词典.mjs')).loadProject();
 const REPO = P.引擎目录;
 const SRC_BASE = P.原文目录;
 const OUT_BASE = P.产物目录;
 const DATE = P.日期;
 
-const { splitChapter, extractParas, sentsOf } = await import(`${REPO}/dist/src/core/textpipe.js`);
-const { alignSentencePairs } = await import(`${REPO}/dist/src/core/align.js`);
-const { runQc } = await import(`${REPO}/dist/src/core/qc.js`);
+const { splitChapter, extractParas, sentsOf } = await import(`${distOf(REPO)}/src/core/textpipe.js`);
+const { alignSentencePairs } = await import(`${distOf(REPO)}/src/core/align.js`);
+const { runQc } = await import(`${distOf(REPO)}/src/core/qc.js`);
 const { loadLexicon, loadDict, chapterNames } = await import('./LayerText_AF词表与词典.mjs');
 /* 章节名从共享模块取（**不再在 10 个脚本里各抄一份 `['一'…'十']`**）：
  * 那份抄写写死了"十章"，换一本 12 章的书会拼出 `第undefined章` 而**照常报成功**。
@@ -89,8 +93,8 @@ const CN_ALL = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '
 const CHAPTER_IDS = argOf('--chapters', '')
   ? argOf('--chapters').split(',').map((x) => Number(x.trim())).filter((n) => n >= 1 && n <= 10)
   : CN_ALL.slice(0, Number(P.章数 ?? 10)).map((_, i) => i + 1);
-const { makeResolver } = await import(`${REPO}/dist/src/core/manifest.js`);
-const { atomicWriteFileSync: writeAtomic } = await import(`${REPO}/dist/src/core/files.js`);
+const { makeResolver } = await import(`${distOf(REPO)}/src/core/manifest.js`);
+const { atomicWriteFileSync: writeAtomic } = await import(`${distOf(REPO)}/src/core/files.js`);
 /* 正文与产物一律**原子写**（先写同目录临时文件再 rename）。
  * writeFileSync 的语义是「截断 → 写」，中途失败会留下**半份正文**——
  * 对教师唯一的一份稿，半份比没有更糟：没有你知道丢了，半份看起来像改坏了，

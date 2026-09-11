@@ -11,7 +11,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { loadLexicon } from './LayerText_AF词表与词典.mjs';
+import { distOf, loadLexicon } from './LayerText_AF词表与词典.mjs';
 
 const P = (await import('./LayerText_AF词表与词典.mjs')).loadProject();
 const LTR = P.引擎目录;
@@ -19,8 +19,8 @@ const SRC_BASE = P.原文目录;
 const OUT_BASE = P.产物目录;
 const DATE = P.日期;
 
-const { splitChapter, extractParas, sentsOf } = await import(`${LTR}/dist/src/core/textpipe.js`);
-const { runQc } = await import(`${LTR}/dist/src/core/qc.js`);
+const { splitChapter, extractParas, sentsOf } = await import(`${distOf(LTR)}/src/core/textpipe.js`);
+const { runQc } = await import(`${distOf(LTR)}/src/core/qc.js`);
 // 词表 + 本书专名（专名不计 OOV）——2026-09-10：原先只喂词库，专名被算成生词
 const LEX = await loadLexicon(P);
 
@@ -44,7 +44,7 @@ const CHAPTER_IDS = argOf('--chapters', '')
   ? argOf('--chapters').split(',').map((x) => Number(x.trim())).filter((n) => n >= 1 && n <= 10)
   : CN_ALL.slice(0, Number(P.章数 ?? 10)).map((_, i) => i + 1);
 const CH_NAME = (ci) => `第${CN_ALL[ci - 1]}章`;
-const { makeResolver } = await import(`${LTR}/dist/src/core/manifest.js`);
+const { makeResolver } = await import(`${distOf(LTR)}/src/core/manifest.js`);
 /* ── 路径一律经清单解析（总计划阶段 3「最关键的迁移」）─────────────────────
  * 「把路径解析集中到一个 `Resolver`，**禁止业务代码拼目录**」。
  * 本脚本原来用 `join(OUT_BASE, ch, `原文_${tag}_${DATE}.md`)` 这类手拼——
@@ -112,8 +112,8 @@ for (const t of TIERS) {
 /* 定位：两条轴分开说（《审查报告 v4_方向》）。
  * 这个产品的核心机制是"难词就地加中文注释"——它降低的是**理解门槛**，不是**阅读负荷**。
  * 合成一个"覆盖率 98%"去讲，买家会以为文本变简单了。所以抬头必须两个数、两个名字。 */
-const { positioningOf, POSITIONING_LINE } = await import(`${LTR}/dist/src/core/positioning.js`);
-const { atomicWriteFileSync: writeAtomic } = await import(`${LTR}/dist/src/core/files.js`);
+const { positioningOf, POSITIONING_LINE } = await import(`${distOf(LTR)}/src/core/positioning.js`);
+const { atomicWriteFileSync: writeAtomic } = await import(`${distOf(LTR)}/src/core/files.js`);
 /* 正文与产物一律**原子写**（先写同目录临时文件再 rename）。
  * writeFileSync 的语义是「截断 → 写」，中途失败会留下**半份正文**——
  * 对教师唯一的一份稿，半份比没有更糟：没有你知道丢了，半份看起来像改坏了，

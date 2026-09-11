@@ -24,6 +24,7 @@ import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 
 const SHARED = await import('./LayerText_AF词表与词典.mjs');
+const { distOf } = SHARED;
 const { loadProject, loadLexicon, loadDict, appendDict, loadKbGloss } = SHARED;
 const P = loadProject();
 const REPO = P.引擎目录;
@@ -37,7 +38,7 @@ const CN = SHARED.chapterNames(P);
 const MODEL = 'deepseek-chat';
 const TAGS = { A: 'A层85', M: 'M层75', B: 'B层60' };
 
-const { makeResolver } = await import(`${REPO}/dist/src/core/manifest.js`);
+const { makeResolver } = await import(`${distOf(REPO)}/src/core/manifest.js`);
 /* ── 路径一律经清单解析（总计划阶段 3「最关键的迁移」）─────────────────────
  * 「把路径解析集中到一个 `Resolver`，**禁止业务代码拼目录**」。
  * 本脚本原来用 `join(OUT_BASE, ch, `原文_${tag}_${DATE}.md`)` 这类手拼——
@@ -81,7 +82,7 @@ const TARGET = (() => {
   return def;
 })();
 
-const { runQc } = await import(`${REPO}/dist/src/core/qc.js`);
+const { runQc } = await import(`${distOf(REPO)}/src/core/qc.js`);
 const LEX = await loadLexicon(P);
 const DICT = loadDict(P.词典路径);
 const KB = loadKbGloss(P.知识库路径);

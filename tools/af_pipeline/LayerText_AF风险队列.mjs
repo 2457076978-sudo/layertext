@@ -27,6 +27,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 const SHARED = await import('./LayerText_AF词表与词典.mjs');
+const { distOf } = SHARED;
 const P = SHARED.loadProject();
 const REPO = P.引擎目录;
 const SRC_BASE = P.原文目录;
@@ -77,17 +78,17 @@ const CH_IDS = SCOPE.chapters.length
 
 if (!TIERS.length) { console.error('✗ --tier 只能是 A / M / B 的组合'); process.exit(2); }
 
-const { gateSegment, GATE_RULES } = await import(`${REPO}/dist/src/core/segmentgate.js`);
-const { buildRiskQueue, oneHourPlan } = await import(`${REPO}/dist/src/core/riskqueue.js`);
-const { parsePlotBaseline, plotLine } = await import(`${REPO}/dist/src/core/plotweight.js`);
-const { actionOf } = await import(`${REPO}/dist/src/core/riskaction.js`);
-const { parseDoc } = await import(`${REPO}/dist/src/core/docast.js`);
-const { runQc } = await import(`${REPO}/dist/src/core/qc.js`);
+const { gateSegment, GATE_RULES } = await import(`${distOf(REPO)}/src/core/segmentgate.js`);
+const { buildRiskQueue, oneHourPlan } = await import(`${distOf(REPO)}/src/core/riskqueue.js`);
+const { parsePlotBaseline, plotLine } = await import(`${distOf(REPO)}/src/core/plotweight.js`);
+const { actionOf } = await import(`${distOf(REPO)}/src/core/riskaction.js`);
+const { parseDoc } = await import(`${distOf(REPO)}/src/core/docast.js`);
+const { runQc } = await import(`${distOf(REPO)}/src/core/qc.js`);
 const LEX = await SHARED.loadLexicon(P);
 const DICT = SHARED.loadDict(P.词典路径);
 const { segmentList } = SHARED;
-const { makeResolver, dirOfPath } = await import(`${REPO}/dist/src/core/manifest.js`);
-const { annotatableOf } = await import(`${REPO}/dist/src/core/segmentgate.js`);
+const { makeResolver, dirOfPath } = await import(`${distOf(REPO)}/src/core/manifest.js`);
+const { annotatableOf } = await import(`${distOf(REPO)}/src/core/segmentgate.js`);
 const wc = (t) => (t.match(/[A-Za-z][A-Za-z'-]*/g) ?? []).length;
 
 const warnings = [];

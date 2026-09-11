@@ -7,6 +7,10 @@ import { readFileSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import { join } from 'node:path';
 
+/* 共享模块要**最先**导入：下面这些引擎模块路径都经 `distOf()`，
+ * 而 `distOf` 就在它里面——晚一行就是 TDZ，脚本一跑就 `ReferenceError`。 */
+const { distOf } = await import('./LayerText_AF词表与词典.mjs');
+
 const P = (await import('./LayerText_AF词表与词典.mjs')).loadProject();
 const REPO = P.引擎目录;
 const SRC_BASE = P.原文目录;
@@ -16,9 +20,9 @@ const MODEL = 'deepseek-chat';
 
 const CFG = JSON.parse(readFileSync(`${process.env.HOME}/.layertext.json`, 'utf-8'));
 const KEY = execSync('security find-generic-password -s layertext.apikey -w').toString().trim();
-const { splitChapter, extractParas, sentsOf } = await import(`${REPO}/dist/src/core/textpipe.js`);
-const { runQc } = await import(`${REPO}/dist/src/core/qc.js`);
-const { alignSentencePairs } = await import(`${REPO}/dist/src/core/align.js`);
+const { splitChapter, extractParas, sentsOf } = await import(`${distOf(REPO)}/src/core/textpipe.js`);
+const { runQc } = await import(`${distOf(REPO)}/src/core/qc.js`);
+const { alignSentencePairs } = await import(`${distOf(REPO)}/src/core/align.js`);
 // 词表/词典集中一份（2026-09-10：三份拷贝各漏 clover/squealer/mollie，才注出"三叶草""告密者"）
 const { makeKnownChecker, loadDict, appendDict, loadLexicon, chapterNames } = await import('./LayerText_AF词表与词典.mjs');
 /* 章节名从共享模块取（**不再在 10 个脚本里各抄一份 `['一'…'十']`**）：
@@ -37,8 +41,8 @@ const NEVER_ANNOTATE = new Set(['chapter']); // 正文里的 "Chapter N" 标题�
 
 const TAGS = { A: 'A层85', M: 'M层75', B: 'B层60' };
 
-const { makeResolver } = await import(`${REPO}/dist/src/core/manifest.js`);
-const { atomicWriteFileSync: writeAtomic } = await import(`${REPO}/dist/src/core/files.js`);
+const { makeResolver } = await import(`${distOf(REPO)}/src/core/manifest.js`);
+const { atomicWriteFileSync: writeAtomic } = await import(`${distOf(REPO)}/src/core/files.js`);
 /* 正文与产物一律**原子写**（先写同目录临时文件再 rename）。
  * writeFileSync 的语义是「截断 → 写」，中途失败会留下**半份正文**——
  * 对教师唯一的一份稿，半份比没有更糟：没有你知道丢了，半份看起来像改坏了，

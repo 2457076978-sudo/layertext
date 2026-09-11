@@ -7,6 +7,10 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import { join } from 'node:path';
 
+/* 共享模块要**最先**导入：下面这些引擎模块路径都经 `distOf()`，
+ * 而 `distOf` 就在它里面——晚一行就是 TDZ，脚本一跑就 `ReferenceError`。 */
+const { distOf } = await import('./LayerText_AF词表与词典.mjs');
+
 const P = (await import('./LayerText_AF词表与词典.mjs')).loadProject();
 const REPO = P.引擎目录;
 const BASE = P.原文目录;
@@ -24,18 +28,21 @@ const SEG_KEEP = 0.85; // 段级守恒线：单段 < 原段 85% 触发重试
 const CFG = JSON.parse(readFileSync(`${process.env.HOME}/.layertext.json`, 'utf-8'));
 const MODEL = 'deepseek-chat'; // 非思考型（v4-flash 思考型在复杂指令下会把推理/续写混入正文——09-09 与本次第一章实跑双重实证）
 const KEY = execSync('security find-generic-password -s layertext.apikey -w').toString().trim();
-const { splitChapter } = await import(`${REPO}/dist/src/core/textpipe.js`);
-const { buildLexicon } = await import(`${REPO}/dist/src/core/lexicon.js`);
-const { runQc } = await import(`${REPO}/dist/src/core/qc.js`);
-const LEX = buildLexicon({ vocabCsvTexts: [readFileSync(VOCAB, 'utf-8')] });
-const RULES = readFileSync(join(BASE, '校正规则_v1.md'), 'utf-8');
+/* 共享模块要**最先**导入：下面这些引擎模块路径都经 `distOf()`，
+ * 而 `distOf` 就在它里面——晚一行就是 TDZ，脚本一跑就 `ReferenceError`。 */
+const SHARED = await import('./LayerText_AF词表与词典.mjs');
 
+const { splitChapter } = await import(`${distOf(REPO)}/src/core/textpipe.js`);
+const { buildLexicon } = await import(`${distOf(REPO)}/src/core/lexicon.js`);
+const { runQc } = await import(`${distOf(REPO)}/src/core/qc.js`);
+const LEX = buildLexicon({ vocabCsvTexts: [readFileSync(VOCAB, 'utf-8')] });
 /* 章节名从共享模块取（**不再在 10 个脚本里各抄一份 `['一'…'十']`**）：
  * 那份抄写写死了"十章"，换一本 12 章的书会拼出 `第undefined章` 而**照常报成功**。
  * 现在优先级是「配置 > 原文目录 > 默认（第N章 × 章数）」，
  * 最后那层逐字符复现旧行为，所以既没配置、也没有可扫目录的老项目结果不变。 */
-const SHARED = await import('./LayerText_AF词表与词典.mjs');
 const CN = SHARED.chapterNames(P);
+const RULES = readFileSync(join(BASE, '校正规则_v1.md'), 'utf-8');
+
 
 /** AF 专名（人物/动物/地名/作品名）——QC 口径不计 OOV（与教师专名表机制同语义） */
 const PROPER = P.PROPER;

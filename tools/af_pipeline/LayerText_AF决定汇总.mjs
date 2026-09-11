@@ -25,6 +25,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } fr
 import { join } from 'node:path';
 
 const SHARED = await import('./LayerText_AF词表与词典.mjs');
+const { distOf } = SHARED;
 const P = SHARED.loadProject();
 const REPO = P.引擎目录;
 const OUT_BASE = P.产物目录;
@@ -35,13 +36,13 @@ const arg = (n, d) => { const i = argv.indexOf(n); return i >= 0 ? argv[i + 1] :
 const has = (n) => argv.includes(n);
 
 const { buildProposals, parseDecisionLog, summarizeDecisions, contestedItems, PROPOSAL_LABEL } =
-  await import(`${REPO}/dist/src/core/decision.js`);
+  await import(`${distOf(REPO)}/src/core/decision.js`);
 /** SQLite 决定索引：JSONL 仍是正本，索引随时可重建（报告 §四：查询"某位教师对某词的所有决定"）。
  *  拿不到 node:sqlite 时自动降级为"不可用"，查询回落 JSONL 全扫。 */
-const { openDecisionStore } = await import(`${REPO}/dist/src/core/decisiondb.js`);
-const { productMetrics } = await import(`${REPO}/dist/src/core/productmetrics.js`);
-const { makeResolver } = await import(`${REPO}/dist/src/core/manifest.js`);
-const { atomicWriteFileSync: writeAtomic } = await import(`${REPO}/dist/src/core/files.js`);
+const { openDecisionStore } = await import(`${distOf(REPO)}/src/core/decisiondb.js`);
+const { productMetrics } = await import(`${distOf(REPO)}/src/core/productmetrics.js`);
+const { makeResolver } = await import(`${distOf(REPO)}/src/core/manifest.js`);
+const { atomicWriteFileSync: writeAtomic } = await import(`${distOf(REPO)}/src/core/files.js`);
 /* 正文与产物一律**原子写**（先写同目录临时文件再 rename）。
  * writeFileSync 的语义是「截断 → 写」，中途失败会留下**半份正文**——
  * 对教师唯一的一份稿，半份比没有更糟：没有你知道丢了，半份看起来像改坏了，

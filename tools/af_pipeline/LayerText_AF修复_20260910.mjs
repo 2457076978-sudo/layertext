@@ -18,7 +18,7 @@
  */
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { loadProject, makeKnownChecker, loadKbGloss } from './LayerText_AF词表与词典.mjs';
+import { distOf, loadProject, makeKnownChecker, loadKbGloss } from './LayerText_AF词表与词典.mjs';
 
 const P = loadProject();
 const PROPER = P.PROPER;
@@ -35,7 +35,7 @@ const argOf = (n, d) => { const i = argv.indexOf(n); return i >= 0 ? argv[i + 1]
 const TAGS_ALL = { A: 'A层85', M: 'M层75', B: 'B层60' };
 const TAGS = (argOf('--tier', 'A,M,B')).split(',').map((x) => x.trim().toUpperCase())
   .map((k) => TAGS_ALL[k]).filter(Boolean);
-const { makeResolver } = await import(`${P.引擎目录}/dist/src/core/manifest.js`);
+const { makeResolver } = await import(`${distOf(P.引擎目录)}/src/core/manifest.js`);
 /* ── 路径一律经清单解析（总计划阶段 3「最关键的迁移」）─────────────────────
  * 「把路径解析集中到一个 `Resolver`，**禁止业务代码拼目录**」。
  * 本脚本原来用 `join(OUT_BASE, ch, `原文_${tag}_${DATE}.md`)` 这类手拼——
@@ -88,8 +88,8 @@ const pOf = (ch, tag) => RR(tag).any('正文', { chapter: ch });
  *  原先这里自己写了一条 NESTED_RE：它只能处理一层嵌套，而且和引擎其它地方的
  *  "什么算一条注释"口径不完全一致——又是一次口径漂移。
  *  现在按括号深度扫描（能处理任意深度），并保留 `word（第一个中文串）` 的既有语义。 */
-const { flattenNestedAnnotations } = await import(`${P.引擎目录}/dist/src/core/docast.js`);
-const { atomicWriteFileSync: writeAtomic } = await import(`${P.引擎目录}/dist/src/core/files.js`);
+const { flattenNestedAnnotations } = await import(`${distOf(P.引擎目录)}/src/core/docast.js`);
+const { atomicWriteFileSync: writeAtomic } = await import(`${distOf(P.引擎目录)}/src/core/files.js`);
 /* 正文与产物一律**原子写**（先写同目录临时文件再 rename）。
  * writeFileSync 的语义是「截断 → 写」，中途失败会留下**半份正文**——
  * 对教师唯一的一份稿，半份比没有更糟：没有你知道丢了，半份看起来像改坏了，
