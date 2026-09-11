@@ -120,6 +120,19 @@ export interface SegmentGateInput {
   dict?: Map<string, string>;
   /** 本段应有的段落编号（形如 P07）。模型漏写/写错段号时按它归一，保证段落对齐不错位 */
   markerId?: string;
+  /**
+   * 调用方已判定"全篇别处注过、这里又注了"的词。
+   * 门禁自己只看得到手里这一段的文本（`idx.duplicates` 是**段内**重复），
+   * 而"全篇一词一注"要跨段才知道——这份账本只有调用方有，所以由它传进来，
+   * 由门禁统一算进 ANNO-02。**不另开规则号**：同一条规则只该有一个判定处。
+   */
+  reannotated?: string[];
+  /**
+   * 判定粒度：`segment`（默认，整段）｜`sentence`（单句改写）。
+   * 单句 scope 下**不补段号**——给一句话前面加 `[P01]` 是错的；
+   * 且调用方（`src/core/rewrite.ts`）会传 `target: 0` 让段级的长度约束彻底不参与。
+   */
+  scope?: 'segment' | 'sentence';
 }
 
 /** 词数（与管线各处一致：字母起首的英文词） */
@@ -129,12 +142,23 @@ export const wordCount = (t: string): number => (t.match(/[A-Za-z][A-Za-z'-]*/g)
  *  「原文的 03 在改写里找不到」这类纯假警报（实测于 2026-09-11 风险队列首跑）。 */
 export const stripMarkers = (t: string): string => t.replace(/\[P\d+\]/g, ' ');
 
-/** 单段分句：包成最小章节喂给 textpipe，保证与 QC 的分句口径完全一致 */
+/** 分句：包成最小章节喂给 textpipe，保证与 QC 的分句口径完全一致。
+ *
+ *  ⚠ 没有 `[P##]` 标记时必须**退化成"整块当一段"**，不能返回空数组。
+ *  `extractParas` 是按段标记切段的，没有标记就一段都切不出来——
+ *  于是 `overLenSentences` 恒为空、**SENT-01（超长句）永远不会触发**。
+ *  这个坑是在接单句改写（`src/core/rewrite.ts`，传进来的是光秃秃一句话）时才暴露的：
+ *  门禁看起来在跑、指标也在算，实际那条规则一直是死的。 */
 export function segmentSentences(text: string): string[] {
   const md = `## Chapter One\n\n${text}\n`;
-  const paras = extractParas(splitChapter(md).body);
-  return paras.flatMap((p) => sentsOf(p, p.includes('Beasts of England')));
+  const body = splitChapter(md).body;
+  const paras = extractParas(body);
+  const blocks = paras.length ? paras : [body];
+  return blocks.flatMap((p) => sentsOf(p, p.includes('Beasts of England')));
 }
+
+/** 去掉模型可能残留的「查词」回合标记（不补段号）——单句改写用 */
+export const stripLookup = (text: string): string => text.replace(/【查[^】]*】/g, '').trim();
 
 /** 去掉模型可能残留的「查词」回合标记，并把段落标记归一到**该段应有的编号**。
  *
@@ -144,7 +168,7 @@ export function segmentSentences(text: string): string[] {
  *  所以这里把开头的标记强制改写成本段应有的编号。**只有明确给出 markerId 时才改写**：
  *  不给就保持原样，免得把已有的正确段号踩成 P01。 */
 export function normalizeSegmentBody(text: string, markerId?: string): string {
-  const clean = text.replace(/【查[^】]*】/g, '').trim();
+  const clean = stripLookup(text);
   if (/^\[P\d+\]/.test(clean)) return markerId ? clean.replace(/^\[P\d+\]/, `[${markerId}]`) : clean;
   return `[${markerId ?? 'P01'}] ${clean}`;
 }
@@ -154,7 +178,7 @@ export function normalizeSegmentBody(text: string, markerId?: string): string {
  * 纯函数——同样的输入永远同样的判定，可单测、可回放、可解释。
  */
 export function gateSegment(input: SegmentGateInput): SegmentVerdict {
-  const body = normalizeSegmentBody(input.text, input.markerId);
+  const body = input.scope === 'sentence' ? stripLookup(input.text) : normalizeSegmentBody(input.text, input.markerId);
   const words = wordCount(body);
   const sents = segmentSentences(body);
   const overLenSentences = sents.filter((s) => wordCount(s) > input.maxLen);
@@ -222,10 +246,9 @@ export function gateSegment(input: SegmentGateInput): SegmentVerdict {
       rewritten: body.slice(0, 300),
     });
   }
-  if (idx.duplicates.length) {
-    push('ANNO-02', `同词重复注释 ${idx.duplicates.length} 处（全篇一个词只注一次）`, {
-      words: [...new Set(idx.duplicates.map((d) => d.word))],
-    });
+  const dupWords = [...new Set([...idx.duplicates.map((d) => d.word), ...(input.reannotated ?? [])])];
+  if (dupWords.length) {
+    push('ANNO-02', `同词重复注释：${dupWords.join('、')}（全篇一个词只注一次）`, { words: dupWords });
   }
   if (idx.conflicts.length) {
     push('ANNO-03', `注释释义与统一词典冲突 ${idx.conflicts.length} 处`, { conflicts: idx.conflicts.slice(0, 20) });

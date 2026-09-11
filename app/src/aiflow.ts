@@ -20,6 +20,9 @@ import { buildSystemPrompt, buildRewriteSentencePrompt, promptSetVersion, simpli
 import { RULE_BY_TYPE, appendCsvLine } from './main.js';
 import { showAiSettings } from './settings.js';
 import { applyZhAnnotations, applyWordSimplifications } from './pipew.js';
+import { buildAppPolicy } from './rewritegate.js';
+import { checkRewrite } from '../../src/core/rewrite.js';
+import { findProjectConfig } from './datapanel.js';
 
 export /**
  * 请求 AI 修订候选。
@@ -54,6 +57,50 @@ ${marks || '（无标记）'}`;
 /** 在正文中唯一定位原句（实现已抽至 pure.ts locateOriginal，此处按会话包装） */
 export function locateSent(session: FileSession, original: string): { pi: number; si: number } | null {
   return locateOriginal(session.md, original);
+}
+
+/**
+ * 把一条改写候选送进**与批量管线同一个**门禁。
+ *
+ * 成本策略（v4 方向："合并契约与门禁，分离上下文与成本"）：
+ * App 不背 19.6k tokens 的全量开场，只组一份**局部切片**——
+ * 本书专名 + 本句命中的那几条释义 + 已注词账本（账本只在本地判定用，不进 prompt）。
+ * 缺什么由 `missingPolicy` 如实报出来，而不是假装查过。
+ */
+async function gateRewriteCandidate(revised: string, source: string) {
+  const s = activeSession();
+  if (!s) return null;
+  try {
+    const cfg = s.sourcePath ? (await findProjectConfig(s.sourcePath.replace(/\/[^/]*$/, '')))?.config ?? null : null;
+    const { policy } = await buildAppPolicy({
+      currentText: s.md,
+      sourcePath: s.sourcePath ?? null,
+      known: S.currentKnown,
+      properNames: S.properRows,
+      config: cfg,
+      tier: '自定义',
+      maxLen: simplifyMaxLen(),
+      involved: [...new Set((source + ' ' + revised).match(/[A-Za-z][A-Za-z'-]*/g) ?? [])],
+    });
+    // promptSetVersion 是异步的（要读提示词文件）——先取出来，别把 Promise 塞进 traceId
+    const promptVersion = await promptSetVersion();
+    return checkRewrite(
+      {
+        source,
+        intent: '单句改写',
+        scope: 'sentence',
+        tier: '自定义',
+        bookVersion: s.sourcePath ?? 'unsaved',
+        promptVersion,
+      },
+      policy,
+      revised,
+    );
+  } catch {
+    // 门禁自身出错**不允许**变成"放行"：宁可退回建议页让人看，也不静默写正文
+    setStatus('⚠ 改写门禁未能运行（本地检查出错），本条只进建议页、不直写正文', 'err');
+    return null;
+  }
 }
 
 /** 改写文本复核（多句拆分逐句检测，超长=最长一句超限） */
@@ -464,6 +511,12 @@ export async function aiRewriteSentence(pi: number, si: number, intent: string, 
     }
     const one = picked;
     const risk = checkRev(one.revised);
+    /* ★ 改写门禁（《审查报告 v4_方向》残余 P0）：
+     * 原先到这里就直接进正文了，而本地只查了句法黑名单——
+     * 于是"改写引入了一个超纲词却没加注""把第 1 章注过的词又注了一遍"
+     * "用了和统一词典不一致的释义"这三类不一致**可以静默写进书稿**。
+     * 现在：同一套 gateSegment（与批量管线共用），不过就不许直写。 */
+    const gate = await gateRewriteCandidate(one.revised, sent);
     const g: Suggestion = {
       markId: autoMarkId ?? 'rw-' + Date.now().toString(36),
       type: intent || '词改写',
@@ -473,7 +526,24 @@ export async function aiRewriteSentence(pi: number, si: number, intent: string, 
       alternative: one.alternative,
       status: 'pending',
       check: { passive: risk.passive, relcl: risk.relcl, pastperf: risk.pastperf, overlong: risk.overlong },
+      gate: gate
+        ? {
+            status: gate.status,
+            traceId: gate.traceId,
+            reasons: gate.blockedReasons,
+            missingPolicy: gate.missingPolicy,
+            warns: gate.checks.warns.map((w) => `${w.ruleId} ${w.message}`),
+          }
+        : undefined,
     };
+    // 未过门禁：即使是"标记即改写"（原本直写）也不许写正文，改走建议页让教师看原因
+    if (gate?.status === 'blocked') {
+      S.suggestions.push(g);
+      hidePop();
+      attachInlineSuggestions();
+      setStatus(`⛔ 未过门禁，未写入正文：${gate.blockedReasons.join('；')}——已放进「修订建议」页`, 'err');
+      return;
+    }
     if (autoMarkId) {
       hidePop();
       await acceptSuggestion(g, { scene: '标记即改写', outcome: '直改' });

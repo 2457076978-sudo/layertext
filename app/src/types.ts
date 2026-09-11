@@ -133,6 +133,21 @@ export interface Suggestion {
   pi?: number;
   si?: number;
   status?: 'pending' | 'accepted' | 'rejected';
+  /**
+   * 改写门禁结论（`src/core/rewrite.ts`）：与批量管线**同一个判定**。
+   * `blocked` 的候选**不许直写正文**，只进建议页并说明原因。
+   * 这一条是《审查报告 v4_方向》点出的残余 P0：改造前 App 单句改写只查句法黑名单。
+   */
+  gate?: {
+    status: 'candidate' | 'blocked';
+    traceId: string;
+    /** 被拦下的规则与原因，直接进界面文案 */
+    reasons: string[];
+    /** 这次判定在缺哪些策略下做的（空数组 = 策略齐备）——**可见地缺** */
+    missingPolicy: string[];
+    /** 待判断项（未拦下但值得人看一眼） */
+    warns: string[];
+  };
 }
 
 /** 变更日志 CSV 表头（与原型审计 schema 一致） */
