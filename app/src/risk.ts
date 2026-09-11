@@ -13,7 +13,7 @@
  */
 
 import { buildProposals, makeDecisionEvent, parseDecisionLog, summarizeDecisions, toDecisionLine, type DecisionEvent, type DecisionKind } from '../../src/core/decision.js';
-import { chooseIdentity, contentHash, LATEST_POINTER_NAME, makeResolver, pointerNameOf, TIER_TAG, type Layout, type ManifestPointer } from '../../src/core/manifest.js';
+import { chooseIdentity, contentHash, dirOfPath, LATEST_POINTER_NAME, makeResolver, pointerNameOf, TIER_TAG, type Layout, type ManifestPointer } from '../../src/core/manifest.js';
 import { parseDictCsv } from '../../src/core/dictmerge.js';
 import { plotLine } from '../../src/core/plotweight.js';
 import { POSITIONING_LINE } from '../../src/core/positioning.js';
@@ -23,6 +23,33 @@ import { actionOf, REVERT_ACTION, type RuleAction } from '../../src/core/riskact
 import { applyChange, applyChangeBatch, currentVersionOf, parseVersionLog, recordOnly, type ChangeResult, type TxIo, type VersionTarget } from '../../src/core/version.js';
 /** 有确定性动作的规则（批量应用只在这几类上给） */
 const MUTATING_RULES = ['ANNO-01', 'ANNO-02', 'ANNO-03', 'AST-02'];
+/**
+ * 任务工作台（《LayerText工程优化总计划》阶段 2）：暂停/恢复、今日任务、变更历史、可解释性。
+ * **判定语义（什么算办完、还剩什么）全部来自引擎**，本文件不再自己定义一遍——
+ * 见下面 `TERMINAL_DECISIONS` / `pendingItems` 一带的说明。
+ */
+import {
+  currentPause,
+  dayOf,
+  eventRef,
+  explainState,
+  historyRows,
+  isSettled,
+  latestDecisionMap,
+  parseWorkbenchLog,
+  pauseMarker,
+  pausedDrift,
+  pendingOf,
+  resumeCheck,
+  resumeMarker,
+  taskStateOf,
+  TERMINAL_KINDS,
+  toWorkbenchLine,
+  todayTasks,
+  undoneEventRefs,
+  type ItemHistory,
+  type WorkbenchMarker,
+} from '../../src/core/workbench.js';
 import { batchImpact, batchPreview, groupQueue, sessionState, subjectOf, type RiskItem, type RiskQueue, type TaskGroup } from '../../src/core/riskqueue.js';
 import { oneHourPlan } from '../../src/core/riskqueue.js';
 import { GATE_RULES, type GateCategory } from '../../src/core/segmentgate.js';
@@ -79,23 +106,24 @@ export function parseQueueFile(text: string): RiskQueueFile | null {
  * ⚠ `rejected`（**动作没执行成**）**不算**——它是"系统没做成"，不是"教师判过了"。
  * 把它也算成已决，就会出现最坏的那种两头空：**卡片消失了、正文也没变**，
  * 而教师以为这件事已经办完（v4 方向明确要求"失败时不得让卡片消失"）。
+ *
+ * ★ 判定语义已**下沉到引擎**（`src/core/workbench.ts`：`TERMINAL_KINDS` / `isSettled` / `pendingOf`）。
+ * 理由与 `subjectOf` 当初下沉同源：任务工作台（暂停恢复、今日任务、可解释性）也要回答
+ * "还剩什么、办完没有"，而"待办"**只能有一个定义**——两份就会有一天分成两半，
+ * 那时"暂停 10 分钟后还是同一批任务"这句话就不再成立。
+ * 下面这些名字继续导出（面板、测试、命令行都在用），实现一律转出，**不再有第二份**。
  */
-export const TERMINAL_DECISIONS: DecisionKind[] = ['accept', 'reject', 'false-positive', 'edit'];
+export const TERMINAL_DECISIONS: DecisionKind[] = TERMINAL_KINDS;
 
 /** 撤销指针：`itemId + '@' + timestamp`（同一个项可以被改主意多次，要指得准） */
-export const refOf = (e: DecisionEvent): string => `${e.itemId}@${e.timestamp}`;
+export const refOf = eventRef;
 
 /** 已被撤销的引用集合（`undoOf` 指过的）。
  *  被撤销的项**回到待办**——这是"撤销不是删历史"在判定上的落点。 */
-export function undoneRefs(events: DecisionEvent[]): Set<string> {
-  const out = new Set<string>();
-  for (const e of events) if (e.decision === 'undo' && e.undoOf) out.add(e.undoOf);
-  return out;
-}
+export const undoneRefs = undoneEventRefs;
 
 /**
- * 一个项当前算不算"处理完了"。语义定死在这儿，界面与统计都从这儿取：
- *
+ * 一个项当前算不算"处理完了"：
  *   · 取**最新一条**决定（`undo` 本身不算决定，它只是把某条作废）；
  *   · 它属于终态四类、**且没有被撤销** → 算处理完；
  *   · **被撤销 = 整条作废，项回到待办**。
@@ -103,25 +131,17 @@ export function undoneRefs(events: DecisionEvent[]): Set<string> {
  * 为什么不做"回退到更早的那条"：那要教师理解一个多级撤销栈，
  * 而他心里只有"我刚才点错了，撤销一下"。界面上的撤销键也长在最新那条上——
  * 单级撤销与界面一致，多级回退只会让"现在到底算什么状态"变得说不清。
+ * 计划里那句「撤销连续发生三次时状态仍可解释（若实测需要多级，再升级为版本树）」
+ * 就是拿这条规则实测的：实测不需要版本树，见 `tests/workbench.test.ts`。
  */
-const isResolved = (d: DecisionEvent | undefined, undone?: Set<string>): boolean => d !== undefined && TERMINAL_DECISIONS.includes(d.decision) && !(undone?.has(refOf(d)) ?? false);
+const isResolved = isSettled;
+
+/** 每个项的最新一条**决定**（忽略 `undo`——它不是决定，是作废指令） */
+export const latestDecisions = latestDecisionMap;
 
 /** 队列里还有哪些没被处理完（处理完的从待办里消失，但历史事件一条不删） */
-/** 每个项的最新一条**决定**（忽略 `undo`——它不是决定，是作废指令） */
-export function latestDecisions(events: DecisionEvent[]): Map<string, DecisionEvent> {
-  const m = new Map<string, DecisionEvent>();
-  for (const e of events) {
-    if (e.decision === 'undo') continue;
-    const prev = m.get(e.itemId);
-    if (!prev || prev.timestamp <= e.timestamp) m.set(e.itemId, e);
-  }
-  return m;
-}
-
 export function pendingItems(file: RiskQueueFile, events: DecisionEvent[]): RiskItem[] {
-  const decided = latestDecisions(events);
-  const undone = undoneRefs(events);
-  return file.队列.filter((it) => !isResolved(decided.get(it.id), undone));
+  return pendingOf(file.队列, events);
 }
 
 /** 「看我判过的」：按时间倒序的已处理项（含被撤销的），供教师回头改主意 */
@@ -197,10 +217,15 @@ export interface PanelStat {
 
 export function panelStat(file: RiskQueueFile, events: DecisionEvent[], budget = 60): PanelStat {
   const decided = latestDecisions(events);
+  /* ★ 页首的"待办"必须与列表里的卡片同源：原来这里漏了 `undone`，
+   * 于是**撤销过的条目在列表里回到待办、却在页首仍算已决**——
+   * 同一屏上两个数对不上。这直接打到阶段 2 那句"重新打开仍回到同一任务状态"：
+   * 状态要是自己都说不一致，就谈不上"同一"。 */
+  const undone = undoneRefs(events);
   const items = file.队列;
-  const pending = items.filter((it) => !isResolved(decided.get(it.id)));
+  const pending = items.filter((it) => !isResolved(decided.get(it.id), undone));
   // 计时按"还没处理掉的"算：已经采纳的不该继续占用人工预算
-  const remainingMinutes = pending.filter((it) => !isResolved(decided.get(it.id))).reduce((n, it) => n + (itemMinutes(it.ruleId) ?? 0.5), 0);
+  const remainingMinutes = pending.reduce((n, it) => n + (itemMinutes(it.ruleId) ?? 0.5), 0);
   const stat = summarizeDecisions(events);
   const plan = oneHourPlan({ items, summary: file.摘要 ?? { total: items.length, blockers: 0, byRule: {}, byCategory: {}, estimatedMinutes: remainingMinutes } }, budget);
   void plan;
@@ -365,6 +390,54 @@ export async function appendDecision(paths: ProjectPaths, tier: string, event: D
   await io.write(path, prev + toDecisionLine(event));
 }
 
+/* ────────────────────── 工作台：暂停点那本账（IO） ────────────────────── */
+
+/**
+ * 暂停点写在**与决定日志并列的另一本 append-only 账**里（`_决定/工作台_<层>.jsonl`），
+ * **不写进决定日志**。为什么：决定日志是共享账本，`tools/af_pipeline/LayerText_AF决定汇总.mjs`
+ * 会整份读它去算误报率 / 撤销率 / 执行失败率 / 前 10 次操作的切分——
+ * 「暂停」不是"教师就某条队列项做的决定"，混进去会把阶段 2 点名要的那几个指标的分母挤偏，
+ * 还会让 `contestedItems` 把一个 `session-pause` 当成"反复改主意的队列项"报出来。
+ * 那条工具链不在本次改动的文件范围内，改不动也验证不了——所以宁可多一本小账。
+ * 完整理由见 `src/core/workbench.ts` 里 `WorkbenchMarker` 的注释。
+ *
+ * 路径：目录取自解析器（= 决定日志所在的那个目录），**不自己拼目录**，只多一个文件名；
+ * 层级带进文件名，否则 A 层与 M 层的暂停点会互相覆盖。
+ */
+export function workbenchLogPath(paths: ProjectPaths, identity: RunIdentity, tier: string): string {
+  return `${dirOfPath(pathsFor(paths, identity, tier).decision())}/工作台_${TAGS[tier] ?? tier}.jsonl`;
+}
+
+/** 读暂停点账本。读不到 = 从来没暂停过，是常态不是错误（与决定日志同一约定）。 */
+export async function loadWorkbenchMarkers(paths: ProjectPaths, tier: string, id?: RunIdentity): Promise<WorkbenchMarker[]> {
+  if (!io) return [];
+  const identity = id ?? (await loadRunIdentity(paths, { tier: TAGS[tier] ?? tier }));
+  try {
+    return parseWorkbenchLog(await io.read(workbenchLogPath(paths, identity, tier))).markers;
+  } catch {
+    return [];
+  }
+}
+
+/** 追加一条暂停/恢复标记。有原子追加就用它——读全文再写回去会在两个人同时按暂停时丢一条。 */
+export async function appendWorkbenchMarker(paths: ProjectPaths, tier: string, marker: WorkbenchMarker, id?: RunIdentity): Promise<void> {
+  if (!io) throw new Error('面板 IO 未注入');
+  const identity = id ?? (await loadRunIdentity(paths, { teacher: marker.teacherId, tier: TAGS[tier] ?? tier }));
+  const path = workbenchLogPath(paths, identity, tier);
+  const line = toWorkbenchLine(marker);
+  if (io.append) {
+    await io.append(path, line);
+    return;
+  }
+  let prev = '';
+  try {
+    prev = await io.read(path);
+  } catch {
+    /* 还没有这本账 = 第一次暂停（prev 保持空串） */
+  }
+  await io.write(path, prev + line);
+}
+
 /* ────────────────────── DOM 渲染 ────────────────────── */
 
 const esc = (s: string): string => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -386,6 +459,13 @@ export interface RiskRenderInput {
   budget?: number;
   /** 内部用：重渲染时不再记 session-open（否则每渲染一次写一条） */
   skipSessionOpen?: boolean;
+  /**
+   * 注入时钟（可选；不传就是真实时间）。**只用来给事件盖时间戳与显示"今天是哪天"**，
+   * 不参与任何判定——任务状态是 (队列 + 决定日志) 的纯函数，与"现在几点"无关。
+   * 存在的理由只有一个：验收要断言"暂停 10 分钟后重新打开还是同一批任务"，
+   * 真睡 10 分钟的测试不叫测试。
+   */
+  now?: () => Date;
 }
 
 /**
@@ -395,8 +475,9 @@ export interface RiskRenderInput {
  */
 export async function renderRiskPane(
   input: RiskRenderInput,
-  /** 上一次动作失败留在页首的说明（`{itemId}` 用于把那张卡标红，让它看起来"还在待办里"） */
-  flash?: { itemId: string; text: string },
+  /** 上一次动作失败留在页首的说明（`{itemId}` 用于把那张卡标红，让它看起来"还在待办里"）。
+   *  `hint` 是括号里那句补充：动作失败与"暂停期间状态变了"要用不同的话，不能共用一句。 */
+  flash?: { itemId: string; text: string; hint?: string },
 ): Promise<{ ok: boolean; message: string }> {
   const el = input.dom.getElementById('pane-risk');
   if (!el) return { ok: false, message: '缺 pane-risk 容器' };
@@ -411,16 +492,26 @@ export async function renderRiskPane(
     return { ok: false, message: error ?? '没有队列' };
   }
   const budget = input.budget ?? 60;
+  /* "现在"从这里进：面板自己**不取**系统时间，全部走 `input.now`——
+   * 一是测试要能造"10 分钟后重新打开"，二是显示用的日期与写进账本的时间戳必须同源。 */
+  const now = input.now?.() ?? new Date();
   /* 打开队列记一条事件（算"首次点击到可采纳结果的时间"要用）。
-   * 只在**这一轮还没记过**时写：面板每次重渲染都写一条的话，日志会被灌满，指标也就没意义了。 */
-  if (!input.skipSessionOpen && !events.some((e) => e.itemId === 'session-open' && e.timestamp.slice(0, 10) === new Date().toISOString().slice(0, 10))) {
+   * 只在**这一天还没记过**时写：面板每次重渲染都写一条的话，日志会被灌满，指标也就没意义了。
+   * 判据改成 `dayOf`（本地日）：原来用的是 UTC 日的字符串切片，
+   * 于是"今天开工时欠多少条"在夜里会算到前一天去。 */
+  if (!input.skipSessionOpen && !events.some((e) => e.itemId === 'session-open' && dayOf(e.timestamp) === dayOf(now))) {
     try {
-      await appendDecision(
-        input.paths,
-        input.tier,
-        sessionOpenEvent({ tier: input.tier, teacherId: input.teacherId, sourceVersion: input.paths.sourceVersion, pending: pendingItems(file, events).length }),
-        identity,
-      );
+      const opened = sessionOpenEvent({
+        tier: input.tier,
+        teacherId: input.teacherId,
+        sourceVersion: input.paths.sourceVersion,
+        pending: pendingItems(file, events).length,
+        timestamp: now.toISOString(),
+      });
+      await appendDecision(input.paths, input.tier, opened, identity);
+      /* 刚写的这一条要进本屏的 `events`：否则"今天开工时欠多少条"在**当天第一次打开**时
+       * 永远显示"还没有记录"——那个数就在这条事件的 reason 里，而这一屏正是它刚写的时候。 */
+      events.push(opened);
     } catch {
       /* 记不上不影响用队列；指标里会显示"算不出来" */
     }
@@ -433,6 +524,43 @@ export async function renderRiskPane(
   // 可观测产品指标（v4 报告「系统性偏差」一节）：全部从已有事件日志算出来，不新增埋点
   const pm = productMetrics(events);
   const planned = oneHourPlan({ items: file.队列, summary: file.摘要 }, budget);
+  /* ★ 任务工作台（阶段 2）：**任务状态现算**，绝不是"读暂停时存下来的那份快照"。
+   * `markers` 只提供"教师上次停在哪、那时是什么样"，用来**比对**（同一状态吗）。 */
+  const markers = await loadWorkbenchMarkers(input.paths, input.tier, identity);
+  const wbOpts = { now, groups: { mutatingRules: MUTATING_RULES } };
+  /* `resume.state` 就是"现在要办什么"（现算的）。下面不再另算一份——
+   * 同一屏里出现两个"待办数"正是这一批要修的那类毛病。 */
+  const resume = resumeCheck(file.队列, events, markers, wbOpts);
+  const today = todayTasks(file.队列, events, wbOpts);
+  const history = historyRows(file.队列, events);
+  const explain = explainState(file.队列, events);
+
+  /* 今日任务：它**不是**日历、**不是**截止时间（说明文字与 `workbench.ts` 里那句同源） */
+  const todayBar = `<div class="rq-today">${esc(today.text)}</div><div class="rq-hint">${esc(today.disclaimer)}</div>`;
+  /* 暂停 / 恢复入口。暂停只记一笔"我停在这儿"，**待办一条不动**——
+   * 状态由队列 + 决定日志现算，所以 10 分钟后（或 10 天后）重新打开必然是同一批任务。 */
+  const wbBar = `<div class="rq-wb">
+      ${resume.paused ? `<button class="rq-btn rq-btn-resume" data-workbench="resume">▶ 继续（回到同一任务状态）</button>` : `<button class="rq-btn rq-btn-pause" data-workbench="pause">⏸ 暂停（记住我停在哪）</button>`}
+      <span class="rq-hint">${resume.paused ? `⏸ 已暂停 · ${esc(resume.text)}${resume.cursorNote ? `｜${esc(resume.cursorNote)}` : ''}` : '暂停只记一笔"我停在这儿"，待办一条不动；过一会儿重新打开仍是同一批任务。'}</span>
+    </div>`;
+  /* 变更历史：**逐轮**，不是最新一条。「已判记录」看的是最新一条，那是另一个问题。 */
+  const historyItem = (h: ItemHistory): string => `
+      <div class="rq-history-item">
+        <div class="rq-history-head">${esc(h.item ? `${h.item.segLabel} · ${h.item.title}` : h.itemId)} <span class="rq-history-now">现在：${h.settled ? '已决' : '待办'}</span></div>
+        ${h.rounds
+          .map(
+            (r) =>
+              `<div class="rq-history-round${r.undone ? ' rq-history-undone' : ''}">第 ${r.round} 轮 ${esc(r.label)}${r.undoesRound ? `（作废第 ${r.undoesRound} 轮）` : ''}${r.undoneByRound ? `（已被第 ${r.undoneByRound} 轮撤销）` : ''}：${esc(r.before || '（空）')} → ${esc(r.after || '（空）')}${r.version ? ` · 版本 ${esc(r.version)}` : ''}</div>`,
+          )
+          .join('')}
+      </div>`;
+  const historyBar = history.length
+    ? `<details class="rq-history"><summary>变更历史（${history.length} 项 · ${history.reduce((n, h) => n + h.rounds.length, 0)} 条事件，逐轮列出）</summary>
+        <div class="rq-explain">${esc(explain.line)}</div>
+        <div class="rq-history-list">${history.slice(0, 20).map(historyItem).join('')}</div>
+        ${history.length > 20 ? `<div class="rq-hint">还有 ${history.length - 20} 项没列出来（按最近一条决定倒序，只列前 20 项）</div>` : ''}
+      </details>`
+    : '';
 
   const head = `
     <div class="rq-head">
@@ -446,6 +574,8 @@ export async function renderRiskPane(
       <div class="rq-advice">${esc(stat.advice)}｜路径布局 <b>${esc(identity.layout)}</b>${identity.runId ? `（${esc(identity.runId)}）` : ''}${identity.source ? `｜身份来源 <b>${esc(identity.source)}</b>` : ''}</div>
       ${lastIdentityWarning ? `<div class="rq-flash">⚠ ${esc(lastIdentityWarning)}</div>` : ''}
       <div class="rq-session ${session.done ? 'rq-session-done' : ''}">${esc(session.text)}</div>
+      ${wbBar}
+      ${todayBar}
       ${pm.decisions ? `<details class="rq-metrics"><summary>我这边用得怎么样（产品指标）</summary><ul>${pm.notes.map((n) => `<li>${esc(n)}</li>`).join('')}</ul></details>` : ''}
       <details class="rq-budget">
         <summary>本次预算怎么排（后台估算，不是任务模型）</summary>
@@ -466,6 +596,7 @@ export async function renderRiskPane(
               .join('')}</div></details>`
           : ''
       }
+      ${historyBar}
     </div>`;
 
   if (!file.队列.length) {
@@ -477,7 +608,7 @@ export async function renderRiskPane(
     return { ok: true, message: '已全部处理' };
   }
 
-  const flashBar = flash ? `<div class="rq-flash">⚠ ${esc(flash.text)} <span style="color:var(--muted)">（这一条仍在待办里，正文没有改动）</span></div>` : '';
+  const flashBar = flash ? `<div class="rq-flash">⚠ ${esc(flash.text)} <span style="color:var(--muted)">（${esc(flash.hint ?? '这一条仍在待办里，正文没有改动')}）</span></div>` : '';
   const card = (it: RiskItem): string => `
       <div class="rq-card${flash && flash.itemId === it.id ? ' rq-card-failed' : ''}" data-item="${esc(it.id)}">
         <div class="rq-card-head">
@@ -509,11 +640,10 @@ export async function renderRiskPane(
      * 教师按下去之前**看不到究竟要改哪几个词、哪几段**。
      * 预览默认折叠：它不该抢走卡片的注意力，但你按按钮之前一定能打开看。 */
     const pv = batchPreview(g);
-    const preview = pv.batchable && pv.lines.length
-      ? `<details class="rq-preview"><summary>⚡ 将改动 ${pv.lines.length} 处——点开看具体改哪些词、哪些段</summary><ul>${pv.lines
-          .map((l) => `<li>${esc(l)}</li>`)
-          .join('')}</ul></details>`
-      : '';
+    const preview =
+      pv.batchable && pv.lines.length
+        ? `<details class="rq-preview"><summary>⚡ 将改动 ${pv.lines.length} 处——点开看具体改哪些词、哪些段</summary><ul>${pv.lines.map((l) => `<li>${esc(l)}</li>`).join('')}</ul></details>`
+        : '';
     return `
     <section class="rq-group" data-group="${esc(g.id)}">
       <div class="rq-group-head">
@@ -545,6 +675,32 @@ export async function renderRiskPane(
       void appendDecision(input.paths, input.tier, decisionLineFor(it, kind, { teacherId: input.teacherId, sourceVersion: input.paths.sourceVersion }), identity).then(() =>
         renderRiskPane({ ...input, skipSessionOpen: true }),
       );
+    });
+  }
+  // 暂停 / 恢复：往**工作台那本账**追加一条标记。待办一条不动——状态是现算的，不是存出来的。
+  for (const btn of Array.from(input.dom.querySelectorAll('#pane-risk [data-workbench]'))) {
+    btn.addEventListener('click', (ev) => {
+      const kind = (ev.currentTarget as HTMLElement).getAttribute('data-workbench');
+      if (kind !== 'pause' && kind !== 'resume') return;
+      (ev.currentTarget as HTMLElement).setAttribute('disabled', 'true');
+      void (async () => {
+        /* ★ 点下去的这一刻**从盘上重读一遍**再算，而不是复用渲染时那份内存里的日志：
+         * 教师完全可能在暂停期间被别的窗口/别的教师/命令行改过队列，
+         * "现算"要是拿的是一份旧内存，那它算出来的就不是"现在"，比对也就白比了。 */
+        const fresh = await loadRiskQueue(input.paths, input.tier, identity, input.teacherId);
+        const rows = fresh.file?.队列 ?? file.队列;
+        const cur = taskStateOf(rows, fresh.events, { mutatingRules: MUTATING_RULES });
+        const before = currentPause(markers);
+        const drift = kind === 'resume' && before ? pausedDrift(before, cur, rows) : [];
+        const at = (input.now?.() ?? new Date()).toISOString();
+        const common = { teacherId: input.teacherId, sourceVersion: input.paths.sourceVersion, tier: input.tier, state: cur, timestamp: at };
+        const marked = kind === 'pause' ? pauseMarker(common) : resumeMarker(common);
+        await appendWorkbenchMarker(input.paths, input.tier, marked, identity);
+        /* 恢复到"不一样"的状态时**必须当场说**：那种情况下"回到同一任务状态"这句话不成立，
+         * 而教师最需要知道的正是这件事（有人在他暂停期间动过队列）。 */
+        const flash = drift.length ? { itemId: '', text: `你暂停之后任务状态变了：${drift.join('；')}`, hint: '待办列表已按最新的日志重算；历史一条没删' } : undefined;
+        await renderRiskPane({ ...input, skipSessionOpen: true }, flash);
+      })().catch(() => renderRiskPane({ ...input, skipSessionOpen: true }, { itemId: '', text: '暂停点没记上（写日志失败）——待办没有变，重试即可', hint: '账本写不进去，但队列与决定都没动' }));
     });
   }
   // 撤销 = 写一条新的 undo 事件（**不删历史**），并（如果是改稿动作）把正文改回去

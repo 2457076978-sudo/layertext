@@ -12,9 +12,11 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
   appendDecision,
+  appendWorkbenchMarker,
   decisionLineFor,
   loadRunIdentity,
   loadRiskQueue,
+  loadWorkbenchMarkers,
   decidedRows,
   panelStat,
   parseQueueFile,
@@ -25,11 +27,13 @@ import {
   ruleLabel,
   setRiskIo,
   subjectOf,
+  workbenchLogPath,
   type RiskIo,
   type RiskQueueFile,
 } from '../app/src/risk.js';
 import { makeDecisionEvent, parseDecisionLog } from '../src/core/decision.js';
 import type { RiskItem } from '../src/core/riskqueue.js';
+import { parseWorkbenchLog, pauseMarker, resumeMarker, taskStateOf, toWorkbenchLine } from '../src/core/workbench.js';
 
 const item = (over: Partial<RiskItem> = {}): RiskItem => ({
   id: '第一章#2:FACT-01:1911',
@@ -72,7 +76,10 @@ test('决定过的从待办里消失，但事件一条不删', () => {
   const f = file([item(), item({ id: 'b', ruleId: 'ANNO-01' })]);
   const ev = decisionLineFor(f.队列[0], 'accept', { teacherId: 'wayne', sourceVersion: 'sha1', timestamp: '2026-09-11T10:00:00.000Z' });
   const left = pendingItems(f, [ev]);
-  assert.deepEqual(left.map((i) => i.id), ['b']);
+  assert.deepEqual(
+    left.map((i) => i.id),
+    ['b'],
+  );
 });
 
 test('决定事件的字段与报告逐项对应（decision/before/after/ruleIds/teacherId/timestamp/sourceVersion）', () => {
@@ -141,9 +148,7 @@ test('规则人话标签与引擎规则表同源（面板不再各写一份）',
 
 test('提议预览：面板直接告诉教师"这些决定汇总器会提议什么"', () => {
   const f = file([item({ id: 'a', ruleId: 'ANNO-01', detail: { word: 'windmill' } }), item({ id: 'b', ruleId: 'ANNO-01', detail: { word: 'windmill' } })]);
-  const evs = f.队列.map((it, i) =>
-    decisionLineFor(it, 'accept', { teacherId: 'wayne', sourceVersion: 's', after: '风车', timestamp: `2026-09-11T10:0${i}:00.000Z` }),
-  );
+  const evs = f.队列.map((it, i) => decisionLineFor(it, 'accept', { teacherId: 'wayne', sourceVersion: 's', after: '风车', timestamp: `2026-09-11T10:0${i}:00.000Z` }));
   const p = proposalPreview(evs);
   assert.equal(p.length, 1);
   assert.equal(p[0].kind, 'dict-entry');
@@ -199,7 +204,10 @@ test('写决定：追加而不是覆盖（append-only），两次决定都在日
   const log = files['/work/_决定/A层85.jsonl'];
   assert.equal(parseDecisionLog(log).events.length, 2, '教师改主意，历史一条都不能删');
   const r = await loadRiskQueue(paths, 'A');
-  assert.deepEqual(r.events.map((e) => e.decision), ['reject', 'accept']);
+  assert.deepEqual(
+    r.events.map((e) => e.decision),
+    ['reject', 'accept'],
+  );
 });
 
 /* ────────────────── 路径也由清单解析（App 与命令行同一套口径） ────────────────── */
@@ -222,7 +230,11 @@ test('读清单拿运行身份：run 布局下按运行私有目录找队列与�
   assert.equal(r.file?.队列.length, 1, 'run 布局下队列要从 _运行/<runId>/ 里找');
   assert.equal(r.identity.layout, 'run');
 
-  await appendDecision({ outDir: '/out', workDir: '/work', sourceVersion: 's' }, 'A', decisionLineFor(r.file!.队列[0]!, 'accept', { teacherId: 'wayne', sourceVersion: 's', timestamp: '2026-09-11T10:00:00.000Z' }));
+  await appendDecision(
+    { outDir: '/out', workDir: '/work', sourceVersion: 's' },
+    'A',
+    decisionLineFor(r.file!.队列[0]!, 'accept', { teacherId: 'wayne', sourceVersion: 's', timestamp: '2026-09-11T10:00:00.000Z' }),
+  );
   assert.equal(parseDecisionLog(files[`/out/_运行/${RID}/决定/A层85.jsonl`]!).events.length, 1, '决定也要写进运行私有目录');
 });
 
@@ -250,10 +262,17 @@ test('清单指针指向的文件读不到 → 退回 legacy 而不是崩（坏�
 test('★ rejected（动作没执行成）不算已处理：卡片必须留在待办里', () => {
   const f = file([item(), item({ id: 'b', ruleId: 'ANNO-01', severity: 'blocker', category: '加注' })]);
   const failed = decisionLineFor(f.队列[0]!, 'rejected', {
-    teacherId: 'wayne', sourceVersion: 's', reason: '找不到段落 P10', timestamp: '2026-09-11T10:00:00.000Z',
+    teacherId: 'wayne',
+    sourceVersion: 's',
+    reason: '找不到段落 P10',
+    timestamp: '2026-09-11T10:00:00.000Z',
   });
   const left = pendingItems(f, [failed]);
-  assert.deepEqual(left.map((i) => i.id), ['第一章#2:FACT-01:1911', 'b'], '失败了就还得办，不能从待办消失');
+  assert.deepEqual(
+    left.map((i) => i.id),
+    ['第一章#2:FACT-01:1911', 'b'],
+    '失败了就还得办，不能从待办消失',
+  );
 
   const stat = panelStat(f, [failed]);
   assert.equal(stat.pending, 2, '统计口径也要一致：失败的不算已决');
@@ -261,9 +280,14 @@ test('★ rejected（动作没执行成）不算已处理：卡片必须留在�
 
   // 教师后来真的处理了，才算完
   const done = decisionLineFor(f.队列[0]!, 'accept', {
-    teacherId: 'wayne', sourceVersion: 's', timestamp: '2026-09-11T10:05:00.000Z',
+    teacherId: 'wayne',
+    sourceVersion: 's',
+    timestamp: '2026-09-11T10:05:00.000Z',
   });
-  assert.deepEqual(pendingItems(f, [failed, done]).map((i) => i.id), ['b']);
+  assert.deepEqual(
+    pendingItems(f, [failed, done]).map((i) => i.id),
+    ['b'],
+  );
   assert.equal(panelStat(f, [failed, done]).decided, 1);
 });
 
@@ -280,18 +304,31 @@ test('四种终态决定才算处理完（accept/reject/false-positive/edit）',
 test('撤销是**新事件**：历史一条不删，被撤销的项回到待办', () => {
   const f = file();
   const accept = decisionLineFor(f.队列[0]!, 'accept', {
-    teacherId: 'w', sourceVersion: 's', timestamp: '2026-09-11T10:00:00.000Z',
+    teacherId: 'w',
+    sourceVersion: 's',
+    timestamp: '2026-09-11T10:00:00.000Z',
   });
   assert.equal(pendingItems(f, [accept]).length, 0, '先决了 → 不在待办');
 
   const undo = makeDecisionEvent({
-    itemId: accept.itemId, decision: 'undo', before: accept.after, after: accept.before,
-    reason: '改主意了', ruleIds: accept.ruleIds, teacherId: 'w', sourceVersion: 's',
-    timestamp: '2026-09-11T10:05:00.000Z', undoOf: refOf(accept),
+    itemId: accept.itemId,
+    decision: 'undo',
+    before: accept.after,
+    after: accept.before,
+    reason: '改主意了',
+    ruleIds: accept.ruleIds,
+    teacherId: 'w',
+    sourceVersion: 's',
+    timestamp: '2026-09-11T10:05:00.000Z',
+    undoOf: refOf(accept),
   });
   const events = [accept, undo];
   assert.equal(events.length, 2, '撤销不删历史');
-  assert.deepEqual(pendingItems(f, events).map((i) => i.id), [accept.itemId], '撤销后回到待办');
+  assert.deepEqual(
+    pendingItems(f, events).map((i) => i.id),
+    [accept.itemId],
+    '撤销后回到待办',
+  );
 
   const rows = decidedRows(f, events);
   assert.equal(rows.length, 1);
@@ -304,8 +341,14 @@ test('「看我判过的」按时间倒序，最近的先看到', () => {
   const e1 = decisionLineFor(f.队列[0]!, 'accept', { teacherId: 'w', sourceVersion: 's', timestamp: '2026-09-11T10:00:00.000Z' });
   const e2 = decisionLineFor(f.队列[1]!, 'false-positive', { teacherId: 'w', sourceVersion: 's', timestamp: '2026-09-11T11:00:00.000Z' });
   const rows = decidedRows(f, [e1, e2]);
-  assert.deepEqual(rows.map((r) => r.item.id), ['b', '第一章#2:FACT-01:1911']);
-  assert.deepEqual(rows.map((r) => r.label), ['标记误报', '采纳']);
+  assert.deepEqual(
+    rows.map((r) => r.item.id),
+    ['b', '第一章#2:FACT-01:1911'],
+  );
+  assert.deepEqual(
+    rows.map((r) => r.label),
+    ['标记误报', '采纳'],
+  );
 });
 
 test('撤销是**单级**：撤销最新那条 = 整条作废、回到待办（不做多级回退）', () => {
@@ -313,17 +356,120 @@ test('撤销是**单级**：撤销最新那条 = 整条作废、回到待办（�
   const a = decisionLineFor(f.队列[0]!, 'reject', { teacherId: 'w', sourceVersion: 's', timestamp: '2026-09-11T10:00:00.000Z' });
   const b = decisionLineFor(f.队列[0]!, 'accept', { teacherId: 'w', sourceVersion: 's', timestamp: '2026-09-11T11:00:00.000Z' });
   const undoB = makeDecisionEvent({
-    itemId: b.itemId, decision: 'undo', before: b.after, after: b.before, reason: '', ruleIds: b.ruleIds,
-    teacherId: 'w', sourceVersion: 's', timestamp: '2026-09-11T12:00:00.000Z', undoOf: refOf(b),
+    itemId: b.itemId,
+    decision: 'undo',
+    before: b.after,
+    after: b.before,
+    reason: '',
+    ruleIds: b.ruleIds,
+    teacherId: 'w',
+    sourceVersion: 's',
+    timestamp: '2026-09-11T12:00:00.000Z',
+    undoOf: refOf(b),
   });
   const rows = decidedRows(f, [a, b, undoB]);
   assert.equal(rows.length, 1);
   assert.equal(rows[0]!.event.decision, 'accept', '列表显示的是"最新那条 + 已撤销"');
   assert.equal(rows[0]!.undone, true);
   // 单级撤销的语义：整条作废 → 回到待办（教师心里只有"点错了，撤销一下"）
-  assert.deepEqual(pendingItems(f, [a, b, undoB]).map((i) => i.id), [b.itemId]);
+  assert.deepEqual(
+    pendingItems(f, [a, b, undoB]).map((i) => i.id),
+    [b.itemId],
+  );
   // 再判一次就又是一条新决定——历史仍然一条不删
   const c = decisionLineFor(f.队列[0]!, 'false-positive', { teacherId: 'w', sourceVersion: 's', timestamp: '2026-09-11T13:00:00.000Z' });
   assert.equal(pendingItems(f, [a, b, undoB, c]).length, 0);
   assert.equal(latestDecisions([a, b, undoB, c]).get(b.itemId)!.decision, 'false-positive');
+});
+
+/* ────────────────── 任务工作台（阶段 2）：待办口径只有一份 ────────────────── */
+
+test('★ 页首的"待办"与列表里的卡片必须同源：撤销过的条目在两边都算待办', () => {
+  const f = file([item(), item({ id: 'b', ruleId: 'ANNO-01', category: '加注', severity: 'blocker' })]);
+  const a = decisionLineFor(f.队列[0]!, 'accept', { teacherId: 'w', sourceVersion: 's', timestamp: '2026-09-11T10:00:00.000Z' });
+  const undo = makeDecisionEvent({
+    itemId: a.itemId,
+    decision: 'undo',
+    before: a.after,
+    after: a.before,
+    reason: '改主意',
+    ruleIds: a.ruleIds,
+    teacherId: 'w',
+    sourceVersion: 's',
+    timestamp: '2026-09-11T10:05:00.000Z',
+    undoOf: refOf(a),
+  });
+  const events = [a, undo];
+  assert.equal(pendingItems(f, events).length, 2, '撤销后回到待办');
+  const s = panelStat(f, events);
+  // 老实现：页首漏了 `undone`，于是**同一屏上**列表说"还剩 2 条"、页首说"待办 1 条"。
+  // 阶段 2 要的是"重新打开仍是同一任务状态"——状态自己都说不一致，就谈不上"同一"。
+  assert.equal(s.pending, 2, '页首也得把撤销过的算成待办（老实现是 1）');
+  assert.equal(s.decided, 0);
+  assert.equal(s.estimatedMinutes, 2.5, '估时同样按"还没办掉的"算');
+});
+
+test('暂停点写在与决定日志**并列**的那本账里，且是追加（决定日志一个字节都不动）', async () => {
+  const { io, files } = memIo({ '/out/_运行/风险队列_A层85.json': JSON.stringify(file()) });
+  setRiskIo(io);
+  const paths = { outDir: '/out', workDir: '/work', sourceVersion: 's' };
+  const r = await loadRiskQueue(paths, 'A');
+  const state = taskStateOf(r.file!.队列, r.events);
+  await appendWorkbenchMarker(paths, 'A', pauseMarker({ teacherId: 'wayne', sourceVersion: 's', tier: 'A', state, timestamp: '2026-09-11T10:00:00.000Z' }));
+  await appendWorkbenchMarker(paths, 'A', resumeMarker({ teacherId: 'wayne', sourceVersion: 's', tier: 'A', state, timestamp: '2026-09-11T10:10:00.000Z' }));
+
+  assert.deepEqual(
+    Object.keys(files).filter((p) => /工作台/.test(p)),
+    ['/work/_决定/工作台_A层85.jsonl'],
+    '落点与决定日志同目录、不同文件',
+  );
+  assert.equal(files['/work/_决定/A层85.jsonl'], undefined, '★ 决定日志一个字节都没写——暂停不是决定，不许污染误报率/撤销率');
+  const back = await loadWorkbenchMarkers(paths, 'A');
+  assert.deepEqual(
+    back.map((m) => m.kind),
+    ['pause', 'resume'],
+    '追加而不是覆盖',
+  );
+  assert.deepEqual(
+    back[0]!.pending,
+    r.file!.队列.map((i) => i.id),
+  );
+  assert.equal(workbenchLogPath(paths, { layout: 'legacy', runId: '', teacher: 'wayne' }, 'A'), '/work/_决定/工作台_A层85.jsonl');
+});
+
+test('暂停账本用的是原子追加（有 append 就不走"读全文再写回"）', async () => {
+  const files: Record<string, string> = {};
+  const appended: string[] = [];
+  let wrote = 0;
+  setRiskIo({
+    read: (p) => (p in files ? Promise.resolve(files[p]!) : Promise.reject(new Error('no file'))),
+    write: (p, c) => {
+      wrote++;
+      files[p] = c;
+      return Promise.resolve();
+    },
+    append: (p, line) => {
+      appended.push(line);
+      files[p] = (files[p] ?? '') + line;
+      return Promise.resolve();
+    },
+    listDir: () => Promise.resolve([]),
+  });
+  const paths = { outDir: '/out', workDir: '/work', sourceVersion: 's' };
+  await appendWorkbenchMarker(paths, 'A', pauseMarker({ teacherId: 'wayne', sourceVersion: 's', state: taskStateOf(file().队列, []) }));
+  assert.equal(appended.length, 1);
+  assert.equal(wrote, 0, '有原子追加就用它——两个人同时按暂停时"读全文再写回"会丢一条');
+  assert.equal(parseWorkbenchLog(files['/work/_决定/工作台_A层85.jsonl']!).markers.length, 1);
+});
+
+test('还没暂停过 = 那本账还不存在：读回空数组，不是错误', async () => {
+  setRiskIo(memIo({}).io);
+  assert.deepEqual(await loadWorkbenchMarkers({ outDir: '/out', workDir: '/work', sourceVersion: 's' }, 'A'), []);
+});
+
+test('暂停账本坏行计数但不丢整份（与决定日志同一约定）', () => {
+  const good = toWorkbenchLine(pauseMarker({ teacherId: 'wayne', sourceVersion: 's', state: taskStateOf(file().队列, []), timestamp: '2026-09-11T10:00:00.000Z' }));
+  const p = parseWorkbenchLog(`${good}{这不是 JSON}\n`);
+  assert.equal(p.markers.length, 1);
+  assert.equal(p.badLines, 1);
 });
