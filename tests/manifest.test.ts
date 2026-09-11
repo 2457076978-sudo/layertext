@@ -276,6 +276,18 @@ test('两种布局都不许出现"路径里带 undefined/…"这类半成品', (
   }
 });
 
+test('层级口径唯一：传裸层键（A）与层级标签（A层85）解析到**同一个**文件（第七轮 P1-⑤）', () => {
+  /* 写日志的一侧传标签、读的一侧传裸层键曾各写各的——同名请求解析出两个文件名，
+   * 读的那个永远不存在（发布包的决定条数恒为 0 的根因）。归一落在 `resolvePath` 入口，
+   * 这个用例钉死它：日志类（走 logTail）与正文类（走 tier 变量）都要一致。 */
+  for (const kind of ['决定日志', '会话日志', '版本日志', '正文', '台账'] as const) {
+    const byKey = resolvePath('run', ROOTS, RID, { kind, tier: 'A' });
+    const byTag = resolvePath('run', ROOTS, RID, { kind, tier: 'A层85' });
+    assert.equal(byKey, byTag, `${kind}：裸层键与标签必须解析到同一路径`);
+    assert.match(byKey, /A层85/, `${kind}：路径里应是层级标签`);
+  }
+});
+
 test('撞名探测：legacy 下两次运行必撞，run 下必不撞（报告 §三 第一个规模崩点）', () => {
   /* 这两条用例里的登记项**没有 kind/层级/章节**（只有路径），而那正是它们的身份来源：
    * 说不出自己是什么的登记项，身份就是它的路径——所以这两条测的是"路径撞不撞"。

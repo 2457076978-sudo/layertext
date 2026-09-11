@@ -272,13 +272,11 @@ const BOOK_VERSION = RUN.runId || `${P.书名}-${P.版本 ?? 'v1'}`;
  * 编了就会让"这条产物是对着哪版词库做的"变成一个假答案，而假答案比没有答案更坏。
  * （读法与 `readRunIdentity` 同一套指针约定，只是这里还要清单里的 lexicon 字段。） */
 const LEXICON_VERSION = (() => {
-  try {
-    const ptr = JSON.parse(readFileSync(join(OUT_BASE, '_运行', '清单_最新.json'), 'utf-8'));
-    const m = JSON.parse(readFileSync(ptr.path, 'utf-8'));
-    return m.lexicon?.version ?? '未锁定';
-  } catch {
-    return '未锁定';
-  }
+  /* 词库版本从**本次运行**的清单里取（`RUN` 已解析身份）——不再读全局 `清单_最新.json`：
+   * 那份指针并发时可能指向另一位教师的运行，别人的词库版本就是假答案（第七轮 P0-② 同病点）。
+   * `readManifest` 的全局兜底读回来的同样校验 runId：对不上就当没有，如实记「未锁定」。 */
+  const m = SHARED.readManifest(P, RUN.runId);
+  return m?.runId === RUN.runId ? m.lexicon?.version ?? '未锁定' : '未锁定';
 })();
 if (RUN.warning) console.warn(`\n⚠ ${RUN.warning}`);
 const R = makeResolver(RUN.layout, { out: OUT_BASE, work: P.调适工作区 }, { runId: RUN.runId, tier: TAG, date: DATE, suffix: SUFFIX });

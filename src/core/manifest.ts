@@ -615,8 +615,14 @@ const logTail = (req: PathRequest): string =>
  * · `legacy` 布局**逐字符复现**既有命名——教师已有的书与下游脚本一个字都不用改；
  * · `run` 布局把每类产物收进运行私有目录，跨运行不可能撞名。
  */
-export function resolvePath(layout: Layout, roots: { out: string; work: string }, runId: string, req: PathRequest): string {
+export function resolvePath(layout: Layout, roots: { out: string; work: string }, runId: string, reqIn: PathRequest): string {
   const { out, work } = roots;
+  /* 层级先过唯一口径（`tierTagOf`）——归一落在**请求**上而不是某个局部变量，
+   * 因为函数内每条分支（含 `logTail`）都要用同一个值：写日志的一侧一直传标签（`A层85`），
+   * 读的一侧却混着传裸层键（`A`）——同名请求解析出两个文件名，读的那个永远不存在
+   * （发布包的决定条数恒为 0 就是这么来的，第七轮 P1-⑤）。在入口归一，
+   * 调用方传哪种写法都解析到同一个文件，口径就不可能再分叉。 */
+  const req: PathRequest = reqIn.tier ? { ...reqIn, tier: tierTagOf(reqIn.tier) } : reqIn;
   const tier = req.tier ?? '';
   const suffix = req.suffix ?? '';
   const date = req.date ?? '';

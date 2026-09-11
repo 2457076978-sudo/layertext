@@ -15,8 +15,8 @@
  * 路径一律经 `Resolver`，身份走共享的 `readRunIdentity` —— 与其它脚本同一条规则。
  */
 
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { dirname, join, relative } from 'node:path';
 
 const SHARED = await import('./LayerText_AF词表与词典.mjs');
 const { distOf } = SHARED;
@@ -26,7 +26,8 @@ const OUT_BASE = P.产物目录;
 const DATE = P.日期;
 
 const { buildBundle, provenanceOf, publishReadiness, renderProvenance, verifyBundle, BUNDLE_SCHEMA_VERSION } = await import(`${distOf(REPO)}/src/core/bundle.js`);
-const { artifactIdOf, makeResolver } = await import(`${distOf(REPO)}/src/core/manifest.js`);
+const { artifactIdOf, fileSafe, makeResolver } = await import(`${distOf(REPO)}/src/core/manifest.js`);
+const { teacherIdOf } = await import(`${distOf(REPO)}/src/core/teachers.js`);
 const { parseDecisionLog } = await import(`${distOf(REPO)}/src/core/decision.js`);
 
 /* 身份从命令行取（**不复用各脚本自己的参数助手**：定义位置各不相同） */
@@ -43,17 +44,50 @@ const BUNDLE_ROOT = R.dir('汇总报告');
 
 const readIf = (p) => (p && existsSync(p) ? readFileSync(p, 'utf-8') : null);
 
-/** 读清单（没有清单就没法回答"哪次运行/哪个模型/哪版词库"，这是硬前提） */
+/** 这位教师在 `_运行/` 里有几份运行分片指针（`清单_<教师ID>_<层级>.json`）。
+ *  "最近一次"来源放行前要数它：≥2 说明这位教师手上有多份运行，
+ *  "最近一次"只是最后一次跑的，回答不了"这次要发布的是哪一次"。 */
+function teacherRunShards(teacherId) {
+  const dir = join(OUT_BASE, '_运行');
+  if (!existsSync(dir)) return 0;
+  const prefix = `清单_${fileSafe(teacherId)}_`;
+  return readdirSync(dir).filter((f) => f.startsWith(prefix) && f.endsWith('.json')).length;
+}
+
+/** 读清单（没有清单就没法回答"哪次运行/哪个模型/哪版词库"，这是硬前提）。
+ *
+ * 事实源是**本次运行自己的那份** `清单_<runId>.json`——runId 已由 `readRunIdentity`
+ * 按可信度解析（显式 `--run` > 教师+层级分片 > 教师对得上的"最近一次"）。
+ * 全局 `清单_最新.json` 在这里**一份都不读**：它只是给人看的索引，并发时指向谁
+ * 取决于谁后跑——拿它当发布事实源，会把 A 老师的清单打进 B 老师的发布包（第七轮 P0-②）。 */
 function loadManifest() {
-  const ptrText = readIf(join(OUT_BASE, '_运行', '清单_最新.json')) ?? readIf(join(OUT_BASE, '_运行', `清单_${RUN.runId}.json`));
-  if (!ptrText) return null;
-  try {
-    const ptr = JSON.parse(ptrText);
-    const p = ptr.path ?? join(OUT_BASE, '_运行', `清单_${RUN.runId}.json`);
-    return existsSync(p) ? JSON.parse(readFileSync(p, 'utf-8')) : null;
-  } catch {
-    return null;
+  if (RUN.source === '无清单（legacy）') {
+    console.error('✗ 运行身份定不下来（无清单，或并发时全局指针指向了另一位教师）——发布必须指向确定的一次运行。');
+    console.error('  补法：--run <runId> 显式指定；或先 `清单.mjs --new` 建立本次运行的清单。');
+    process.exit(2);
   }
+  if (RUN.source === '最近一次' && teacherRunShards(RUN.teacher) > 1) {
+    console.error(`✗ 教师 ${RUN.teacher} 名下有多份运行，"最近一次"说不清这次要发的是哪一次——拒绝猜测。`);
+    console.error('  补法：--run <runId> 显式指定。');
+    process.exit(2);
+  }
+  const p = join(OUT_BASE, '_运行', `清单_${RUN.runId}.json`);
+  const readJson = (t) => {
+    if (!t) return null;
+    try {
+      return JSON.parse(t);
+    } catch {
+      return null; // 坏清单当没有——错误信息在下面统一说
+    }
+  };
+  const m = readJson(readIf(p));
+  if (!m || m.runId !== RUN.runId || teacherIdOf(String(m.teacher ?? '')) !== teacherIdOf(String(RUN.teacher))) {
+    console.error(`✗ 本次运行的清单读不出来或对不上身份（${p}）：`);
+    console.error(`   身份是 ${RUN.runId}（教师 ${RUN.teacher}），清单里是 ${m?.runId ?? '（无）'}（教师 ${m?.teacher ?? '（无）'}）——发布的事实源就是这份清单，对不上不发。`);
+    console.error('  补法：--run <runId> 指到正确的运行，或 `清单.mjs --new` 重建清单。');
+    process.exit(2);
+  }
+  return m;
 }
 
 /* ────────────────────── 导出 ────────────────────── */
@@ -72,7 +106,7 @@ function collectFiles(manifest) {
   for (const a of manifest.artifacts ?? []) {
     const abs = join(OUT_BASE, a.path);
     if (!existsSync(abs) || !statSync(abs).isFile()) {
-      skipped.push({ path: a.path, reason: '清单登记了但它不在盘上（可能已被清理）' });
+      skipped.push({ id: a.id || artifactIdOf(a), path: a.path, reason: '清单登记了但它不在盘上（可能已被清理）' });
       continue;
     }
     out.push({ path: a.path, id: a.id || artifactIdOf(a), kind: a.kind, tier: a.tier, chapter: a.chapter, text: readFileSync(abs, 'utf-8') });
@@ -82,11 +116,6 @@ function collectFiles(manifest) {
 
 function doExport() {
   const m = loadManifest();
-  if (!m) {
-    console.error('✗ 还没有运行清单。发布包靠清单回答「哪次运行/哪个模型/哪版词库」，没有清单就不该发。');
-    console.error('  先建清单：node tools/af_pipeline/LayerText_AF清单.mjs --new --tier A');
-    process.exit(2);
-  }
   /* 纪律第 4 条：「没有这些字段的产物**不可发布**」。
    * 先单独报一次，好让失败原因是"缺字段"而不是一句从 `buildBundle` 里抛出来的长话。 */
   const ready = publishReadiness(m);
@@ -97,17 +126,56 @@ function doExport() {
     process.exit(2);
   }
   const { files, skipped } = collectFiles(m);
-  const events = parseDecisionLog(readIf(R.decision({ tier: m.tiers?.[0] ?? '' })) ?? '').events;
+  /* 发布是不可逆的交付动作：缺一件就整个不发。一份"结构完整但缺件"的部分包，
+   * 收件人只会核对包描述里有的那些件——少的件在他那边根本不出现，
+   * 于是"缺件"看起来就像"完整"。要在写任何文件之前拦下（第七轮 P0-③）。 */
+  if (skipped.length) {
+    console.error(`✗ 清单登记的产物有 ${skipped.length} 件不在盘上——拒绝导出部分包：`);
+    for (const s of skipped) console.error(`   ✗ ${s.path}｜产物 ${s.id}｜${s.reason}`);
+    console.error('  补法：重跑产出该件的步骤，或 `清单.mjs --stamp` 刷新清单后再导出。');
+    process.exit(1);
+  }
+  /* 决定记在**层**上：每一层的决定日志都读进来（只数条数），不是只有第一层。
+   * 层键（`A`）由 `resolvePath` 归一成产物命名里的层级标签（`A层85`）——与写日志那侧同一口径。 */
+  const events = [];
+  for (const t of m.tiers ?? []) {
+    const text = readIf(R.decision({ tier: t }));
+    if (text) events.push(...parseDecisionLog(text).events);
+  }
   const bundle = buildBundle({ manifest: m, files, events });
 
+  /* 写包走 staging + 自检 + 原子替换：自检不过，最终目录一个字都不动；
+   * 替换时旧目录整个让位——重复导出后目录内容严格等于本次清单，
+   * 旧的多余文件不再混进 `--check` 的视野（第七轮 P1-④）。 */
   mkdirSync(BUNDLE_ROOT, { recursive: true });
   const dir = join(BUNDLE_ROOT, `发布包_${m.runId}`);
-  if (existsSync(dir)) console.warn(`⚠ ${dir} 已存在，本次会覆盖同名文件（旧的多余文件不会被删）`);
-  mkdirSync(dir, { recursive: true });
-  for (const e of bundle.entries) cpSync(join(OUT_BASE, e.path), join(dir, e.path), { recursive: false });
-
+  const staging = join(BUNDLE_ROOT, `发布包_${m.runId}.staging-${process.pid}`);
+  rmSync(staging, { recursive: true, force: true });
+  mkdirSync(staging, { recursive: true });
+  try {
+    for (const e of bundle.entries) {
+      const dst = join(staging, e.path);
+      mkdirSync(dirname(dst), { recursive: true });
+      cpSync(join(OUT_BASE, e.path), dst);
+    }
+    writeFileSync(join(staging, '发布包.json'), JSON.stringify(bundle, null, 2), 'utf-8');
+    /* 自检：刚写进去的每一件读回来核对——连这关都过不了说明写盘环节出了问题，
+     * 这种包绝不让它出现在最终目录里。 */
+    const received = walk(staging).map((rel) => ({ path: rel, text: readFileSync(join(staging, rel), 'utf-8') }));
+    const self = verifyBundle(bundle, received);
+    if (!self.ok) {
+      console.error('✗ 包在写盘自检中不过关（不该发生；请连同清单一起反馈）：');
+      for (const p of self.problems) console.error(`   ✗ [${p.kind}] ${p.path}｜${p.message}`);
+      rmSync(staging, { recursive: true, force: true });
+      process.exit(1);
+    }
+    rmSync(dir, { recursive: true, force: true });
+    renameSync(staging, dir);
+  } catch (err) {
+    rmSync(staging, { recursive: true, force: true });
+    throw err;
+  }
   const descPath = join(dir, '发布包.json');
-  writeFileSync(descPath, JSON.stringify(bundle, null, 2), 'utf-8');
 
   console.log('════ AF 发布包 ════');
   console.log(` 运行：${bundle.run.runId}`);
@@ -122,7 +190,6 @@ function doExport() {
   } else {
     console.log(' 排除 0 件（本次产物里没有学生数据迹象）');
   }
-  for (const s of skipped) console.log(`   ⚠ ${s.path}｜${s.reason}`);
   console.log(`\n✓ ${descPath}`);
   console.log('  收件人核对：node tools/af_pipeline/LayerText_AF发布包.mjs --check <解开的包目录>');
 }
@@ -174,7 +241,7 @@ function doWhere(target) {
   const m = loadManifest();
   const events = [];
   // 每一层的决定日志都看（决定是记在层上的）
-  for (const tier of m?.tiers ?? []) {
+  for (const tier of m.tiers ?? []) {
     const text = readIf(makeResolver(RUN.layout, { out: OUT_BASE, work: P.调适工作区 }, { runId: RUN.runId, tier }).decision());
     if (text) events.push(...parseDecisionLog(text).events);
   }
