@@ -23,6 +23,7 @@ import {
   newManifest,
   recordStep,
   refOf,
+  resolvePath,
   summarizeManifest,
   upsertArtifact,
   verifyLexiconSnapshot,
@@ -461,4 +462,32 @@ test('★ 自愈：--stamp 走一遍就把身份补进旧清单，且**只加 id
   const fresh = manifest();
   upsertArtifact(fresh, art({ path: '第一章/原文_A层85.md', tier: 'A层85', chapter: '第一章' }));
   assert.match(fresh.artifacts[0]!.id ?? '', /^art-[0-9a-f]{12}$/);
+});
+
+/* ────────────────── run 布局：后缀必须参与落点 ────────────────── */
+
+test('★ run 布局下 `待复核` 必须认后缀——否则"试跑"与"正式"会写进同一个文件', () => {
+  /* 这是一个**实际存在过**的缺陷，由迁移工具的作者发现并报了回来：
+   * legacy 用子目录把试跑与正式分开（`_待复核/A层85_试跑/` 与 `_待复核/A层85/`），
+   * 而 run 布局的分支把 `suffix` 丢了。
+   *
+   * 为什么危险：runId 由"书+版本+层+教师+输入哈希"决定，所以
+   * **输入相同 ⇒ runId 相同**——而"先 `--out 试跑` 跑一遍看看、再正式跑"正是最常见的用法，
+   * 两次运行落在同一个运行私有目录里，待复核段落**必然撞同一个路径**，后一次覆盖前一次。
+   * 待复核目录装的是"门禁没过、被隔离出来"的段落——**那是那次失败唯一的记录**。
+   * 被覆盖之后，教师看到的是"这次没有段落被隔离"，而实际上有。 */
+  const roots = { out: '/OUT', work: '/WORK' };
+  const at = (layout: 'legacy' | 'run', suffix: string): string => resolvePath(layout, roots, 'rid', { kind: '待复核', tier: 'A层85', suffix, chapter: '第一章', segId: 'P07' });
+
+  assert.notEqual(at('run', ''), at('run', '_试跑'), '**同一次运行的两个后缀不能落到同一个文件**');
+  assert.equal(at('run', '_试跑').includes('待复核_试跑'), true, `后缀要出现在落点里，实得 ${at('run', '_试跑')}`);
+  // 不带后缀时与从前逐字符相同（改这个不许动已有项目的落点）
+  assert.equal(at('run', ''), '/OUT/_运行/rid/待复核/第一章_P07.md');
+  // 两种布局的**语义**要一致：都按后缀分空间，只是目录不同
+  assert.equal(at('legacy', '').includes('_待复核/A层85/'), true);
+  assert.equal(at('legacy', '_试跑').includes('_待复核/A层85_试跑/'), true);
+
+  // json 扩展名同样要认后缀（同一段的记录与副本是一对）
+  const j = resolvePath('run', roots, 'rid', { kind: '待复核', tier: 'A层85', suffix: '_试跑', chapter: '第一章', segId: 'P07', ext: 'json' });
+  assert.equal(j.endsWith('待复核_试跑/第一章_P07.json'), true, `实得 ${j}`);
 });

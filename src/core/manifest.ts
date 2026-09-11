@@ -637,7 +637,18 @@ export function resolvePath(layout: Layout, roots: { out: string; work: string }
       case '正文':
         return `${dir}/正文/${req.chapter ?? ''}/原文_${tier}_${date}${suffix}.md`;
       case '待复核':
-        return `${dir}/待复核/${req.chapter ?? ''}_${req.segId ?? '第N段'}.${req.ext ?? 'md'}`;
+        /* ★ 后缀必须参与落点。legacy 用**子目录**把试跑与正式分开
+         * （`_待复核/A层85_试跑/` 与 `_待复核/A层85/`），run 布局原来把它丢了——
+         * 于是同一个 runId 下的两次运行（**输入相同 ⇒ runId 相同**，正是"先试跑看看、
+         * 再正式跑"这个最常见的用法）会把待复核段落写到**同一个路径**上，后一次覆盖前一次。
+         *
+         * 待复核目录装的是"门禁没过、被隔离出来"的段落——**它是那次失败唯一的记录**。
+         * 被覆盖掉之后，教师看到的是"这次没有段落被隔离"，而实际上有。
+         * 跑得通、退出码 0、结论错，正是本项目一直在治的那一类。
+         *
+         * 这里保留 legacy 的**语义**（后缀分目录）而不是把后缀拼进文件名：
+         * 两种布局的差别应当只是"收进运行私有目录"，不是"换一套命名规则"。 */
+        return `${dir}/待复核${suffix}/${req.chapter ?? ''}_${req.segId ?? '第N段'}.${req.ext ?? 'md'}`;
       case '完成标记':
         return `${dir}/完成.json`;
       case '失败清单':
