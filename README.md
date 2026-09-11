@@ -45,6 +45,8 @@
 引擎质量：**92 项回归测试全绿**（防坑规则 + 审校 DOM + UI 部件 + 应用逻辑）；TS 引擎与 Python 原型在示例与真实章节上逐字段一致（[M1 对照报告](docs/M1-对照测试报告.md)）。
 产品文档：[PRD（一页）](docs/PRD.md) · [CHANGELOG](CHANGELOG.md) · [工程化开发提示词](docs/工程化开发提示词_v1.0.md)。
 
+换一本书 / 失败后怎么续跑 / 报告里那些覆盖率各是什么：[换书与续跑说明](docs/换书与续跑说明.md) · 判定与人工队列：[段级门禁与风险队列](docs/段级门禁与风险队列.md)。
+
 ## 安装（macOS）
 
 1. 下载 `LayerText_1.1.0_universal.dmg`（[Releases](../../releases) 页，或本地构建见下）；
