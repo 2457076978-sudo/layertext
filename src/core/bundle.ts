@@ -44,7 +44,7 @@ export const BUNDLE_SCHEMA_VERSION = 1;
  * 黑名单仍然保留（见 `STUDENT_DATA_PATTERNS`），它挡的是"白名单种类里混进了学生数据"
  * 这种更隐蔽的情形——比如某份台账里贴了班级成绩。
  */
-export const PUBLISHABLE_KINDS: ArtifactKind[] = ['正文', '报告', '台账', '风险队列', '清单', '其他'];
+export const PUBLISHABLE_KINDS: ArtifactKind[] = ['学生版', '正文', '报告', '台账', '风险队列', '清单', '其他'];
 
 /**
  * **学生数据**的迹象。命中即排除，无论它的产物种类在白名单里多么无辜。

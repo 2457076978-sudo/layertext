@@ -140,7 +140,7 @@ export function verifyLexiconSnapshot(snap: LexiconSnapshot, current: SourceRef[
 
 export const MANIFEST_SCHEMA_VERSION = 1;
 
-export type ArtifactKind = '正文' | '报告' | '台账' | '风险队列' | '清单' | '会话日志' | '其他';
+export type ArtifactKind = '学生版' | '正文' | '报告' | '台账' | '风险队列' | '清单' | '会话日志' | '其他';
 export type ArtifactStatus = 'ok' | 'needs-review' | 'missing' | 'stale';
 
 export interface RunArtifact {
@@ -552,6 +552,10 @@ export const tierTagOf = (tier: string): string => TIER_TAG[tier] ?? tier;
 
 export type ArtifactPathKind =
   | '正文'
+  /** **学生版**：教师工作稿减去内部内容之后的、能直接交给学生读的那一份。
+   *  与 `正文` 分开是刻意的——它们**不是同一种东西**：正文是工作稿（带段标记 `[P##]`
+   *  与内部制作说明），学生版是读物。混成一种名称，迟早有人把工作稿当成读物发出去。 */
+  | '学生版'
   | '会话日志'
   | '待复核'
   | '完成标记'
@@ -636,6 +640,8 @@ export function resolvePath(layout: Layout, roots: { out: string; work: string }
         return `${dir}/${req.name ?? '中间产物'}${suffix}${req.ext ?? '.json'}`;
       case '正文':
         return `${dir}/正文/${req.chapter ?? ''}/原文_${tier}_${date}${suffix}.md`;
+      case '学生版':
+        return `${dir}/学生版/${req.chapter ?? ''}/学生版_${tier}_${date}${suffix}.md`;
       case '待复核':
         /* ★ 后缀必须参与落点。legacy 用**子目录**把试跑与正式分开
          * （`_待复核/A层85_试跑/` 与 `_待复核/A层85/`），run 布局原来把它丢了——
@@ -678,6 +684,10 @@ export function resolvePath(layout: Layout, roots: { out: string; work: string }
       return `${out}/_运行/${req.name ?? '中间产物'}${suffix}${req.ext ?? '.json'}`;
     case '正文':
       return `${out}/${req.chapter ?? ''}/原文_${tier}_${date}${suffix}.md`;
+    case '学生版':
+      // 与正文同一个章节目录（教师的目录结构不变），只换文件名前缀——
+      // "两种布局的差别只是收进运行私有目录"，这条纪律对新产品同样成立
+      return `${out}/${req.chapter ?? ''}/学生版_${tier}_${date}${suffix}.md`;
     case '待复核':
       return `${out}/_待复核/${tier}${suffix}/${req.chapter ?? ''}_${req.segId ?? '第N段'}.${req.ext ?? 'md'}`;
     case '完成标记':
