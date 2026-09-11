@@ -15,6 +15,10 @@ const CN = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十'
 
 const { splitChapter, extractParas, sentsOf } = await import(`${REPO}/dist/src/core/textpipe.js`);
 const { alignSentencePairs } = await import(`${REPO}/dist/src/core/align.js`);
+const { runQc } = await import(`${REPO}/dist/src/core/qc.js`);
+const { loadLexicon, loadDict } = await import('./LayerText_AF词表与词典.mjs');
+const LEX = await loadLexicon(P);
+const DICT = loadDict(P.词典路径);
 
 const wc = (t) => (t.match(/[A-Za-z][A-Za-z'-]*/g) ?? []).length;
 const toRefs = (md) => {
@@ -47,9 +51,19 @@ function chapterLedger(tier, tag, i) {
     for (let k = 0; k < Math.min(removed.length, addedW.length) && pairs.length < 6; k++) pairs.push(`${removed[k]}→${addedW[k]}`);
     return { pos: `P${r.base.pi + 1}S${r.base.si + 1}`, base: r.base.text, pairs, rest: Math.max(0, removed.length - pairs.length) };
   });
+  /* 加注口径（审查报告 §三）：「只统计注了多少处」已**降级为兼容字段**，不再当质量门禁——
+   * 它曾让 A 层第 7/8/9 章 2% 的缺口完全隐形。现在并排给出 ⑪加注覆盖率（已注词型 / 应注词型）。 */
+  let cover = { annotationCoverage: 1, annotated: 0, annotatable: 0 };
+  try {
+    const q = runQc(out, LEX, { tier: tier, fileName: 'ledger.md', dict: DICT });
+    cover = { annotationCoverage: q.annotationCoverage, annotated: q.annotated, annotatable: q.annotatable };
+  } catch {
+    /* 产物还没成型（缺 [P##] 等）——台账照出，覆盖率留空 */
+  }
   return {
     ch, rows: rows.length, kept: kept.length, rewritten: rewritten.length, sigLost: sigLost.length,
     lost, added, rewrites, notes: notesOf(out).length,
+    coverage: cover.annotationCoverage, annotated: cover.annotated, annotatable: cover.annotatable,
     srcWords: wc(src), outWords: wc(out),
   };
 }
@@ -75,13 +89,15 @@ const TIERS = AI_TIERS.filter((t) => TAGS.includes(t.tag));
 const overview = ['# AF 三档重制 · 原文对照台账总览', '', `生成：${new Date().toLocaleString('zh-CN')}｜对齐口径：完全相同句 LCS 锚点 + 改写句 Jaccard≥0.45 配对（LayerText 引擎 alignSentencePairs）`, ''];
 for (const t of TIERS) {
   const lines = [`# ${t.label} · 原文对照台账`, '', `产物：重制三版/第X章/原文_${t.tag}_${DATE}.md｜对齐基准：原文规范化版（245 段）`, '',
-    '| 章 | 对齐句 | 原样保留 | 改写 | 数字/专名缺失 | 删句 | 加注 | 篇幅 |', '|---|---|---|---|---|---|---|---|'];
-  const totals = { rows: 0, kept: 0, rewritten: 0, sigLost: 0, lost: 0, notes: 0, sw: 0, ow: 0 };
+    '| 章 | 对齐句 | 原样保留 | 改写 | 数字/专名缺失 | 删句 | **加注覆盖率（已注/应注）** | 加注处数（旧口径·仅参考） | 篇幅 |', '|---|---|---|---|---|---|---|---|---|'];
+  const totals = { rows: 0, kept: 0, rewritten: 0, sigLost: 0, lost: 0, notes: 0, sw: 0, ow: 0, annotated: 0, annotatable: 0 };
   for (const ci of CHAPTER_IDS) {
     const L = chapterLedger(tier_tag(t), t.tag, ci);
     totals.rows += L.rows; totals.kept += L.kept; totals.rewritten += L.rewritten; totals.sigLost += L.sigLost;
     totals.lost += L.lost.length; totals.notes += L.notes; totals.sw += L.srcWords; totals.ow += L.outWords;
-    lines.push(`| ${L.ch} | ${L.rows} | ${L.kept} | ${L.rewritten} | ${L.sigLost} | ${L.lost.length} | ${L.notes} | ${L.srcWords}→${L.outWords}（${((L.outWords / L.srcWords) * 100).toFixed(0)}%） |`);
+    totals.annotated += L.annotated; totals.annotatable += L.annotatable;
+    const cov = L.annotatable ? `${(L.coverage * 100).toFixed(0)}%（${L.annotated}/${L.annotatable}）` : '—';
+    lines.push(`| ${L.ch} | ${L.rows} | ${L.kept} | ${L.rewritten} | ${L.sigLost} | ${L.lost.length} | **${cov}** | ${L.notes} | ${L.srcWords}→${L.outWords}（${((L.outWords / L.srcWords) * 100).toFixed(0)}%） |`);
     // 章内明细：删句与改写样例
     lines.push('', `<details><summary>${L.ch} 明细（改写 ${L.rewritten} 句的词级变更 · 删句 ${L.lost.length}）</summary>`, '');
     if (L.sigLost.length) {
@@ -99,10 +115,10 @@ for (const t of TIERS) {
     }
     lines.push('', '</details>', '');
   }
-  lines.push('', `**${t.label} 合计**：对齐 ${totals.rows} 句｜原样保留 ${totals.kept}（${((totals.kept / totals.rows) * 100).toFixed(0)}%）｜改写 ${totals.rewritten}（${((totals.rewritten / totals.rows) * 100).toFixed(0)}%）｜数字专名缺失 ${totals.sigLost}｜删句 ${totals.lost}｜加注 ${totals.notes} 处｜篇幅 ${totals.sw}→${totals.ow}（${((totals.ow / totals.sw) * 100).toFixed(0)}%）`, '');
+  lines.push('', `**${t.label} 合计**：对齐 ${totals.rows} 句｜原样保留 ${totals.kept}（${((totals.kept / totals.rows) * 100).toFixed(0)}%）｜改写 ${totals.rewritten}（${((totals.rewritten / totals.rows) * 100).toFixed(0)}%）｜数字专名缺失 ${totals.sigLost}｜删句 ${totals.lost}｜**加注覆盖率 ${totals.annotatable ? ((totals.annotated / totals.annotatable) * 100).toFixed(0) : '—'}%（${totals.annotated}/${totals.annotatable} 词型）**｜加注处数 ${totals.notes}（旧口径，仅参考）｜篇幅 ${totals.sw}→${totals.ow}（${((totals.ow / totals.sw) * 100).toFixed(0)}%）`, '');
   const p = join(OUT_BASE, `台账_${t.tag}_${DATE}.md`);
   writeFileSync(p, lines.join('\n'), 'utf-8');
-  overview.push(`- [${t.label}](台账_${t.tag}_${DATE}.md)：保留句 ${totals.kept}/${totals.rows}，改写 ${totals.rewritten}，删句 ${totals.lost}，加注 ${totals.notes}`);
+  overview.push(`- [${t.label}](台账_${t.tag}_${DATE}.md)：保留句 ${totals.kept}/${totals.rows}，改写 ${totals.rewritten}，删句 ${totals.lost}，加注覆盖率 ${totals.annotatable ? ((totals.annotated / totals.annotatable) * 100).toFixed(0) : '—'}%`);
   console.log(`✓ ${p}`);
 }
 writeFileSync(join(OUT_BASE, `台账总览_${DATE}.md`), overview.join('\n'), 'utf-8');
