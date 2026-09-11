@@ -146,22 +146,6 @@ const { annotatableOf } = await import(`${REPO}/dist/src/core/segmentgate.js`);
  * （`src/core/rewrite.ts` 的 `traceIdOf`，FNV-1a 双通道）。
  * 纪律第 4 条：「所有 AI 响应保存 prompt 版本、policy snapshot、模型和 **traceId**」——
  * 原来只记了前三个，traceId 是缺的。缺了它，"这一段是第几次调用产出的"就只能靠翻日志顺序。 */
-const { traceIdOf } = await import(`${REPO}/dist/src/core/rewrite.js`);
-const BOOK_VERSION = RUN.runId || `${P.书名}-${P.版本 ?? 'v1'}`;
-/* 本运行用的**词库快照版本**（纪律第 4 条要的 "policy snapshot"）。
- * 取自清单里记的那一版——清单是唯一记着"这次用哪版词库"的地方。
- * 没有清单（单独跑本脚本）时如实记为「未锁定」，**不编一个版本号**：
- * 编了就会让"这条产物是对着哪版词库做的"变成一个假答案，而假答案比没有答案更坏。
- * （读法与 `readRunIdentity` 同一套指针约定，只是这里还要清单里的 lexicon 字段。） */
-const LEXICON_VERSION = (() => {
-  try {
-    const ptr = JSON.parse(readFileSync(join(OUT_BASE, '_运行', '清单_最新.json'), 'utf-8'));
-    const m = JSON.parse(readFileSync(ptr.path, 'utf-8'));
-    return m.lexicon?.version ?? '未锁定';
-  } catch {
-    return '未锁定';
-  }
-})();
 /** 本段的追踪 ID（段级 scope） */
 const traceOf = (segText, k, ch) => traceIdOf({ source: segText, scope: 'segment', tier: TAG, bookVersion: BOOK_VERSION, intent: `${ch}#${k}`, promptVersion: PROMPT_VERSION });
 /* 正文与产物一律**原子写**（先写同目录临时文件再 rename）。
@@ -274,6 +258,23 @@ ${vocabBlock}
  * 详见 `LayerText_AF词表与词典.mjs` 的 `readRunIdentity`。 */
 const TEACHER = arg('--teacher', process.env.LAYERTEXT_TEACHER ?? process.env.USER ?? 'unknown');
 const RUN = await SHARED.readRunIdentity({ out: OUT_BASE, work: P.调适工作区 }, { teacher: TEACHER, tier: TAG }, { runId: arg('--run', undefined) });
+
+const { traceIdOf } = await import(`${REPO}/dist/src/core/rewrite.js`);
+const BOOK_VERSION = RUN.runId || `${P.书名}-${P.版本 ?? 'v1'}`;
+/* 本运行用的**词库快照版本**（纪律第 4 条要的 "policy snapshot"）。
+ * 取自清单里记的那一版——清单是唯一记着"这次用哪版词库"的地方。
+ * 没有清单（单独跑本脚本）时如实记为「未锁定」，**不编一个版本号**：
+ * 编了就会让"这条产物是对着哪版词库做的"变成一个假答案，而假答案比没有答案更坏。
+ * （读法与 `readRunIdentity` 同一套指针约定，只是这里还要清单里的 lexicon 字段。） */
+const LEXICON_VERSION = (() => {
+  try {
+    const ptr = JSON.parse(readFileSync(join(OUT_BASE, '_运行', '清单_最新.json'), 'utf-8'));
+    const m = JSON.parse(readFileSync(ptr.path, 'utf-8'));
+    return m.lexicon?.version ?? '未锁定';
+  } catch {
+    return '未锁定';
+  }
+})();
 if (RUN.warning) console.warn(`\n⚠ ${RUN.warning}`);
 const R = makeResolver(RUN.layout, { out: OUT_BASE, work: P.调适工作区 }, { runId: RUN.runId, tier: TAG, date: DATE, suffix: SUFFIX });
 const sessionFile = () => R.session({ scope: SCOPE, vocab: VOCAB });
