@@ -407,3 +407,23 @@ test('统一词典：合并过的词下次不再问一遍（原来会被并行�
   assert.equal(entries.length, 0, '词典里已有的词不该再被新配一次');
   assert.match(readFileSync(join(root, '词典.csv'), 'utf-8'), /barn,风车/);
 });
+
+test('run 布局：风险队列也写进运行私有目录（App 面板按同一套解析才找得到）', () => {
+  const { root, json } = makeProject();
+  const a = initManifest(root, json, 'run', 'wayne');
+  const rid = /运行 ID：(\S+)/.exec(a.stdout)?.[1];
+  assert.ok(rid);
+  assert.equal(spawnSync(process.execPath, [SCRIPT, '--tier', 'A', '--chapters', '1'], withFake('annotate', json)).status, 0);
+
+  const rq = spawnSync(process.execPath, [join(REPO, 'tools', 'af_pipeline', 'LayerText_AF风险队列.mjs'), '--tier', 'A', '--chapters', '1'], {
+    cwd: REPO, encoding: 'utf-8', env: { ...process.env, LAYERTEXT_PROJECT: json, LAYERTEXT_ENGINE: REPO },
+  });
+  assert.equal(rq.status, 0, `${rq.stdout}\n${rq.stderr}`);
+  const runDir = join(root, '产物', '_运行', rid!);
+  assert.equal(existsSync(join(runDir, '风险队列.json')), true, '队列 JSON 必须在运行私有目录里（面板去那儿找）');
+  assert.equal(existsSync(join(root, '产物', '_运行', `风险队列_${TAG}.json`)), false, '不该同时写 legacy 路径（两套路径并存比撞名更难查）');
+
+  // 面板用引擎的解析器算出来的路径，必须与脚本写的一致
+  const parsed = JSON.parse(readFileSync(join(runDir, '风险队列.json'), 'utf-8')) as { 层级: string[] };
+  assert.deepEqual(parsed.层级, ['A']);
+});

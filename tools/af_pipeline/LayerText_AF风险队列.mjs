@@ -24,7 +24,7 @@
  *         "这段能不能算完成"由 LayerText_AF会话改写.mjs 的门禁负责，这里不重复判。
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 const SHARED = await import('./LayerText_AF词表与词典.mjs');
 const P = SHARED.loadProject();
@@ -59,6 +59,7 @@ const { runQc } = await import(`${REPO}/dist/src/core/qc.js`);
 const LEX = await SHARED.loadLexicon(P);
 const DICT = SHARED.loadDict(P.词典路径);
 const { segmentList } = SHARED;
+const { makeResolver } = await import(`${REPO}/dist/src/core/manifest.js`);
 const wc = (t) => (t.match(/[A-Za-z][A-Za-z'-]*/g) ?? []).length;
 
 const warnings = [];
@@ -75,9 +76,24 @@ const oovOf = (seg) => {
   }
 };
 
+/** 运行身份 + 路径解析：与命令行其它脚本、App 面板共用同一套规则
+ *  （报告 §三：「都只能通过 manifest 解析路径」——谁自己拼字符串，谁就是下一个撞名点）。 */
+function runIdentity(outBase) {
+  try {
+    const ptr = JSON.parse(readFileSync(join(outBase, '_运行', '清单_最新.json'), 'utf-8'));
+    const m = JSON.parse(readFileSync(ptr.path, 'utf-8'));
+    return { layout: m.layout ?? 'legacy', runId: m.runId, teacher: m.teacher };
+  } catch {
+    return { layout: 'legacy', runId: '', teacher: process.env.USER ?? 'unknown' };
+  }
+}
+
+const RUN = runIdentity(OUT_BASE);
+const R = makeResolver(RUN.layout, { out: OUT_BASE, work: P.调适工作区 }, { runId: RUN.runId, tier: TAGS[TIERS[0]] ?? TIERS[0], date: DATE });
+
 console.log('════ AF 段级风险队列 ════');
 console.log(`项目：${P._meta?.名称 ?? '（未命名）'}｜书名：${P.书名}`);
-console.log(`层级：${TIERS.join('/')}｜章节：${CH_IDS.join(',')}｜人工预算：${BUDGET} 分钟`);
+console.log(`层级：${TIERS.join('/')}｜章节：${CH_IDS.join(',')}｜人工预算：${BUDGET} 分钟｜路径布局：${RUN.layout}`);
 
 const allSegments = [];
 const unfinished = [];
@@ -89,7 +105,7 @@ for (const tier of TIERS) {
   for (const ci of CH_IDS) {
     const ch = `第${CN[ci - 1]}章`;
     const srcPath = join(SRC_BASE, ch, '原文_规范化.md');
-    const outPath = join(OUT_BASE, ch, `原文_${tag}_${DATE}${SUFFIX}.md`);
+    const outPath = makeResolver(RUN.layout, { out: OUT_BASE, work: P.调适工作区 }, { runId: RUN.runId, tier: tag, date: DATE, suffix: SUFFIX }).any('正文', { chapter: ch });
     if (!existsSync(srcPath)) { unreadable.push(`${ch}：缺规范化原文`); continue; }
     if (!existsSync(outPath)) { unreadable.push(`${ch}：缺 ${tag} 产物（先去生成）`); continue; }
     const srcSegs = segmentList(readFileSync(srcPath, 'utf-8'));
@@ -200,13 +216,13 @@ if (unreadable.length) {
   lines.push('## 读不到的文件', '', ...unreadable.map((u) => `- ${u}`), '');
 }
 
-const mdPath = join(OUT_BASE, `风险队列_${TAGS[TIERS[0]]}${TIERS.length > 1 ? '_等' : ''}_${DATE}.md`);
+const mdPath = join(OUT_BASE, `风险队列_${TAGS[TIERS[0]]}${TIERS.length > 1 ? '_等' : ''}_${DATE}${SUFFIX}.md`);
 mkdirSync(OUT_BASE, { recursive: true });
 writeFileSync(mdPath, lines.join('\n'), 'utf-8');
 
 /* ────────────────────── 机器看的格式（App 阅读器 / 离线汇总器） ────────────────────── */
-const jsonPath = join(OUT_BASE, '_运行', `风险队列_${TAGS[TIERS[0]]}${SUFFIX}.json`);
-mkdirSync(join(OUT_BASE, '_运行'), { recursive: true });
+const jsonPath = R.any('风险队列', { ext: '.json' });
+mkdirSync(dirname(jsonPath), { recursive: true });
 writeFileSync(
   jsonPath,
   JSON.stringify(

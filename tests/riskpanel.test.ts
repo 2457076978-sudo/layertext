@@ -13,6 +13,7 @@ import { test } from 'node:test';
 import {
   appendDecision,
   decisionLineFor,
+  loadRunIdentity,
   loadRiskQueue,
   panelStat,
   parseQueueFile,
@@ -196,4 +197,46 @@ test('写决定：追加而不是覆盖（append-only），两次决定都在日
   assert.equal(parseDecisionLog(log).events.length, 2, '教师改主意，历史一条都不能删');
   const r = await loadRiskQueue(paths, 'A');
   assert.deepEqual(r.events.map((e) => e.decision), ['reject', 'accept']);
+});
+
+/* ────────────────── 路径也由清单解析（App 与命令行同一套口径） ────────────────── */
+
+test('读清单拿运行身份：run 布局下按运行私有目录找队列与决定日志', async () => {
+  const RID = 'AnimalFarm-v1-A-wayne-abc';
+  const files: Record<string, string> = {
+    '/out/_运行/清单_最新.json': JSON.stringify({ runId: RID, path: `/out/_运行/清单_${RID}.json` }),
+    [`/out/_运行/清单_${RID}.json`]: JSON.stringify({ runId: RID, layout: 'run', teacher: 'wayne' }),
+    [`/out/_运行/${RID}/风险队列.json`]: JSON.stringify(file()),
+    [`/out/_运行/${RID}/决定/A层85.jsonl`]: '',
+  };
+  setRiskIo(memIo(files).io);
+
+  const id = await loadRunIdentity({ outDir: '/out', workDir: '/work', sourceVersion: 's' });
+  assert.deepEqual(id, { layout: 'run', runId: RID, teacher: 'wayne' });
+
+  const r = await loadRiskQueue({ outDir: '/out', workDir: '/work', sourceVersion: 's' }, 'A');
+  assert.equal(r.file?.队列.length, 1, 'run 布局下队列要从 _运行/<runId>/ 里找');
+  assert.equal(r.identity.layout, 'run');
+
+  await appendDecision({ outDir: '/out', workDir: '/work', sourceVersion: 's' }, 'A', decisionLineFor(r.file!.队列[0]!, 'accept', { teacherId: 'wayne', sourceVersion: 's', timestamp: '2026-09-11T10:00:00.000Z' }));
+  assert.equal(parseDecisionLog(files[`/out/_运行/${RID}/决定/A层85.jsonl`]!).events.length, 1, '决定也要写进运行私有目录');
+});
+
+test('没有清单时退回 legacy：老项目一个字都不用改', async () => {
+  const files: Record<string, string> = { '/out/_运行/风险队列_A层85.json': JSON.stringify(file()) };
+  setRiskIo(memIo(files).io);
+  const r = await loadRiskQueue({ outDir: '/out', workDir: '/work', sourceVersion: 's' }, 'A');
+  assert.equal(r.identity.layout, 'legacy');
+  assert.equal(r.file?.队列.length, 1);
+  assert.equal(r.error, undefined);
+});
+
+test('清单指针指向的文件读不到 → 退回 legacy 而不是崩（坏清单不该让面板全黑）', async () => {
+  const files: Record<string, string> = {
+    '/out/_运行/清单_最新.json': JSON.stringify({ runId: 'x', path: '/out/_运行/清单_x.json' }),
+    '/out/_运行/风险队列_A层85.json': JSON.stringify(file()),
+  };
+  setRiskIo(memIo(files).io);
+  const id = await loadRunIdentity({ outDir: '/out', workDir: '/work', sourceVersion: 's' });
+  assert.equal(id.layout, 'legacy');
 });

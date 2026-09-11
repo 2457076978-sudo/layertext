@@ -13,6 +13,7 @@
  */
 
 import { buildProposals, decisionIndex, makeDecisionEvent, parseDecisionLog, summarizeDecisions, toDecisionLine, type DecisionEvent, type DecisionKind } from '../../src/core/decision.js';
+import { makeResolver, type Layout } from '../../src/core/manifest.js';
 import { oneHourPlan, type RiskItem, type RiskQueue } from '../../src/core/riskqueue.js';
 import { GATE_RULES, type GateCategory } from '../../src/core/segmentgate.js';
 
@@ -169,31 +170,72 @@ export interface ProjectPaths {
   sourceVersion: string;
 }
 
-export async function loadRiskQueue(paths: ProjectPaths, tier: string): Promise<{ file: RiskQueueFile | null; events: DecisionEvent[]; error?: string }> {
-  if (!io) return { file: null, events: [], error: '面板 IO 未注入' };
-  const tag = TAGS[tier] ?? tier;
+/** 清单指针里的运行身份（App 也要按清单解析路径，否则 `--layout run` 一开面板就找不到文件） */
+export interface RunIdentity {
+  layout: Layout;
+  runId: string;
+  teacher: string;
+}
+
+/**
+ * 读清单指针拿到运行身份。读不到就退回 legacy + 一个占位 runId——
+ * 与命令行脚本 `runIdentity()` 同一套规则，**两处口径必须一致**，
+ * 否则"命令行写到了 A、面板去 B 找"会表现成"面板说没有队列"。
+ */
+export async function loadRunIdentity(paths: ProjectPaths): Promise<RunIdentity> {
+  const fallback: RunIdentity = { layout: 'legacy', runId: '', teacher: 'unknown' };
+  if (!io) return fallback;
+  try {
+    const ptr = JSON.parse(await io.read(`${paths.outDir}/_运行/清单_最新.json`)) as { path?: string };
+    if (!ptr.path) return fallback;
+    const m = JSON.parse(await io.read(ptr.path)) as { layout?: Layout; runId?: string; teacher?: string };
+    return { layout: m.layout ?? 'legacy', runId: m.runId ?? '', teacher: m.teacher ?? 'unknown' };
+  } catch {
+    return fallback;
+  }
+}
+
+/** 面板用的一整套路径：与命令行脚本共用引擎的 `makeResolver`（不自己拼字符串） */
+export function pathsFor(paths: ProjectPaths, id: RunIdentity, tier: string, date = ''): ReturnType<typeof makeResolver> {
+  return makeResolver(id.layout, { out: paths.outDir, work: paths.workDir }, { runId: id.runId, tier: TAGS[tier] ?? tier, date });
+}
+
+export async function loadRiskQueue(
+  paths: ProjectPaths,
+  tier: string,
+  id?: RunIdentity,
+): Promise<{ file: RiskQueueFile | null; events: DecisionEvent[]; error?: string; identity: RunIdentity }> {
+  const identity = id ?? (await loadRunIdentity(paths));
+  if (!io) return { file: null, events: [], error: '面板 IO 未注入', identity };
+  const R = pathsFor(paths, identity, tier);
+  const queuePath = R.any('风险队列', { ext: '.json' });
   let file: RiskQueueFile | null = null;
   let error: string | undefined;
   try {
-    file = parseQueueFile(await io.read(`${paths.outDir}/_运行/风险队列_${tag}.json`));
-    if (!file) error = `队列文件格式不对：_运行/风险队列_${tag}.json`;
+    file = parseQueueFile(await io.read(queuePath));
+    if (!file) error = `队列文件格式不对：${queuePath}`;
   } catch {
-    error = `还没生成过风险队列（${tag}）。先在管线里跑「风险队列」那一步。`;
+    error = `还没生成过风险队列（${TAGS[tier] ?? tier}，${identity.layout} 布局）。先在管线里跑「风险队列」那一步。`;
   }
   let events: DecisionEvent[] = [];
   try {
-    events = parseDecisionLog(await io.read(`${paths.workDir}/_决定/${tag}.jsonl`)).events;
+    events = parseDecisionLog(await io.read(R.decision())).events;
   } catch {
     /* 还没有任何决定——这是正常的，不是错误 */
   }
-  return { file, events, error };
+  return { file, events, error, identity };
 }
 
-/** 追加一条不可变事件（读→拼接→写；事件日志只增不改） */
-export async function appendDecision(paths: ProjectPaths, tier: string, event: DecisionEvent): Promise<void> {
+/** 追加一条不可变事件（读→拼接→写；事件日志只增不改）。路径按清单布局解析。 */
+export async function appendDecision(
+  paths: ProjectPaths,
+  tier: string,
+  event: DecisionEvent,
+  id?: RunIdentity,
+): Promise<void> {
   if (!io) throw new Error('面板 IO 未注入');
-  const tag = TAGS[tier] ?? tier;
-  const path = `${paths.workDir}/_决定/${tag}.jsonl`;
+  const identity = id ?? (await loadRunIdentity(paths));
+  const path = pathsFor(paths, identity, tier).decision();
   let prev: string;
   try {
     prev = await io.read(path);
@@ -233,7 +275,7 @@ export interface RiskRenderInput {
 export async function renderRiskPane(input: RiskRenderInput): Promise<{ ok: boolean; message: string }> {
   const el = input.dom.getElementById('pane-risk');
   if (!el) return { ok: false, message: '缺 pane-risk 容器' };
-  const { file, events, error } = await loadRiskQueue(input.paths, input.tier);
+  const { file, events, error, identity } = await loadRiskQueue(input.paths, input.tier);
   if (!file) {
     el.innerHTML = `<div class="empty"><b>还没有风险队列</b><br/>${esc(error ?? '')}<br/><span style="font-size:12px">在管线里跑「风险队列」那一步即可生成（<code>node tools/af_pipeline/LayerText_AF风险队列.mjs --tier A</code>）</span></div>`;
     return { ok: false, message: error ?? '没有队列' };
@@ -255,7 +297,7 @@ export async function renderRiskPane(input: RiskRenderInput): Promise<{ ok: bool
         ｜误报率 <b>${(stat.falsePositiveRate * 100).toFixed(0)}%</b>
         ${stat.unfinished ? `｜<b class="rq-over">未完成段落 ${stat.unfinished}</b>` : ''}
       </div>
-      <div class="rq-advice">${esc(stat.advice)}</div>
+      <div class="rq-advice">${esc(stat.advice)}｜路径布局 <b>${esc(identity.layout)}</b>${identity.runId ? `（${esc(identity.runId)}）` : ''}</div>
       <div class="rq-plan">${planned.phases.map((p) => `<span class="rq-phase">${esc(p.title)} ${p.budget}′ / ${p.items.length} 条</span>`).join('')}</div>
     </div>`;
 
@@ -311,6 +353,7 @@ export async function renderRiskPane(input: RiskRenderInput): Promise<{ ok: bool
         input.paths,
         input.tier,
         decisionLineFor(it, kind, { teacherId: input.teacherId, sourceVersion: input.paths.sourceVersion }),
+        identity,
       ).then(() => renderRiskPane(input));
     });
   }

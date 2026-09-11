@@ -39,10 +39,22 @@ const { buildProposals, parseDecisionLog, summarizeDecisions, contestedItems, PR
 /** SQLite 决定索引：JSONL 仍是正本，索引随时可重建（报告 §四：查询"某位教师对某词的所有决定"）。
  *  拿不到 node:sqlite 时自动降级为"不可用"，查询回落 JSONL 全扫。 */
 const { openDecisionStore } = await import(`${REPO}/dist/src/core/decisiondb.js`);
+const { makeResolver } = await import(`${REPO}/dist/src/core/manifest.js`);
 
-const DECISION_DIR = join(P.调适工作区, '_决定');
+function runIdentity() {
+  try {
+    const ptr = JSON.parse(readFileSync(join(P.产物目录, '_运行', '清单_最新.json'), 'utf-8'));
+    const m = JSON.parse(readFileSync(ptr.path, 'utf-8'));
+    return { layout: m.layout ?? 'legacy', runId: m.runId, teacher: m.teacher };
+  } catch {
+    return { layout: 'legacy', runId: '', teacher: process.env.USER ?? 'unknown' };
+  }
+}
+const RUN = runIdentity();
+const resolveDecision = (tag) => makeResolver(RUN.layout, { out: P.产物目录, work: P.调适工作区 }, { runId: RUN.runId, tier: tag }).decision();
+
+const DECISION_DIR = join(P.调适工作区, '_决定');   // 索引与落库留痕仍在调适工作区（跟运行无关）
 const INDEX_PATH = join(DECISION_DIR, '决定索引.db');
-const decisionFile = (tag) => join(DECISION_DIR, `${tag}.jsonl`);
 
 /* ────────────────────── 读取全部决定（跨层合并统计） ────────────────────── */
 const TIERS = (arg('--tier', 'A')).split(',').map((s) => s.trim().toUpperCase()).filter((t) => TAGS[t]);
@@ -50,7 +62,7 @@ const allEvents = [];
 const perTier = {};
 let badLines = 0;
 for (const t of TIERS) {
-  const f = decisionFile(TAGS[t]);
+  const f = resolveDecision(TAGS[t]);
   if (!existsSync(f)) { perTier[TAGS[t]] = { events: 0, file: f, missing: true }; continue; }
   const r = parseDecisionLog(readFileSync(f, 'utf-8'));
   badLines += r.badLines;
