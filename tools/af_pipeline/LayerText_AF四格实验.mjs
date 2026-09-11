@@ -41,6 +41,27 @@ const arg = (n, d) => { const i = argv.indexOf(n); return i >= 0 ? argv[i + 1] :
 const has = (n) => argv.includes(n);
 const TIER = (arg('--tier', 'A')).split(',')[0].trim().toUpperCase();
 if (!TAGS[TIER]) { console.error(`✗ 未知层级「${TIER}」`); process.exit(2); }
+const { makeResolver } = await import(`${REPO}/dist/src/core/manifest.js`);
+/* ── 路径一律经清单解析（总计划阶段 3「最关键的迁移」）─────────────────────
+ * 「把路径解析集中到一个 `Resolver`，**禁止业务代码拼目录**」。
+ * 本脚本原来用 `join(OUT_BASE, ch, `原文_${tag}_${DATE}.md`)` 这类手拼——
+ * legacy 布局下逐字符正确，`--layout run` 下**写在一处、读又从另一处读**，
+ * 而脚本照常报告成功（这类"不报错、结果错"正是这个规模崩点的样子）。
+ * 命名规则的唯一来源是 `src/core/manifest.ts` 的 `resolvePath`。
+ * 身份也走共享的那一个入口：两位教师并发时不再互相读到对方的 runId。 */
+/* 身份从命令行取。**刻意不复用各脚本自己的参数助手**：它们的定义位置各不相同
+ * （有的还是 `args.includes` 风格），在这一段引用会在定义之前求值。 */
+const argRun = (n, d) => { const i = process.argv.indexOf(n); return i >= 0 ? process.argv[i + 1] : d; };
+const TEACHER = argRun('--teacher', process.env.LAYERTEXT_TEACHER ?? process.env.USER ?? 'unknown');
+const RUN = await SHARED.readRunIdentity(
+  { out: OUT_BASE, work: P.调适工作区 },
+  { teacher: TEACHER, tier: TAG },
+  { runId: argRun('--run', undefined) },
+);
+if (RUN.warning) console.warn(`\n⚠ ${RUN.warning}`);
+/** 按层级标签取解析器（多层脚本与单层脚本共用同一种写法） */
+const RR = (tag) => makeResolver(RUN.layout, { out: OUT_BASE, work: P.调适工作区 }, { runId: RUN.runId, tier: tag, date: DATE });
+const R = RR(TAG);
 const TAG = TAGS[TIER];
 const CH = Number(arg('--chapters', '1').split(',')[0]);
 const FAKE = arg('--fake', '');
@@ -89,9 +110,9 @@ for (const [i, spec] of experimentPlan().entries()) {
   // 非零退出**不中止实验**：未通过门禁的段本身就是"人工修订率"要测的东西
   if (r.status !== 0) console.log(`（本格退出码 ${r.status}：有段落未过门禁，这正是要测的指标之一）`);
 
-  const outFile = join(OUT_BASE, ch, `原文_${TAG}_${DATE}_${suffix}.md`);
+  const outFile = R.any('正文', { chapter: ch, suffix: `_${suffix}` });
   const finals = new Map(segmentList(existsSync(outFile) ? readFileSync(outFile, 'utf-8') : '').map((s) => [s.id, s.text]));
-  const logPath = join(P.调适工作区, '_会话', `${TAG}${spec.scope === 'tier' ? '' : '_' + spec.scope}${spec.vocabArg === 'full' ? '' : '_' + spec.vocabArg}_${suffix}.jsonl`);
+  const logPath = R.session({ scope: spec.scope, vocab: spec.vocabArg, suffix: `_${suffix}` });
   const firsts = existsSync(logPath) ? segmentFirstResponses(readFileSync(logPath, 'utf-8')) : new Map();
   let usage = { calls: 0, in: 0, out: 0, cached: 0 };
   let needsReview = 0;
@@ -171,10 +192,10 @@ const lines = [
 ];
 
 mkdirSync(OUT_BASE, { recursive: true });
-const mdPath = join(OUT_BASE, `四格实验_${TAG}_${DATE}.md`);
+const mdPath = R.any('汇总报告', { name: `四格实验_${TAG}` });
 writeFileSync(mdPath, lines.join('\n'), 'utf-8');
-mkdirSync(join(OUT_BASE, '_运行'), { recursive: true });
-const jsonPath = join(OUT_BASE, '_运行', `四格实验_${TAG}.json`);
+mkdirSync(R.dir('运行中间产物'), { recursive: true });
+const jsonPath = R.any('运行中间产物', { name: `四格实验_${TAG}` });
 writeFileSync(
   jsonPath,
   JSON.stringify({ schemaVersion: 1, 书名: P.书名, 层级: TIER, 章: CH, 段数: srcSegs.length, 假模型: FAKE || null, 生成时间: new Date().toISOString(), 结论: verdict, 四格: cellsRaw }, null, 2),

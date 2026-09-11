@@ -55,7 +55,11 @@ function makeManySegmentProject(n: number): { root: string; json: string } {
 }
 
 function makeProject(): { root: string; json: string } {
-  const root = mkdtempSync(join(tmpdir(), 'lt-gate-'));
+  return makeProjectUnder(mkdtempSync(join(tmpdir(), 'lt-gate-')));
+}
+
+/** 同一个自检项目，但建在指定目录下（"两种布局各跑一次"要比的正是同一份输入） */
+function makeProjectUnder(root: string): { root: string; json: string } {
   const w = (...p: string[]): string => join(root, ...p);
   mkdirSync(w('原文', '第一章'), { recursive: true });
   mkdirSync(w('调适', '_会话'), { recursive: true });
@@ -454,4 +458,134 @@ test('run 布局：风险队列也写进运行私有目录（App 面板按同一
   // 面板用引擎的解析器算出来的路径，必须与脚本写的一致
   const parsed = JSON.parse(readFileSync(join(runDir, '风险队列.json'), 'utf-8')) as { 层级: string[] };
   assert.deepEqual(parsed.层级, ['A']);
+});
+
+/* ────────────────── 路径解析收口：每个脚本都必须跟着布局走（总计划阶段 3「最关键的迁移」） ──────────────────
+ *
+ * 这几条是**逐个脚本**的端到端证据，针对的是本项目里最难查的一类缺陷：
+ * 脚本自己拼路径 → `legacy` 下逐字符正确 → 切到 `--layout run` 后
+ * **写在一处、读又从另一处读**，而脚本照常报告成功。
+ * 只断言"跑通了"没有意义（跑了但写在错地方照样退出 0），所以每条都断言**文件落在哪**。
+ */
+
+const ARCHIVE = join(REPO, 'tools', 'af_pipeline');
+
+/** 造一份"已经生成过 A 层第一章产物"的项目，好让只读型脚本有东西可读 */
+function makeProducedProject(): { root: string; json: string; rid: string; product: string } {
+  const { root, json } = makeProject();
+  const init = spawnSync(
+    process.execPath,
+    [join(ARCHIVE, 'LayerText_AF清单.mjs'), '--new', '--tier', 'A', '--chapters', '1', '--layout', 'run', '--teacher', 'wayne'],
+    { cwd: REPO, encoding: 'utf-8', env: { ...process.env, LAYERTEXT_PROJECT: json, LAYERTEXT_ENGINE: REPO } },
+  );
+  assert.equal(init.status, 0, init.stdout + init.stderr);
+  const rid = /运行 ID：(\S+)/.exec(init.stdout)?.[1] ?? '';
+  assert.notEqual(rid, '', `没拿到运行 ID：${init.stdout}`);
+  const product = join(root, '产物', '_运行', rid, '正文', '第一章', `原文_${TAG}_${DATE}.md`);
+  mkdirSync(dirname(product), { recursive: true });
+  writeFileSync(product, `## Chapter One\n\n[P01] The boy ran to the red barn（谷仓）and saw a small dog.\n`, 'utf-8');
+  return { root, json, rid, product };
+}
+
+function runScript(script: string, json: string, extra: string[] = []): { status: number | null; out: string } {
+  const r = spawnSync(process.execPath, [join(ARCHIVE, script), '--tier', 'A', '--chapters', '1', ...extra], {
+    cwd: REPO,
+    encoding: 'utf-8',
+    env: { ...process.env, LAYERTEXT_PROJECT: json, LAYERTEXT_ENGINE: REPO },
+  });
+  return { status: r.status, out: `${r.stdout ?? ''}${r.stderr ?? ''}` };
+}
+
+test('★ 对照台账：run 布局下台账与总览落进运行私有目录，而不是产物根目录', () => {
+  const { root, json, rid } = makeProducedProject();
+  const r = runScript('LayerText_AF对照台账.mjs', json);
+  assert.equal(r.status, 0, r.out);
+  const dir = join(root, '产物', '_运行', rid);
+  assert.equal(existsSync(join(dir, `台账_${TAG}_${DATE}.md`)), true, `台账要落进运行私有目录：${r.out}`);
+  assert.equal(existsSync(join(dir, `台账总览_${DATE}.md`)), true, '总览同理');
+  // 旧的手拼位置**不许**再出现（两套路径并存比撞名更难查）
+  assert.equal(existsSync(join(root, '产物', `台账_${TAG}_${DATE}.md`)), false, '产物根目录不该再有台账');
+  assert.equal(existsSync(join(root, '产物', `台账总览_${DATE}.md`)), false);
+});
+
+test('★ 三档复核：run 布局下汇总报告落进运行私有目录，且它读得到运行目录里的产物', () => {
+  const { root, json, rid } = makeProducedProject();
+  const r = runScript('LayerText_AF三档复核.mjs', json);
+  assert.equal(r.status, 0, r.out);
+  const dir = join(root, '产物', '_运行', rid);
+  assert.equal(existsSync(join(dir, `三档汇总_${DATE}.md`)), true, `汇总要落进运行私有目录：${r.out}`);
+  assert.equal(existsSync(join(root, '产物', `三档汇总_${DATE}.md`)), false, '产物根目录不该再有汇总');
+  /* 读的那一侧同样要跟着布局走：报告里必须**确实读到了**那份产物。
+   * 只断言文件存在是不够的——写成"读不到 → 记 0 词 → 照样写报告"也会通过。 */
+  const report = readFileSync(join(dir, `三档汇总_${DATE}.md`), 'utf-8');
+  assert.match(report, /第一章/, `报告里要出现读到的章节：${report.slice(0, 400)}`);
+  assert.doesNotMatch(report, /读不到|缺 .*产物/, `报告里不该出现"读不到产物"：${report.slice(0, 400)}`);
+});
+
+test('★ 风险队列：人读的 Markdown 报告与机器读的 JSON 都跟着布局走（两者本来就在不同目录）', () => {
+  const { root, json, rid } = makeProducedProject();
+  const r = runScript('LayerText_AF风险队列.mjs', json);
+  assert.equal(r.status, 0, r.out);
+  const dir = join(root, '产物', '_运行', rid);
+  assert.equal(existsSync(join(dir, '风险队列.json')), true, '机器读的 JSON 在运行私有目录');
+  assert.equal(existsSync(join(dir, `风险队列_${TAG}_${DATE}.md`)), true, `人读的报告也要跟着走：${r.out}`);
+  assert.equal(existsSync(join(root, '产物', `风险队列_${TAG}_${DATE}.md`)), false, '产物根目录不该再有报告');
+});
+
+test('★ 清单：台账与报告这两条产物也按解析器登记（清单记的相对路径要能复原）', () => {
+  const { root, json, rid } = makeProducedProject();
+  assert.equal(runScript('LayerText_AF对照台账.mjs', json).status, 0);
+  // `--stamp` 才是"把产物登记进清单"的那一步（不带参数时它只读并打印）
+  const r = runScript('LayerText_AF清单.mjs', json, ['--stamp']);
+  assert.equal(r.status, 0, r.out);
+  const manifestPath = join(root, '产物', '_运行', `清单_${rid}.json`);
+  const m = JSON.parse(readFileSync(manifestPath, 'utf-8')) as { artifacts: { path: string; kind: string }[] };
+  const ledger = m.artifacts.find((a) => a.kind === '台账');
+  assert.ok(ledger, `清单里要有台账这条：${JSON.stringify(m.artifacts.map((a) => a.kind))}`);
+  assert.equal(ledger.path.startsWith('_运行/'), true, `run 布局下台账的相对路径要带运行私有前缀，实得 ${ledger.path}`);
+});
+
+test('★ 布局以**清单**为准：`--stamp` 不带 `--layout` 也要扫得到 run 布局的产物', () => {
+  /* 这是一条**实际踩到过**的缺陷：建清单时用了 `--layout run`，
+   * 之后 `--stamp` 忘了再写一遍 —— 扫描就按 legacy 去找产物，一件都扫不到、
+   * 清单记 0 件，**而输出照旧写「清单已更新」**。
+   * 这类"不报错、结果错"正是本项目最难查的一类。 */
+  const { root, json, rid } = makeProducedProject();
+  assert.equal(runScript('LayerText_AF对照台账.mjs', json).status, 0);
+  const r = runScript('LayerText_AF清单.mjs', json, ['--stamp', '--step', '台账']); // 刻意不带 --layout
+  assert.equal(r.status, 0, r.out);
+  const m = JSON.parse(readFileSync(join(root, '产物', '_运行', `清单_${rid}.json`), 'utf-8')) as {
+    artifacts: { kind: string; path: string }[];
+  };
+  assert.notEqual(m.artifacts.length, 0, `不许静默记 0 件：${r.out}`);
+  const kinds = m.artifacts.map((a) => a.kind);
+  assert.equal(kinds.includes('台账'), true, `台账要登记上：${JSON.stringify(kinds)}`);
+  const ledger = m.artifacts.find((a) => a.kind === '台账')!;
+  assert.equal(ledger.path.startsWith('_运行/'), true, `run 布局下相对路径要带运行私有前缀，实得 ${ledger.path}`);
+});
+
+test('★ 两个布局都跑得通，且各自落到自己的位置（同一份项目，legacy 与 run 各跑一次）', () => {
+  /* legacy：不建清单 → 脚本退回 legacy 布局。
+   * 这是"不破坏教师已有工作流"的硬约束：老项目的路径必须逐字符不变。 */
+  const legacyRoot = mkdtempSync(join(tmpdir(), 'lt-legacy-'));
+  const legacy = (() => {
+    const made = makeProjectUnder(legacyRoot);
+    const p = join(legacyRoot, '产物', '第一章', `原文_${TAG}_${DATE}.md`);
+    mkdirSync(dirname(p), { recursive: true });
+    writeFileSync(p, `## Chapter One\n\n[P01] The boy ran to the red barn（谷仓）.\n`, 'utf-8');
+    const r = runScript('LayerText_AF对照台账.mjs', made.json);
+    assert.equal(r.status, 0, r.out);
+    return {
+      台账: existsSync(join(legacyRoot, '产物', `台账_${TAG}_${DATE}.md`)),
+      运行目录: existsSync(join(legacyRoot, '产物', '_运行', `台账_${TAG}_${DATE}.md`)),
+    };
+  })();
+  assert.equal(legacy.台账, true, 'legacy 布局下台账仍在产物根目录——**教师已有工作流一个字都不用改**');
+
+  /* run：同一份源数据，只因为清单说是 run 布局，就落进运行私有目录 */
+  const { root, json, rid } = makeProducedProject();
+  const r = runScript('LayerText_AF对照台账.mjs', json);
+  assert.equal(r.status, 0, r.out);
+  assert.equal(existsSync(join(root, '产物', '_运行', rid, `台账_${TAG}_${DATE}.md`)), true);
+  assert.equal(existsSync(join(root, '产物', `台账_${TAG}_${DATE}.md`)), false, '**同一条命令在两种布局下落点不同**——这正是解析器存在的意义');
 });

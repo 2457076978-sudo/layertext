@@ -444,6 +444,13 @@ export type ArtifactPathKind =
   /** 正文版本节点日志（append-only JSONL）。与 `决定日志` 并列的第二本账：
    *  决定日志回答"谁做了什么决定"，版本日志回答"正文变成了哪一版、父版本是谁"。 */
   | '版本日志'
+  /** 人读的**汇总报告**（三档汇总 / 台账总览 / 四格实验报告 / 重制汇总）。
+   *  legacy 落在产物根目录（`三档汇总_<日期>.md`），run 落进运行私有目录。 */
+  | '汇总报告'
+  /** 落在 `_运行/` 下的**中间产物**（四格实验原始数据、入库提议）。
+   *  与 `汇总报告` 分开，是因为它们的落点不同（一个在产物根、一个在 `_运行/`），
+   *  合成一种会让其中一边的命名被改掉。 */
+  | '运行中间产物'
   | '清单';
 
 export interface PathRequest {
@@ -464,6 +471,9 @@ export interface PathRequest {
   segId?: string;
   /** 覆盖扩展名 */
   ext?: string;
+  /** 产物名（`汇总报告` / `运行中间产物` 用，如 `三档汇总`、`四格实验_A层85`）。
+   *  **不是所有产物都能用"层+章+日期"描述**：汇总报告跨层跨章，它只有一个名字。 */
+  name?: string;
 }
 
 /** 运行私有目录：`<产物目录>/_运行/<runId>`。`run` 布局下每类产物都收在这儿。 */
@@ -498,6 +508,12 @@ export function resolvePath(layout: Layout, roots: { out: string; work: string }
   if (layout === 'run') {
     const dir = privateDirOf(out, runId);
     switch (req.kind) {
+      case '汇总报告':
+        // 与 legacy **同名**，只换目录——不然"两种布局"就变成了"两套命名"，
+        // 而两套命名的直接后果是下游按名字找文件时只对其中一种成立。
+        return `${dir}/${req.name ?? '汇总'}${date ? `_${date}` : ''}${suffix}${req.ext ?? '.md'}`;
+      case '运行中间产物':
+        return `${dir}/${req.name ?? '中间产物'}${suffix}${req.ext ?? '.json'}`;
       case '正文':
         return `${dir}/正文/${req.chapter ?? ''}/原文_${tier}_${date}${suffix}.md`;
       case '待复核':
@@ -523,6 +539,12 @@ export function resolvePath(layout: Layout, roots: { out: string; work: string }
 
   // legacy：与既有命名完全一致（这是"不破坏教师已有工作流"的硬约束）
   switch (req.kind) {
+    /* 这两种是**新增**的 kind，它们逐字符复现的是各脚本原来手拼的字符串——
+     * 迁移不许改动落点，否则"换了个写法"就变成了"换了个位置"。 */
+    case '汇总报告':
+      return `${out}/${req.name ?? '汇总'}${date ? `_${date}` : ''}${suffix}${req.ext ?? '.md'}`;
+    case '运行中间产物':
+      return `${out}/_运行/${req.name ?? '中间产物'}${suffix}${req.ext ?? '.json'}`;
     case '正文':
       return `${out}/${req.chapter ?? ''}/原文_${tier}_${date}${suffix}.md`;
     case '待复核':

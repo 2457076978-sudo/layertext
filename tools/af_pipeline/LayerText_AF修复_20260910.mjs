@@ -35,6 +35,26 @@ const argOf = (n, d) => { const i = argv.indexOf(n); return i >= 0 ? argv[i + 1]
 const TAGS_ALL = { A: 'A层85', M: 'M层75', B: 'B层60' };
 const TAGS = (argOf('--tier', 'A,M,B')).split(',').map((x) => x.trim().toUpperCase())
   .map((k) => TAGS_ALL[k]).filter(Boolean);
+const { makeResolver } = await import(`${P.引擎目录}/dist/src/core/manifest.js`);
+/* ── 路径一律经清单解析（总计划阶段 3「最关键的迁移」）─────────────────────
+ * 「把路径解析集中到一个 `Resolver`，**禁止业务代码拼目录**」。
+ * 本脚本原来用 `join(OUT_BASE, ch, `原文_${tag}_${DATE}.md`)` 这类手拼——
+ * legacy 布局下逐字符正确，`--layout run` 下**写在一处、读又从另一处读**，
+ * 而脚本照常报告成功（这类"不报错、结果错"正是这个规模崩点的样子）。
+ * 命名规则的唯一来源是 `src/core/manifest.ts` 的 `resolvePath`。
+ * 身份也走共享的那一个入口：两位教师并发时不再互相读到对方的 runId。 */
+/* 身份从命令行取。**刻意不复用各脚本自己的参数助手**：它们的定义位置各不相同
+ * （有的还是 `args.includes` 风格），在这一段引用会在定义之前求值。 */
+const argRun = (n, d) => { const i = process.argv.indexOf(n); return i >= 0 ? process.argv[i + 1] : d; };
+const TEACHER = argRun('--teacher', process.env.LAYERTEXT_TEACHER ?? process.env.USER ?? 'unknown');
+const RUN = await (await import('./LayerText_AF词表与词典.mjs')).readRunIdentity(
+  { out: OUT_BASE, work: P.调适工作区 },
+  { teacher: TEACHER, tier: TAGS[0] },
+  { runId: argRun('--run', undefined) },
+);
+if (RUN.warning) console.warn(`\n⚠ ${RUN.warning}`);
+/** 按层级标签取解析器（多层脚本与单层脚本共用同一种写法） */
+const RR = (tag) => makeResolver(RUN.layout, { out: OUT_BASE, work: P.调适工作区 }, { runId: RUN.runId, tier: tag, date: DATE });
 const CN_ALL = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十'];
 /** 章号（数字，1 起）：路径与台账都按它取中文章名 */
 const CHAPTER_IDS = argOf('--chapters', '')
@@ -58,7 +78,7 @@ const GLOSS_OVERRIDE = new Map([
 
 const ANN_RE = /([A-Za-z][A-Za-z'-]*)（([^（）]{1,24})）/g;
 const read = (p) => readFileSync(p, 'utf-8');
-const pOf = (ch, tag) => join(OUT_BASE, ch, `原文_${tag}_${DATE}.md`);
+const pOf = (ch, tag) => RR(tag).any('正文', { chapter: ch });
 
 /* ── ① 全局统计：同词多义 ── */
 /** 畸形嵌套注释：模型把释义又注了一遍，产生 `Mollie（莫丽（名字））`、

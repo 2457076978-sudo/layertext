@@ -35,6 +35,27 @@ const TIERS = {
   B: { key: 'B', label: 'B层（基础）', ratio: 0.6, maxLen: 14, retryLine: 0.48, clsTag: 'B层60' },
 };
 
+const { makeResolver, dirOfPath } = await import(`${REPO}/dist/src/core/manifest.js`);
+/* ── 路径一律经清单解析（总计划阶段 3「最关键的迁移」）─────────────────────
+ * 「把路径解析集中到一个 `Resolver`，**禁止业务代码拼目录**」。
+ * 本脚本原来用 `join(OUT_BASE, ch, `原文_${tag}_${DATE}.md`)` 这类手拼——
+ * legacy 布局下逐字符正确，`--layout run` 下**写在一处、读又从另一处读**，
+ * 而脚本照常报告成功（这类"不报错、结果错"正是这个规模崩点的样子）。
+ * 命名规则的唯一来源是 `src/core/manifest.ts` 的 `resolvePath`。
+ * 身份也走共享的那一个入口：两位教师并发时不再互相读到对方的 runId。 */
+/* 身份从命令行取。**刻意不复用各脚本自己的参数助手**：它们的定义位置各不相同
+ * （有的还是 `args.includes` 风格），在这一段引用会在定义之前求值。 */
+const argRun = (n, d) => { const i = process.argv.indexOf(n); return i >= 0 ? process.argv[i + 1] : d; };
+const TEACHER = argRun('--teacher', process.env.LAYERTEXT_TEACHER ?? process.env.USER ?? 'unknown');
+const RUN = await SHARED.readRunIdentity(
+  { out: OUT_BASE, work: P.调适工作区 },
+  { teacher: TEACHER, tier: TIERS.A.clsTag },
+  { runId: argRun('--run', undefined) },
+);
+if (RUN.warning) console.warn(`\n⚠ ${RUN.warning}`);
+/** 按层级标签取解析器（多层脚本与单层脚本共用同一种写法） */
+const RR = (tag) => makeResolver(RUN.layout, { out: OUT_BASE, work: P.调适工作区 }, { runId: RUN.runId, tier: tag, date: DATE });
+const R = RR(TIERS.A.clsTag);
 /* ---------- 知识库 ---------- */
 const kbNotes = new Map(); // word → 释义（教师认可的加注对，过滤"复现"等非释义值）
 const kbSwaps = [];
@@ -146,10 +167,10 @@ async function runChapter(i, t) {
     out.push(revised);
     process.stdout.write(`  ${ch}${t.key} 段 ${k + 1}/${segs.length}（${srcW}→${wc(revised)}）\r`);
   }
-  const outDir = join(OUT_BASE, ch);
-  mkdirSync(outDir, { recursive: true });
+  // 产物路径只从 Resolver 来（legacy 下与手拼逐字符相同，run 下才落进运行私有目录）
+  const outPath = RR(t.clsTag).any('正文', { chapter: ch });
+  mkdirSync(dirOfPath(outPath), { recursive: true });
   const newMd = `${header}${chLine}\n\n${out.join('\n\n')}\n`;
-  const outPath = join(outDir, `原文_${t.clsTag}_${DATE}.md`);
   writeFileSync(outPath, newMd, 'utf-8');
   const srcWords = wc(md.split('## 词句卡')[0]);
   const outWords = wc(newMd.split('## 词句卡')[0]);
@@ -193,5 +214,5 @@ for (const r of results) {
 }
 lines.push('');
 for (const [k, v] of Object.entries(byT)) lines.push(`${k} 层合计：${v.s} → ${v.o}（${((v.o / v.s) * 100).toFixed(0)}%）`);
-writeFileSync(join(OUT_BASE, `三档汇总_${DATE}.md`), lines.join('\n'), 'utf-8');
+writeFileSync(R.any('汇总报告', { name: '三档汇总' }), lines.join('\n'), 'utf-8');
 console.log('\n' + lines.join('\n'));

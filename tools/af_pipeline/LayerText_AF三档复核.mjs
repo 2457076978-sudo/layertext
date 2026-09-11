@@ -44,6 +44,27 @@ const CHAPTER_IDS = argOf('--chapters', '')
   ? argOf('--chapters').split(',').map((x) => Number(x.trim())).filter((n) => n >= 1 && n <= 10)
   : CN_ALL.slice(0, Number(P.章数 ?? 10)).map((_, i) => i + 1);
 const CH_NAME = (ci) => `第${CN_ALL[ci - 1]}章`;
+const { makeResolver } = await import(`${LTR}/dist/src/core/manifest.js`);
+/* ── 路径一律经清单解析（总计划阶段 3「最关键的迁移」）─────────────────────
+ * 「把路径解析集中到一个 `Resolver`，**禁止业务代码拼目录**」。
+ * 本脚本原来用 `join(OUT_BASE, ch, `原文_${tag}_${DATE}.md`)` 这类手拼——
+ * legacy 布局下逐字符正确，`--layout run` 下**写在一处、读又从另一处读**，
+ * 而脚本照常报告成功（这类"不报错、结果错"正是这个规模崩点的样子）。
+ * 命名规则的唯一来源是 `src/core/manifest.ts` 的 `resolvePath`。
+ * 身份也走共享的那一个入口：两位教师并发时不再互相读到对方的 runId。 */
+/* 身份从命令行取。**刻意不复用各脚本自己的参数助手**：它们的定义位置各不相同
+ * （有的还是 `args.includes` 风格），在这一段引用会在定义之前求值。 */
+const argRun = (n, d) => { const i = process.argv.indexOf(n); return i >= 0 ? process.argv[i + 1] : d; };
+const TEACHER = argRun('--teacher', process.env.LAYERTEXT_TEACHER ?? process.env.USER ?? 'unknown');
+const RUN = await (await import('./LayerText_AF词表与词典.mjs')).readRunIdentity(
+  { out: OUT_BASE, work: P.调适工作区 },
+  { teacher: TEACHER, tier: TAGS[0] },
+  { runId: argRun('--run', undefined) },
+);
+if (RUN.warning) console.warn(`\n⚠ ${RUN.warning}`);
+/** 按层级标签取解析器（多层脚本与单层脚本共用同一种写法） */
+const RR = (tag) => makeResolver(RUN.layout, { out: OUT_BASE, work: P.调适工作区 }, { runId: RUN.runId, tier: tag, date: DATE });
+const R = RR(TAGS[0]);
 const TIERS = AI_TIERS.filter((t) => TAGS.includes(t.tag));
 const wc = (t) => (t.match(/[A-Za-z][A-Za-z'-]*/g) ?? []).length;
 const ANN_RE = /([A-Za-z][A-Za-z'-]*)（([^（）]{1,24})）/g;
@@ -69,7 +90,7 @@ for (const t of TIERS) {
   for (const ci of CHAPTER_IDS) {
     const ch = CH_NAME(ci);
     const src = readFileSync(join(SRC_BASE, ch, '原文_规范化.md'), 'utf-8');
-    const p = join(OUT_BASE, ch, `原文_${t.tag}_${DATE}.md`);
+    const p = RR(t.tag).any('正文', { chapter: ch });
     const md = readFileSync(p, 'utf-8');
     const sw = wc(src.split('## 词句卡')[0]);
     const ow = wc(md.split('## 词句卡')[0]);
@@ -147,7 +168,7 @@ L.push('3. **QC 词表口径错误**：原先四个脚本只喂项目词库、�
 L.push('   （`properNouns` 是 buildLexicon 的参数，传给 runQc 无效）——数词与专名被算成生词，生词率虚高。已统一为 `loadLexicon()`；');
 L.push('4. 引擎新增指标⑪（加注覆盖率），并修正连字符复合词的"已注"识别（`blood-curdling（…）` 算 curdling 已注）。');
 
-const out = join(OUT_BASE, `三档汇总_${DATE}.md`);
+const out = R.any('汇总报告', { name: '三档汇总' });
 writeFileSync(out, L.join('\n') + '\n', 'utf-8');
 console.log(L.join('\n'));
 console.log(`\n✓ 已写出 ${out}`);

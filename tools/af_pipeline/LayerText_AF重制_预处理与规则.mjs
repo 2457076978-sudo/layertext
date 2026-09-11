@@ -14,6 +14,12 @@ import { join } from 'node:path';
 const P = (await import('./LayerText_AF词表与词典.mjs')).loadProject();
 const WS = P.调适工作区;
 const OUT = P.原文目录;
+/* ── 为什么本脚本**不**走 `Resolver` ──────────────────────────────────────
+ * `Resolver` 建模的是**产物目录**（`产物目录` + `调适工作区`）：正文/台账/报告/队列/日志。
+ * 本脚本读写的是**原文目录**（`原文重制_M50/第X章/…`）——那是源树，不是产物树：
+ * 它产出的是"供其它脚本当输入用"的规范化原文，从不参与运行私有目录那套隔离。
+ * 把它硬塞进 `Resolver` 只会给源树编一套并不存在的 ArtifactKind。
+ * 真正需要经 `Resolver` 的是**产物**那几类，那几类别的脚本已经全部改过去了。 */
 const SRC_CLEAN = P.原文基线清理版名 ?? '原文基线_清理对齐版.md';
 const SRC_RAW = P.原文基线重建稿名 ?? '原文基线_重建稿.txt';
 const CH_COUNT = Number(P.章数 ?? 10);

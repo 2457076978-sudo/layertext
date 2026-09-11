@@ -10,6 +10,12 @@ import { join } from 'node:path';
 const P = (await import('./LayerText_AF词表与词典.mjs')).loadProject();
 const REPO = P.引擎目录;
 const BASE = P.原文目录;
+/* ── 为什么本脚本**不**走 `Resolver` ──────────────────────────────────────
+ * `Resolver` 建模的是**产物目录**（`产物目录` + `调适工作区`）：正文/台账/报告/队列/日志。
+ * 本脚本读写的是**原文目录**（`原文重制_M50/第X章/…`）——那是源树，不是产物树：
+ * 它产出的是"供其它脚本当输入用"的规范化原文，从不参与运行私有目录那套隔离。
+ * 把它硬塞进 `Resolver` 只会给源树编一套并不存在的 ArtifactKind。
+ * 真正需要经 `Resolver` 的是**产物**那几类，那几类别的脚本已经全部改过去了。 */
 const VOCAB = P.词库;
 const DATE = P.日期;
 const MIN_CHAPTER_RATIO = 0.5; // 章级下限：产物 ≥ 原文 50%

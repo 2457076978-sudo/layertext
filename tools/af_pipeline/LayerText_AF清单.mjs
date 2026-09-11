@@ -65,8 +65,23 @@ const MANIFEST_POINTER = join(RUN_DIR, '清单_最新.json');
  *  这个开关就是那句"解析路径"的落点：改成 run 之后所有脚本自动跟着走。 */
 const LAYOUT = arg('--layout', 'legacy');
 if (!['legacy', 'run'].includes(LAYOUT)) { console.error(`✗ --layout 只能是 legacy / run`); process.exit(2); }
-/** 本脚本自己的产物路径也走同一套解析（否则它就成了唯一的例外） */
-const selfPaths = (runId) => makeResolver(LAYOUT, { out: OUT_BASE, work: P.调适工作区 }, { runId, tier: TAGS[TIERS[0]] ?? TIERS[0], date: DATE });
+/**
+ * 本脚本自己的产物路径也走同一套解析（否则它就成了唯一的例外）。
+ *
+ * ★ 布局**以清单为准**，不是以命令行 `--layout` 为准。
+ * `--layout` 只在 `--new` 时决定"这次运行用哪种布局"；之后每一次 `--stamp` / `--verify`
+ * 都该跟着**那份清单**走。原来这里读的是命令行，于是"建清单时用了 `--layout run`、
+ * 刷状态时忘了再写一遍"会让扫描按 legacy 去找产物 —— **一件都扫不到、清单记 0 件、
+ * 而输出照旧写「清单已更新」**。这类"不报错、结果错"正是本项目最难查的一类缺陷。
+ * 命令行与清单打架时以清单为准，并且**说出来**。 */
+const layoutOf = () => {
+  const fromManifest = cur?.manifest?.layout;
+  if (fromManifest && fromManifest !== LAYOUT) {
+    console.warn(`⚠ 清单记的是 ${fromManifest} 布局，命令行给的是 ${LAYOUT}——按**清单**走（产物在哪只有清单说了算）`);
+  }
+  return fromManifest ?? LAYOUT;
+};
+const selfPaths = (runId) => makeResolver(layoutOf(), { out: OUT_BASE, work: P.调适工作区 }, { runId, tier: TAGS[TIERS[0]] ?? TIERS[0], date: DATE });
 
 
 const readIf = (p) => (p && existsSync(p) ? readFileSync(p, 'utf-8') : null);
@@ -144,11 +159,17 @@ function scanArtifacts() {
       const text = readFileSync(abs, 'utf-8');
       out.push({ path: rel, kind: '正文', tier: t, chapter: ch, status, reason, hash: contentHash(text), bytes: text.length, updatedAt: new Date().toISOString() });
     }
-    for (const [kind, name] of [['台账', `台账_${tag}_${DATE}.md`], ['风险队列', `风险队列_${tag}_${DATE}.md`]]) {
-      const abs = join(OUT_BASE, name);
+    /* 台账与人读的风险队列报告：两条也经解析器取路径。
+     * 清单记的是**相对产物目录**的路径（`rel`），所以这里减掉前缀即可——
+     * 两种布局下 `rel` 自然不同（run 布局会带上 `_运行/<runId>/`），下游按它复原也在同一套规则里。 */
+    for (const [kind, abs] of [
+      ['台账', rr.any('台账', { tier: tag, date: DATE })],
+      ['风险队列', rr.any('汇总报告', { name: `风险队列_${tag}`, date: DATE })],
+    ]) {
+      const rel = abs.replace(`${OUT_BASE}/`, '');
       if (!existsSync(abs)) continue;
       const text = readFileSync(abs, 'utf-8');
-      out.push({ path: name, kind, tier: t, status: 'ok', hash: contentHash(text), bytes: text.length, updatedAt: new Date().toISOString() });
+      out.push({ path: rel, kind, tier: t, status: 'ok', hash: contentHash(text), bytes: text.length, updatedAt: new Date().toISOString() });
     }
     // 待复核的段落数：清单的"能不能交付"由它决定
     if (review) {

@@ -62,7 +62,7 @@ const { runQc } = await import(`${REPO}/dist/src/core/qc.js`);
 const LEX = await SHARED.loadLexicon(P);
 const DICT = SHARED.loadDict(P.词典路径);
 const { segmentList } = SHARED;
-const { makeResolver } = await import(`${REPO}/dist/src/core/manifest.js`);
+const { makeResolver, dirOfPath } = await import(`${REPO}/dist/src/core/manifest.js`);
 const wc = (t) => (t.match(/[A-Za-z][A-Za-z'-]*/g) ?? []).length;
 
 const warnings = [];
@@ -237,8 +237,15 @@ if (unreadable.length) {
   lines.push('## 读不到的文件', '', ...unreadable.map((u) => `- ${u}`), '');
 }
 
-const mdPath = join(OUT_BASE, `风险队列_${TAGS[TIERS[0]]}${TIERS.length > 1 ? '_等' : ''}_${DATE}${SUFFIX}.md`);
-mkdirSync(OUT_BASE, { recursive: true });
+/* 人读的 Markdown 报告也走解析器。它是**另一个产物**（队列 JSON 在 `_运行/`，报告在产物根），
+ * 所以按 `汇总报告` 取；带 `--out` 后缀时同样带上，否则两次试跑会互相覆盖。 */
+const mdPath = makeResolver(RUN.layout, { out: OUT_BASE, work: P.调适工作区 }, {
+  runId: RUN.runId,
+  tier: TAGS[TIERS[0]] ?? TIERS[0],
+  date: DATE,
+  suffix: SUFFIX,
+}).any('汇总报告', { name: `风险队列_${TAGS[TIERS[0]]}${TIERS.length > 1 ? '_等' : ''}` });
+mkdirSync(dirOfPath(mdPath), { recursive: true });
 writeFileSync(mdPath, lines.join('\n'), 'utf-8');
 
 /* ────────────────────── 机器看的格式（App 阅读器 / 离线汇总器） ────────────────────── */

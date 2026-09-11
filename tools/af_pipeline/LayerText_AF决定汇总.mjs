@@ -43,14 +43,19 @@ const { productMetrics } = await import(`${REPO}/dist/src/core/productmetrics.js
 const { makeResolver } = await import(`${REPO}/dist/src/core/manifest.js`);
 
 /* 运行身份走**共享的那一个**解析入口（与其它脚本、App 面板同一条规则）。 */
-const TEACHER = arg('--teacher', process.env.LAYERTEXT_TEACHER ?? process.env.USER ?? 'unknown');
+/* 身份从命令行取。**刻意不复用各脚本自己的参数助手**：它们的定义位置各不相同
+ * （有的还是 `args.includes` 风格），在这一段引用会在定义之前求值。 */
+const argRun = (n, d) => { const i = process.argv.indexOf(n); return i >= 0 ? process.argv[i + 1] : d; };
+const TEACHER = argRun('--teacher', process.env.LAYERTEXT_TEACHER ?? process.env.USER ?? 'unknown');
 const RUN = await SHARED.readRunIdentity(
   { out: P.产物目录, work: P.调适工作区 },
   { teacher: TEACHER, tier: TAGS[TIERS[0]] ?? TIERS[0] },
-  { runId: arg('--run', undefined) },
+  { runId: argRun('--run', undefined) },
 );
 if (RUN.warning) console.warn(`\n⚠ ${RUN.warning}`);
 const resolveDecision = (tag) => makeResolver(RUN.layout, { out: P.产物目录, work: P.调适工作区 }, { runId: RUN.runId, tier: tag }).decision();
+/* 本脚本也会写产物（入库提议），所以还需要一个**默认层**的解析器 */
+const R = makeResolver(RUN.layout, { out: OUT_BASE, work: P.调适工作区 }, { runId: RUN.runId, tier: TAGS[TIERS[0]] ?? TIERS[0] });
 
 const DECISION_DIR = join(P.调适工作区, '_决定');   // 索引与落库留痕仍在调适工作区（跟运行无关）
 const INDEX_PATH = join(DECISION_DIR, '决定索引.db');
@@ -176,14 +181,15 @@ if (contested.length) {
 }
 
 if (!has('--dry')) {
-  mkdirSync(join(OUT_BASE, '_运行'), { recursive: true });
-  writeFileSync(join(OUT_BASE, '_运行', `入库提议_${TAGS[TIERS[0]]}.md`), lines.join('\n'), 'utf-8');
+  mkdirSync(R.dir('运行中间产物'), { recursive: true });
+  const proposeName = `入库提议_${TAGS[TIERS[0]]}`;
+  writeFileSync(R.any('运行中间产物', { name: proposeName, ext: '.md' }), lines.join('\n'), 'utf-8');
   writeFileSync(
-    join(OUT_BASE, '_运行', `入库提议_${TAGS[TIERS[0]]}.json`),
+    R.any('运行中间产物', { name: proposeName }),
     JSON.stringify({ schemaVersion: 1, 生成时间: new Date().toISOString(), 决定统计: stat, 产品指标: pm, 反复改主意: contested, 提议: proposals }, null, 2),
     'utf-8',
   );
-  console.log(`\n✓ ${join(OUT_BASE, '_运行', `入库提议_${TAGS[TIERS[0]]}.md`)}`);
+  console.log(`\n✓ ${R.any('运行中间产物', { name: proposeName, ext: '.md' })}`);
 }
 
 /* ────────────────────── 落库（必须显式指定序号） ────────────────────── */
