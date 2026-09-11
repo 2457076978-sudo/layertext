@@ -39,6 +39,7 @@ const { buildProposals, parseDecisionLog, summarizeDecisions, contestedItems, PR
 /** SQLite 决定索引：JSONL 仍是正本，索引随时可重建（报告 §四：查询"某位教师对某词的所有决定"）。
  *  拿不到 node:sqlite 时自动降级为"不可用"，查询回落 JSONL 全扫。 */
 const { openDecisionStore } = await import(`${REPO}/dist/src/core/decisiondb.js`);
+const { productMetrics } = await import(`${REPO}/dist/src/core/productmetrics.js`);
 const { makeResolver } = await import(`${REPO}/dist/src/core/manifest.js`);
 
 function runIdentity() {
@@ -131,6 +132,10 @@ const contested = contestedItems(allEvents);
 
 console.log(`\n决定 ${stat.total} 条｜误报率 ${(stat.falsePositiveRate * 100).toFixed(1)}%（规则噪音水平的直接度量）｜教师：${stat.teachers.join('、')}`);
 console.log('分布：' + Object.entries(stat.byDecision).map(([k, v]) => `${k} ${v}`).join('，'));
+/* 可观测产品指标（v4 报告「系统性偏差」）：不要只报"机器做了什么"，还要报"教师那边结果如何" */
+const pm = productMetrics(allEvents);
+console.log('\n──── 产品指标（量教师那边）────');
+for (const n of pm.notes) console.log(`  ${n}`);
 console.log('按规则：' + Object.entries(stat.byRule).map(([k, v]) => `${k} ${v}`).join('，'));
 if (contested.length) console.log(`⚠ ${contested.length} 个项目被反复改主意（说明规则或词条本身有问题）：${contested.slice(0, 5).map((c) => c.itemId).join('、')}`);
 
@@ -141,6 +146,11 @@ const lines = [
   `生成：${new Date().toLocaleString('zh-CN')}｜层级：${TIERS.join('/')}｜依据 ${stat.total} 条教师决定`,
   '',
   `误报率 **${(stat.falsePositiveRate * 100).toFixed(1)}%**（规则噪音水平的直接度量）｜被反复改主意的项 ${contested.length} 个`,
+  '',
+  '## 产品指标（量教师那边，不是量机器）',
+  '',
+  ...pm.notes.map((n) => `- ${n}`),
+  '',
   '',
   '> **本清单只提议、不入库。** 确认后才执行：`node LayerText_AF决定汇总.mjs --apply <序号>`。',
   '> 原因是报告 §一 的明文要求：任何入库都要人工确认——否则一次误判就会被固化成全书的规则。',
@@ -172,7 +182,7 @@ if (!has('--dry')) {
   writeFileSync(join(OUT_BASE, '_运行', `入库提议_${TAGS[TIERS[0]]}.md`), lines.join('\n'), 'utf-8');
   writeFileSync(
     join(OUT_BASE, '_运行', `入库提议_${TAGS[TIERS[0]]}.json`),
-    JSON.stringify({ schemaVersion: 1, 生成时间: new Date().toISOString(), 决定统计: stat, 反复改主意: contested, 提议: proposals }, null, 2),
+    JSON.stringify({ schemaVersion: 1, 生成时间: new Date().toISOString(), 决定统计: stat, 产品指标: pm, 反复改主意: contested, 提议: proposals }, null, 2),
     'utf-8',
   );
   console.log(`\n✓ ${join(OUT_BASE, '_运行', `入库提议_${TAGS[TIERS[0]]}.md`)}`);

@@ -135,7 +135,7 @@ test('点「标记误报」= 追加一条不可变事件，卡片从待办里消
   btn.click();
   await new Promise((res) => setTimeout(res, 10));
   const log = files[`/work/_决定/${TAG}.jsonl`]!;
-  const { events } = parseDecisionLog(log);
+  const events = decisionsIn(log);
   assert.equal(events.length, 1);
   assert.equal(events[0]!.decision, 'false-positive');
   assert.equal(events[0]!.itemId, '第一章#2:FACT-01:1911');
@@ -171,6 +171,11 @@ const ANNO_ITEM = (over: Partial<RiskItem> = {}): RiskItem =>
     detail: { word: 'barn', field: undefined },
     ...over,
   });
+
+/** 决定日志里还会混着"打开队列"那条 session-open（面板打开时写，用来算首次上手时间）。
+ *  数"决定"时要把它滤掉——但**不能因此就说它不该写**：产品指标正是靠它算的。 */
+const decisionsIn = (log: string) =>
+  parseDecisionLog(log).events.filter((e) => e.itemId !== 'session-open');
 
 function actionSetup(files: Record<string, string>): void {
   win.document.body.innerHTML = '<section id="pane-risk"></section>';
@@ -235,7 +240,7 @@ test('点「补上注释」= 改正文 + 记事件（一次事务），两个结
   // ① 正文真的改了（这是"事件不是理由、正文变更才是结果"）
   assert.match(files['/out/第一章/原文_A层85_2026-09-10.md']!, /barn（谷仓）/);
   // ② 事件也写了，带 before/after
-  const ev = parseDecisionLog(files[`/work/_决定/${TAG}.jsonl`] ?? '').events;
+  const ev = decisionsIn(files[`/work/_决定/${TAG}.jsonl`] ?? '');
   assert.equal(ev.length, 1);
   assert.equal(ev[0]!.decision, 'accept');
   assert.equal(ev[0]!.itemId, '第一章#0:ANNO-01:barn');
@@ -267,7 +272,7 @@ test('动作执行失败：只写 rejected 事件，**卡片不许消失**、正
   await new Promise((res) => setTimeout(res, 30));
 
   assert.equal(files['/out/第一章/原文_A层85_2026-09-10.md'], before, '失败时正文一个字节都不能动');
-  const ev = parseDecisionLog(files[`/work/_决定/${TAG}.jsonl`] ?? '').events;
+  const ev = decisionsIn(files[`/work/_决定/${TAG}.jsonl`] ?? '');
   assert.equal(ev.length, 1);
   assert.equal(ev[0]!.decision, 'rejected', '"执行失败"与教师的"退回重写"是两回事，必须分开记');
   assert.match(ev[0]!.reason, /找不到段落|找不到/);
@@ -299,7 +304,7 @@ test('没有统一词典时补注被拒并说明原因（不插一个空括号�
   btn.click();
   await new Promise((res) => setTimeout(res, 30));
   assert.equal(files['/out/第一章/原文_A层85_2026-09-10.md'], before);
-  const ev = parseDecisionLog(files[`/work/_决定/${TAG}.jsonl`] ?? '').events;
+  const ev = decisionsIn(files[`/work/_决定/${TAG}.jsonl`] ?? '');
   assert.equal(ev[0]!.decision, 'rejected');
   assert.match(ev[0]!.reason, /释义/);
 });
@@ -373,7 +378,7 @@ test('批量应用：一章只读一次写一次，逐条走同一个 applyActio
   const out = files['/out/第一章/原文_A层85_2026-09-10.md']!;
   assert.equal((out.match(/barn（谷仓）/g) ?? []).length, 3, '三段都补上了注释');
   assert.equal(docWrites, 1, '一章只写一次（不是每条一次读改写）');
-  const ev = parseDecisionLog(files[`/work/_决定/${TAG}.jsonl`] ?? '').events;
+  const ev = decisionsIn(files[`/work/_决定/${TAG}.jsonl`] ?? '');
   assert.equal(ev.filter((e) => e.decision === 'accept').length, 3);
   assert.equal(ev.every((e) => /^批量/.test(e.reason)), true, '批量来源要留痕，事后分得清是批量还是逐条');
 });

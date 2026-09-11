@@ -17,6 +17,7 @@ import { makeResolver, type Layout } from '../../src/core/manifest.js';
 import { parseDictCsv } from '../../src/core/dictmerge.js';
 import { parseDoc } from '../../src/core/docast.js';
 import { DECISION_LABEL } from '../../src/core/decision.js';
+import { productMetrics, sessionOpenEvent } from '../../src/core/productmetrics.js';
 import { actionOf, applyAction, failureText, type RuleAction } from '../../src/core/riskaction.js';
 /** 有确定性动作的规则（批量应用只在这几类上给） */
 const MUTATING_RULES = ['ANNO-01', 'ANNO-02', 'ANNO-03', 'AST-02'];
@@ -356,6 +357,8 @@ export interface RiskRenderInput {
   paths: ProjectPaths;
   teacherId: string;
   budget?: number;
+  /** 内部用：重渲染时不再记 session-open（否则每渲染一次写一条） */
+  skipSessionOpen?: boolean;
 }
 
 /**
@@ -376,11 +379,27 @@ export async function renderRiskPane(
     return { ok: false, message: error ?? '没有队列' };
   }
   const budget = input.budget ?? 60;
+  /* 打开队列记一条事件（算"首次点击到可采纳结果的时间"要用）。
+   * 只在**这一轮还没记过**时写：面板每次重渲染都写一条的话，日志会被灌满，指标也就没意义了。 */
+  if (!input.skipSessionOpen && !events.some((e) => e.itemId === 'session-open' && e.timestamp.slice(0, 10) === new Date().toISOString().slice(0, 10))) {
+    try {
+      await appendDecision(
+        input.paths,
+        input.tier,
+        sessionOpenEvent({ tier: input.tier, teacherId: input.teacherId, sourceVersion: input.paths.sourceVersion, pending: pendingItems(file, events).length }),
+        identity,
+      );
+    } catch {
+      /* 记不上不影响用队列；指标里会显示"算不出来" */
+    }
+  }
   const stat = panelStat(file, events, budget);
   const left = pendingItems(file, events);
   const done = decidedRows(file, events);
   const groups = groupQueue(left, { mutatingRules: MUTATING_RULES });
   const session = sessionState(left, groups);
+  // 可观测产品指标（v4 报告「系统性偏差」一节）：全部从已有事件日志算出来，不新增埋点
+  const pm = productMetrics(events);
   const planned = oneHourPlan(
     { items: file.队列, summary: file.摘要 },
     budget,
@@ -397,6 +416,13 @@ export async function renderRiskPane(
       </div>
       <div class="rq-advice">${esc(stat.advice)}｜路径布局 <b>${esc(identity.layout)}</b>${identity.runId ? `（${esc(identity.runId)}）` : ''}</div>
       <div class="rq-session ${session.done ? 'rq-session-done' : ''}">${esc(session.text)}</div>
+      ${
+        pm.decisions
+          ? `<details class="rq-metrics"><summary>我这边用得怎么样（产品指标）</summary><ul>${pm.notes
+              .map((n) => `<li>${esc(n)}</li>`)
+              .join('')}</ul></details>`
+          : ''
+      }
       <details class="rq-budget">
         <summary>本次预算怎么排（后台估算，不是任务模型）</summary>
         <div class="rq-plan">${planned.phases.map((p) => `<span class="rq-phase">${esc(p.title)} ${p.budget}′ / ${p.items.length} 条</span>`).join('')}</div>
@@ -485,7 +511,7 @@ export async function renderRiskPane(
         input.tier,
         decisionLineFor(it, kind, { teacherId: input.teacherId, sourceVersion: input.paths.sourceVersion }),
         identity,
-      ).then(() => renderRiskPane(input));
+      ).then(() => renderRiskPane({ ...input, skipSessionOpen: true }));
     });
   }
   // 撤销 = 写一条新的 undo 事件（**不删历史**），并（如果是改稿动作）把正文改回去
@@ -495,8 +521,8 @@ export async function renderRiskPane(
       if (!ref) return;
       (ev.currentTarget as HTMLElement).setAttribute('disabled', 'true');
       void undoDecision(input, file, identity, ref).then((r) => {
-        if (r.ok) void renderRiskPane(input);
-        else void renderRiskPane(input, { itemId: '', text: r.message ?? '撤销未完成' });
+        if (r.ok) void renderRiskPane({ ...input, skipSessionOpen: true });
+        else void renderRiskPane({ ...input, skipSessionOpen: true }, { itemId: '', text: r.message ?? '撤销未完成' });
       });
     });
   }
@@ -508,7 +534,7 @@ export async function renderRiskPane(
       if (!g) return;
       (ev.currentTarget as HTMLElement).setAttribute('disabled', 'true');
       void runBatchApply(input, file, identity, g).then((r) => {
-        void renderRiskPane(input, r.ok ? undefined : { itemId: '', text: r.message ?? '批量应用未完成' });
+        void renderRiskPane({ ...input, skipSessionOpen: true }, r.ok ? undefined : { itemId: '', text: r.message ?? '批量应用未完成' });
       });
     });
   }
@@ -523,8 +549,8 @@ export async function renderRiskPane(
       void runRiskAction(input, file, identity, it).then((r) => {
         // 失败时**不**立刻重渲染队列：否则刚写上去的失败原因会被覆盖，
         // 教师只看到"点了没反应、卡片还在"。卡片留在列表里 + 顶部一条失败说明。
-        if (r.ok) void renderRiskPane(input);
-        else void renderRiskPane(input, { itemId: it.id, text: r.message ?? '动作未执行' });
+        if (r.ok) void renderRiskPane({ ...input, skipSessionOpen: true });
+        else void renderRiskPane({ ...input, skipSessionOpen: true }, { itemId: it.id, text: r.message ?? '动作未执行' });
       });
     });
   }
