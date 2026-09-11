@@ -8,8 +8,26 @@
  *   已知 = 课标2022三级1600表 ∪ 数词/星期/月份补丁 ∪ 学生词库 v0.6，做规则屈折展开
  *   教师知识库（AF审校知识库_v1.csv 加注词）= 最高优先，永远保留
  *   专名（PROPER）= 不计生词、不加注
+ *
+ * ── 词表正本（LexiconData）：2026-09 新增，总计划阶段 3 ────────────────────
+ * 计划原话：「旧 CSV/JSON 只做一次导入，不再作为新的事实源。」
+ *
+ * 改造前：`LexiconSnapshot` 只是一枚**审计指纹**（路径+哈希+词数+抽样），它不含数据，
+ * 于是本模块的每个 loader 仍然自己去读 CSV。后果是——有人在一本书跑到第 3 天时改了
+ * `词库.csv`，第 4 天的脚本**照旧读新词表**，前三天按旧口径、第四天按新口径，
+ * 中间没有任何东西会说话；`清单 --verify` 要等全部跑完才报漂移，那时两套口径已经混在一起了。
+ *
+ * 改造后：`清单.mjs --new`（或 `--reimport`）把词表**材料化成一份正本**写进
+ * `<产物目录>/_运行/LexiconData.json`；本模块的所有 loader 优先读它。
+ * 三条硬规矩：
+ *   ① 导入只在**一处**发生（`importLexiconStore`），脚本不许各读一份；
+ *   ② 正本与现场 CSV 对不上时**拒绝开工**（不是警告、不是自动重导入，理由见
+ *      `src/core/lexiconstore.ts` 的 `decideLexiconSource`）；
+ *   ③ **从没导入过的项目一字不变**：没有正本就照旧直读 CSV（legacy 路径，见
+ *      `lexiconStoreState` / `decideLexiconSource` 的 `legacy` 分支），
+ *      教师已有的书与脚本一个字都不用改。
  */
-import { closeSync, openSync, readFileSync, writeFileSync, writeSync, existsSync, readdirSync, mkdirSync } from 'node:fs';
+import { closeSync, openSync, readFileSync, writeFileSync, writeSync, existsSync, readdirSync, mkdirSync, statSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { hostname } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -19,6 +37,11 @@ import { fileURLToPath } from 'node:url';
  *  可用环境变量 LAYERTEXT_ENGINE 或项目配置的 `引擎目录` 覆盖。 */
 const HERE = dirname(fileURLToPath(import.meta.url));
 export let LTR = process.env.LAYERTEXT_ENGINE ?? join(HERE, '..', '..');
+
+/** 引擎的**编译产物**目录。默认 `<引擎>/dist`。
+ *  `LAYERTEXT_DIST` 是给"把引擎编到自己的 outDir 再验证"用的逃生门——
+ *  多人/多 agent 并行改同一个仓库时，谁都不许去写共享的 `dist/`，也不必等它被重建。 */
+export const distOf = (engineDir = LTR) => process.env.LAYERTEXT_DIST ?? join(engineDir, 'dist');
 
 /** 找一个项目的配置：环境变量 LAYERTEXT_PROJECT 优先；
  *  否则从当前目录向上逐级找 `调适项目_*.json`（最多 5 层）。
@@ -51,8 +74,9 @@ export function findProjectFile(start = process.cwd()) {
   return null;
 }
 
-/** 读专名表（一行一名，忽略 # 注释与空行） */
-export function loadProper(path) {
+/** 读专名表（一行一名，忽略 # 注释与空行）——
+ *  **直读文件**的那一份。对外请用 `loadProper`（它会优先读词表正本）。 */
+export function readProperLive(path) {
   if (!existsSync(path)) return [];
   return readFileSync(path, 'utf-8')
     .split('\n')
@@ -60,6 +84,11 @@ export function loadProper(path) {
     .filter((l) => l && !l.startsWith('#'))
     .map((l) => l.toLowerCase());
 }
+
+/** 最近一次载入的项目。路径型 loader（loadDict/loadKbGloss）手里只有路径，
+ *  要靠它才知道"该读哪一本书的正本"。**每个脚本第一件事都是 loadProject()**，
+ *  这不是巧合，是约定（也是唯一没有把 P 传遍所有 loader 的原因）。 */
+let _activeProject = null;
 
 /** 读项目配置 → 展开成脚本直接可用的常量（含专名表内容）
  *  这样脚本里不再出现任何绝对路径，也不再各自维护 PROPER。 */
@@ -93,15 +122,22 @@ export function loadProject(path) {
   const d = JSON.parse(readFileSync(path, 'utf-8'));
   const 书级 = d.书级 ?? {};
   if (d.引擎目录) LTR = d.引擎目录;
-  return {
+  /* PROPER 也走词表正本（见 `loadProper`），而 `loadProper` 需要先知道"当前项目是谁"
+   * 才能找到那份正本——所以**先挂 P 再补 PROPER**。顺序反过来，载入配置时就会直读 CSV，
+   * 而 CSV 正是这次要退出事实源位置的东西。 */
+  const P = {
     ...d,
     配置路径: path,
     引擎目录: d.引擎目录 ?? LTR,
     专名表路径: 书级.专名表,
     知识库路径: 书级.知识库,
     词典路径: 书级.词典,
-    PROPER: loadProper(书级.专名表),
+    PROPER: [],
   };
+  _activeProject = P;
+  // tolerant：漂移/坏正本只**喊出来**，不在这一行拦死——`清单 --verify` 得能在坏项目上跑起来
+  P.PROPER = loadProper(书级.专名表, { tolerant: true });
+  return P;
 }
 
 const readCsvWords = (p, col = 0) =>
@@ -112,18 +148,231 @@ const readCsvWords = (p, col = 0) =>
     .map((l) => l.split(',')[col]?.trim().toLowerCase())
     .filter(Boolean);
 
-/** 已知词 + 规则屈折展开。正向生成而非反向剥后缀——反向剥会把 hissing→his、butting→but、manes→man。 */
-export function loadKnownForms(P) {
-  const base = new Set();
-  for (const rel of ['assets/wordlists/curriculum_2022_level3_1600.txt', 'assets/wordlists/curriculum_2022_amendment.txt']) {
-    const p = join(LTR, rel);
-    if (!existsSync(p)) continue;
-    for (const l of readFileSync(p, 'utf-8').split('\n')) {
-      const w = l.trim().toLowerCase().split(/\s+/)[0];
-      if (w) base.add(w);
+/* ────────────────────── 词表正本：预载引擎侧的模块 ────────────────────── */
+/**
+ * 这里为什么有一个**顶层 await**（本仓库其他工具脚本都避开的写法）：
+ *
+ * `loadProper` / `loadDict` / `loadKbGloss` / `loadKnownForms` 都是**同步** API，
+ * 15 个管线脚本都这么调（`const DICT = loadDict(P.词典路径);`）。计划要求"只做一次导入"
+ * 这条改造**只动共享模块这一处**，不许去改 15 个脚本；而 ESM 没有同步 import。
+ * 判定逻辑（`src/core/lexiconstore.ts`）又必须**只写一份**——在这里用 JS 再抄一份
+ * "该读正本还是读 CSV"，就是给自己埋一个"两套规则迟早不一致"的雷。
+ * 所以：模块加载时把引擎侧模块预载好，同步 loader 直接用现成的引用。
+ *
+ * 加载不到时（dist 没编、项目指向了另一个引擎目录）**不放行**：
+ *   · 项目**没有**正本 → 走 legacy，现有行为一字不变；
+ *   · 项目**有**正本 → 拒绝。不许"读不到校验器就直读 CSV"——那正是这次要消灭的静默降级。
+ */
+const _preloadEngineDir = (() => {
+  try {
+    const found = findProjectFile();
+    if (!found) return LTR;
+    return JSON.parse(readFileSync(found.path, 'utf-8')).引擎目录 ?? LTR;
+  } catch {
+    return LTR;
+  }
+})();
+
+const _engineMods = { manifest: null, store: null, files: null };
+/** 预载失败的原因（人话，按模块分开放）。`engineModsFor` 会把它变成一句可执行的建议 */
+const _engineLoadErrors = {};
+for (const [key, file] of [
+  ['manifest', 'manifest.js'],
+  ['store', 'lexiconstore.js'],
+  ['files', 'files.js'],
+]) {
+  try {
+    _engineMods[key] = await import(`${distOf(_preloadEngineDir)}/src/core/${file}`);
+  } catch (e) {
+    // 只有"文件不在"才是可接受的（dist 还没编）；模块本身有语法错之类必须炸出来
+    if (e?.code !== 'ERR_MODULE_NOT_FOUND' && e?.code !== 'ERR_UNSUPPORTED_DIR_IMPORT') throw e;
+    _engineLoadErrors[key] = `${distOf(_preloadEngineDir)}/src/core/${file} 加载不了：${e?.message ?? e}`;
+  }
+}
+
+/** 正本的接口名（与引擎侧 `LEXICON_STORE_FILE` 必须一致；不一致就当场说，不靠自觉） */
+const STORE_FILE = 'LexiconData.json';
+
+/** 项目配的是**另一个**引擎目录时，预载的这些就不是它的判定逻辑——这一条与"没编"是两回事 */
+const _engineDirProblem = (P) =>
+  !process.env.LAYERTEXT_DIST && P && (P.引擎目录 ?? LTR) !== _preloadEngineDir
+    ? `项目配的引擎目录是 ${P.引擎目录}，而本模块预载的是 ${_preloadEngineDir}（用 LAYERTEXT_ENGINE / LAYERTEXT_DIST 显式指定可消除歧义）`
+    : null;
+
+/**
+ * 取引擎模块。**分两档要求**，是为了让"缺哪一个"这句话是准的：
+ *   · `core`  —— 来源哈希（`refOf`/`contentHash`）：来源列表与漂移比对要用；
+ *   · `store` —— 正本判定（`lexiconstore.js`）：只有"有正本"的项目才用得上。
+ * 合成一档的后果：dist 只要没编新模块，连"列出这本项目的来源"都会失败，
+ * 而那句话还说不清到底缺的是什么。
+ */
+function engineModsFor(P, level = 'store') {
+  const mods = _engineMods;
+  const dirProblem = _engineDirProblem(P);
+  if (dirProblem) return { mods: null, why: dirProblem };
+  if (!mods.manifest) return { mods: null, why: _engineLoadErrors.manifest ?? '引擎模块未能预载' };
+  if (level === 'store') {
+    if (!mods.store || !mods.files) {
+      const missing = [...(mods.store ? [] : [_engineLoadErrors.store ?? 'src/core/lexiconstore.js']), ...(mods.files ? [] : [_engineLoadErrors.files ?? 'src/core/files.js'])];
+      return { mods: null, why: `${missing.join('；')}（引擎目录需要先 \`npx tsc -p tsconfig.json\` 才有词表正本能力）` };
+    }
+    if (mods.store.LEXICON_STORE_FILE !== STORE_FILE) {
+      return { mods: null, why: `引擎侧的正本文件名改成了「${mods.store.LEXICON_STORE_FILE}」，本模块还在找「${STORE_FILE}」` };
     }
   }
-  if (P?.词库) for (const w of readCsvWords(P.词库)) base.add(w);
+  return { mods, why: null };
+}
+
+/* ────────────────────── 词表正本：读哪一份、什么时候拒绝 ────────────────────── */
+
+/** 读取方式：auto（默认，有正本读正本）｜live（明知漂移也按现场 CSV 跑）｜reimport（导入步骤专用） */
+const lexiconMode = () => process.env.LAYERTEXT_LEXICON ?? 'auto';
+const storeDirOf = (P) => join(P.产物目录, '_运行');
+export const storePathOf = (P) => join(storeDirOf(P), STORE_FILE);
+
+/** 正本真正的出处。**与快照的 sources 不是同一份清单**：那一份里还有"情节底线"这类
+ *  与词义无关的输入，拿它当漂移基准，会让"改了一句剧情底线"也拦下一次词表读取——
+ *  假警报比没有警报更坏（教师看到两条就会开始忽略整个队列）。 */
+function lexiconInputFiles(P) {
+  const files = [];
+  const add = (name, path) => {
+    if (path && existsSync(path)) files.push([name, path]);
+  };
+  add('内置课标词表', join(LTR, 'assets/wordlists/curriculum_2022_level3_1600.txt'));
+  add('内置补录', join(LTR, 'assets/wordlists/curriculum_2022_amendment.txt'));
+  add('词库', P.词库);
+  add('专名表', P.专名表路径);
+  add('知识库', P.知识库路径);
+  add('词典', P.词典路径);
+  // 教材单元库**只在配了「教材进度」时参与**：没配时 loadTextbookLearned 返回 null，
+  // 它变了也不会改任何一个词的判定——把它算进出处，只会得到一次凭空的拒绝。
+  if (P.教材进度) add('教材单元库', P.教材单元库);
+  return files;
+}
+
+/** 一趟读盘算出正本的现场哈希。**只在真的要判定时读**：legacy 项目一次都不读。 */
+function hashLexiconInputs(P) {
+  const { mods } = engineModsFor(P, 'core');
+  return lexiconInputFiles(P).map(([name, path]) => mods.manifest.refOf(name, path, readFileSync(path, 'utf-8')));
+}
+
+/** 便宜的文件指纹（mtime+size）：判断"这一趟里文件动过没有"，不必重算哈希 */
+const stampOf = (path) => {
+  try {
+    const s = statSync(path);
+    return `${s.mtimeMs}:${s.size}`;
+  } catch {
+    return '不存在';
+  }
+};
+const inputStamps = (P) =>
+  lexiconInputFiles(P)
+    .map(([, p]) => stampOf(p))
+    .join(',');
+
+let _storeCache = null;
+
+/**
+ * 这一次到底读正本还是读 CSV——**唯一的判定入口**（判定规则本身在
+ * `src/core/lexiconstore.ts` 的 `decideLexiconSource`，这里只负责读盘与缓存）。
+ *
+ * 缓存键里带**现场文件的 mtime+size**：同一个进程里有人边跑边改词库，下一次 loader
+ * 调用就会重算，把漂移当场喊出来。缓存省的是哈希，不是"改没改"这件事。
+ */
+export function lexiconStoreState(P = _activeProject) {
+  if (!P) return { mode: 'legacy', store: null, drift: null, notices: [], refusal: '' };
+  const mode = lexiconMode();
+  const storePath = storePathOf(P);
+  const key = [P.产物目录, mode, storePath, stampOf(storePath), inputStamps(P)].join('|');
+  if (_storeCache?.key === key) return _storeCache.state;
+  const state = computeStoreState(P, mode);
+  _storeCache = { key, state };
+  return state;
+}
+
+function computeStoreState(P, mode) {
+  const { mods, why } = engineModsFor(P);
+  const storePath = storePathOf(P);
+  const exists = existsSync(storePath);
+  if (!mods) {
+    return exists
+      ? {
+          mode: 'broken',
+          store: null,
+          drift: null,
+          notices: [`✗ 有词表正本但校验它的引擎模块加载不到：${why}`],
+          refusal:
+            `词表正本存在（${storePath}）但**校验它的引擎模块加载不到**：${why}\n` +
+            `  **不会退回直读 CSV**——"读不到校验器就直接读文件"正是这次改造要消灭的静默降级。\n` +
+            `  修：在引擎目录里 \`npx tsc -p tsconfig.json\`，或用 LAYERTEXT_DIST=<已编译的产物目录> 指明一份`,
+        }
+      : {
+          mode: 'legacy',
+          store: null,
+          drift: null,
+          // 不提"引擎模块没加载上"：没有正本的项目根本用不到它，说了只是噪音。
+          // 真需要它的时刻（有正本要校验）由上面的 broken 分支说清楚。
+          // 也不在这里重复"怎么修"那句话——完整措辞在引擎侧（`decideLexiconSource`），只写一份。
+          notices: [`没有词表正本（${storePath} 不存在）——走**首次导入之前**的既有行为：直读现场 CSV。`],
+          refusal: '',
+        };
+  }
+  let store = null;
+  let broken = null;
+  if (exists) {
+    try {
+      const parsed = mods.store.parseLexiconStore(readFileSync(storePath, 'utf-8'));
+      if (parsed.ok) store = parsed.store;
+      else broken = parsed.error;
+    } catch (e) {
+      broken = `读不出来：${e?.message ?? e}`;
+    }
+  }
+  const live = store && mode !== 'live' ? hashLexiconInputs(P) : null;
+  return mods.store.decideLexiconSource({ store, broken, live, override: mode, storePath });
+}
+
+const _announced = new Set();
+/** 同一句话在一趟运行里重复十遍，等于没打印 */
+function announce(notices) {
+  for (const n of notices ?? []) {
+    if (_announced.has(n)) continue;
+    _announced.add(n);
+    console.error(`[词表] ${n}`);
+  }
+}
+
+/** 每个 loader 的第一行：**先问"这次能不能开工"**，再谈读什么。
+ *  拒绝（漂移/正本坏了/校验器加载不到）在这里抛出——同步接口，抛出去脚本就停在这一行，
+ *  走不到"用一套说不清的口径去生成产物"那一步。 */
+function usableState(P) {
+  const st = lexiconStoreState(P ?? _activeProject);
+  announce(st.notices);
+  if (st.refusal) throw new Error(st.refusal);
+  return st;
+}
+
+/** 专名表：正本里有就用正本，否则直读文件（legacy）。
+ *  路径对不上就直读——正本描述的是**它自己那份**专名表，不是随便哪个路径。
+ *
+ *  `tolerant` 只给 `loadProject` 用：**载入配置不该把整个脚本拦死**。
+ *  理由是审计：`清单 --verify` 恰恰要在"正本已经过期/坏掉"的项目上跑起来，
+ *  才能告诉你差在哪几个词、该跑哪条命令。拒绝必须发生在**真正要消费词表的那一行**
+ *  （`loadLexicon` / `loadDict` / `loadKbGloss` / `loadKnownForms`），
+ *  而不是"连专名表都不让人看"。即便如此，漂移也会在这里当场打印出来（见 announce）。 */
+export function loadProper(path, opts = {}) {
+  const st = opts.tolerant ? lexiconStoreState(_activeProject) : usableState(_activeProject);
+  if (opts.tolerant) announce(st.notices);
+  if (st.mode === 'store') {
+    const src = st.store.inputs.find((s) => s.name === '专名表');
+    if (src && src.path === path) return [...st.store.data.proper];
+  }
+  return readProperLive(path);
+}
+
+/** 规则屈折展开。**单独一个函数**是为了让"读正本"与"读 CSV"两条路走同一套展开——
+ *  两条路各写一份展开，就会有一天只在其中一条上改了规则。 */
+function expandForms(base) {
   const forms = new Set(base);
   const V = 'aeiou';
   for (const w of base) {
@@ -146,6 +395,30 @@ export function loadKnownForms(P) {
   return forms;
 }
 
+/** 已知词 + 规则屈折展开。正向生成而非反向剥后缀——反向剥会把 hissing→his、butting→but、manes→man。
+ *
+ *  读正本时用 `data.wordlists`（内置课标表 + 补录 + 词库首列）**而不是 data.known**：
+ *  两者口径历史上就不同（`known` 只收 单词/课标词/待定词 三类，wordlists.vocab 含短语与句型）。
+ *  在这里"顺手统一"，就是顺手改掉一批词算不算"已学"——不予采纳。 */
+export function loadKnownForms(P) {
+  const st = usableState(P ?? _activeProject);
+  if (st.mode === 'store') {
+    const w = st.store.data.wordlists;
+    return expandForms(new Set([...w.curriculum, ...w.amendment, ...w.vocab]));
+  }
+  const base = new Set();
+  for (const rel of ['assets/wordlists/curriculum_2022_level3_1600.txt', 'assets/wordlists/curriculum_2022_amendment.txt']) {
+    const p = join(LTR, rel);
+    if (!existsSync(p)) continue;
+    for (const l of readFileSync(p, 'utf-8').split('\n')) {
+      const w = l.trim().toLowerCase().split(/\s+/)[0];
+      if (w) base.add(w);
+    }
+  }
+  if (P?.词库) for (const w of readCsvWords(P.词库)) base.add(w);
+  return expandForms(base);
+}
+
 /** 该词形是否属于"学生已学"（课标/词库任一） */
 export const isKnownForm = (word, forms) => forms.has(word.toLowerCase());
 
@@ -154,9 +427,34 @@ export const isKnownForm = (word, forms) => forms.has(word.toLowerCase());
  *   ① 原先只喂 `vocabCsvTexts`（项目词库），**没喂内置课标词表与补录** —— 与 App/CLI 的口径不一致，
  *      于是 eighteen / three 这类数词被判成生词并加注，生词率整体虚高。
  *   ② `properNouns` 是 buildLexicon 的参数，原先却传给了 runQc（无效），Napoleon/Squealer
- *      被算成生词。现在专名一律从项目配置的专名表读。 */
+ *      被算成生词。现在专名一律从项目配置的专名表读。
+ *
+ *  读正本时返回的是 `data.known/pending`——**导入当天逐字冻结下来的那两个集合**。
+ *  这就是"旧 CSV 只做一次导入"的落点：CSV 之后再改，也改不动这一次的判定。 */
 export async function loadLexicon(P) {
-  const { buildLexicon } = await import(`${P.引擎目录}/dist/src/core/lexicon.js`);
+  // 这里不用 `usableState`：拒绝之前要先算出现场口径，才能把**逐词代价**一并说出来
+  const st = lexiconStoreState(P ?? _activeProject);
+  announce(st.notices);
+  if (st.mode === 'store') {
+    return { known: new Set(st.store.data.known), pending: new Set(st.store.data.pending) };
+  }
+  const LIVE = await liveLexicon(P);
+  /* 漂移/正本坏了：**先把差异算出来再抛**。
+   * 只说"词表变了"是没用的——人要判断的是"变了要不要紧"：改了一个错别字的漂移，
+   * 重导入一次就完事；翻了 30 个词判定的漂移，得先停下来想清楚。
+   * 所以这里把现场口径也算一遍，给出逐词代价，然后才拒绝。 */
+  if (st.store && st.drift && st.mode === 'drift') {
+    const { mods } = engineModsFor(P);
+    if (mods) throw new Error(`${st.refusal}\n  代价（逐词）：${mods.store.describeWordDiff(mods.store.diffWordSets(st.store.data.known, LIVE.known))}`);
+  }
+  if (st.refusal) throw new Error(st.refusal);
+  return LIVE;
+}
+
+/** 现场（CSV/JSON）直读的 QC 词表。**legacy 路径的唯一实现**：
+ *  没有正本的项目走的还是这一段，与 2026-09 之前逐字相同。 */
+export async function liveLexicon(P) {
+  const { buildLexicon } = await import(`${distOf(P.引擎目录)}/src/core/lexicon.js`);
   const plainWordlistTexts = [join(LTR, 'assets/wordlists/curriculum_2022_level3_1600.txt'), join(LTR, 'assets/wordlists/curriculum_2022_amendment.txt')]
     .filter((p) => existsSync(p))
     .map((p) => readFileSync(p, 'utf-8'));
@@ -169,7 +467,7 @@ export async function loadLexicon(P) {
   return buildLexicon({
     plainWordlistTexts,
     vocabCsvTexts: [readFileSync(P.词库, 'utf-8')],
-    properNouns: P.PROPER,
+    properNouns: readProperLive(P.专名表路径),
   });
 }
 
@@ -178,13 +476,14 @@ export async function loadLexicon(P) {
  *  比引擎宽 —— 于是它删掉了引擎仍判为 OOV 的词的注释（如 curiously / nightly），
  *  覆盖率随之下跌，两边规则互相打架。现在两边共用同一个判定。 */
 export async function makeKnownChecker(P) {
-  const { hit } = await import(`${P.引擎目录}/dist/src/core/textpipe.js`);
+  const { hit } = await import(`${distOf(P.引擎目录)}/src/core/textpipe.js`);
   const LEX = await loadLexicon(P);
   return (w) => hit(String(w).toLowerCase(), LEX.known);
 }
 
-/** 教师知识库加注词 → 释义（值含"复现/复数/比较级"者为流程标记，不是释义） */
-export function loadKbGloss(path) {
+/** 教师知识库加注词 → 释义（值含"复现/复数/比较级"者为流程标记，不是释义）。
+ *  **直读文件**的那一份，供导入步骤用；对外请用 `loadKbGloss`（优先读正本）。 */
+export function readKbGlossLive(path) {
   const m = new Map();
   if (!existsSync(path)) return m;
   for (const line of readFileSync(path, 'utf-8')
@@ -201,8 +500,20 @@ export function loadKbGloss(path) {
   return m;
 }
 
-/** 统一注释词典（word → 中文释义）：跨章同词同义的正本 */
-export function loadDict(path) {
+/** 知识库加注词：有正本读正本；路径对不上（正本描述的是**它自己那份**知识库）才直读 */
+export function loadKbGloss(path) {
+  const st = usableState(_activeProject);
+  if (st.mode === 'store') {
+    const src = st.store.inputs.find((s) => s.name === '知识库');
+    if (src && src.path === path) return new Map(st.store.data.kb);
+  }
+  return readKbGlossLive(path);
+}
+
+/** 统一注释词典（word → 中文释义）：**直读文件**的那一份。
+ *  导入步骤与 `appendDict` 必须用它——它们要改的正是 CSV 本身，
+ *  拿正本当基线就会把别人在这期间配的释义整份写回去（lost update）。 */
+export function readDictLive(path) {
   const m = new Map();
   if (!existsSync(path)) return m;
   for (const line of readFileSync(path, 'utf-8')
@@ -213,6 +524,17 @@ export function loadDict(path) {
     if (w && zh) m.set(w.trim().toLowerCase(), zh.trim());
   }
   return m;
+}
+
+/** 统一注释词典：有正本读正本。**词典是"同一个词在全书里只有一个意思"的正本**，
+ *  它被中途改过而不出声，正是这次要防的事（旧写法下每个脚本各读一份 CSV，谁也不知道）。 */
+export function loadDict(path) {
+  const st = usableState(_activeProject);
+  if (st.mode === 'store') {
+    const src = st.store.inputs.find((s) => s.name === '词典');
+    if (src && src.path === path) return new Map(st.store.data.dict);
+  }
+  return readDictLive(path);
 }
 
 /** 按 [P##] 标记切段 → [{ id:'P07', text:'[P07] …' }]，保留原有顺序。
@@ -253,7 +575,7 @@ export const REVIEW_PLACEHOLDER = (id, dir) => `[${id}] <!-- 本段未通过复�
  */
 import { renameSync, readdirSync as _readdir, rmSync as _rm } from 'node:fs';
 
-const dictMerge = async () => await import(`${LTR}/dist/src/core/dictmerge.js`);
+const dictMerge = async () => await import(`${distOf(LTR)}/src/core/dictmerge.js`);
 
 /** 写运行私有的词典增量（append-only；同一运行多次调用按词去重，后写的同词同义忽略） */
 export function writeDictDelta(deltaPath, entries, origin) {
@@ -419,6 +741,7 @@ export async function mergeDictIntoProject(P) {
     const tmp = `${dictPath}.tmp-${process.pid}`;
     writeFileSync(tmp, next, 'utf-8');
     renameSync(tmp, dictPath);
+    announceDictCsvChanged(dictPath);
   }
   return {
     added: merged.added,
@@ -434,7 +757,7 @@ export async function mergeDictIntoProject(P) {
  *  这个函数保留给单进程的维护脚本用。 */
 export function appendDict(entries, path) {
   if (!path) throw new Error('appendDict 需要词典路径（来自项目配置的 书级.词典）');
-  const m = loadDict(path);
+  const m = readDictLive(path);
   let added = 0;
   for (const [w, zh] of entries) {
     const k = String(w).toLowerCase();
@@ -444,10 +767,25 @@ export function appendDict(entries, path) {
     }
   }
   if (added) {
-    const rows = ['词,释义,来源', ...[...m].sort((a, b) => a[0].localeCompare(b[0])).map(([w, zh]) => `${w},${zh},${loadKbGloss().has(w) ? '教师知识库' : '归一（多数票）'}`)];
+    /* 注意：这里历史上就是**不带参数**调用的（`loadKbGloss()` ⇒ 空表 ⇒ 来源列恒为「归一（多数票）」，
+     * 即便某个释义其实来自教师知识库）。本次改造**刻意保持原样**：改它会改掉已经写出的词典字节，
+     * 那是另一件事，得单独决定并单独立测试。已记入交接说明，不在这里顺手"修好"。 */
+    const kb = readKbGlossLive();
+    const rows = ['词,释义,来源', ...[...m].sort((a, b) => a[0].localeCompare(b[0])).map(([w, zh]) => `${w},${zh},${kb.has(w) ? '教师知识库' : '归一（多数票）'}`)];
     writeFileSync(path, '\uFEFF' + rows.join('\n') + '\n', 'utf-8');
+    announceDictCsvChanged(path);
   }
   return added;
+}
+
+/** 词典 CSV 被谁改过之后：**当场说出来**。
+ *  有正本的项目下一趟会直接拒绝（因为正本记的哈希已经对不上），
+ *  这句话就是那一刻之前唯一的提示——把它留到"下次跑脚本报错"才让人知道，太晚了。 */
+function announceDictCsvChanged(path) {
+  const st = lexiconStoreState(_activeProject);
+  if (st.mode === 'store') {
+    console.warn(`⚠ 词典 CSV 已改（${path}）——**词表正本已过期**：下一次读词表的脚本会拒绝开工。\n` + `  收尾：${'node tools/af_pipeline/LayerText_AF清单.mjs --reimport'}（重新导入后再接着跑）`);
+  }
 }
 
 /* ────────── 教材进度 → 已学词（2026-09-10 新增） ────────── */
@@ -489,6 +827,178 @@ export function loadTextbookLearned(project) {
   return learned;
 }
 
+/* ────────────────────── 导入：把现场 CSV 变成词表正本（**只在这一处发生**） ────────────────────── */
+
+/**
+ * 快照口径的来源列表（词库/专名表/知识库/词典/情节底线/教材单元库）——
+ * **只写一份**：`清单.mjs` 的 `buildSnapshot` 与这里的导入共用它。
+ * 两处各写一份的后果很具体：两份的 `count` 只要差一行，算出来的快照版本就不同，
+ * 于是每次 `--verify` 都报一次"词表已变"——**假警报**（教师看两条就会忽略整个队列）。
+ */
+export function projectSources(P) {
+  const { mods, why } = engineModsFor(P, 'core');
+  if (!mods) throw new Error(`清单的来源列表需要引擎侧的 manifest.js：${why}`);
+  const files = [
+    ['词库', P.词库],
+    ['专名表', P.专名表路径],
+    ['知识库', P.知识库路径],
+    ['词典', P.词典路径],
+    ['情节底线', P.工作区 ? join(P.工作区, P.情节底线 ?? '调适工作区/规则与底线/全书情节底线_v0.1.md') : null],
+    ['教材单元库', P.教材单元库],
+  ];
+  const sources = [];
+  const counts = { known: 0, pending: 0, proper: 0, dict: 0, kb: 0 };
+  const knownAll = [];
+  for (const [name, path] of files) {
+    const text = path && existsSync(path) ? readFileSync(path, 'utf-8') : null;
+    if (text === null) continue;
+    const count = text.split('\n').filter((l) => l.trim() && !l.trim().startsWith('#')).length;
+    sources.push({ ...mods.manifest.refOf(name, path, text), count });
+    if (name === '词库') {
+      counts.known = count;
+      for (const l of text.split('\n').slice(1)) {
+        const w = l.split(',')[0]?.trim();
+        if (w) knownAll.push(w);
+      }
+    }
+    if (name === '专名表') counts.proper = count;
+    if (name === '词典') counts.dict = count;
+    if (name === '知识库') counts.kb = count;
+  }
+  return { sources, counts, knownAll };
+}
+
+/** 内置一行一词词表的读法。**逐字复刻 `loadKnownForms` 的历史口径**：按空白取第一段、
+ *  不过滤 `#` 注释行（于是注释行会产出一个词 `"#"`）。
+ *  这里"顺手修干净"= 改掉 loadKnownForms 的结果 = 换掉一批词的判定——不许顺手。 */
+const readAssetWords = (text) =>
+  String(text)
+    .split('\n')
+    .map((l) => l.trim().toLowerCase().split(/\s+/)[0])
+    .filter(Boolean);
+
+/**
+ * **一次性导入**：读现场 CSV/JSON → 材料化成词表正本 → 原子写盘。
+ *
+ * `清单.mjs --new` 与 `清单.mjs --reimport` 共用这一份实现（不许各写一份：
+ * 两份导入实现 = 两份"什么算已知"的答案）。
+ *
+ * 这里刻意**不**复用 `loadLexicon` 的合并逻辑去"另算一套导入口径"，而是调
+ * `buildLexicon` 本身——与 `loadLexicon` 用**同一个函数、同一批输入**，
+ * 这样"正本里的 known"和"legacy 路径算出来的 known"逐词相同：
+ * 换句话说，导入**不改变任何判定**，它只是把判定结果冻起来。
+ */
+export async function importLexiconStore(P, opts = {}) {
+  const { mods, why } = engineModsFor(P);
+  if (!mods) throw new Error(`导入词表正本需要引擎侧的模块：${why}`);
+  const { buildLexicon } = await import(`${distOf(P.引擎目录)}/src/core/lexicon.js`);
+
+  const files = lexiconInputFiles(P);
+  const textOf = new Map(files.map(([, path]) => [path, readFileSync(path, 'utf-8')]));
+  const inputs = files.map(([name, path]) => mods.manifest.refOf(name, path, textOf.get(path)));
+
+  const asset = (rel) => textOf.get(join(LTR, rel)) ?? '';
+  const curriculum = readAssetWords(asset('assets/wordlists/curriculum_2022_level3_1600.txt'));
+  const amendment = readAssetWords(asset('assets/wordlists/curriculum_2022_amendment.txt'));
+  const textbook = [...(loadTextbookLearned(P) ?? [])];
+  const proper = readProperLive(P.专名表路径);
+
+  // 与 loadLexicon 完全同一套输入与合并函数（见上面注释）
+  const lex = buildLexicon({
+    plainWordlistTexts: [join(LTR, 'assets/wordlists/curriculum_2022_level3_1600.txt'), join(LTR, 'assets/wordlists/curriculum_2022_amendment.txt')]
+      .filter((p) => existsSync(p))
+      .map((p) => readFileSync(p, 'utf-8'))
+      .concat(textbook.length ? [textbook.join('\n')] : []),
+    vocabCsvTexts: [readFileSync(P.词库, 'utf-8')],
+    properNouns: proper,
+  });
+
+  const data = {
+    known: [...lex.known].sort(),
+    pending: [...lex.pending].sort(),
+    proper,
+    wordlists: { curriculum, amendment, textbook, vocab: readCsvWords(P.词库), proper },
+    dict: [...readDictLive(P.词典路径)],
+    kb: [...readKbGlossLive(P.知识库路径)],
+  };
+
+  const ps = opts.snapshotSources ? { sources: opts.snapshotSources, counts: opts.snapshotCounts } : projectSources(P);
+  const store = mods.store.buildLexiconStore({ data, inputs, snapshotSources: ps.sources, snapshotCounts: ps.counts });
+
+  // 上一份正本（可能是坏的）：导出的报告要说清"这次换了什么"
+  const previous = (() => {
+    try {
+      const parsed = mods.store.parseLexiconStore(readFileSync(storePathOf(P), 'utf-8'));
+      return parsed.ok ? parsed.store : null;
+    } catch {
+      return null;
+    }
+  })();
+
+  // 原子写：半份词表正本 = 下一趟直接读不出词表，正是本项目要消灭的那种损坏。
+  // 先写版本归档，再写指针（指针后写：读的人要么看到旧的完好正本，要么看到新的完好正本）。
+  const dir = storeDirOf(P);
+  const text = mods.store.serializeLexiconStore(store);
+  const versionPath = join(dir, mods.store.storeFileNameFor(store.version));
+  mkdirSync(dir, { recursive: true });
+  mods.files.atomicWriteFileSync(versionPath, text);
+  mods.files.atomicWriteFileSync(join(dir, STORE_FILE), text);
+  _storeCache = null; // 同一个进程里导入完接着读，必须读到新的
+
+  /* 漂移记录到此作废：正本刚刚按现场重写，`LexiconDrift.json` 描述的那种"对不上"
+   * 已经不存在了。留着一份旧的漂移报告，正是本项目点名要防的那类状态
+   * （`清单.mjs` 头部那句"上一轮的完成标记还在，这一轮其实没跑完"）。
+   * 漂移的**内容**不会丢：旧正本按版本归档在 `LexiconData_<旧版本>.json`，
+   * 与新正本一比就是当时的逐词差异。 */
+  const driftPath = join(dir, mods.store.LEXICON_DRIFT_FILE);
+  const clearedDrift = existsSync(driftPath);
+  if (clearedDrift) _rm(driftPath, { force: true });
+
+  const diff = previous ? mods.store.diffWordSets(previous.data.known, store.data.known) : null;
+  return {
+    store,
+    storePath: join(dir, STORE_FILE),
+    versionPath,
+    previous,
+    clearedDrift,
+    wordDiff: diff,
+    /** 人读的一句话（唯一一份措辞，命令行与报告共用） */
+    wordDiffText: diff ? mods.store.describeWordDiff(diff) : null,
+  };
+}
+
+/**
+ * 把漂移**记下来**。漂移的可见性不能只靠一行 stderr：
+ * 报告、论文、三个月后的复盘都要能翻到"那一天词表和正本对不上，差的是这些词"。
+ * 写进 `<产物目录>/_运行/LexiconDrift.json`（原子写，覆盖上一份——它描述的是**当下的**关系）。
+ */
+export async function recordLexiconDrift(P, { state, liveKnown } = {}) {
+  const { mods } = engineModsFor(P);
+  if (!mods) return null;
+  const st = state ?? lexiconStoreState(P);
+  const live = await liveLexicon(P).catch(() => null);
+  const known = liveKnown ?? live?.known ?? null;
+  const payload = {
+    at: new Date().toISOString(),
+    storePath: storePathOf(P),
+    mode: st.mode,
+    storeVersion: st.store?.version ?? null,
+    snapshotVersion: st.store?.snapshotVersion ?? null,
+    storeCreatedAt: st.store?.createdAt ?? null,
+    drift: st.drift?.drift ?? [],
+    changed: st.drift?.changed ?? [],
+    removed: st.drift?.removed ?? [],
+    added: st.drift?.added ?? [],
+    wordDiff: st.store && known ? mods.store.diffWordSets(st.store.data.known, known) : null,
+    wordDiffNote: st.store && known ? mods.store.describeWordDiff(mods.store.diffWordSets(st.store.data.known, known)) : null,
+    refusal: st.refusal || null,
+  };
+  const path = join(storeDirOf(P), mods.store.LEXICON_DRIFT_FILE);
+  mkdirSync(storeDirOf(P), { recursive: true });
+  mods.files.atomicWriteFileSync(path, JSON.stringify(payload, null, 2) + '\n');
+  return { path, payload };
+}
+
 /* ────────────────────── 运行身份：**唯一**的解析入口 ────────────────────── */
 
 /**
@@ -508,7 +1018,7 @@ export function loadTextbookLearned(project) {
  * @param {{runId?:string}} [opts]              显式指定（`--run` / `LAYERTEXT_RUN`）
  */
 export async function readRunIdentity(roots, want = {}, opts = {}) {
-  const M = await import(`${LTR}/dist/src/core/manifest.js`);
+  const M = await import(`${distOf(LTR)}/src/core/manifest.js`);
   const runDir = join(roots.out, '_运行');
   const readPtr = (name) => {
     try {

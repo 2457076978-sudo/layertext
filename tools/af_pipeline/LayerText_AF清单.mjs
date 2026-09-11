@@ -11,20 +11,41 @@
  *   · 论文里的数字说不清"哪版词表、哪版提示词、哪版模型跑出来的"。
  *
  * 用法：
- *   node LayerText_AF清单.mjs --new --tier A --teacher wayne     # 建清单（含词表快照）
+ *   node LayerText_AF清单.mjs --new --tier A --teacher wayne     # 建清单（含词表快照 + **词表正本导入**）
+ *   node LayerText_AF清单.mjs --reimport                        # 只重新导入词表正本（CSV 改过之后）
  *   node LayerText_AF清单.mjs --stamp --tier A --step 生成 --sec 12.3 --ok 1
  *   node LayerText_AF清单.mjs --verify --tier A                  # 校验；有硬问题非零退出
  *   node LayerText_AF清单.mjs                                   # 只打印当前清单摘要
  *
  * 产物（都在 产物目录/_运行/ 下）：
- *   LexiconSnapshot_<版本>.json   词表快照（带版本与哈希，**所有阶段只读它**）
+ *   LexiconData.json / LexiconData_<版本>.json   词表**正本**（数据本身，所有阶段只读它）
+ *   LexiconDrift.json                            正本与现场对不上时的逐词差异（漂移必须留痕）
+ *   LexiconSnapshot_<版本>.json   词表快照（带版本与哈希，**审计指纹**：回答"来源换过没有"）
  *   LexiconSnapshot.json          指向当前版本的指针
  *   清单_<runId>.json             运行清单
  *   清单_最新.json                指向当前清单的指针
+ *
+ * 快照与正本的分工（总计划阶段 3：「旧 CSV/JSON 只做一次导入，不再作为新的事实源」）：
+ *   · 快照 = 指纹：来源的路径/哈希/词数/抽样，**不含数据**。它只是"换过没有"的探测网。
+ *   · 正本 = 数据：已知词、待定词、专名、逐来源词表、词典释义、知识库加注。
+ *     导入一次，`词表与词典.mjs` 的所有 loader 之后都读它；CSV 再被改，脚本会**拒绝开工**
+ *     （判据与逐词代价见 `src/core/lexiconstore.ts` 的 `decideLexiconSource`）。
  */
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { join } from 'node:path';
+
+const argv = process.argv.slice(2);
+const arg = (n, d) => {
+  const i = argv.indexOf(n);
+  return i >= 0 ? argv[i + 1] : d;
+};
+const has = (n) => argv.includes(n);
+/* ★ 必须在**导入共享模块之前**决定：`--reimport` 的用途就是"正本已经和现场对不上了，
+ *   重新导入一次"，而共享模块在漂移时默认拒绝开工——先设好逃生门再 import，
+ *   否则这条命令永远跑不起来（它会被自己设的规矩挡在门外）。
+ *   显式给了 LAYERTEXT_LEXICON 就以外面的为准（不去覆盖人已经说清楚的选择）。 */
+if (has('--reimport') && !process.env.LAYERTEXT_LEXICON) process.env.LAYERTEXT_LEXICON = 'reimport';
 
 const SHARED = await import('./LayerText_AF词表与词典.mjs');
 const P = SHARED.loadProject();
@@ -35,15 +56,33 @@ const DATE = P.日期;
 const CN = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十'];
 /* 层级标签与指针命名都从引擎取——**不在脚本里再抄一份**（抄一份就会有一天改漏） */
 
-const M = await import(`${REPO}/dist/src/core/manifest.js`);
-const { buildLexiconSnapshot, refOf, newManifest, upsertArtifact, recordStep, verifyManifest, summarizeManifest, detectCollision, contentHash, verifyLexiconSnapshot, makeResolver, detectArtifactCollisions, pointerNameOf, TIER_TAG: TAGS } = M;
+const M = await import(`${SHARED.distOf(REPO)}/src/core/manifest.js`);
+const {
+  buildLexiconSnapshot,
+  refOf,
+  newManifest,
+  upsertArtifact,
+  recordStep,
+  verifyManifest,
+  summarizeManifest,
+  detectCollision,
+  contentHash,
+  verifyLexiconSnapshot,
+  makeResolver,
+  detectArtifactCollisions,
+  pointerNameOf,
+  TIER_TAG: TAGS,
+} = M;
 
-const argv = process.argv.slice(2);
-const arg = (n, d) => { const i = argv.indexOf(n); return i >= 0 ? argv[i + 1] : d; };
-const has = (n) => argv.includes(n);
-const TIERS = (arg('--tier', 'A')).split(',').map((s) => s.trim().toUpperCase()).filter((t) => TAGS[t]);
+const TIERS = arg('--tier', 'A')
+  .split(',')
+  .map((s) => s.trim().toUpperCase())
+  .filter((t) => TAGS[t]);
 const CH_IDS = arg('--chapters', '')
-  ? arg('--chapters').split(',').map((x) => Number(x.trim())).filter((n) => n >= 1 && n <= 10)
+  ? arg('--chapters')
+      .split(',')
+      .map((x) => Number(x.trim()))
+      .filter((n) => n >= 1 && n <= 10)
   : CN.slice(0, Number(P.章数 ?? 10)).map((_, i) => i + 1);
 const TEACHER = arg('--teacher', process.env.LAYERTEXT_TEACHER ?? process.env.USER ?? 'unknown');
 const RUN_DIR = join(OUT_BASE, '_运行');
@@ -64,7 +103,10 @@ const MANIFEST_POINTER = join(RUN_DIR, '清单_最新.json');
  *  报告 §三 说"只能重构一处，应先建清单层……都只能通过 manifest 解析路径"——
  *  这个开关就是那句"解析路径"的落点：改成 run 之后所有脚本自动跟着走。 */
 const LAYOUT = arg('--layout', 'legacy');
-if (!['legacy', 'run'].includes(LAYOUT)) { console.error(`✗ --layout 只能是 legacy / run`); process.exit(2); }
+if (!['legacy', 'run'].includes(LAYOUT)) {
+  console.error(`✗ --layout 只能是 legacy / run`);
+  process.exit(2);
+}
 /**
  * 本脚本自己的产物路径也走同一套解析（否则它就成了唯一的例外）。
  *
@@ -83,7 +125,6 @@ const layoutOf = () => {
 };
 const selfPaths = (runId) => makeResolver(layoutOf(), { out: OUT_BASE, work: P.调适工作区 }, { runId, tier: TAGS[TIERS[0]] ?? TIERS[0], date: DATE });
 
-
 const readIf = (p) => (p && existsSync(p) ? readFileSync(p, 'utf-8') : null);
 
 /** 本次运行的全部输入哈希：词表/专名/知识库/词典/底线/教材单元库 + 每一章原文。
@@ -101,32 +142,14 @@ function buildInputs(sources) {
   ];
 }
 
-/* ────────────────────── 词表快照（唯一口径的来源） ────────────────────── */
+/* ────────────────────── 词表快照（审计指纹）与词表正本（数据） ────────────────────── */
+/**
+ * 快照：**它不含数据**，只记来源的路径/哈希/词数与抽样——回答"来源换过没有"。
+ * 来源列表在共享模块的 `projectSources`（与词表正本导入共用一份，见那里的注释：
+ * 两处各写一份，只要 `count` 差一行，就会天天报一次"词表已变"的假警报）。
+ */
 function buildSnapshot() {
-  const files = [
-    ['词库', P.词库],
-    ['专名表', P.专名表路径],
-    ['知识库', P.知识库路径],
-    ['词典', P.词典路径],
-    ['情节底线', P.工作区 ? join(P.工作区, P.情节底线 ?? '调适工作区/规则与底线/全书情节底线_v0.1.md') : null],
-    ['教材单元库', P.教材单元库],
-  ];
-  const sources = [];
-  const counts = { known: 0, pending: 0, proper: 0, dict: 0, kb: 0 };
-  const knownAll = [];
-  for (const [name, path] of files) {
-    const text = readIf(path);
-    if (text === null) continue;
-    const count = text.split('\n').filter((l) => l.trim() && !l.trim().startsWith('#')).length;
-    sources.push({ ...refOf(name, path, text), count });
-    if (name === '词库') {
-      counts.known = count;
-      for (const l of text.split('\n').slice(1)) { const w = l.split(',')[0]?.trim(); if (w) knownAll.push(w); }
-    }
-    if (name === '专名表') counts.proper = count;
-    if (name === '词典') counts.dict = count;
-    if (name === '知识库') counts.kb = count;
-  }
+  const { sources, counts, knownAll } = SHARED.projectSources(P);
   return { snapshot: buildLexiconSnapshot({ sources, counts, known: knownAll }), sources };
 }
 
@@ -136,6 +159,24 @@ function writeSnapshot(snap) {
   if (!existsSync(p)) writeFileSync(p, JSON.stringify(snap, null, 2), 'utf-8');
   writeFileSync(SNAP_POINTER, JSON.stringify(snap, null, 2), 'utf-8');
   return p;
+}
+
+/** 导入词表正本。**--new 与 --reimport 共用一份实现**，报告的句子也共用（`lines`）
+ *  ——命令行的措辞写两遍，就会有一天两边说法不一致。 */
+async function importStore(snapshotSources, snapshotCounts) {
+  const r = await SHARED.importLexiconStore(P, { snapshotSources, snapshotCounts });
+  const c = r.store.counts;
+  const lines = [` 词表正本：${r.store.version}（已知 ${c.known} 词、待定 ${c.pending}、专名 ${c.proper}、词典 ${c.dict} 条、知识库 ${c.kb} 条）`];
+  if (r.previous) {
+    lines.push(` 上一份正本：${r.previous.version}（${r.previous.createdAt}）→ 本次换成新版本`);
+    lines.push(` 逐词代价：${r.wordDiffText ?? '（无法比对）'}`);
+  } else {
+    lines.push(' 上一份正本：无（**首次导入**：从这一版起，CSV 不再是对判定的事实源）');
+  }
+  for (const w of r.store.warnings) lines.push(` ⚠ 正本自检：${w}`);
+  if (r.clearedDrift) lines.push(' （旧的 LexiconDrift.json 已清掉：那种"对不上"已收进这份新正本；旧正本仍按版本归档，随时能逐词比）');
+  lines.push(` ✓ ${r.storePath}`, `   归档：${r.versionPath}`);
+  return { ...r, lines };
 }
 
 /** 当前产物状态的扫描：产物的"能不能当完成品"只由完成标记决定，不看文件在不在 */
@@ -149,7 +190,12 @@ function scanArtifacts() {
     const done = readIf(donePath);
     const review = readIf(reviewPath);
     const status = done ? 'ok' : review ? 'needs-review' : 'stale';
-    const reason = review ? (JSON.parse(review).待复核明细 ?? []).map((d) => (d.规则 ?? []).join('/')).slice(0, 3).join('；') : undefined;
+    const reason = review
+      ? (JSON.parse(review).待复核明细 ?? [])
+          .map((d) => (d.规则 ?? []).join('/'))
+          .slice(0, 3)
+          .join('；')
+      : undefined;
     const rr = selfPaths(cur?.manifest?.runId ?? '');
     for (const ci of CH_IDS) {
       const ch = `第${CN[ci - 1]}章`;
@@ -175,7 +221,14 @@ function scanArtifacts() {
     if (review) {
       const list = JSON.parse(review).待复核明细 ?? [];
       for (const d of list) {
-        out.push({ path: join('_待复核', `${tag}`, `${d.位置.split(' ')[0]}_第${Number(d.位置.match(/第(\d+)段/)?.[1] ?? 0)}段.md`), kind: '其他', tier: t, status: 'needs-review', reason: (d.规则 ?? []).join('/'), updatedAt: new Date().toISOString() });
+        out.push({
+          path: join('_待复核', `${tag}`, `${d.位置.split(' ')[0]}_第${Number(d.位置.match(/第(\d+)段/)?.[1] ?? 0)}段.md`),
+          kind: '其他',
+          tier: t,
+          status: 'needs-review',
+          reason: (d.规则 ?? []).join('/'),
+          updatedAt: new Date().toISOString(),
+        });
       }
     }
   }
@@ -186,7 +239,7 @@ const pendingReviewOf = () => {
   let n = 0;
   for (const t of TIERS) {
     const r = readIf(selfPaths(cur?.manifest?.runId ?? '').any('失败清单', { tier: TAGS[t] }));
-    if (r) n += (JSON.parse(r).待复核 ?? 0);
+    if (r) n += JSON.parse(r).待复核 ?? 0;
   }
   return n;
 };
@@ -195,6 +248,12 @@ const pendingReviewOf = () => {
 if (has('--new')) {
   const { snapshot, sources } = buildSnapshot();
   const snapPath = writeSnapshot(snapshot);
+  // 导入是 --new 的一部分：**"建清单"这件事的含义就是把这次的输入冻下来**。
+  // 只冻指纹不冻数据，等于把"三天后有人改了词库"这件事留到跑完才发现。
+  const imported = await importStore(sources, snapshot.counts);
+  if (imported.store.snapshotVersion !== snapshot.version) {
+    console.warn(`⚠ 快照版本（${snapshot.version}）与正本记的快照版本（${imported.store.snapshotVersion}）对不上——` + `引擎里这两处算版本的地方出现了分歧，请把这两行连同 ${snapPath} 一起报上来`);
+  }
   const inputs = buildInputs(sources);
   const m = newManifest({
     book: P.书名,
@@ -203,7 +262,8 @@ if (has('--new')) {
     chapters: CH_IDS,
     teacher: TEACHER,
     model: { name: P.模型 ?? 'deepseek-chat', temperature: 0.3, promptVersion: arg('--prompt', 'session-v3-20260911') },
-    lexicon: { version: snapshot.version, snapshotPath: snapPath, warnings: snapshot.warnings },
+    // 版本仍是**快照版本**：既有运行的 --verify 不该因为这次改动凭空报一次漂移（假警报比没有警报更坏）
+    lexicon: { version: snapshot.version, snapshotPath: snapPath, warnings: snapshot.warnings, storePath: imported.storePath, storeVersion: imported.store.version },
     inputs,
     owner: { pid: process.pid, host: hostname() },
     layout: LAYOUT,
@@ -211,7 +271,14 @@ if (has('--new')) {
   const existingPath = join(RUN_DIR, `清单_${m.runId}.json`);
   const existing = readIf(existingPath);
   if (existing) {
-    const warn = detectCollision(JSON.parse(existing), m, (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } });
+    const warn = detectCollision(JSON.parse(existing), m, (pid) => {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    });
     if (warn) console.warn(`\n⚠ ${warn}`);
   }
   mkdirSync(RUN_DIR, { recursive: true });
@@ -230,9 +297,27 @@ if (has('--new')) {
   console.log(` 书名：${m.book}｜版本：${m.version}｜层：${m.tiers.join('/')}｜教师：${m.teacher}`);
   console.log(` 路径布局：${LAYOUT}${LAYOUT === 'legacy' ? '（沿用既有命名，教师已有工作流不受影响）' : '（产物收进 _运行/<运行 ID>/，跨运行不会互相覆盖）'}`);
   console.log(` 词表快照：${snapshot.version}（${snapshot.sources.length} 个来源）→ ${snapPath}`);
+  for (const l of imported.lines) console.log(l);
   if (snapshot.warnings.length) for (const w of snapshot.warnings) console.warn(` ⚠ ${w}`);
   console.log(` 输入哈希：${inputs.length} 项已锁定（词表/专名/知识库/词典/底线/原文）`);
   console.log(` ✓ ${existingPath}`);
+  process.exit(0);
+}
+
+/* ────────────────────── 只重新导入词表正本 ──────────────────────
+ * 为什么单独给一条命令：CSV 改过之后，脚本会**拒绝开工**并把差异说出来（这是有意的）。
+ * 那条拒绝必须有一个"下一步动作"可执行，否则规矩就只是挡路。
+ * 它**不动清单**：已登记的运行仍记着旧快照版本，`--verify` 之后会把它们判为 blocked——
+ * 那是对的，它们确实是用旧口径跑出来的。要接着往下跑，重新 `--new` 开一次运行。 */
+if (has('--reimport')) {
+  console.log('════ AF 词表正本 · 重新导入 ════');
+  console.log(` 项目：${P.书名}｜产物目录：${OUT_BASE}`);
+  const { sources, counts } = SHARED.projectSources(P);
+  const r = await importStore(sources, counts);
+  for (const l of r.lines) console.log(l);
+  if (r.previous && r.previous.version !== r.store.version) {
+    console.warn(' ⚠ 正本版本已变：已登记的运行仍记着旧快照版本，--verify 会把它们判为 blocked（它们确实是用旧口径跑出来的）');
+  }
   process.exit(0);
 }
 
@@ -291,7 +376,11 @@ if (has('--verify')) {
       if (!/^清单_.*\.json$/.test(f)) continue;
       const t = readIf(join(RUN_DIR, f));
       if (!t) continue;
-      try { siblings.push(JSON.parse(t)); } catch { /* 坏清单跳过 */ }
+      try {
+        siblings.push(JSON.parse(t));
+      } catch {
+        /* 坏清单跳过 */
+      }
     }
   }
   const collide = detectArtifactCollisions(siblings.map((x) => ({ runId: x.runId, artifacts: x.artifacts ?? [] })));
@@ -302,6 +391,28 @@ if (has('--verify')) {
   console.log(` 路径布局：${m.layout ?? 'legacy'}｜已登记运行 ${siblings.length} 个${collide.ok ? '（无跨运行撞名）' : `（**${collide.collisions.length} 处撞名**）`}`);
   const blocked = r.problems.filter((p) => p.severity === 'blocked');
   const warns = r.problems.filter((p) => p.severity === 'warn');
+
+  /* 词表正本：与快照**不是同一件事**。快照回答"来源换过没有"（上面那行），
+   * 正本回答"判定用的那批词是哪一版、现在还作不作数"。这里把它的状态一并报出来，
+   * 有漂移就**留痕**（LexiconDrift.json）并判 blocked——漂移只在 stderr 上喊一声，
+   * 三个月后没人能回答"那一天到底差的是哪些词"。 */
+  const storeState = SHARED.lexiconStoreState(P);
+  console.log(` 词表正本：${describeStoreState(storeState, m)}`);
+  if (storeState.mode === 'drift' || storeState.mode === 'broken') {
+    const live = await SHARED.liveLexicon(P).catch(() => null);
+    const rec = await SHARED.recordLexiconDrift(P, { state: storeState, liveKnown: live?.known ?? null });
+    const diffLine = rec?.payload.wordDiffNote;
+    blocked.push({
+      kind: 'lexicon-drift',
+      message:
+        `词表正本与现场对不上（${storeState.mode}）：${(storeState.drift?.drift ?? [storeState.notices[0] ?? '']).join('；')}` +
+        (diffLine ? `｜${diffLine}` : '') +
+        `｜已留痕：${rec?.path ?? '（记录失败）'}。修：node tools/af_pipeline/LayerText_AF清单.mjs --reimport`,
+    });
+  } else {
+    for (const n of storeState.notices) console.log(`   ${n}`);
+  }
+
   if (!blocked.length && !warns.length) {
     console.log(`\n✓ 清单一致：${m.artifacts.length} 件产物、输入哈希全部未变、无未完成段落。`);
     console.log('  这次运行可以当作完成品引用（论文里的数字可以标注本运行 ID）。');
@@ -322,6 +433,22 @@ if (has('--verify')) {
 }
 
 /* ────────────────────── 摘要（默认） ────────────────────── */
+/** 一行说清"这次读的是什么口径"：正本 / legacy 直读 CSV / 拒绝。 */
+function describeStoreState(st, m) {
+  const recorded = m.lexicon.storeVersion ? `清单记 ${m.lexicon.storeVersion}｜` : '';
+  switch (st.mode) {
+    case 'store':
+      return `${recorded}当前 ${st.store.version}（已知 ${st.store.counts.known} 词、导入于 ${st.store.createdAt}）——现场一致，读正本`;
+    case 'drift':
+    case 'broken':
+      return `${recorded}**${st.mode === 'drift' ? '已与现场不一致' : '读不出来'}**：${(st.drift?.drift ?? st.notices).join('；')}`;
+    case 'reimport':
+      return `${recorded}导入模式（按现场 CSV 读，导入会覆盖正本）`;
+    default:
+      return '**没有正本（legacy）**：直读现场 CSV——这是首次导入之前的既有行为，跑一次 --reimport 即可冻结';
+  }
+}
+
 const m = cur.manifest;
 const s = summarizeManifest(m);
 console.log('════ AF 运行清单 ════');
@@ -329,6 +456,7 @@ console.log(` 运行 ID：${m.runId}`);
 console.log(` ${m.book}｜版本 ${m.version}｜层 ${m.tiers.join('/')}｜章 ${m.chapters.join(',')}｜教师 ${m.teacher}`);
 console.log(` 模型 ${m.model.name}（温度 ${m.model.temperature}）｜提示词 ${m.model.promptVersion}`);
 console.log(` 词表快照 ${m.lexicon.version}｜输入 ${m.inputs.length} 项｜产物 ${s.artifactCount} 件｜待复核 ${s.pendingReview} 段`);
+console.log(` 词表正本：${describeStoreState(SHARED.lexiconStoreState(P), m)}`);
 console.log(` 步骤：${m.steps.map((x) => `${x.ok ? '✓' : '✗'}${x.id}`).join(' ') || '（还没跑）'}`);
 console.log(s.deliverable ? ' ✓ 可交付' : ' ✗ 不可交付（有未完成段落或失败步骤）');
 console.log(` 清单：${cur.path}`);
