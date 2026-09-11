@@ -73,44 +73,59 @@ const TIERS = {
 
 /* ────────────────────── 命令行 ────────────────────── */
 const argv = process.argv.slice(2);
-const arg = (n, d) => { const i = argv.indexOf(n); return i >= 0 ? argv[i + 1] : d; };
+const arg = (n, d) => {
+  const i = argv.indexOf(n);
+  return i >= 0 ? argv[i + 1] : d;
+};
 const has = (n) => argv.includes(n);
-const TIER = (arg('--tier', 'A')).toUpperCase();
+const TIER = arg('--tier', 'A').toUpperCase();
 /** 会话粒度（2026-09-11 由"只改文件名"变成**真的换会话**）：
  *  tier（默认）= 一层一条会话；chapter = 每章重置；segment = 每段重置（独立调用，实验对照组）。
  *  原先这个参数只影响会话日志文件名，`--scope chapter` 其实还是"一本书一条会话"——
  *  也就是说，报告批评的"无限增长会话"根本没法通过参数避开。 */
-const SCOPE = arg('--scope', 'tier')
+const SCOPE = arg('--scope', 'tier');
 const VALID_SCOPES = ['tier', 'book', 'chapter', 'segment'];
-if (!VALID_SCOPES.includes(SCOPE)) { console.error(`✗ 未知会话粒度「${SCOPE}」，只能是 ${VALID_SCOPES.join(' / ')}`); process.exit(2); }
+if (!VALID_SCOPES.includes(SCOPE)) {
+  console.error(`✗ 未知会话粒度「${SCOPE}」，只能是 ${VALID_SCOPES.join(' / ')}`);
+  process.exit(2);
+}
 /** 词表注入维度（四格实验的第二个因子）：full=开场给全词表（默认）｜lite=只给"该注哪些词"（2% 那版的老口径） */
-const VOCAB = arg('--vocab', 'full')
+const VOCAB = arg('--vocab', 'full');
 const DRY = has('--dry');
-const OUT_SUFFIX = arg('--out', '');   // 试跑用：产物与会话日志都加后缀，不碰正式文件
+const OUT_SUFFIX = arg('--out', ''); // 试跑用：产物与会话日志都加后缀，不碰正式文件
 const RESUME = has('--resume');
 const CH_IDS = arg('--chapters', '')
-  ? arg('--chapters').split(',').map((x) => Number(x.trim())).filter((n) => n >= 1 && n <= 10)
+  ? arg('--chapters')
+      .split(',')
+      .map((x) => Number(x.trim()))
+      .filter((n) => n >= 1 && n <= 10)
   : CN.slice(0, Number(P.章数 ?? 10)).map((_, i) => i + 1);
-const TOOL_ROUNDS = Number(arg('--tool-rounds', '2'));   // 「查词」往返上限
-const QC_ROUNDS = Number(arg('--qc-rounds', '2'));       // 本地复检回流上限
+const TOOL_ROUNDS = Number(arg('--tool-rounds', '2')); // 「查词」往返上限
+const QC_ROUNDS = Number(arg('--qc-rounds', '2')); // 本地复检回流上限
 /** 会话滚动窗口：保留最近多少「段」的逐段对话（0 = 不滚动，全历史）。
  *  审查报告 §二：「一本书一条无限增长会话」不应成为唯一模式——上下文累积会带来
  *  注意力稀释、截断和恢复困难；而原实现只在章末追加 5 行摘要，**却没有实际删除历史**。
  *  报告给的建议粒度是"按章或 20–40 段"，所以默认 30 段。 */
-const WINDOW = Number(arg('--window', '30'))
+const WINDOW = Number(arg('--window', '30'));
 const BASELINE = P.情节底线 ?? '调适工作区/规则与底线/全书情节底线_v0.1.md';
 /** 自检用假模型：long=永远超长（必不过）｜exact=按目标词数精确回放原文（必过）｜其他=字面返回。
  *  有了它，"门禁真的拦得住"这件事才能被自动化断言，而不靠人肉试。 */
 const FAKE_LLM = process.env.LAYERTEXT_FAKE_LLM;
 
-if (!TIERS[TIER]) { console.error(`✗ 未知层级「${TIER}」，只能是 A / M / B`); process.exit(2); }
+if (!TIERS[TIER]) {
+  console.error(`✗ 未知层级「${TIER}」，只能是 A / M / B`);
+  process.exit(2);
+}
 const T = TIERS[TIER];
 const TAG = TAGS[TIER];
 const SUFFIX = OUT_SUFFIX ? '_' + OUT_SUFFIX : '';
 
 const CFG = (() => {
-  try { return JSON.parse(readFileSync(`${process.env.HOME}/.layertext.json`, 'utf-8')); }
-  catch { return { baseUrl: 'https://api.deepseek.com' }; }
+  try {
+    return JSON.parse(readFileSync(`${process.env.HOME}/.layertext.json`, 'utf-8'));
+  } catch {
+    return { baseUrl: 'https://api.deepseek.com' };
+  }
 })();
 /** API key 惰性读取：--dry、假模型、纯本地路径都不该碰钥匙串 */
 let _key = null;
@@ -127,6 +142,28 @@ const { splitChapter } = await import(`${REPO}/dist/src/core/textpipe.js`);
 const { runQc } = await import(`${REPO}/dist/src/core/qc.js`);
 const { atomicWriteFileSync: writeAtomic } = await import(`${REPO}/dist/src/core/files.js`);
 const { annotatableOf } = await import(`${REPO}/dist/src/core/segmentgate.js`);
+/* 每一段的**追踪 ID**：与 App 侧 `RewriteRequest.traceId` 同一套算法
+ * （`src/core/rewrite.ts` 的 `traceIdOf`，FNV-1a 双通道）。
+ * 纪律第 4 条：「所有 AI 响应保存 prompt 版本、policy snapshot、模型和 **traceId**」——
+ * 原来只记了前三个，traceId 是缺的。缺了它，"这一段是第几次调用产出的"就只能靠翻日志顺序。 */
+const { traceIdOf } = await import(`${REPO}/dist/src/core/rewrite.js`);
+const BOOK_VERSION = RUN.runId || `${P.书名}-${P.版本 ?? 'v1'}`;
+/* 本运行用的**词库快照版本**（纪律第 4 条要的 "policy snapshot"）。
+ * 取自清单里记的那一版——清单是唯一记着"这次用哪版词库"的地方。
+ * 没有清单（单独跑本脚本）时如实记为「未锁定」，**不编一个版本号**：
+ * 编了就会让"这条产物是对着哪版词库做的"变成一个假答案，而假答案比没有答案更坏。
+ * （读法与 `readRunIdentity` 同一套指针约定，只是这里还要清单里的 lexicon 字段。） */
+const LEXICON_VERSION = (() => {
+  try {
+    const ptr = JSON.parse(readFileSync(join(OUT_BASE, '_运行', '清单_最新.json'), 'utf-8'));
+    const m = JSON.parse(readFileSync(ptr.path, 'utf-8'));
+    return m.lexicon?.version ?? '未锁定';
+  } catch {
+    return '未锁定';
+  }
+})();
+/** 本段的追踪 ID（段级 scope） */
+const traceOf = (segText, k, ch) => traceIdOf({ source: segText, scope: 'segment', tier: TAG, bookVersion: BOOK_VERSION, intent: `${ch}#${k}`, promptVersion: PROMPT_VERSION });
 /* 正文与产物一律**原子写**（先写同目录临时文件再 rename）。
  * writeFileSync 的语义是「截断 → 写」，中途失败会留下**半份正文**——
  * 对教师唯一的一份稿，半份比没有更糟：没有你知道丢了，半份看起来像改坏了，
@@ -143,11 +180,16 @@ const sha = (s) => createHash('sha256').update(String(s)).digest('hex').slice(0,
 /** 词汇标记 brief 版：一行一词「词\t类型」。3600+ 词全表约 1.4 万 tokens，
  *  占 1M 上下文的 1.5% —— 让模型自己在这张表里"调取"，而不是每次猜边界。 */
 function vocabBrief() {
-  const raw = readFileSync(P.词库, 'utf-8').replace(/^\uFEFF/, '').split('\n');
-  const rows = raw.slice(1).map((l) => {
-    const c = l.split(',');
-    return c[0] && c[1] ? `${c[0].trim()}\t${c[1].trim()}` : null;
-  }).filter(Boolean);
+  const raw = readFileSync(P.词库, 'utf-8')
+    .replace(/^\uFEFF/, '')
+    .split('\n');
+  const rows = raw
+    .slice(1)
+    .map((l) => {
+      const c = l.split(',');
+      return c[0] && c[1] ? `${c[0].trim()}\t${c[1].trim()}` : null;
+    })
+    .filter(Boolean);
   return { text: rows.join('\n'), n: rows.length };
 }
 
@@ -248,11 +290,20 @@ function loadSession() {
   const done = new Set();
   const warnings = [];
   let stats = { calls: 0, in: 0, out: 0, cached: 0 };
-  let carryAt = -1;   // 最后一个 window 事件之后的消息才是"当前窗口"
+  let carryAt = -1; // 最后一个 window 事件之后的消息才是"当前窗口"
   let lastCarry = '';
   for (const l of lines) {
-    let o; try { o = JSON.parse(l); } catch { continue; }
-    if (o.t === 'window') { carryAt = messages.length; lastCarry = o.carry ?? ''; continue; }
+    let o;
+    try {
+      o = JSON.parse(l);
+    } catch {
+      continue;
+    }
+    if (o.t === 'window') {
+      carryAt = messages.length;
+      lastCarry = o.carry ?? '';
+      continue;
+    }
     if (o.t === 'msg') {
       // tool_calls / tool_call_id 必须一起还原：少了它们，重建出来的会话里
       // 会留下"助手发了工具调用但没有工具回复"的非法回合，--resume 直接被 API 拒。
@@ -262,9 +313,15 @@ function loadSession() {
         ...(o.tool_calls ? { tool_calls: o.tool_calls } : {}),
         ...(o.tool_call_id ? { tool_call_id: o.tool_call_id } : {}),
       });
-    }
-    else if (o.t === 'done') { done.add(o.key); if (o.usage) { stats.calls++; stats.in += o.usage.in || 0; stats.out += o.usage.out || 0; stats.cached += o.usage.cached || 0; } }
-    else if (o.t === 'warning') warnings.push(o);
+    } else if (o.t === 'done') {
+      done.add(o.key);
+      if (o.usage) {
+        stats.calls++;
+        stats.in += o.usage.in || 0;
+        stats.out += o.usage.out || 0;
+        stats.cached += o.usage.cached || 0;
+      }
+    } else if (o.t === 'warning') warnings.push(o);
     else if (o.t === 'stats') stats = o.v;
   }
   // 会话滚动事件：`--resume` 重建时必须**重放同样的裁剪**，否则续跑后的上下文
@@ -272,7 +329,10 @@ function loadSession() {
   const windowed = carryAt >= 0 ? messages.slice(carryAt) : messages;
   return { messages: windowed, done, stats, warnings, carryText: lastCarry };
 }
-const logLine = (o) => { mkdirSync(dirname(sessionFile()), { recursive: true }); appendFileSync(sessionFile(), JSON.stringify(o) + '\n', 'utf-8'); };
+const logLine = (o) => {
+  mkdirSync(dirname(sessionFile()), { recursive: true });
+  appendFileSync(sessionFile(), JSON.stringify(o) + '\n', 'utf-8');
+};
 /** 推一条消息进会话，**同时写进事件日志**（否则 --resume 会丢上下文——首版就踩了这个坑） */
 function pushMsg(messages, role, content, extra = {}) {
   messages.push({ role, content, ...extra });
@@ -311,7 +371,9 @@ function carryState() {
     state.carry?.章摘要?.length ? `已完成章节摘要：\n${state.carry.章摘要.map(([c, t]) => `· ${c}：${String(t).replace(/\n/g, ' ')}`).join('\n')}` : '',
     newDictEntries.length ? `运行中新配的释义（统一词典增量，加注时优先用这些）：\n${newDictEntries.map(([w, zh]) => `${w}\t${zh}`).join('\n')}` : '',
     '改写约束与开场完全一致，未变：篇幅守恒（同义转换不是压缩）、句法黑名单、加注格式 `word（中文）`。',
-  ].filter(Boolean).join('\n');
+  ]
+    .filter(Boolean)
+    .join('\n');
 }
 /** 超窗就把开场之后的历史整段换掉。开场（system）**一个字节都不动** —— 它是缓存命中的前缀。 */
 function rollWindow() {
@@ -344,7 +406,11 @@ function fakeChat(messages, tools = null) {
   // 注意：复检回流那一轮的"最后一条 user 消息"是反馈而不是原文段，
   // 所以要取**最后一条含原文段**的消息，否则重写轮会退化成无原文的瞎写。
   const segOf = (m) => m.content.match(/【原文段落】\n([\s\S]*?)\n\n请改写这一段/)?.[1];
-  const withSeg = [...messages].reverse().filter((m) => m.role === 'user').map(segOf).find(Boolean);
+  const withSeg = [...messages]
+    .reverse()
+    .filter((m) => m.role === 'user')
+    .map(segOf)
+    .find(Boolean);
   const seg = withSeg ?? [...messages].reverse().find((m) => m.role === 'user')?.content ?? '';
   const target = Math.round(wc(seg) * T.ratio);
   if (FAKE_LLM === 'long') {
@@ -361,10 +427,10 @@ function fakeChat(messages, tools = null) {
     const md = `## Chapter One\n\n${seg}\n`;
     const oov = annotatableOf(runQc(md, LEX, { tier: TIER, fileName: 'seg.md', dict: DICT }).oov);
     const words = (seg.match(/[A-Za-z][A-Za-z'-]*/g) ?? []).filter((w) => w !== 'P');
-    const kept = words.slice(0, Math.max(1, target - 1)).join(' ').replace(
-      /\b[A-Za-z][A-Za-z'-]*\b/g,
-      (w) => (oov.includes(w.toLowerCase()) ? `${w}（风车）` : w),
-    );
+    const kept = words
+      .slice(0, Math.max(1, target - 1))
+      .join(' ')
+      .replace(/\b[A-Za-z][A-Za-z'-]*\b/g, (w) => (oov.includes(w.toLowerCase()) ? `${w}（风车）` : w));
     return { text: `[P01] ${kept}`, toolCalls: [], usage: { in: 0, out: 0, cached: 0 } };
   }
   if (FAKE_LLM === 'tool' && tools) {
@@ -381,7 +447,9 @@ function fakeChat(messages, tools = null) {
     const md0 = `## Chapter One\n\n${seg}\n`;
     const oov = annotatableOf(runQc(md0, LEX, { tier: TIER, fileName: 'seg.md', dict: DICT }).oov);
     const words = (seg.match(/[A-Za-z][A-Za-z'-]*/g) ?? []).filter((w) => w !== 'P');
-    const body = words.slice(0, Math.max(1, target - 1)).join(' ')
+    const body = words
+      .slice(0, Math.max(1, target - 1))
+      .join(' ')
       .replace(/\b[A-Za-z][A-Za-z'-]*\b/g, (w) => (oov.includes(w.toLowerCase()) ? `${w}（风车）` : w));
     return { text: `[P01] ${body}`, toolCalls: [], usage: { in: 0, out: 0, cached: 0 } };
   }
@@ -392,7 +460,10 @@ function fakeChat(messages, tools = null) {
 async function callChat(messages, maxTokens = 3000, tools = null) {
   if (FAKE_LLM !== undefined) return fakeChat(messages, tools);
   const body = { model: MODEL, max_tokens: maxTokens, temperature: 0.3, messages };
-  if (tools) { body.tools = tools; body.tool_choice = 'auto'; }
+  if (tools) {
+    body.tools = tools;
+    body.tool_choice = 'auto';
+  }
   const resp = await fetch(`${CFG.baseUrl}/chat/completions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey()}` },
@@ -437,24 +508,41 @@ async function answerLookup(words) {
     const w = w0.toLowerCase();
     const kb = KB.get(w);
     const dict = DICT.get(w);
-    if (dict || kb) { entries.push({ word: w, known: false, zh: dict ?? kb.zh, source: kb ? '教师知识库收录，必须加注' : '统一词典已有，按此释义加注' }); continue; }
+    if (dict || kb) {
+      entries.push({ word: w, known: false, zh: dict ?? kb.zh, source: kb ? '教师知识库收录，必须加注' : '统一词典已有，按此释义加注' });
+      continue;
+    }
     const q = segQc(`[P01] ${w}`).oov.includes(w);
-    if (!q) { entries.push({ word: w, known: true }); continue; }
+    if (!q) {
+      entries.push({ word: w, known: true });
+      continue;
+    }
     entries.push({ word: w, known: false, zh: '', source: '待配释义' });
     needGloss.push(w);
   }
   if (needGloss.length) {
-    const r = await callChat([
-      { role: 'system', content: '你给初中英语教材配生词注释。只输出一个 JSON 对象 {词: 释义}，释义 2-6 个汉字，初中生能懂，不要其他文字。' },
-      { role: 'user', content: `给这些词配释义：${needGloss.join(', ')}` },
-    ], 800);
+    const r = await callChat(
+      [
+        { role: 'system', content: '你给初中英语教材配生词注释。只输出一个 JSON 对象 {词: 释义}，释义 2-6 个汉字，初中生能懂，不要其他文字。' },
+        { role: 'user', content: `给这些词配释义：${needGloss.join(', ')}` },
+      ],
+      800,
+    );
     let map = {};
-    try { map = JSON.parse(r.text.replace(/^[^{]*/, '').replace(/[^}]*$/, '')); } catch { warn('lookup-parse', `「查词」释义 JSON 解析失败，回退为让模型自行判断：${r.text.slice(0, 80)}`); }
+    try {
+      map = JSON.parse(r.text.replace(/^[^{]*/, '').replace(/[^}]*$/, ''));
+    } catch {
+      warn('lookup-parse', `「查词」释义 JSON 解析失败，回退为让模型自行判断：${r.text.slice(0, 80)}`);
+    }
     for (const e of entries) {
       if (e.known || e.zh !== '') continue;
       const zh = map[e.word];
-      if (zh) { e.zh = zh; e.source = '新配，已写进统一词典'; DICT.set(e.word, zh); newDictEntries.push([e.word, zh]); }
-      else e.source = '查不到，按你的判断配一个 2-6 字释义';
+      if (zh) {
+        e.zh = zh;
+        e.source = '新配，已写进统一词典';
+        DICT.set(e.word, zh);
+        newDictEntries.push([e.word, zh]);
+      } else e.source = '查不到，按你的判断配一个 2-6 字释义';
     }
   }
   return entries;
@@ -464,7 +552,15 @@ const newDictEntries = [];
 /* ────────────────────── 单段判定：交给引擎的段级门禁 ────────────────────── */
 function stripLookup(text) {
   const m = text.match(/【查\s*([^】]*)】/);
-  return { cleaned: text.replace(/【查[^】]*】/g, '').trim(), words: m ? m[1].trim().split(/[\s,，、]+/).filter(Boolean) : [] };
+  return {
+    cleaned: text.replace(/【查[^】]*】/g, '').trim(),
+    words: m
+      ? m[1]
+          .trim()
+          .split(/[\s,，、]+/)
+          .filter(Boolean)
+      : [],
+  };
 }
 
 /** 段级判定：篇幅 / 句长 / 漏注 / 注释外中文 是 blocker（不过就不可完成）；
@@ -500,24 +596,22 @@ async function rewriteSegment(messages, seg, chLabel, k, total, annotatedSoFar, 
     `【本段事实（本地体检，确定性）】`,
     `原文 ${srcW} 词 → 目标约 ${target} 词（±10%）。本层句长上限 ${T.maxLen} 词。`,
     kbMust.length ? `本段含教师知识库要求加注的词：${kbMust.join('、')}` : `本段不含教师知识库指定词。`,
-    srcOov.length ? `本段超出学生词汇表的词共 ${srcOov.length} 个（首次出现处都要按冻结格式加注，用统一词典的释义）：${srcOov.slice(0, 60).join('、')}${srcOov.length > 60 ? ' …' : ''}` : `本段全部词都在学生词汇表内，不必加注。`,
+    srcOov.length
+      ? `本段超出学生词汇表的词共 ${srcOov.length} 个（首次出现处都要按冻结格式加注，用统一词典的释义）：${srcOov.slice(0, 60).join('、')}${srcOov.length > 60 ? ' …' : ''}`
+      : `本段全部词都在学生词汇表内，不必加注。`,
     // 外部记忆（agent 的做法：把"我已经做过什么"告诉模型，而不是让它自己记）
     (() => {
       const dup = srcOov.filter((w) => annotatedSoFar.has(w));
-      return dup.length
-        ? `⚠ 你在这本书里**已经注过**这些词了，本段**绝对不要**再加注（全篇一个词只注一次）：${dup.slice(0, 80).join('、')}`
-        : '';
+      return dup.length ? `⚠ 你在这本书里**已经注过**这些词了，本段**绝对不要**再加注（全篇一个词只注一次）：${dup.slice(0, 80).join('、')}` : '';
     })(),
-  ].filter(Boolean).join('\n');
+  ]
+    .filter(Boolean)
+    .join('\n');
 
   const inputHash = sha(`${PROMPT_VERSION}|${seg}|${target}|${T.maxLen}`);
   const carry = pendingCarry;
   pendingCarry = '';
-  pushMsg(
-    messages,
-    'user',
-    `${carry ? carry + '\n\n' : ''}${chLabel} · 第 ${k + 1}/${total} 段\n\n${facts}\n\n【原文段落】\n${seg.trim()}\n\n请改写这一段。`,
-  );
+  pushMsg(messages, 'user', `${carry ? carry + '\n\n' : ''}${chLabel} · 第 ${k + 1}/${total} 段\n\n${facts}\n\n【原文段落】\n${seg.trim()}\n\n请改写这一段。`);
   let first = await callChat(messages, 3000, LOOKUP_TOOL);
   let text = first.text;
   const callUsage = [first.usage];
@@ -537,7 +631,9 @@ async function rewriteSegment(messages, seg, chLabel, k, total, annotatedSoFar, 
         pushMsg(messages, 'assistant', text);
         pushMsg(messages, 'user', `【工具调用参数不合规】${errors.join('；')}\n请用 lookup_words 重新提问（words 是英文单词数组，最多 8 个）。`);
         const r = await callChat(messages, 3000, LOOKUP_TOOL);
-        text = r.text; first = r; callUsage.push(r.usage);
+        text = r.text;
+        first = r;
+        callUsage.push(r.usage);
         continue;
       }
       break;
@@ -552,7 +648,9 @@ async function rewriteSegment(messages, seg, chLabel, k, total, annotatedSoFar, 
     }
     pushMsg(messages, 'user', `【查词结果】\n${answer}\n\n请据此输出这一段的最终正文。`);
     const r = await callChat(messages, 3000, LOOKUP_TOOL);
-    text = r.text; first = r; callUsage.push(r.usage);
+    text = r.text;
+    first = r;
+    callUsage.push(r.usage);
   }
 
   /* 本地复检回流：不达标就让模型自己改（最多 QC_ROUNDS 轮）。
@@ -564,13 +662,10 @@ async function rewriteSegment(messages, seg, chLabel, k, total, annotatedSoFar, 
   while (verdict.status !== 'pass' && attempts.length < QC_ROUNDS) {
     attempts.push({ problems: verdict.problems.map((p) => p.ruleId), words: verdict.words });
     pushMsg(messages, 'assistant', text);
-    pushMsg(
-      messages,
-      'user',
-      `【本地复检】本段未达标：\n- ${verdict.blockers.map((p) => p.message).join('\n- ')}\n请重写这一段（只输出该段正文，保持 [P##] 开头）。`,
-    );
+    pushMsg(messages, 'user', `【本地复检】本段未达标：\n- ${verdict.blockers.map((p) => p.message).join('\n- ')}\n请重写这一段（只输出该段正文，保持 [P##] 开头）。`);
     const r = await callChat(messages, 3000, LOOKUP_TOOL);
-    text = r.text; callUsage.push(r.usage);
+    text = r.text;
+    callUsage.push(r.usage);
     verdict = verifySegment(text, seg, target, srcOov, markerId, annotatedSoFar);
   }
 
@@ -585,12 +680,7 @@ async function rewriteSegment(messages, seg, chLabel, k, total, annotatedSoFar, 
     pushMsg(messages, 'assistant', body);
   } else {
     pushMsg(messages, 'assistant', body);
-    pushMsg(
-      messages,
-      'user',
-      `【未通过】本段复检未通过（规则 ${verdict.blockers.map((p) => p.ruleId).join('、')}），` +
-        `已移出正文、转人工复核队列。请继续后面的段落，但不要以为本段已定稿。`,
-    );
+    pushMsg(messages, 'user', `【未通过】本段复检未通过（规则 ${verdict.blockers.map((p) => p.ruleId).join('、')}），` + `已移出正文、转人工复核队列。请继续后面的段落，但不要以为本段已定稿。`);
   }
   return {
     status: verdict.status,
@@ -629,7 +719,10 @@ console.log(`段落总数：${totalSegs}｜原文 ${chSegs.reduce((a, c) => a + 
 console.log(`预计调用：${totalSegs} 段 ×（1 主 + ≤${TOOL_ROUNDS} 查词 + ≤${QC_ROUNDS} 复检）≈ ${totalSegs}–${totalSegs * (1 + TOOL_ROUNDS + QC_ROUNDS)} 次`);
 console.log(`缓存说明：开场 ${openerTokens} tokens 全程不变 → 每次都命中缓存（0.02 元/百万）`);
 
-if (DRY) { console.log('\n（--dry，未调 API、未写文件）'); process.exit(0); }
+if (DRY) {
+  console.log('\n（--dry，未调 API、未写文件）');
+  process.exit(0);
+}
 
 const state = RESUME ? loadSession() : { messages: [], done: new Set(), stats: { calls: 0, in: 0, out: 0, cached: 0 }, warnings: [] };
 if (!state.warnings) state.warnings = [];
@@ -639,8 +732,8 @@ pendingCarry = state.carryText ?? '';
 const messages = state.messages.length ? state.messages : [{ role: 'system', content: system }];
 if (!state.messages.length) logLine({ t: 'msg', role: 'system', content: system });
 
-const failures = [];   // 读取/异常类失败
-const reviews = [];    // 门禁未通过（needs-review）——**不可完成**
+const failures = []; // 读取/异常类失败
+const reviews = []; // 门禁未通过（needs-review）——**不可完成**
 
 /* 「已注词」= 全书唯一注释的账本，必须在**开工前**从全部产物恢复。
  * 两个"只扫一部分"的坑都踩过：
@@ -668,18 +761,24 @@ if (!state.annotated) {
 for (const { i } of chSegs) {
   const ch = `第${CN[i - 1]}章`;
   const src = join(SRC_BASE, ch, '原文_规范化.md');
-  if (!existsSync(src)) { failures.push(`${ch}：缺规范化原文`); continue; }
+  if (!existsSync(src)) {
+    failures.push(`${ch}：缺规范化原文`);
+    continue;
+  }
   const md = readFileSync(src, 'utf-8');
   const chLine = md.match(/^## Chapter \w+.*$/m)?.[0] ?? `## Chapter ${['One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten'][i - 1]}`;
   const header = md.slice(0, md.indexOf(chLine)) || '';
-  const segList = segmentList(md);   // [{id:'P07', text:'[P07] …'}]——段号是稳定 ID
+  const segList = segmentList(md); // [{id:'P07', text:'[P07] …'}]——段号是稳定 ID
   const srcText = (k) => segList[k].text;
   const outPath = R.any('正文', { chapter: ch });
   const existing = existsSync(outPath) ? readFileSync(outPath, 'utf-8') : null;
   const outSegs = existing ? (splitChapter(existing).body.match(/\[P\d+\][\s\S]*?(?=\[P\d+\]|$)/g) ?? []) : [];
   for (let k = 0; k < segList.length; k++) {
     const key = `${ch}#${k}`;
-    if (state.done.has(key)) { process.stdout.write(`· ${ch} ${k + 1}/${segList.length} 已完成\r`); continue; }
+    if (state.done.has(key)) {
+      process.stdout.write(`· ${ch} ${k + 1}/${segList.length} 已完成\r`);
+      continue;
+    }
     // 会话粒度真正生效：章首（chapter）或段首（segment）把对话重置回"开场 + 结转状态"。
     // 重置的是**对话历史**，不是身份：已注词账本、章摘要、新配释义全部随结转保留。
     if (globalSegIndex > 0) {
@@ -691,10 +790,19 @@ for (const { i } of chSegs) {
     rollWindow();
     try {
       const { status, body, verdict, attempts, qcRounds, usage, inputHash, strippedAnnotations, reinforceHints } = await rewriteSegment(
-        messages, srcText(k), ch, k, segList.length, state.annotated, segList[k].id,
+        messages,
+        srcText(k),
+        ch,
+        k,
+        segList.length,
+        state.annotated,
+        segList[k].id,
       );
       const u = usage.reduce((a, c) => ({ in: a.in + c.in, out: a.out + c.out, cached: a.cached + c.cached }), { in: 0, out: 0, cached: 0 });
-      state.stats.calls += usage.length; state.stats.in += u.in; state.stats.out += u.out; state.stats.cached += u.cached;
+      state.stats.calls += usage.length;
+      state.stats.in += u.in;
+      state.stats.out += u.out;
+      state.stats.cached += u.cached;
       logLine({ t: 'stats', v: state.stats });
 
       if (status === 'needs-review') {
@@ -703,18 +811,42 @@ for (const { i } of chSegs) {
         //   且**保住后面段落的位置**（否则第 8 段的原句会对到第 7 段的改写上，风险队列全错）。
         outSegs[k] = REVIEW_PLACEHOLDER(segList[k].id, REVIEW_DIR.replace(`${OUT_BASE}/`, ''));
         const rec = {
-          chapter: ch, segIndex: k, segLabel: `${ch} 第${k + 1}段`, key,
-          source: srcText(k).trim(), body, status,
-          blockers: verdict.blockers, warns: verdict.warns, attempts,
-          inputHash, promptVersion: PROMPT_VERSION, model: MODEL,
+          chapter: ch,
+          segIndex: k,
+          segLabel: `${ch} 第${k + 1}段`,
+          key,
+          source: srcText(k).trim(),
+          body,
+          status,
+          blockers: verdict.blockers,
+          warns: verdict.warns,
+          attempts,
+          inputHash,
+          promptVersion: PROMPT_VERSION,
+          model: MODEL,
+          // 纪律第 4 条要求的第五样：traceId（`sourceVersion + traceId` 才能重放段）
+          traceId: traceOf(srcText(k).trim(), k, ch),
+          lexiconVersion: LEXICON_VERSION,
           response: body.slice(0, 2000),
-          annotation: verdict.annotation, words: verdict.words, target: verdict.target,
+          annotation: verdict.annotation,
+          words: verdict.words,
+          target: verdict.target,
         };
         const segLabel = `第${k + 1}段`;
         mkdirSync(REVIEW_DIR, { recursive: true });
         writeFileSync(R.any('待复核', { chapter: ch, segId: segLabel }), `[P${String(k + 1).padStart(2, '0')}] ${body.replace(/^\[P\d+\]\s*/, '')}\n`, 'utf-8');
         writeFileSync(R.any('待复核', { chapter: ch, segId: segLabel, ext: 'json' }), JSON.stringify(rec, null, 2), 'utf-8');
-        logLine({ t: 'review', key, rules: verdict.blockers.map((p) => p.ruleId), problems: verdict.blockers, inputHash, promptVersion: PROMPT_VERSION });
+        logLine({
+          t: 'review',
+          key,
+          rules: verdict.blockers.map((p) => p.ruleId),
+          problems: verdict.blockers,
+          inputHash,
+          promptVersion: PROMPT_VERSION,
+          model: MODEL,
+          traceId: traceOf(srcText(k).trim(), k, ch),
+          lexiconVersion: LEXICON_VERSION,
+        });
         reviews.push(rec);
         console.error(`\n✗ ${ch} 第${k + 1}段 复检未通过（${verdict.blockers.map((p) => p.ruleId).join('、')}）→ 已隔离，未写入正文`);
       } else {
@@ -723,11 +855,21 @@ for (const { i } of chSegs) {
         outSegs[k] = body;
         state.done.add(key);
         logLine({
-          t: 'done', key, usage: u, rounds: qcRounds, status, inputHash, promptVersion: PROMPT_VERSION,
+          t: 'done',
+          key,
+          usage: u,
+          rounds: qcRounds,
+          status,
+          inputHash,
+          promptVersion: PROMPT_VERSION,
+          model: MODEL,
+          traceId: traceOf(srcText(k).trim(), k, ch),
+          lexiconVersion: LEXICON_VERSION,
           rules: verdict.warns.map((p) => p.ruleId),
           // 报告要求的可复现信息：输入哈希 + 提示词版本 + 本次响应（截断存，够定位是哪一版写的）
           response: body.slice(0, 2000),
-          strippedAnnotations, reinforceHints,
+          strippedAnnotations,
+          reinforceHints,
         });
         if (reinforceHints.length) {
           // 教学复现点：不进正文注释，交给词卡层（报告 §二：复现提示要与正文注释分开）
@@ -755,7 +897,10 @@ for (const { i } of chSegs) {
     pushMsg(messages, 'assistant', r.text);
     state.carry.章摘要.push([ch, r.text.replace(/\n/g, ' ')]);
     state.carry.last = `${ch} 已处理完`;
-    state.stats.calls++; state.stats.in += r.usage.in; state.stats.out += r.usage.out; state.stats.cached += r.usage.cached;
+    state.stats.calls++;
+    state.stats.in += r.usage.in;
+    state.stats.out += r.usage.out;
+    state.stats.cached += r.usage.cached;
     console.log(`\n📌 ${ch} 摘要：${r.text.replace(/\n/g, ' / ').slice(0, 100)}…`);
   } catch (e) {
     // 原来这里是 catch {}：摘要失败会让后续一致性下降却显示成功。降级为 warning 并计数。
@@ -781,9 +926,11 @@ if (newDictEntries.length) {
 }
 
 const hitRate = state.stats.in ? Math.round((state.stats.cached / state.stats.in) * 100) : 0;
-const cost = (state.stats.in - state.stats.cached) / 1e6 * 1 + state.stats.cached / 1e6 * 0.02 + state.stats.out / 1e6 * 4;
+const cost = ((state.stats.in - state.stats.cached) / 1e6) * 1 + (state.stats.cached / 1e6) * 0.02 + (state.stats.out / 1e6) * 4;
 console.log('\n════ 用量台账（空闲时段价）════');
-console.log(`  调用 ${state.stats.calls} 次｜输入 ${state.stats.in.toLocaleString()} tokens（缓存命中 ${state.stats.cached.toLocaleString()}，命中率 ${hitRate}%）｜输出 ${state.stats.out.toLocaleString()}`);
+console.log(
+  `  调用 ${state.stats.calls} 次｜输入 ${state.stats.in.toLocaleString()} tokens（缓存命中 ${state.stats.cached.toLocaleString()}，命中率 ${hitRate}%）｜输出 ${state.stats.out.toLocaleString()}`,
+);
 console.log(`  估算花费：¥${cost.toFixed(3)}`);
 
 /* ────────────────────── 收尾：完成标记 / 失败清单 / 退出码 ────────────────────── */
@@ -795,14 +942,32 @@ if (incomplete && existsSync(doneMarker())) {
   console.log('（上一轮的完成标记已作废：本轮有未完成段落）');
 }
 const runSummary = {
-  层级: TIER, 会话粒度: SCOPE, 日期: DATE, 模型: MODEL, 提示词版本: PROMPT_VERSION,
-  书名: P.书名, 章节: CH_IDS, 段落总数: totalSegs,
-  已完成: state.done.size, 待复核: reviews.length, 失败: failures.length,
-  用量: state.stats, 缓存命中率: hitRate, 估算花费: Number(cost.toFixed(4)),
+  层级: TIER,
+  会话粒度: SCOPE,
+  日期: DATE,
+  模型: MODEL,
+  提示词版本: PROMPT_VERSION,
+  书名: P.书名,
+  章节: CH_IDS,
+  段落总数: totalSegs,
+  已完成: state.done.size,
+  待复核: reviews.length,
+  失败: failures.length,
+  用量: state.stats,
+  缓存命中率: hitRate,
+  估算花费: Number(cost.toFixed(4)),
   warnings: state.warnings.map((w) => ({ kind: w.kind, message: w.message })),
 };
 if (incomplete) {
-  writeFileSync(reviewMarker(), JSON.stringify({ ...runSummary, 待复核明细: reviews.map((r) => ({ 位置: r.segLabel, 规则: r.blockers.map((p) => p.ruleId), 问题: r.blockers.map((p) => p.message) })), 失败明细: failures }, null, 2), 'utf-8');
+  writeFileSync(
+    reviewMarker(),
+    JSON.stringify(
+      { ...runSummary, 待复核明细: reviews.map((r) => ({ 位置: r.segLabel, 规则: r.blockers.map((p) => p.ruleId), 问题: r.blockers.map((p) => p.message) })), 失败明细: failures },
+      null,
+      2,
+    ),
+    'utf-8',
+  );
   console.error(`\n✗ 本层未完成：待复核 ${reviews.length} 段｜异常失败 ${failures.length} 段`);
   for (const r of reviews.slice(0, 10)) console.error(`   ${r.segLabel}：${r.blockers.map((p) => p.ruleId).join('、')} — ${r.blockers[0]?.message ?? ''}`);
   for (const f of failures.slice(0, 10)) console.error(`   ${f}`);

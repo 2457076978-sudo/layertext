@@ -24,7 +24,7 @@ const REPO = P.引擎目录;
 const OUT_BASE = P.产物目录;
 const DATE = P.日期;
 
-const { buildBundle, provenanceOf, renderProvenance, verifyBundle, BUNDLE_SCHEMA_VERSION } = await import(`${REPO}/dist/src/core/bundle.js`);
+const { buildBundle, provenanceOf, publishReadiness, renderProvenance, verifyBundle, BUNDLE_SCHEMA_VERSION } = await import(`${REPO}/dist/src/core/bundle.js`);
 const { makeResolver } = await import(`${REPO}/dist/src/core/manifest.js`);
 const { parseDecisionLog } = await import(`${REPO}/dist/src/core/decision.js`);
 
@@ -80,6 +80,15 @@ function doExport() {
   if (!m) {
     console.error('✗ 还没有运行清单。发布包靠清单回答「哪次运行/哪个模型/哪版词库」，没有清单就不该发。');
     console.error('  先建清单：node tools/af_pipeline/LayerText_AF清单.mjs --new --tier A');
+    process.exit(2);
+  }
+  /* 纪律第 4 条：「没有这些字段的产物**不可发布**」。
+   * 先单独报一次，好让失败原因是"缺字段"而不是一句从 `buildBundle` 里抛出来的长话。 */
+  const ready = publishReadiness(m);
+  if (!ready.ok) {
+    console.error('✗ 这次运行的清单缺发布必需的字段，**不可发布**：');
+    for (const p of ready.problems) console.error(`   · ${p}`);
+    console.error('  补法：用 `清单.mjs --new` 重建清单（它会锁定模型、提示词版本与词库快照）。');
     process.exit(2);
   }
   const { files, skipped } = collectFiles(m);

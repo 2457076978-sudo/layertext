@@ -122,6 +122,44 @@ export interface PublishBundle {
   createdAt: string;
 }
 
+/**
+ * 发布前的最后一关：**没有这几样东西的产物不许发布**。
+ *
+ * 纪律第 4 条原文：「所有 AI 响应保存 prompt 版本、policy snapshot、模型和 traceId；
+ * **没有这些字段的产物不可发布**。」
+ *
+ * 注意这半句是**强制**的，不是"建议补上"。一个不知道由哪个模型、哪版提示词、
+ * 哪版词库生成的产物，发出去之后**没有任何办法**回答"这句话怎么变成现在这样的"——
+ * 而它是要给学生读、给另一位老师用的东西。所以这里的选择是"不发"，
+ * 而不是"发出去但在描述里留个空字段"。
+ *
+ * 为什么这一关放在发布包上，而不是放在每一次 AI 调用上：
+ * 调用那一层已经在记（`会话改写.mjs` 的每条 `done`/`review` 记录带
+ * `promptVersion` / `model` / `inputHash` / `traceId` / `lexiconVersion`）；
+ * 而"能不能出去"是一个**发布**决定，落点就该是发布这一步。
+ */
+export interface PublishReadiness {
+  ok: boolean;
+  /** 缺了什么（空数组 = 齐备）。**列出来**，不要只说"不允许发布" */
+  problems: string[];
+}
+
+export function publishReadiness(manifest: RunManifest): PublishReadiness {
+  const problems: string[] = [];
+  const need = (v: unknown, what: string): void => {
+    if (typeof v !== 'string' || !v.trim()) problems.push(what);
+  };
+  need(manifest.runId, '运行 ID（runId）—— 没有它就答不了"这是哪次运行"');
+  need(manifest.teacher, '教师（teacher）—— 没有它就答不了"谁做的决定"');
+  need(manifest.model?.name, '模型名（model.name）');
+  need(manifest.model?.promptVersion, '提示词版本（model.promptVersion）—— 模型换了说法会变，不记就复现不了');
+  need(manifest.lexicon?.version, '词库版本（lexicon.version）—— 即 policy snapshot；词表变了判定就变了');
+  need(manifest.lexicon?.snapshotPath, '词库快照路径（lexicon.snapshotPath）');
+  if (!manifest.inputs?.length) problems.push('输入哈希（inputs）—— 没有它，"同样的输入"这句话无法验证');
+  if (!manifest.artifacts?.length) problems.push('产物清单（artifacts）为空 —— 没有东西可发');
+  return { ok: problems.length === 0, problems };
+}
+
 export interface BundleInput {
   manifest: RunManifest;
   /** 待入包的文件（路径相对产物目录 + 内容） */
@@ -142,6 +180,12 @@ export interface BundleInput {
  * 而那正是"发布包默认不含学生数据"这句话最容易失效的地方。
  */
 export function buildBundle(input: BundleInput): PublishBundle {
+  /* ★ 先过关再打包。**抛**而不是"打个标记继续"：
+   * 纪律第 4 条说的是"不可发布"，不是"可以发布但要标注"。 */
+  const ready = publishReadiness(input.manifest);
+  if (!ready.ok) {
+    throw new Error(`产物缺少发布必需的字段，**不可发布**：\n  · ${ready.problems.join('\n  · ')}`);
+  }
   const entries: BundleEntry[] = [];
   const excluded: ExcludedEntry[] = [];
   const allowed = new Set<string>(PUBLISHABLE_KINDS);

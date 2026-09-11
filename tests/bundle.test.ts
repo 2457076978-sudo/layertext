@@ -14,9 +14,20 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { buildBundle, decisionRow, provenanceOf, PUBLISHABLE_KINDS, renderProvenance, studentDataReason, verifyBundle, BUNDLE_SCHEMA_VERSION, type PublishBundle } from '../src/core/bundle.js';
+import {
+  buildBundle,
+  BUNDLE_SCHEMA_VERSION,
+  decisionRow,
+  provenanceOf,
+  PUBLISHABLE_KINDS,
+  publishReadiness,
+  renderProvenance,
+  studentDataReason,
+  verifyBundle,
+  type PublishBundle,
+} from '../src/core/bundle.js';
 import { makeDecisionEvent, type DecisionEvent } from '../src/core/decision.js';
-import { contentHash, newManifest, type RunManifest } from '../src/core/manifest.js';
+import { contentHash, newManifest, refOf, type RunManifest } from '../src/core/manifest.js';
 
 /* ────────────────────── 夹具 ────────────────────── */
 
@@ -30,11 +41,15 @@ const manifest = (over: Partial<RunManifest> = {}): RunManifest =>
       teacher: 'wayne',
       model: { name: 'deepseek-chat', temperature: 0.3, promptVersion: 'session-v3-20260911' },
       lexicon: { version: '7f02a62f353e5085', snapshotPath: '/out/_运行/LexiconSnapshot_7f02a62f.json', warnings: [] },
-      inputs: [],
+      /* 一份**像样**的清单：发布那一关要求输入哈希与产物清单都在
+       * （纪律第 4 条："没有这些字段的产物不可发布"）。
+       * 夹具跟着真实清单走，否则测出来的只是一份现实中不存在的清单。 */
+      inputs: [refOf('词库', '/x/词库.csv', '词,类型\nthe,单词\n')],
       owner: { pid: 1, host: 'test' },
       layout: 'run',
     }),
     ...over,
+    artifacts: over.artifacts ?? [{ path: FILES[0]!.path, kind: '正文' as const, status: 'ok' as const }],
   }) as RunManifest;
 
 const CH1 = '## Chapter One\n\n[P01] The boy ran to the red barn（谷仓）.\n';
@@ -281,4 +296,70 @@ test('包描述可 JSON 往返（它要能存盘、能随包走）', () => {
     ).ok,
     true,
   );
+});
+
+/* ────────────────────── ⑦ 发布前的最后一关（纪律第 4 条） ────────────────────── */
+
+test('★ 缺字段就**不可发布**：不是"发出去但留个空"，是直接不发', () => {
+  const bad = manifest({ model: { name: '', temperature: 0.3, promptVersion: '' } });
+  const ready = publishReadiness(bad);
+  assert.equal(ready.ok, false);
+  assert.equal(
+    ready.problems.some((p) => /模型名/.test(p)),
+    true,
+    `要点名缺的是哪一样：${ready.problems.join('；')}`,
+  );
+  assert.equal(
+    ready.problems.some((p) => /提示词版本/.test(p)),
+    true,
+  );
+  assert.throws(() => buildBundle({ manifest: bad, files: FILES }), /不可发布/, '**抛**而不是打个标记继续——纪律说的是"不可发布"，不是"可以发布但标注一下"');
+});
+
+test('★ 词库版本缺失同样拦下（policy snapshot 是四样里最容易漏的那一样）', () => {
+  const bad = manifest({ lexicon: { version: '', snapshotPath: '', warnings: [] } });
+  const ready = publishReadiness(bad);
+  assert.equal(ready.ok, false);
+  assert.equal(
+    ready.problems.some((p) => /词库版本/.test(p)),
+    true,
+  );
+  assert.equal(
+    ready.problems.some((p) => /policy snapshot/.test(p)),
+    true,
+    '要把"它就是 policy snapshot"写出来，免得读者以为只是个小字段',
+  );
+});
+
+test('四样齐备的清单照常发布（这一关不该误伤正常流程）', () => {
+  const ready = publishReadiness(manifest());
+  assert.equal(ready.ok, true, ready.problems.join('；'));
+  assert.doesNotThrow(() => buildBundle({ manifest: manifest(), files: FILES }));
+});
+
+test('★ 输入哈希为空也拦下：没有它，"同样的输入"这句话无法验证', () => {
+  const bad = manifest({ inputs: [] });
+  const ready = publishReadiness(bad);
+  assert.equal(ready.ok, false);
+  assert.equal(
+    ready.problems.some((p) => /输入哈希/.test(p)),
+    true,
+  );
+});
+
+test('没有产物也拦下：不发布一个空包', () => {
+  const bad = manifest({ artifacts: [] });
+  assert.equal(
+    publishReadiness(bad).problems.some((p) => /产物清单/.test(p)),
+    true,
+  );
+});
+
+test('★ 拒绝理由逐条可读（不是一句"缺少必需字段"就完了）', () => {
+  const bare = manifest({ runId: '', teacher: '', model: { name: '', temperature: 0, promptVersion: '' }, lexicon: { version: '', snapshotPath: '', warnings: [] }, inputs: [], artifacts: [] });
+  const ready = publishReadiness(bare);
+  assert.equal(ready.problems.length >= 7, true, `七样都缺就该报七条，实得 ${ready.problems.length} 条`);
+  for (const p of ready.problems) {
+    assert.equal(p.length > 6, true, `每条都要说清缺什么、为什么重要：${p}`);
+  }
 });
