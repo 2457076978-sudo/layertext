@@ -58,10 +58,13 @@ const CN = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十'
 
 const M = await import(`${SHARED.distOf(REPO)}/src/core/manifest.js`);
 const {
+  artifactIdOf,
+  artifactsMissingId,
   buildLexiconSnapshot,
   refOf,
   newManifest,
   upsertArtifact,
+  withArtifactIds,
   recordStep,
   verifyManifest,
   summarizeManifest,
@@ -182,6 +185,10 @@ async function importStore(snapshotSources, snapshotCounts) {
 /** 当前产物状态的扫描：产物的"能不能当完成品"只由完成标记决定，不看文件在不在 */
 function scanArtifacts() {
   const out = [];
+  /** 登记一项：**路径是"在哪儿"，身份是"是什么"**（见 `src/core/manifest.ts` 的「产物身份」）。
+   *  扫描时两样一起写：只写路径的话，这件产物换个目录/换个布局就成了"另一件"，
+   *  而"两位教师各写了一份同一件产物"这件事会永远比不出来（阶段 3 要拦的正是它）。 */
+  const push = (rec) => out.push({ ...rec, id: artifactIdOf(rec) });
   for (const t of TIERS) {
     const tag = TAGS[t];
     const rrx = selfPaths(cur?.manifest?.runId ?? '');
@@ -203,7 +210,7 @@ function scanArtifacts() {
       const rel = abs.replace(`${OUT_BASE}/`, '');
       if (!existsSync(abs)) continue;
       const text = readFileSync(abs, 'utf-8');
-      out.push({ path: rel, kind: '正文', tier: t, chapter: ch, status, reason, hash: contentHash(text), bytes: text.length, updatedAt: new Date().toISOString() });
+      push({ path: rel, kind: '正文', tier: t, chapter: ch, status, reason, hash: contentHash(text), bytes: text.length, updatedAt: new Date().toISOString() });
     }
     /* 台账与人读的风险队列报告：两条也经解析器取路径。
      * 清单记的是**相对产物目录**的路径（`rel`），所以这里减掉前缀即可——
@@ -215,13 +222,13 @@ function scanArtifacts() {
       const rel = abs.replace(`${OUT_BASE}/`, '');
       if (!existsSync(abs)) continue;
       const text = readFileSync(abs, 'utf-8');
-      out.push({ path: rel, kind, tier: t, status: 'ok', hash: contentHash(text), bytes: text.length, updatedAt: new Date().toISOString() });
+      push({ path: rel, kind, tier: t, status: 'ok', hash: contentHash(text), bytes: text.length, updatedAt: new Date().toISOString() });
     }
     // 待复核的段落数：清单的"能不能交付"由它决定
     if (review) {
       const list = JSON.parse(review).待复核明细 ?? [];
       for (const d of list) {
-        out.push({
+        push({
           path: join('_待复核', `${tag}`, `${d.位置.split(' ')[0]}_第${Number(d.位置.match(/第(\d+)段/)?.[1] ?? 0)}段.md`),
           kind: '其他',
           tier: t,
@@ -342,13 +349,21 @@ if (!cur) {
 /* ────────────────────── 刷状态（每一步跑完调一次） ────────────────────── */
 if (has('--stamp')) {
   const m = cur.manifest;
+  /* 先数、再补：`upsertArtifact` 自己也会给**这次扫到的**登记项补身份，
+   * 于是"盘上有多少条还没有身份"必须在扫描之前数，否则这句报告会偏小。 */
+  const backfilled = artifactsMissingId(m).length;
   for (const a of scanArtifacts()) upsertArtifact(m, a);
+  /* 自愈：旧清单（登记项只有 path/kind/…，没有 id）**在这一步拿到身份**。
+   * 只加 id 一个字段，别的账一个字都不动——身份是算出来的，所以补上去与"从来就有"等价，
+   * 也就不需要任何迁移脚本、更不需要"升级清单格式"这件事。 */
+  withArtifactIds(m);
   m.pendingReview = pendingReviewOf();
   recordStep(m, { id: arg('--step', '（未命名）'), ok: arg('--ok', '1') !== '0', sec: Number(arg('--sec', '0')) || 0, note: arg('--note', undefined) });
   if (arg('--warning')) m.warnings.push({ kind: arg('--warning-kind', 'step'), message: arg('--warning'), at: new Date().toISOString() });
   saveManifest(m, cur.path);
   const s = summarizeManifest(m);
   console.log(`清单已更新：${m.runId}｜产物 ${s.artifactCount} 件｜待复核 ${s.pendingReview}｜步骤 ${m.steps.length}`);
+  if (backfilled) console.log(` 产物身份：补齐 ${backfilled} 件旧登记项（身份是算出来的：种类+层级+章节，与路径无关）`);
   process.exit(0);
 }
 
@@ -388,7 +403,15 @@ if (has('--verify')) {
   console.log('════ AF 运行清单 · 校验 ════');
   console.log(` 运行 ID：${m.runId}｜书：${m.book} ${m.version}｜层：${m.tiers.join('/')}｜教师：${m.teacher}`);
   console.log(` 词表快照：清单 ${m.lexicon.version}｜当前 ${snapshot.version}${drift.ok ? '（一致）' : '（**已变**）'}`);
-  console.log(` 路径布局：${m.layout ?? 'legacy'}｜已登记运行 ${siblings.length} 个${collide.ok ? '（无跨运行撞名）' : `（**${collide.collisions.length} 处撞名**）`}`);
+  /* 撞名按**产物身份**报，所以"两位教师各写一份同一件产物、路径还不一样"也看得见（旧口径只比路径）。
+   * 两种性质分开说：`覆盖` 是谁把谁盖掉了（最坏），`分叉` 是同一件产物有了两份副本（谁作数要人定）。 */
+  const overCount = collide.collisions.filter((c) => c.kind === '覆盖').length;
+  const forkCount = collide.collisions.length - overCount;
+  console.log(
+    ` 路径布局：${m.layout ?? 'legacy'}｜已登记运行 ${siblings.length} 个` +
+      (collide.ok ? '（无跨运行撞名）' : `（**${collide.collisions.length} 处撞名**：覆盖 ${overCount} 件、分叉 ${forkCount} 件）`),
+  );
+  console.log(` 产物身份：${describeIdentities(m)}`);
   const blocked = r.problems.filter((p) => p.severity === 'blocked');
   const warns = r.problems.filter((p) => p.severity === 'warn');
 
@@ -416,11 +439,18 @@ if (has('--verify')) {
   if (!blocked.length && !warns.length) {
     console.log(`\n✓ 清单一致：${m.artifacts.length} 件产物、输入哈希全部未变、无未完成段落。`);
     console.log('  这次运行可以当作完成品引用（论文里的数字可以标注本运行 ID）。');
+    // 撞名是**另一本账**上的事（跨运行），不改变"这次运行自己一致"这个结论——但绝不能不说
+    for (const c of collide.collisions.slice(0, 5)) console.log(`  ⚠ ${collisionLine(c)}`);
+    if (collide.collisions.length > 5) console.log(`  · 另有 ${collide.collisions.length - 5} 处撞名未列出（上面只印了前 5 处，不静默略过）`);
     process.exit(0);
   }
   for (const c of collide.collisions.slice(0, 5)) {
-    warns.push({ kind: 'artifact-collision', message: `产物被多次运行写过：${c.path}（${c.runs.join(' / ')}）——换 --layout run 可根治` });
+    warns.push({
+      kind: c.kind === '覆盖' ? 'artifact-collision' : 'artifact-fork',
+      message: collisionLine(c),
+    });
   }
+  if (collide.collisions.length > 5) warns.push({ kind: 'artifact-collision', message: `另有 ${collide.collisions.length - 5} 处撞名未列出（不静默略过：上面只印了前 5 处）` });
   for (const p of blocked) console.error(` ✗ [${p.kind}] ${p.message}`);
   for (const p of warns) console.warn(` ⚠ [${p.kind}] ${p.message}`);
   if (blocked.length) {
@@ -447,6 +477,31 @@ function describeStoreState(st, m) {
     default:
       return '**没有正本（legacy）**：直读现场 CSV——这是首次导入之前的既有行为，跑一次 --reimport 即可冻结';
   }
+}
+
+/**
+ * 产物身份的覆盖情况：**盘上写没写 id** 是事实，"读的时候算不算得出来"是另一回事——
+ * 两件事分开说，免得有人以为"清单里没有 id 就不能用"。
+ * 旧清单照常工作（身份是算出来的），跑一次 `--stamp` 才会把它写进盘上。
+ */
+function describeIdentities(m) {
+  const list = m.artifacts ?? [];
+  if (!list.length) return '清单里还没有产物——没有东西可以标识（跑生成/管线会自动盖章）';
+  const ids = new Set(list.map((a) => a.id || artifactIdOf(a)));
+  const missing = artifactsMissingId(m).length;
+  const counted = `${list.length} 件产物、${ids.size} 个身份`;
+  return missing
+    ? `${counted}，其中 ${missing} 件盘上还没写身份（旧清单形状：读取时按 种类+层级+章节 算得出来，跑一次 --stamp 就补齐）`
+    : `${counted}（身份与路径无关：同一件产物换个目录/换布局仍是同一个 ID）`;
+}
+
+/** 一条撞名的说明：**先说哪一件产物，再说它在哪儿**。
+ *  路径只回答"在哪儿"，身份才回答得了"这是两件不同的东西，还是同一件被写了两次"。 */
+function collisionLine(c) {
+  const runs = c.runs.join(' / ');
+  return c.kind === '覆盖'
+    ? `产物「${c.label}」（${c.id}）被多次运行写到**同一个路径**（${c.overwritten.join('、')}；${runs}）——后写的盖掉了先写的，换 --layout run 可根治`
+    : `产物「${c.label}」（${c.id}）被多次运行各写了一份、落在不同路径（${c.paths.join('、')}；${runs}）——没有互相覆盖，但两份谁作数要人定`;
 }
 
 const m = cur.manifest;

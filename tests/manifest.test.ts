@@ -12,6 +12,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
+  artifactIdOf,
+  artifactLabelOf,
+  artifactsMissingId,
   buildLexiconSnapshot,
   contentHash,
   detectArtifactCollisions,
@@ -24,7 +27,9 @@ import {
   upsertArtifact,
   verifyLexiconSnapshot,
   verifyManifest,
+  withArtifactIds,
   type LexiconSnapshotSource,
+  type RunArtifact,
   type RunManifest,
 } from '../src/core/manifest.js';
 
@@ -69,8 +74,7 @@ test('词表快照：版本由全部来源的哈希与词数决定——换一�
 test('词表快照：来源顺序不影响版本（同一份词表怎么排都该同版本）', () => {
   const p = src('词库', 'x');
   const q = src('专名表', 'y', 1);
-  const mk = (s: LexiconSnapshotSource[]) =>
-    buildLexiconSnapshot({ sources: s, counts: { known: 1, pending: 0, proper: 0, dict: 0, kb: 0 }, known: ['x'] }).version;
+  const mk = (s: LexiconSnapshotSource[]) => buildLexiconSnapshot({ sources: s, counts: { known: 1, pending: 0, proper: 0, dict: 0, kb: 0 }, known: ['x'] }).version;
   assert.equal(mk([p, q]), mk([q, p]));
 });
 
@@ -112,12 +116,7 @@ test('运行 ID：同样输入 = 同一个 ID（可复现）；换输入就换 I
 });
 
 test('运行 ID：不同教师/不同层/不同版本互不相同（一百名学生场景的前提）', () => {
-  const ids = new Set([
-    manifest().runId,
-    manifest({ teacher: 'li' }).runId,
-    manifest({ tiers: ['B'] }).runId,
-    manifest({ version: 'v2' }).runId,
-  ]);
+  const ids = new Set([manifest().runId, manifest({ teacher: 'li' }).runId, manifest({ tiers: ['B'] }).runId, manifest({ version: 'v2' }).runId]);
   assert.equal(ids.size, 4);
 });
 
@@ -130,7 +129,10 @@ test('清单身份信息齐备：报告点名的六项（书/版本/层/教师/�
   assert.ok(m.runId);
   assert.equal(m.lexicon.version, snapshot().version);
   assert.equal(m.model.promptVersion, 'session-v3-20260911');
-  assert.deepEqual(m.inputs.map((i) => i.name), ['原文', '词库']);
+  assert.deepEqual(
+    m.inputs.map((i) => i.name),
+    ['原文', '词库'],
+  );
 });
 
 test('产物登记：同路径覆盖而不是堆积', () => {
@@ -160,7 +162,10 @@ test('校验：输入漂移 / 产物缺失 / 未过门禁 / 步骤失败 —— 
     exists: () => false,
     inputs: [refOf('原文', '/p/原文', 'CHANGED'), refOf('词库', '/p/词库.csv', 'a,b\ncat,单词\n')],
   });
-  const kinds = r.problems.filter((p) => p.severity === 'blocked').map((p) => p.kind).sort();
+  const kinds = r.problems
+    .filter((p) => p.severity === 'blocked')
+    .map((p) => p.kind)
+    .sort();
   assert.deepEqual([...new Set(kinds)].sort(), ['artifact-missing', 'input-drift', 'needs-review', 'step-failed']);
   assert.equal(r.ok, false);
 });
@@ -185,16 +190,26 @@ test('并发写入探测：同一运行 ID 还有活进程 → 报警（报告 �
   const a = manifest();
   const b = manifest();
   assert.match(detectCollision(a, b, () => true) ?? '', /还在跑/);
-  assert.equal(detectCollision(a, b, () => false), null);
+  assert.equal(
+    detectCollision(a, b, () => false),
+    null,
+  );
   assert.match(detectCollision(a, manifest({ owner: { pid: 1, host: 'other' } }), () => false) ?? '', /多机并行/);
-  assert.equal(detectCollision(a, manifest({ teacher: 'li', owner: { pid: 1, host: 'other' } }), () => false), null, '不同运行不该互相报警');
+  assert.equal(
+    detectCollision(a, manifest({ teacher: 'li', owner: { pid: 1, host: 'other' } }), () => false),
+    null,
+    '不同运行不该互相报警',
+  );
 });
 
 test('空清单不许报绿：一件产物都没登记 = 这份校验证明不了任何事', () => {
-  const m = manifest();   // 没登记任何 artifact
+  const m = manifest(); // 没登记任何 artifact
   const r = verifyManifest(m, { exists: () => true, lexiconVersion: m.lexicon.version });
   assert.equal(r.ok, false, '0 件产物却报"可以当作完成品"是最坏的一种假绿');
-  assert.equal(r.problems.some((p) => p.kind === 'artifact-missing' && p.severity === 'blocked'), true);
+  assert.equal(
+    r.problems.some((p) => p.kind === 'artifact-missing' && p.severity === 'blocked'),
+    true,
+  );
   assert.match(r.problems[0]!.message, /证明不了任何事/);
 });
 
@@ -261,6 +276,10 @@ test('两种布局都不许出现"路径里带 undefined/…"这类半成品', (
 });
 
 test('撞名探测：legacy 下两次运行必撞，run 下必不撞（报告 §三 第一个规模崩点）', () => {
+  /* 这两条用例里的登记项**没有 kind/层级/章节**（只有路径），而那正是它们的身份来源：
+   * 说不出自己是什么的登记项，身份就是它的路径——所以这两条测的是"路径撞不撞"。
+   * 写全了字段的登记项按**逻辑身份**比，两次运行各写一份同一件产物**仍然会被报出来**
+   * （那是"分叉"，不是"路径撞名"）——见下一节的「撞名探测按身份报」。 */
   const legacyA = [
     { path: '第一章/原文_A层85_2026-09-10.md', kind: '正文' as const, status: 'ok' as const },
     { path: '台账_A层85_2026-09-10.md', kind: '台账' as const, status: 'ok' as const },
@@ -285,4 +304,161 @@ test('撞名探测：legacy 下两次运行必撞，run 下必不撞（报告 §
 test('清单默认 legacy 布局（保守），可显式选 run', () => {
   assert.equal(manifest().layout, 'legacy');
   assert.equal(manifest({ layout: 'run' }).layout, 'run');
+});
+
+/* ────────────────── ④ 产物身份：一件产物"是什么"，与它放在哪儿无关 ────────────────── */
+/*
+ * 验收（《LayerText 工程优化总计划》阶段 3）：
+ *   「Run/Artifact/Decision/Teacher 四类实体**有稳定 ID**」——Round 之前 Artifact 一直没有，
+ *   它的身份就是它的路径（`path` 当主键）。
+ *   「两位教师同时对同一本书不同层级运行不会覆盖词典、日志或产物」——按路径比，
+ *   "两位教师各写一份同一件产物、路径还不一样"这件事永远比不出来。
+ */
+
+const art = (over: Partial<RunArtifact> & { path: string }): RunArtifact => ({ kind: '正文', status: 'ok', ...over });
+
+test('★ 产物身份与路径无关：文件搬家、换布局之后仍是同一件产物', () => {
+  const legacy = artifactIdOf(art({ path: '第一章/原文_A层85_2026-09-10.md', tier: 'A层85', chapter: '第一章' }));
+  const moved = artifactIdOf(art({ path: `_运行/${RID}/正文/第一章/原文_A层85_2026-09-11.md`, tier: 'A层85', chapter: '第一章' }));
+  assert.equal(legacy, moved, '同一件产物落到另一个路径，身份必须不变（这是"稳定 ID"的全部含义）');
+  assert.match(legacy, /^art-[0-9a-f]{12}$/);
+  // 种类/层级/章节三样，任何一样变了就是**另一件**产物
+  assert.notEqual(legacy, artifactIdOf(art({ path: 'x.md', kind: '台账', tier: 'A层85', chapter: '第一章' })));
+  assert.notEqual(legacy, artifactIdOf(art({ path: 'x.md', tier: 'M层75', chapter: '第一章' })));
+  assert.notEqual(legacy, artifactIdOf(art({ path: 'x.md', tier: 'A层85', chapter: '第二章' })));
+  assert.equal(artifactLabelOf(art({ path: 'x.md', tier: 'A层85', chapter: '第一章' })), '正文｜A层85｜第一章');
+});
+
+test('★ 身份**不是内容哈希**：改过内容的还是同一件产物（"被改过"由 hash 字段回答）', () => {
+  const before = art({ path: '第一章/原文_A层85.md', tier: 'A层85', chapter: '第一章', hash: 'aaaa', bytes: 10 });
+  const edited = art({ path: '第一章/原文_A层85.md', tier: 'A层85', chapter: '第一章', hash: 'bbbb', bytes: 12 });
+  assert.equal(artifactIdOf(before), artifactIdOf(edited), '内容进了身份，教师改一次稿就等于换了一件产物——历史决定会全部变成孤儿');
+});
+
+test('★ 身份**不是随机 UUID**：它是算出来的，不需要任何注册表或持久状态', () => {
+  // 两个互不相干的进程/清单（不同路径、不同时间）算同一件产物 → 同一个 ID
+  const one = artifactIdOf(art({ path: '/A/第一章/原文_A层85.md', tier: 'A层85', chapter: '第一章' }));
+  const two = artifactIdOf(art({ path: '/B/run/正文/第一章/原文_A层85_2026-09-11.md', tier: 'A层85', chapter: '第一章' }));
+  assert.equal(one, two, '随机 UUID 只在"登记那一刻"唯一，两次运行各写一份会得到两个 ID，于是永远查不出它们是同一件');
+});
+
+test('说不出自己是什么的登记项：身份退化为路径；连路径都没有就**没有身份**（不凭空造一个）', () => {
+  assert.equal(artifactIdOf({ path: 'a.md' }), 'art@a.md');
+  assert.equal(artifactIdOf({ path: 'a.md', kind: '' }), 'art@a.md');
+  assert.equal(artifactIdOf({ kind: '   ' }), '', '空种类不能当逻辑身份');
+  assert.equal(artifactIdOf({}), '', '两条空登记项若都算成"空内容的哈希"，就会凭空撞名——报假警比不报更坏');
+  assert.equal(artifactLabelOf({}), '（无身份）');
+});
+
+/* ── 撞名探测：按身份报 ── */
+
+test('★ 撞名探测按身份报：两次运行把同一件产物写到两个不同路径，也必须报出来（旧口径只比路径，会漏）', () => {
+  const one = art({ path: '第一章/原文_A层85_2026-09-10.md', tier: 'A层85', chapter: '第一章' });
+  const two = art({ path: `_运行/run-li/正文/第一章/原文_A层85_2026-09-11.md`, tier: 'A层85', chapter: '第一章' });
+  const r = detectArtifactCollisions([
+    { runId: 'run-wayne', artifacts: [one] },
+    { runId: 'run-li', artifacts: [two] },
+  ]);
+  assert.equal(r.ok, false, '两位教师各写一份"同一件产物"——这正是计划要拦的那件事，旧口径因为路径不同而一个字都不报');
+  assert.equal(r.collisions.length, 1);
+  const c = r.collisions[0]!;
+  assert.equal(c.label, '正文｜A层85｜第一章');
+  assert.equal(c.kind, '分叉');
+  assert.deepEqual(c.runs, ['run-li', 'run-wayne']);
+  assert.deepEqual(c.paths, [one.path, two.path].sort());
+  assert.deepEqual(c.overwritten, [], '没有互相覆盖——是两份副本，不是谁盖掉了谁');
+});
+
+test('撞名分两种：同一路径 = 覆盖（真被盖掉），不同路径 = 分叉（两份副本，谁作数要人定）', () => {
+  const ledger = art({ path: '台账_A层85.md', kind: '台账', tier: 'A层85' });
+  const over = detectArtifactCollisions([
+    { runId: 'run-a', artifacts: [ledger] },
+    { runId: 'run-b', artifacts: [ledger] },
+  ]);
+  assert.equal(over.collisions.length, 1, `同一路径只报一次，不重复计数：${JSON.stringify(over.collisions)}`);
+  assert.equal(over.collisions[0]!.kind, '覆盖');
+  assert.deepEqual(over.collisions[0]!.overwritten, ['台账_A层85.md']);
+  assert.equal(over.collisions[0]!.label, '台账｜A层85｜—', '没有章节的产物，标签里如实留空（不编一个章节名）');
+});
+
+test('★ 身份只在"认得出唯一一件"时才当身份：同一份清单里两件产物共用一个身份 → 退回路径，不凭粗身份误报', () => {
+  const seg = (n: number) => art({ path: `_待复核/A层85/第一章_P0${n}.md`, kind: '其他', tier: 'A层85' });
+  assert.equal(artifactIdOf(seg(1)), artifactIdOf(seg(2)), '真实例：某层若干条待复核段落都是"其他 + 该层 + 无章节"，逻辑身份一样——它描述不了它们');
+  const vague = detectArtifactCollisions([
+    { runId: 'run-a', artifacts: [seg(1), seg(2)] },
+    { runId: 'run-b', artifacts: [seg(3)] },
+  ]);
+  assert.equal(vague.ok, true, `粗身份不许拿来报撞名（一次假警就会让这条检查从此被忽略）：${JSON.stringify(vague.collisions)}`);
+  // 对照：同一件产物在两次运行里各只登记一次时，身份就是身份，该报就得报
+  const doc = (p: string) => art({ path: p, tier: 'A层85', chapter: '第一章' });
+  const real = detectArtifactCollisions([
+    { runId: 'run-a', artifacts: [doc('a/第一章/原文_A层85.md')] },
+    { runId: 'run-b', artifacts: [doc('b/第一章/原文_A层85.md')] },
+  ]);
+  assert.equal(real.ok, false);
+  assert.equal(real.collisions[0]!.kind, '分叉');
+});
+
+test('★ 同一个路径被两次运行写过，**即便身份认不出来也要报**（旧口径唯一能报的那件事，一件都不能丢）', () => {
+  const seg = (n: number) => art({ path: `_待复核/A层85/第一章_P0${n}.md`, kind: '其他', tier: 'A层85' });
+  const r = detectArtifactCollisions([
+    { runId: 'run-a', artifacts: [seg(1), seg(2)] }, // 同一份清单里身份重复 → 这两条退回路径
+    { runId: 'run-b', artifacts: [seg(1)] }, // 另一份清单里它却是唯一的 → 按身份
+  ]);
+  assert.equal(r.ok, false, '两边的身份口径不一致时，纯路径那一半口径必须兜住——真被盖掉的事不能漏');
+  assert.equal(r.collisions.length, 1);
+  assert.equal(r.collisions[0]!.kind, '覆盖');
+  assert.deepEqual(r.collisions[0]!.runs, ['run-a', 'run-b']);
+});
+
+/* ── 兼容与自愈：旧清单不需要迁移 ── */
+
+test('★ 旧清单（登记项没有 id）照常校验、摘要、比对——身份是**算出来的**，不需要迁移脚本', () => {
+  const old = manifest();
+  // 这正是盘上那份真实清单的形状：`artifacts: [{path, kind, tier, status, hash, ...}]`，没有 id
+  old.artifacts = [
+    { path: '第一章/原文_A层85.md', kind: '正文', tier: 'A层85', chapter: '第一章', status: 'ok', hash: 'aaaa' },
+    { path: '台账_A层85.md', kind: '台账', tier: 'A层85', status: 'ok', hash: 'bbbb' },
+  ];
+  const r = verifyManifest(old, {
+    exists: () => true,
+    hashOf: (p) => (p.startsWith('第一章') ? 'aaaa' : 'bbbb'),
+    inputs: old.inputs,
+    lexiconVersion: old.lexicon.version,
+  });
+  assert.equal(r.ok, true, `旧清单照常校验：${JSON.stringify(r.problems)}`);
+  assert.equal(summarizeManifest(old).artifactCount, 2);
+  const collide = detectArtifactCollisions([
+    { runId: 'run-a', artifacts: old.artifacts },
+    { runId: 'run-b', artifacts: old.artifacts },
+  ]);
+  assert.equal(collide.ok, false, '旧形状的登记项也要能测出撞名');
+  assert.equal(collide.collisions[0]!.id.startsWith('art-'), true, '两个运行写的是同一件逻辑产物（不是"两条路径恰好同名"）');
+  // 盘上还没有身份，但读取时算得出来——这正是"不需要迁移"的证据
+  assert.deepEqual(
+    artifactsMissingId(old).map((a) => a.path),
+    ['第一章/原文_A层85.md', '台账_A层85.md'],
+  );
+});
+
+test('★ 自愈：--stamp 走一遍就把身份补进旧清单，且**只加 id 这一个字段**、可反复走', () => {
+  const old = manifest();
+  old.artifacts = [art({ path: '第一章/原文_A层85.md', tier: 'A层85', chapter: '第一章', hash: 'aaaa' })];
+  const before = JSON.parse(JSON.stringify(old.artifacts[0])) as RunArtifact;
+
+  withArtifactIds(old);
+  assert.equal(old.artifacts[0]!.id, artifactIdOf(old.artifacts[0]!), '补上去的身份就是算出来的那个（不是新生成的另一个）');
+  assert.deepEqual(artifactsMissingId(old), []);
+  const keys = Object.keys(old.artifacts[0]!).sort();
+  assert.deepEqual(keys, [...Object.keys(before).sort(), 'id'].sort(), `自愈只许加 id 一个字段，实得多出来的：${keys.join('/')}`);
+  for (const k of Object.keys(before)) assert.deepEqual((old.artifacts[0] as unknown as Record<string, unknown>)[k], (before as unknown as Record<string, unknown>)[k]);
+
+  const once = JSON.stringify(old);
+  withArtifactIds(old);
+  assert.equal(JSON.stringify(old), once, '幂等：再走一遍一个字都不变（身份是算出来的，不是每次新发一个）');
+
+  // --stamp 的入口（upsertArtifact）自己也会补：新登记的产物一落地就带身份
+  const fresh = manifest();
+  upsertArtifact(fresh, art({ path: '第一章/原文_A层85.md', tier: 'A层85', chapter: '第一章' }));
+  assert.match(fresh.artifacts[0]!.id ?? '', /^art-[0-9a-f]{12}$/);
 });

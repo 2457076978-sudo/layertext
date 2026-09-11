@@ -146,6 +146,10 @@ export type ArtifactStatus = 'ok' | 'needs-review' | 'missing' | 'stale';
 export interface RunArtifact {
   /** 相对"产物目录"的路径（清单本身可整体搬走而不失效） */
   path: string;
+  /** **稳定产物身份**（见下文「产物身份」一节）。它回答的是"这件东西是**什么**"，
+   *  而 `path` 回答的是"它**现在在哪儿**"——两者不是一回事，这正是本轮要分开的东西。
+   *  旧清单没有这个字段（读的时候按 `kind/层级/章节` 算得出来，`--stamp` 时写进盘上）。 */
+  id?: string;
   kind: ArtifactKind;
   tier?: string;
   chapter?: string;
@@ -155,6 +159,112 @@ export interface RunArtifact {
   updatedAt?: string;
   /** needs-review 时的原因（规则号），人一眼知道为什么不算完成 */
   reason?: string;
+}
+
+/* ────────────────────── 产物身份：一件产物"是什么"，与它放在哪儿无关 ────────────────────── */
+
+/**
+ * 《LayerText 工程优化总计划》阶段 3 的第一句是「Run/Artifact/Decision/Teacher 四类实体
+ * **有稳定 ID**」。Run（`runId`）与 Decision（`eventId`）已经各有一个，Artifact 一直空着：
+ * `RunArtifact` 拿 `path` 当主键，于是**产物的身份就是它的位置**。
+ *
+ * 身份 = 位置会坏在三处，而且三处都是"不报错、结果错"：
+ *   · 文件搬家/改名（换章节目录、换布局 `legacy` ↔ `run`）——同一件产物被当成两件，
+ *     旧的那条登记从此对不上盘上任何文件，而谁也不会去删它；
+ *   · 同一件产物被两次运行（两位教师）各写一份、路径还不一样——按路径比永远比不出来，
+ *     于是"两位教师互相覆盖"这件事，在最该被看见的时候是看不见的（本轮要修的漏洞）；
+ *   · 决定（`DecisionEvent`）与版本节点是挂在产物上的：产物一换身份，历史决定就成了孤儿。
+ *
+ * ── 选的是什么 ────────────────────────────────────────────────────────────
+ * **逻辑身份：`种类（kind） + 层级（tier） + 章节（chapter）`**。
+ * 也就是说"这本书 A 层第一章的正文"这件事物，无论它落在
+ * `第一章/原文_A层85_2026-09-10.md` 还是 `_运行/<runId>/正文/第一章/原文_A层85_2026-09-11.md`，
+ * 都是同一件产物、同一个 ID。
+ *
+ * ── 为什么不是另外三样 ────────────────────────────────────────────────────
+ * · **不是内容哈希**：内容进了身份，就等于说"重写一遍就是另一件产物"。可是 `hash` 本来
+ *   就是 `RunArtifact` 的一个字段，"这件被改过"由 `artifact-stale` 校验回答——
+ *   "内容变了"已经有一个字段在记，不必再让它去改身份。由此得到的性质是刻意的：
+ *   **同一件产物被两位教师改成两份内容时，身份相同、内容不同**——这不是缺陷，
+ *   这正是要报出来的那件事（见 `detectArtifactCollisions` 的「分叉」）。
+ * · **不是随机 UUID**：随机 ID 只在"登记的那一刻"唯一。两次运行各写同一件产物会拿到两个
+ *   UUID，于是"两位教师写的是不是同一件东西"永远查不出来——正是要修的漏洞。
+ *   它还要求身份必须被**持久化**：清单被手写一份、从别处拷一份，身份就没了。
+ *   这里选的身份是**算出来的**（`artifactIdOf` 是纯函数），所以任何一份旧清单，读的时候
+ *   都算得出它的产物身份（`withArtifactIds` 只是把算出来的结果写进盘上）。
+ * · **不是路径**：路径是它在盘上的位置，位置会变；而且它已经作为 `path` 字段在那里了。
+ *
+ * ── 它不是什么（边界，写清楚免得被当成万能钥匙） ──────────────────────────
+ * · **不含日期**：`台账_A层85_2026-09-10.md` 与 `台账_A层85_2026-09-11.md` 是同一件产物
+ *   被两天各写了一份（会被报成「分叉」），不是两件不同产物。日期属于运行（`runId`/`updatedAt`）。
+ * · **不含运行**：身份必须跨运行稳定，否则"两次运行写的是不是同一件东西"就无从谈起。
+ * · **不含书**：身份在**一份产物目录内**唯一（每本书有自己的产物目录与 `_运行/`）。
+ *   把两本书的清单混在一起比对，本来就是另一件事，不在 `detectArtifactCollisions` 的职责里。
+ * · **拿不出 `kind` 的登记项没有逻辑身份**，退化为路径身份（`art@<path>`）：一件说不出
+ *   自己是什么的东西，只有它的位置能指认它。这是旧登记项的退化情形，不是错误。
+ * · 它**不取代 `path`**：登记（`upsertArtifact`）仍然按路径——登记记的是盘上的事实。
+ *   文件搬到别处，登记会多出一条，但那两条的身份相同，撞名探测与发布包都认得出它们是同一件。
+ *   反过来**不能**按身份去覆盖登记：待复核段落这类产物共用同一个粗身份（见下），
+ *   按身份覆盖会让它们互相吃掉，一次运行只剩一条待复核记录——那比多一条登记坏得多。
+ *
+ * ── 已知的诚实边界 ────────────────────────────────────────────────────────
+ * 逻辑身份只在"它认得出唯一一件"时才当身份用。同一份清单里两件产物共用一个身份
+ * （例：某层若干条待复核段落都是 `其他 + 该层 + 无章节`），说明这个身份描述不了它们，
+ * 于是退回路径比对（见 `identityKeysOf`）。宁可少报，不可误报：一条凭粗身份发出来的
+ * 假撞名，会让人从此忽略这条检查——而它要拦的是真事故。
+ */
+
+/** 逻辑身份只认这几个字段：**没有 hash**（内容不进身份，理由见上） */
+export interface ArtifactIdentity {
+  /** 逻辑身份认不出来时的退化身份（`art@<path>`）；也是"这件东西在哪儿"的登记 */
+  path?: string;
+  kind?: string;
+  tier?: string;
+  chapter?: string;
+}
+
+/** 退化身份的前缀：一眼看得出"这条不是逻辑身份，而是位置" */
+export const PATH_ID_PREFIX = 'art@';
+
+/**
+ * 算出一件产物的稳定身份。**纯函数：不看盘、不带状态、不依赖任何注册表**——
+ * 同一件产物在任何时候、任何进程里都算出同一个 ID，这就是"稳定"的全部含义，
+ * 也是旧清单不需要迁移的原因（读的时候算，写的时候落）。
+ *
+ * 种类、层级、章节三样都拿不出来（连路径都没有）时返回**空串 = 没有身份**。
+ * 这里刻意不返回"空内容的哈希"：那会让两条互不相干的空白登记项算出同一个 ID，
+ * 凭空造出一次撞名——报假警比不报更坏。
+ */
+export function artifactIdOf(a: ArtifactIdentity): string {
+  const kind = (a.kind ?? '').trim();
+  if (!kind) return a.path ? `${PATH_ID_PREFIX}${a.path}` : '';
+  return `art-${contentHash(`${kind}\u0001${a.tier ?? ''}\u0001${a.chapter ?? ''}`).slice(0, 12)}`;
+}
+
+/** 人读的身份（`正文｜A层85｜第一章`）。报错信息里要说清"是哪一件"，
+ *  而不是只给一串十六进制——那串十六进制除了用来比对，读不出任何东西。 */
+export function artifactLabelOf(a: ArtifactIdentity): string {
+  const kind = (a.kind ?? '').trim();
+  if (!kind) return a.path ? a.path : '（无身份）';
+  return [kind, a.tier || '—', a.chapter || '—'].join('｜');
+}
+
+/** 还没有身份的登记项（读的时候算得出来，但**盘上没写**）。
+ *  用途只有一个：如实报告"这份清单还是旧形状"，以及 `--stamp` 时补齐。 */
+export const artifactsMissingId = (m: RunManifest): RunArtifact[] => m.artifacts.filter((a) => !a.id);
+
+/**
+ * 把身份就地补进还没有身份的登记项（`--stamp` 走一遍，旧清单从此就是新形状）。
+ * 与 `upsertArtifact` 同一风格：就地改 `m` 并返回它。
+ * **只加 `id` 一个字段**，其它字段一个字都不动——自愈不许顺手改写别的账。
+ */
+export function withArtifactIds(m: RunManifest): RunManifest {
+  for (let i = 0; i < m.artifacts.length; i++) {
+    const a = m.artifacts[i]!;
+    const id = a.id || artifactIdOf(a);
+    if (id && id !== a.id) m.artifacts[i] = { ...a, id };
+  }
+  return m;
 }
 
 export interface ManifestOwner {
@@ -257,11 +367,21 @@ export function newManifest(input: NewManifestInput): RunManifest {
 
 const slug = (s: string): string => (s || 'x').replace(/[^\w\u4e00-\u9fff-]+/g, '').slice(0, 24) || 'x';
 
-/** 登记/更新一个产物（同 path 覆盖，不重复堆积） */
+/**
+ * 登记/更新一个产物（同 path 覆盖，不重复堆积）。
+ *
+ * 主键仍然是**路径**——登记记的是"盘上现在有这个文件"，那是事实，不是身份。
+ * 但登记的同时把身份算出来写进去（`--stamp` 因此天然就是旧清单的自愈点）：
+ * 只算不写的话，下一次读这份清单的人还得再算一遍，而"清单里有没有身份"这件事
+ * 就会永远停在一个说不清的状态上。
+ */
 export function upsertArtifact(m: RunManifest, a: RunArtifact): RunManifest {
   const i = m.artifacts.findIndex((x) => x.path === a.path);
-  if (i >= 0) m.artifacts[i] = { ...m.artifacts[i], ...a };
-  else m.artifacts.push(a);
+  const merged = i >= 0 ? { ...m.artifacts[i], ...a } : { ...a };
+  const id = merged.id || artifactIdOf(merged);
+  const rec = id ? { ...merged, id } : merged;
+  if (i >= 0) m.artifacts[i] = rec;
+  else m.artifacts.push(rec);
   m.updatedAt = new Date().toISOString();
   return m;
 }
@@ -600,28 +720,115 @@ export function makeResolver(layout: Layout, roots: { out: string; work: string 
   };
 }
 
+export interface ArtifactCollision {
+  /** 撞在一起的**产物身份**（同一件产物，不是同一个位置） */
+  id: string;
+  /** 人读的身份（`正文｜A层85｜第一章`；退化身份时就是路径） */
+  label: string;
+  /** · `覆盖` = 两次运行写到了**同一个路径**：后者把前者盖掉了，最坏的一种；
+   *  · `分叉` = 同一件逻辑产物落在**不同路径**：没有互相覆盖，但两份副本谁作数没人知道。
+   *    旧口径只比路径，这一种一个字都不会报——而"两位教师各写一份"正是它。 */
+  kind: '覆盖' | '分叉';
+  /** 涉及这次撞名的运行（升序，可复现） */
+  runs: string[];
+  /** 这件产物被写到的全部路径（升序） */
+  paths: string[];
+  /** 被两次以上运行写过的那几个路径（非空 = 真的互相覆盖过） */
+  overwritten: string[];
+}
+
 export interface CollisionReport {
   ok: boolean;
-  /** 撞名的产物路径与涉及它的运行 */
-  collisions: { path: string; runs: string[] }[];
+  /** 撞名的产物身份（空数组 = 没有撞名） */
+  collisions: ArtifactCollision[];
 }
 
 /**
- * 跨运行撞名探测：把多份清单登记过的产物路径并起来，找出被两次以上运行写过的那些。
- * 这是"第二本书/第二位教师/同书多层并行会互相覆盖"的**直接度量**——
- * legacy 布局下它必然报出撞名，run 布局下必然为空。
+ * 一份清单内部：**身份只在它认得出唯一一件的时候才当身份**。
+ *
+ * 两件产物共用一个逻辑身份（真实例子：某层若干条待复核段落都是 `其他 + 该层 + 无章节`），
+ * 说明这个身份描述不了它们——那就退回路径。这是有意的保守：撞名探测的价值全在"报了就是真的"，
+ * 一条凭粗身份发出来的假撞名，会让人从此忽视这条检查，而它要拦的是真事故。
  */
-export function detectArtifactCollisions(manifests: { runId: string; artifacts: { path: string }[] }[]): CollisionReport {
-  const owners = new Map<string, Set<string>>();
-  for (const m of manifests)
-    for (const a of m.artifacts) {
-      if (!owners.has(a.path)) owners.set(a.path, new Set());
-      owners.get(a.path)!.add(m.runId);
-    }
-  const collisions = [...owners]
-    .filter(([, runs]) => runs.size > 1)
-    .map(([path, runs]) => ({ path, runs: [...runs].sort() }))
-    .sort((a, b) => (a.path < b.path ? -1 : 1));
+function identityKeysOf(artifacts: ArtifactIdentity[]): string[] {
+  const logical = artifacts.map((a) => artifactIdOf(a));
+  const count = new Map<string, number>();
+  for (const id of logical) if (id) count.set(id, (count.get(id) ?? 0) + 1);
+  return logical.map((id, i) => {
+    if (id && (count.get(id) ?? 0) === 1) return id;
+    const p = artifacts[i]!.path;
+    return p ? `${PATH_ID_PREFIX}${p}` : '';
+  });
+}
+
+const sortedKeys = (s: Set<string>): string[] => [...s].sort((x, y) => (x < y ? -1 : x > y ? 1 : 0));
+
+/**
+ * 跨运行撞名探测：找出**同一件产物被两次以上运行写过**的那些。
+ * 这是"第二本书/第二位教师/同书多层并行会互相覆盖"的**直接度量**——阶段 3 验收
+ * 「两位教师同时对同一本书不同层级运行不会覆盖词典、日志或产物」靠它答卷。
+ *
+ * 按**身份**比，不按路径比（这是本轮改的东西）：
+ *   · 同一件逻辑产物被两次运行写到两个不同路径（换了布局、换了日期、两位教师各写一份），
+ *     旧口径只比路径，会**静静地漏掉**——而"两位教师各写一份"恰恰是最该被看见的；
+ *   · 按身份比之后，撞名分两类报：`覆盖`（真被盖掉，最坏）与 `分叉`（两份副本，谁作数要人定）。
+ *
+ * 但**按路径的那半件事一件都不能丢**：身份认不出来时退回路径（见 `identityKeysOf`），
+ * 若只按身份比，"同一个文件被两次运行写过"这件事就会漏。所以两条路都要走，
+ * 并且**去重**——同一个路径靠身份已经报过的，不再重复报一次。
+ */
+export function detectArtifactCollisions(manifests: { runId: string; artifacts: ArtifactIdentity[] }[]): CollisionReport {
+  /** 身份 → 这次撞名的全部参与者 */
+  const groups = new Map<string, { label: string; runs: Set<string>; pathRuns: Map<string, Set<string>> }>();
+  /** 路径 → 写过它的运行（身份认不出来时的兜底口径，也是旧口径） */
+  const pathRuns = new Map<string, Set<string>>();
+  const put = <T>(map: Map<string, Set<T>>, key: string, value: T): void => {
+    const s = map.get(key) ?? new Set<T>();
+    s.add(value);
+    map.set(key, s);
+  };
+
+  for (const m of manifests) {
+    const keys = identityKeysOf(m.artifacts);
+    m.artifacts.forEach((a, i) => {
+      const id = keys[i]!;
+      // 没有身份的登记项不参与身份比对：凭空给它一个身份，就是凭空造一次撞名
+      if (id) {
+        const g = groups.get(id) ?? { label: artifactLabelOf(a), runs: new Set<string>(), pathRuns: new Map() };
+        g.runs.add(m.runId);
+        if (a.path) put(g.pathRuns, a.path, m.runId);
+        groups.set(id, g);
+      }
+      if (a.path) put(pathRuns, a.path, m.runId);
+    });
+  }
+
+  const collisions: ArtifactCollision[] = [];
+  const reported = new Set<string>();
+  for (const [id, g] of groups) {
+    if (g.runs.size < 2) continue;
+    const overwritten = [...g.pathRuns]
+      .filter(([, runs]) => runs.size > 1)
+      .map(([p]) => p)
+      .sort();
+    for (const p of overwritten) reported.add(p);
+    collisions.push({
+      id,
+      label: g.label,
+      kind: overwritten.length ? '覆盖' : '分叉',
+      runs: sortedKeys(g.runs),
+      paths: sortedKeys(new Set(g.pathRuns.keys())),
+      overwritten,
+    });
+  }
+  /* 兜底那一条口径：同一个路径被两次运行写过。旧口径唯一能报的就是它——
+   * 身份退化、或被 `identityKeysOf` 退回路径时，只有这条路还拦得住"真被盖掉"。 */
+  for (const [path, runs] of pathRuns) {
+    if (runs.size < 2 || reported.has(path)) continue;
+    collisions.push({ id: `${PATH_ID_PREFIX}${path}`, label: path, kind: '覆盖', runs: sortedKeys(runs), paths: [path], overwritten: [path] });
+  }
+
+  collisions.sort((a, b) => (a.label < b.label ? -1 : a.label > b.label ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   return { ok: collisions.length === 0, collisions };
 }
 
@@ -673,8 +880,7 @@ export const fileSafe = (s: string): string =>
  * 而两边都报告成功。**连 `--layout run` 都挡不住**，因为它挡的是"路径撞名"，
  * 不是"身份被换掉"。分片之后，每个 (教师, 层级) 有自己的指针，谁也覆盖不了谁。
  */
-export const pointerNameOf = (key: { teacher: string; tier?: string }): string =>
-  `清单_${fileSafe(key.teacher)}${key.tier ? `_${fileSafe(key.tier)}` : ''}.json`;
+export const pointerNameOf = (key: { teacher: string; tier?: string }): string => `清单_${fileSafe(key.teacher)}${key.tier ? `_${fileSafe(key.tier)}` : ''}.json`;
 
 /** "最近一次运行"的索引文件名。**它只是索引**：
  *  给人看的"最近跑过哪一次"，不是任何程序的事实源（事实源是各次运行自己的那份指针）。 */
@@ -707,8 +913,7 @@ const knownTeacher = (t?: string): string => (t && t !== 'unknown' ? t : '');
  */
 /** 造一个身份。`tier` 不知道就不写这个字段——写 `tier: undefined` 会让序列化结果里多一个空键，
  *  "有没有层级"这件事就变得要读两次才看得出来。 */
-const identityOf = (layout: Layout, runId: string, teacher: string, tier?: string): RunIdentity =>
-  tier ? { layout, runId, teacher, tier } : { layout, runId, teacher };
+const identityOf = (layout: Layout, runId: string, teacher: string, tier?: string): RunIdentity => (tier ? { layout, runId, teacher, tier } : { layout, runId, teacher });
 
 export function chooseIdentity(input: {
   want: { teacher?: string; tier?: string };
@@ -765,7 +970,4 @@ const tsOf = (p: ManifestPointer): number => {
 };
 
 /** 多份指针里"最近一次"（给 `清单_最新.json` 与报表用）。同一时刻按 runId 定序，保证可复现。 */
-export const latestOf = (pointers: ManifestPointer[]): ManifestPointer | null =>
-  pointers.length
-    ? [...pointers].sort((a, b) => tsOf(b) - tsOf(a) || (a.runId < b.runId ? 1 : -1))[0]!
-    : null;
+export const latestOf = (pointers: ManifestPointer[]): ManifestPointer | null => (pointers.length ? [...pointers].sort((a, b) => tsOf(b) - tsOf(a) || (a.runId < b.runId ? 1 : -1))[0]! : null);

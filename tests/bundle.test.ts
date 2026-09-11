@@ -27,7 +27,7 @@ import {
   type PublishBundle,
 } from '../src/core/bundle.js';
 import { makeDecisionEvent, type DecisionEvent } from '../src/core/decision.js';
-import { contentHash, newManifest, refOf, type RunManifest } from '../src/core/manifest.js';
+import { artifactIdOf, contentHash, newManifest, refOf, type RunManifest } from '../src/core/manifest.js';
 
 /* ────────────────────── 夹具 ────────────────────── */
 
@@ -49,7 +49,9 @@ const manifest = (over: Partial<RunManifest> = {}): RunManifest =>
       layout: 'run',
     }),
     ...over,
-    artifacts: over.artifacts ?? [{ path: FILES[0]!.path, kind: '正文' as const, status: 'ok' as const }],
+    /* 登记项写全（种类/层级/章节）：这就是真实清单的形状，也是产物身份的来源——
+     * 只写一个 path 的登记项说不出自己是什么，身份就只能退化为路径。 */
+    artifacts: over.artifacts ?? [{ path: FILES[0]!.path, kind: '正文' as const, tier: 'A层85', chapter: '第一章', status: 'ok' as const }],
   }) as RunManifest;
 
 const CH1 = '## Chapter One\n\n[P01] The boy ran to the red barn（谷仓）.\n';
@@ -140,6 +142,22 @@ test('包描述里带齐了「哪次运行 / 哪个模型 / 哪版词库 / 谁�
 
 /* ────────────────────── ③ 导入核对 ────────────────────── */
 
+test('★ 包里的每一件都带产物身份（路径只说明它在包里的哪儿）', () => {
+  const b = buildBundle({ manifest: manifest(), files: FILES });
+  const first = b.entries[0]!;
+  assert.match(first.id ?? '', /^art-[0-9a-f]{12}$/, '阶段 3：Artifact 要有稳定 ID');
+  assert.equal(first.id, artifactIdOf({ kind: '正文', tier: 'A层85', chapter: '第一章' }));
+  // 同一件产物换个路径（换布局、换日期、被别人搬走）仍是同一个身份
+  const moved = buildBundle({
+    manifest: manifest(),
+    files: [{ ...FILES[0]!, path: '_运行/r2/正文/第一章/原文_A层85_2026-09-12.md', text: CH1_OLD }],
+  });
+  assert.equal(moved.entries[0]!.id, first.id, '身份认的是"是什么"，不是"在哪儿"');
+  // 换成另一个层级就是**另一件**产物
+  const other = buildBundle({ manifest: manifest(), files: [{ ...FILES[0]!, tier: 'M层75', path: '_运行/r1/正文/第一章/原文_M层75_2026-09-11.md' }] });
+  assert.notEqual(other.entries[0]!.id, first.id);
+});
+
 test('★ 导入核对：该有的都在、内容哈希对得上', () => {
   const b = buildBundle({ manifest: manifest(), files: FILES });
   const ok = verifyBundle(
@@ -177,6 +195,36 @@ test('夹带了清单之外的普通文件 → 报 extra（清单过期或真的
   assert.equal(r.ok, false);
   assert.equal(r.problems[0]!.kind, 'extra');
   assert.match(r.problems[0]!.message, /夹带或清单过期/);
+});
+
+test('★ 核对报错要说清"缺的是哪一件产物"——路径只说明它在哪儿', () => {
+  const b = buildBundle({ manifest: manifest(), files: FILES });
+  const missing = verifyBundle(b, [{ path: FILES[1]!.path, text: FILES[1]!.text }]).problems.find((p) => p.kind === 'missing')!;
+  assert.equal(missing.artifact, '正文｜A层85｜第一章');
+  assert.equal(missing.id, b.entries[0]!.id, '身份要跟包描述里那一件对得上（同一个值，不是另算一个）');
+  assert.match(missing.message, /产物身份：正文｜A层85｜第一章/, '报告里要能一眼看出"缺的是第一章的正文"，而不是只有一串路径');
+
+  const mismatch = verifyBundle(b, [{ path: FILES[0]!.path, text: '被人改过的正文' }]).problems.find((p) => p.kind === 'hash-mismatch')!;
+  assert.equal(mismatch.artifact, '正文｜A层85｜第一章');
+  assert.match(mismatch.message, /产物身份：正文｜A层85｜第一章/);
+});
+
+test('★ 身份是算出来的：旧包描述（条目没有 id）照常核对，报错时照样说得清是哪一件', () => {
+  const b = buildBundle({ manifest: manifest(), files: FILES });
+  const full = FILES.map((f) => ({ path: f.path, text: f.text }));
+  const old = JSON.parse(JSON.stringify(b)) as PublishBundle;
+  for (const e of old.entries) delete e.id; // 上一版程序写出来的包描述
+  assert.equal(verifyBundle(old, full).ok, true, '旧包描述照常通过——身份不是兼容性断层');
+  assert.equal(verifyBundle(old, [{ path: FILES[1]!.path, text: FILES[1]!.text }]).problems.find((p) => p.kind === 'missing')!.artifact, '正文｜A层85｜第一章');
+
+  // 身份与条目自己的字段对不上 → 这份描述被改过，"这是哪一件产物"的说法一个字都不能信
+  const tampered = JSON.parse(JSON.stringify(b)) as PublishBundle;
+  tampered.entries[0]!.id = 'art-000000000000';
+  const t = verifyBundle(tampered, full);
+  assert.equal(t.ok, false, '把 A 层正文标成别的产物还核对照过，正是"默认不含学生数据"那一类事故的同类：说了假话没人拦');
+  const bad = t.problems.find((p) => p.kind === 'id-mismatch');
+  assert.ok(bad, `必须报出身份自相矛盾：${JSON.stringify(t.problems)}`);
+  assert.match(bad.message, /对不上/);
 });
 
 /* ────────────────────── ④ 溯源 ────────────────────── */
@@ -235,6 +283,17 @@ test('★ 查不到就**如实说查不到**，不编一个出处', () => {
   assert.equal(p.found, false);
   assert.match(p.line, /都查不到它/);
   assert.match(p.line, /不编一个出处/);
+});
+
+test('★ 溯源顺带说清"这是哪一件产物"（决定是挂在产物上的，不是挂在路径上的）', () => {
+  const m = manifest();
+  const b = buildBundle({ manifest: m, files: FILES });
+  const p = provenanceOf({ path: FILES[0]!.path, currentText: CH1, bundle: b, manifest: m });
+  assert.equal(p.artifactId, b.entries[0]!.id);
+  assert.match(p.line, /产物 正文｜A层85｜第一章/, `溯源行要说得出是哪一件：${p.line}`);
+  // 只有清单、没有包描述时，身份同样算得出来（旧清单没有 id 字段也一样）
+  const onlyManifest = provenanceOf({ path: FILES[0]!.path, manifest: m });
+  assert.equal(onlyManifest.artifactId, b.entries[0]!.id);
 });
 
 test('溯源只算与这份文件相关的决定（按章过滤），不是把全书决定都倒出来', () => {

@@ -28,7 +28,7 @@
  * 纯逻辑：不读文件、不写文件。文件由调用方读进来（IO 在 `tools/` 与 App 两侧各不相同）。
  */
 
-import { contentHash, type ArtifactKind, type RunManifest } from './manifest.js';
+import { artifactIdOf, artifactLabelOf, contentHash, type ArtifactIdentity, type ArtifactKind, type RunManifest } from './manifest.js';
 import type { DecisionEvent } from './decision.js';
 
 export const BUNDLE_SCHEMA_VERSION = 1;
@@ -75,8 +75,18 @@ export function studentDataReason(path: string): string | null {
 /* ────────────────────── 包 ────────────────────── */
 
 export interface BundleEntry {
-  /** 包内相对路径 */
+  /** 包内相对路径 —— 一件产物**在包里的位置** */
   path: string;
+  /** **产物身份**（`art-…`，见 `manifest.ts` 的「产物身份」一节）：这一件"是什么"。
+   *  阶段 3 要 Run/Artifact/Decision/Teacher 四类实体有稳定 ID，它就是 Artifact 的那一个。
+   *
+   *  为什么包里既要路径又要身份：核对一份包是**按文件树**做的（缺件/多件/哈希），
+   *  那件事只有路径能回答；而"缺的这一件是哪一件产物"只有身份能回答——
+   *  路径本来就写在包里，可它说明的只是"它现在放在哪儿"。
+   *  旧版本的包描述没有这个字段：读的时候按 `kind/层级/章节` 算得出来（`artifactIdOf`），
+   *  所以它**是附加信息，不是兼容性断层**。
+   */
+  id?: string;
   kind: ArtifactKind | '决定日志' | '版本日志';
   tier?: string;
   chapter?: string;
@@ -162,8 +172,8 @@ export function publishReadiness(manifest: RunManifest): PublishReadiness {
 
 export interface BundleInput {
   manifest: RunManifest;
-  /** 待入包的文件（路径相对产物目录 + 内容） */
-  files: { path: string; kind: ArtifactKind; tier?: string; chapter?: string; text: string }[];
+  /** 待入包的文件（路径相对产物目录 + 内容 + **产物身份**） */
+  files: { path: string; id?: string; kind: ArtifactKind; tier?: string; chapter?: string; text: string }[];
   /** 决定事件（只数条数，不进包内容） */
   events?: DecisionEvent[];
   /** 版本节点（只数条数） */
@@ -204,6 +214,10 @@ export function buildBundle(input: BundleInput): PublishBundle {
      * 包描述要能 JSON 存盘再读回来，而 `undefined` 过一趟 JSON 就没了——
      * 于是一份包"存盘前"和"读回来后"形状不同，任何 deepEqual 都会莫名其妙地失败。 */
     const entry: BundleEntry = { path: f.path, kind: f.kind, bytes: f.text.length, hash: contentHash(f.text) };
+    /* 身份：条目自己带的优先（它来自清单里那条登记），没有就按 `kind/层级/章节` 算。
+     * 两条路得到的是同一个值——身份是算出来的，不是发出来的。 */
+    const id = f.id || artifactIdOf(f);
+    if (id) entry.id = id;
     if (f.tier) entry.tier = f.tier;
     if (f.chapter) entry.chapter = f.chapter;
     entries.push(entry);
@@ -238,8 +252,12 @@ export function buildBundle(input: BundleInput): PublishBundle {
 /* ────────────────────── 导入时的核对 ────────────────────── */
 
 export interface BundleProblem {
-  kind: 'missing' | 'hash-mismatch' | 'extra' | 'student-data';
+  kind: 'missing' | 'hash-mismatch' | 'extra' | 'student-data' | 'id-mismatch';
   path: string;
+  /** 出问题的**是哪一件产物**（`art-…`）。夹带的文件没有身份——它本来就不在清单里 */
+  id?: string;
+  /** 人读的身份（`正文｜A层85｜第一章`），给报告与命令行用 */
+  artifact?: string;
   message: string;
 }
 
@@ -251,11 +269,31 @@ export interface BundleVerifyResult {
 }
 
 /**
+ * 出问题时说清"这是哪一件产物"。
+ *
+ * 路径相同不等于同一件东西（两次运行各写一份同名文件就是两条不同的账），
+ * 反过来同一件产物换个路径仍然是它——所以核对时**按路径查文件树**（那是事实），
+ * 报问题时**按身份说是哪一件**（那才是人能拿去做决定的信息）。
+ * 退化身份（只有路径、没有 `kind`）时不重复一遍路径：那串路径就在同一行里写着。
+ */
+function artifactNote(e: ArtifactIdentity): string {
+  const id = artifactIdOf(e);
+  if (!id) return '';
+  const label = artifactLabelOf(e);
+  return label === e.path ? '' : `｜产物身份：${label}`;
+}
+
+/**
  * 收到包之后逐件核对：**该有的都在、内容哈希对得上、没有夹带学生数据**。
  *
  * 第三条是关键：如果包描述说排除了一件画像文件，而对方手里那份包里**有**它，
  * 或者对方把画像文件改了个名字塞进来，这里要能发现——
  * 否则"默认不含学生数据"就只是对本方成立，对收到的包不成立。
+ *
+ * 第四条是本轮加的：**包描述里的身份必须与它自己的字段自洽**（见 `id-mismatch`）。
+ * 身份是算出来的，所以它要么没有、要么算得出同一个值；算不出同一个值，说明这份描述
+ * 被人（或别的程序）改过，那它关于"这件产物是什么"的说法就一个字都不能信。
+ * 没有这一条，一个手艺好的裁剪者可以把 A 层的正文标成 B 层的正文而核对照过。
  */
 export function verifyBundle(bundle: PublishBundle, received: { path: string; text: string }[]): BundleVerifyResult {
   const problems: BundleProblem[] = [];
@@ -263,14 +301,29 @@ export function verifyBundle(bundle: PublishBundle, received: { path: string; te
   let checked = 0;
 
   for (const e of bundle.entries) {
+    /* 身份：条目自带优先，没有就按字段算（旧版本的包描述没有 `id` 字段，
+     * 于是"收到的包"与"新写的包"在这一点上完全一样——不靠升级才认得出来）。 */
+    const id = e.id || artifactIdOf(e);
+    /* 自洽性只在这一件说得出自己是什么（有 kind）时才查：
+     * 说不出 `kind` 的登记项，身份本来就是它的路径，没有第二个来源可以对。 */
+    if (e.id && e.kind && e.id !== artifactIdOf(e)) {
+      problems.push({
+        kind: 'id-mismatch',
+        path: e.path,
+        id: e.id,
+        artifact: artifactLabelOf(e),
+        message: `包描述里的产物身份与它自己的字段对不上（写的是 ${e.id}，按 ${artifactLabelOf(e)} 算出来是 ${artifactIdOf(e)}）——这份描述被改过，"这是哪一件产物"的说法不可信`,
+      });
+    }
+    const note = artifactNote(e);
     const text = got.get(e.path);
     if (text === undefined) {
-      problems.push({ kind: 'missing', path: e.path, message: `包里缺这一件（清单说有 ${e.bytes} 字节）` });
+      problems.push({ kind: 'missing', path: e.path, id: id || undefined, artifact: artifactLabelOf(e), message: `包里缺这一件（清单说有 ${e.bytes} 字节）${note}` });
       continue;
     }
     const h = contentHash(text);
     if (h !== e.hash) {
-      problems.push({ kind: 'hash-mismatch', path: e.path, message: `内容与清单不符（清单 ${e.hash}，实得 ${h}）` });
+      problems.push({ kind: 'hash-mismatch', path: e.path, id: id || undefined, artifact: artifactLabelOf(e), message: `内容与清单不符（清单 ${e.hash}，实得 ${h}）${note}` });
       continue;
     }
     checked++;
@@ -321,6 +374,8 @@ export interface ProvenanceRow {
  */
 export interface Provenance {
   path: string;
+  /** 它是**哪一件产物**（`art-…`）。查一份文件的出处时，先说清"这是什么东西"再说它怎么来的 */
+  artifactId?: string;
   /** 找不到出处时如实说找不到，**不编一个** */
   found: boolean;
   runId?: string;
@@ -405,9 +460,16 @@ export function provenanceOf(input: {
     .map(decisionRow);
 
   const found = !!(entry || rows.length);
+  /* 说得出身份就带上：决定是挂在**产物**上的，不是挂在路径上的——
+   * 一份文件被搬到别处之后，"这句话怎么变成现在这样的"要能顺着身份接回去。 */
+  const artifactId = entry ? artifactIdOf(entry) || undefined : undefined;
   const bits: string[] = [];
   if (found) {
     bits.push(`${input.path}`);
+    if (entry) {
+      const label = artifactLabelOf(entry);
+      if (label !== input.path) bits.push(`产物 ${label}`);
+    }
     if (runId) bits.push(`由运行 ${runId} 生成`);
     if (model) bits.push(`模型 ${model}${promptVersion ? `（提示词 ${promptVersion}）` : ''}`);
     if (lexiconVersion) bits.push(`词库 ${lexiconVersion}`);
@@ -421,6 +483,7 @@ export function provenanceOf(input: {
 
   return {
     path: input.path,
+    artifactId,
     found,
     runId,
     book: m?.book ?? b?.run.book,

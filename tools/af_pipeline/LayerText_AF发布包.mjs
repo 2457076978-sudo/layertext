@@ -25,7 +25,7 @@ const OUT_BASE = P.产物目录;
 const DATE = P.日期;
 
 const { buildBundle, provenanceOf, publishReadiness, renderProvenance, verifyBundle, BUNDLE_SCHEMA_VERSION } = await import(`${REPO}/dist/src/core/bundle.js`);
-const { makeResolver } = await import(`${REPO}/dist/src/core/manifest.js`);
+const { artifactIdOf, makeResolver } = await import(`${REPO}/dist/src/core/manifest.js`);
 const { parseDecisionLog } = await import(`${REPO}/dist/src/core/decision.js`);
 
 /* 身份从命令行取（**不复用各脚本自己的参数助手**：定义位置各不相同） */
@@ -60,6 +60,10 @@ function loadManifest() {
 /**
  * 把清单登记过的产物读进来（只读白名单里的那几类，**遍历本身也不碰学生数据目录**）。
  * 清单记的是相对产物目录的路径；`layout` 两种都成立。
+ *
+ * 顺带把**产物身份**带上：阶段 3 要 Artifact 有稳定 ID，而发布包正是身份最该出现的地方——
+ * 收件人拿到的是一棵树，光看路径说不清"这一件是不是我以为的那一件"。
+ * 清单里的 `id` 优先（`--stamp` 之后就有），没有就按 `种类/层级/章节` 算——同一个值。
  */
 function collectFiles(manifest) {
   const out = [];
@@ -70,7 +74,7 @@ function collectFiles(manifest) {
       skipped.push({ path: a.path, reason: '清单登记了但它不在盘上（可能已被清理）' });
       continue;
     }
-    out.push({ path: a.path, kind: a.kind, tier: a.tier, chapter: a.chapter, text: readFileSync(abs, 'utf-8') });
+    out.push({ path: a.path, id: a.id || artifactIdOf(a), kind: a.kind, tier: a.tier, chapter: a.chapter, text: readFileSync(abs, 'utf-8') });
   }
   return { files: out, skipped };
 }
@@ -109,8 +113,8 @@ function doExport() {
   console.log(` 书：${bundle.run.book} ${bundle.run.version}｜层：${bundle.run.tiers.join('/')}｜章：${bundle.run.chapters.join(',')}`);
   console.log(` 模型：${bundle.model.name}（提示词 ${bundle.model.promptVersion}）｜词库：${bundle.lexicon.version}`);
   console.log(` 教师：${bundle.teacher}｜决定记录 ${bundle.decisionCount} 条（**只记条数，内容不随包出去**）`);
-  console.log(` 入包 ${bundle.entries.length} 件：`);
-  for (const e of bundle.entries) console.log(`   · ${e.kind}｜${e.path}`);
+  console.log(` 入包 ${bundle.entries.length} 件（每件都带**产物身份**：路径只是它在包里的位置）：`);
+  for (const e of bundle.entries) console.log(`   · ${e.kind}｜${e.path}｜${e.id ?? '（无身份）'}`);
   if (bundle.excluded.length) {
     console.log(` 排除 ${bundle.excluded.length} 件（**列出来，不静默丢弃**）：`);
     for (const x of bundle.excluded) console.log(`   ✗ ${x.path}｜${x.reason}`);
@@ -152,7 +156,9 @@ function doCheck(dir) {
   if (r.ok) {
     console.log(' ✓ 该有的都在、内容与清单一致、没有夹带学生数据');
   } else {
-    for (const p of r.problems) console.log(` ✗ [${p.kind}] ${p.path}｜${p.message}`);
+    /* 报错要说清**缺的是哪一件产物**：路径只说明它在哪儿，身份才回答得了"这是什么东西"。
+     * `artifactId` 由判定逻辑给（`verifyBundle`），这里只负责印出来。 */
+    for (const p of r.problems) console.log(` ✗ [${p.kind}] ${p.path}｜${p.artifact ? `${p.artifact}（${p.id ?? '无身份'}）｜` : ''}${p.message}`);
   }
   if (bundle.excluded?.length) {
     console.log(` 发件方声明排除 ${bundle.excluded.length} 件：`);
