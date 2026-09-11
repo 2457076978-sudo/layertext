@@ -9,7 +9,8 @@
  *   教师知识库（AF审校知识库_v1.csv 加注词）= 最高优先，永远保留
  *   专名（PROPER）= 不计生词、不加注
  */
-import { readFileSync, writeFileSync, existsSync, readdirSync, mkdirSync } from 'node:fs';
+import { closeSync, openSync, readFileSync, writeFileSync, writeSync, existsSync, readdirSync, mkdirSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { hostname } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -33,7 +34,9 @@ export function findProjectFile(start = process.cwd()) {
     try {
       const hit = readdirSync(cur).find((f) => /^调适项目_.*\.json$/.test(f));
       if (hit) return { path: join(cur, hit), sticky: true };
-    } catch { /* 目录不可读就往上走 */ }
+    } catch {
+      /* 目录不可读就往上走 */
+    }
     cur = cur.replace(/\/[^/]+$/, '');
   }
   // ③ 上次用过的项目（脚本每次成功载入后写下的指针，免去每次 cd 或 export）
@@ -42,15 +45,19 @@ export function findProjectFile(start = process.cwd()) {
       const last = readFileSync(PROJECT_POINTER, 'utf-8').trim();
       if (last && existsSync(last)) return { path: last, sticky: false };
     }
-  } catch { /* 指针坏了就当没有 */ }
+  } catch {
+    /* 指针坏了就当没有 */
+  }
   return null;
 }
 
 /** 读专名表（一行一名，忽略 # 注释与空行） */
 export function loadProper(path) {
   if (!existsSync(path)) return [];
-  return readFileSync(path, 'utf-8').split('\n')
-    .map((l) => l.trim()).filter((l) => l && !l.startsWith('#'))
+  return readFileSync(path, 'utf-8')
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l && !l.startsWith('#'))
     .map((l) => l.toLowerCase());
 }
 
@@ -60,20 +67,29 @@ export function loadProject(path) {
   let sticky = false;
   if (!path) {
     const found = findProjectFile();
-    if (found) { path = found.path; sticky = found.sticky; }
+    if (found) {
+      path = found.path;
+      sticky = found.sticky;
+    }
   }
   if (!path) {
     throw new Error(
       '找不到 调适项目_*.json。三种解法任选：\n' +
-      '  ① 设环境变量 LAYERTEXT_PROJECT=/绝对路径/调适项目_我的书.json\n' +
-      '  ② 在工作区目录（或在它的子目录）里运行脚本\n' +
-      '  ③ 传 --project /绝对路径/调适项目_我的书.json（管线脚本支持）',
+        '  ① 设环境变量 LAYERTEXT_PROJECT=/绝对路径/调适项目_我的书.json\n' +
+        '  ② 在工作区目录（或在它的子目录）里运行脚本\n' +
+        '  ③ 传 --project /绝对路径/调适项目_我的书.json（管线脚本支持）',
     );
   }
   if (!existsSync(path)) throw new Error(`项目配置不存在：${path}`);
   // 记下"上次在目录里找到的项目"，下次在任何目录下跑都不用再设环境变量。
   // 显式传路径 / 设环境变量时不写指针——避免"临时跑一下别的项目"把默认带跑偏。
-  if (sticky) { try { writeFileSync(PROJECT_POINTER, path + '\n', 'utf-8'); } catch { /* 只读环境就算了 */ } }
+  if (sticky) {
+    try {
+      writeFileSync(PROJECT_POINTER, path + '\n', 'utf-8');
+    } catch {
+      /* 只读环境就算了 */
+    }
+  }
   const d = JSON.parse(readFileSync(path, 'utf-8'));
   const 书级 = d.书级 ?? {};
   if (d.引擎目录) LTR = d.引擎目录;
@@ -89,7 +105,10 @@ export function loadProject(path) {
 }
 
 const readCsvWords = (p, col = 0) =>
-  readFileSync(p, 'utf-8').replace(/^\uFEFF/, '').split('\n').slice(1)
+  readFileSync(p, 'utf-8')
+    .replace(/^\uFEFF/, '')
+    .split('\n')
+    .slice(1)
     .map((l) => l.split(',')[col]?.trim().toLowerCase())
     .filter(Boolean);
 
@@ -108,7 +127,14 @@ export function loadKnownForms(P) {
   const forms = new Set(base);
   const V = 'aeiou';
   for (const w of base) {
-    forms.add(w + 's').add(w + 'ed').add(w + 'd').add(w + 'ing').add(w + 'er').add(w + 'est').add(w + 'ly');
+    forms
+      .add(w + 's')
+      .add(w + 'ed')
+      .add(w + 'd')
+      .add(w + 'ing')
+      .add(w + 'er')
+      .add(w + 'est')
+      .add(w + 'ly');
     if (w.endsWith('e')) forms.add(w.slice(0, -1) + 'ing').add(w.slice(0, -1) + 'ed');
     // 辅音双写：末位辅音 + 前一位元音（run→running / stop→stopping / hit→hitting）。
     // 会顺带生成 visit→visitting 这类非标准形，但多生成只是"更宽容"，不会误判真实词形。
@@ -131,10 +157,7 @@ export const isKnownForm = (word, forms) => forms.has(word.toLowerCase());
  *      被算成生词。现在专名一律从项目配置的专名表读。 */
 export async function loadLexicon(P) {
   const { buildLexicon } = await import(`${P.引擎目录}/dist/src/core/lexicon.js`);
-  const plainWordlistTexts = [
-    join(LTR, 'assets/wordlists/curriculum_2022_level3_1600.txt'),
-    join(LTR, 'assets/wordlists/curriculum_2022_amendment.txt'),
-  ]
+  const plainWordlistTexts = [join(LTR, 'assets/wordlists/curriculum_2022_level3_1600.txt'), join(LTR, 'assets/wordlists/curriculum_2022_amendment.txt')]
     .filter((p) => existsSync(p))
     .map((p) => readFileSync(p, 'utf-8'));
   // 教材进度 → 已学词，并进"已知"口径。
@@ -164,7 +187,10 @@ export async function makeKnownChecker(P) {
 export function loadKbGloss(path) {
   const m = new Map();
   if (!existsSync(path)) return m;
-  for (const line of readFileSync(path, 'utf-8').replace(/^\uFEFF/, '').split('\n').slice(1)) {
+  for (const line of readFileSync(path, 'utf-8')
+    .replace(/^\uFEFF/, '')
+    .split('\n')
+    .slice(1)) {
     const [type, word, val, n] = line.split(',');
     if (type !== '加注词' || !word || !val) continue;
     if (/复现|复数|比较级/.test(val)) continue;
@@ -179,7 +205,10 @@ export function loadKbGloss(path) {
 export function loadDict(path) {
   const m = new Map();
   if (!existsSync(path)) return m;
-  for (const line of readFileSync(path, 'utf-8').replace(/^\uFEFF/, '').split('\n').slice(1)) {
+  for (const line of readFileSync(path, 'utf-8')
+    .replace(/^\uFEFF/, '')
+    .split('\n')
+    .slice(1)) {
     const [w, zh] = line.split(',');
     if (w && zh) m.set(w.trim().toLowerCase(), zh.trim());
   }
@@ -209,8 +238,7 @@ export function segmentList(md) {
 /** 未通过门禁的段落在产物里的占位标记。
  *  写成 HTML 注释：教师打开文件能一眼看到缺口在哪，
  *  而分句/分词（textpipe）不含 2 个以上连续字母，**不会污染任何 QC 指标**。 */
-export const REVIEW_PLACEHOLDER = (id, dir) =>
-  `[${id}] <!-- 本段未通过复检，未收录；原文与改写见 ${dir} -->`;
+export const REVIEW_PLACEHOLDER = (id, dir) => `[${id}] <!-- 本段未通过复检，未收录；原文与改写见 ${dir} -->`;
 
 /* ────────────────────── 统一词典：增量 + 显式合并（并发安全） ────────────────────── */
 /**
@@ -243,27 +271,94 @@ export function writeDictDelta(deltaPath, entries, origin) {
   return cur.entries.length;
 }
 
-const mkdirFor = (p) => { try { mkdirSync(dirname(p), { recursive: true }); } catch { /* 已存在 */ } };
+const mkdirFor = (p) => {
+  try {
+    mkdirSync(dirname(p), { recursive: true });
+  } catch {
+    /* 已存在 */
+  }
+};
 
 /** 在某份文件上做"独占"操作：锁文件 + 陈旧锁可夺（进程崩了不会把词典永久锁死）。
  *  纯逻辑（锁状态三态）在引擎 src/core/dictmerge.ts 里，可单测。 */
-export async function withLock(lockPath, fn) {
+/**
+ * @param {string} lockPath
+ * @param {() => Promise<any>} fn 临界区
+ * @param {{waitMs?: number, pollMs?: number}} [opts]
+ *   `waitMs`：**等活锁最多等多久**。默认 60s——真实的词典合并要跑若干秒，
+ *   原来"重试 3 次 × 300ms"（合计不到 1 秒）会让第二个进程在第一个还没跑完时就报错退出，
+ *   于是"有锁"反而变成了"并发一跑就失败"。等待本身不是问题，**无限等待**才是问题，
+ *   所以这里给的是明确的上限而不是一个次数。
+ */
+export async function withLock(lockPath, fn, opts = {}) {
   const { lockState } = await dictMerge();
   mkdirFor(lockPath);
-  const isAlive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
-  const readLock = () => { try { return JSON.parse(readFileSync(lockPath, 'utf-8')); } catch { return null; } };
-  for (let i = 0; i < 2; i++) {
-    const st = lockState(readLock(), Date.now(), isAlive);
-    if (st === 'free' || st === 'stale') break;
-    await new Promise((r) => setTimeout(r, 300));
+  const isAlive = (pid) => {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  const readLock = () => {
+    try {
+      return JSON.parse(readFileSync(lockPath, 'utf-8'));
+    } catch {
+      return null;
+    }
+  };
+
+  /* ★ 用 `O_EXCL` **原子地**占锁，而不是"先看再写"。
+   *
+   * 原来是 `lockState(readLock())` → 判断 free → `writeFileSync`。
+   * 两个进程可以同时看到 free、同时写，于是**两个都以为自己拿到了锁**——
+   * 锁形同虚设，而"防止词典被并发合并写坏"正是它存在的唯一理由。
+   * `wx` 的语义是"不存在才创建、存在就 EEXIST"，由内核保证这一步是原子的。
+   *
+   * token 是为了**只释放自己的锁**：陈旧锁会被后来者夺走，
+   * 若那时原持有者才慢吞吞地走到 finally，按路径删就会把**别人的**锁删掉——
+   * 于是又回到了"两个进程都以为自己持锁"。 */
+  const token = randomUUID();
+  const mine = JSON.stringify({ pid: process.pid, host: hostname(), at: new Date().toISOString(), token });
+  const waitMs = opts.waitMs ?? 60_000;
+  const pollMs = opts.pollMs ?? 200;
+  const deadline = Date.now() + waitMs;
+  let acquired = false;
+  while (!acquired) {
+    try {
+      const fd = openSync(lockPath, 'wx');
+      try {
+        writeSync(fd, mine);
+      } finally {
+        closeSync(fd);
+      }
+      acquired = true;
+    } catch (e) {
+      // 不是"已存在"就是真错误（没权限、路径是目录…）——带上原错误再抛，别把它吞掉
+      if (e?.code !== 'EEXIST') throw new Error(`占锁失败（${lockPath}）：${e?.message ?? e}`, { cause: e });
+      const st = lockState(readLock(), Date.now(), isAlive);
+      if (st === 'held') {
+        if (Date.now() >= deadline) {
+          const who = readLock();
+          throw new Error(
+            `等锁超时（${Math.round(waitMs / 1000)}s）：${lockPath} 被 pid ${who?.pid ?? '?'}@${who?.host ?? '?'} 占着` + `（${who?.at ?? '时间未知'}）——等它跑完，或确认它已经死了再删掉锁文件`,
+            { cause: e },
+          );
+        }
+        await new Promise((r) => setTimeout(r, pollMs));
+        continue;
+      }
+      // 陈旧锁：删掉再抢一轮。删也可能被别人抢先删掉，所以下一轮重新 openSync 而不是直接写。
+      _rm(lockPath, { force: true });
+    }
   }
-  const st = lockState(readLock(), Date.now(), isAlive);
-  if (st === 'held') throw new Error(`词典被另一个进程占用（${lockPath}）——等它跑完或删掉锁文件`);
-  writeFileSync(lockPath, JSON.stringify({ pid: process.pid, host: hostname(), at: new Date().toISOString() }), 'utf-8');
   try {
     return await fn();
   } finally {
-    _rm(lockPath, { force: true });
+    // 只释放自己的锁（见上面的 token 说明）
+    const cur = readLock();
+    if (cur?.token === token) _rm(lockPath, { force: true });
   }
 }
 
@@ -307,7 +402,10 @@ export async function mergeDictIntoProject(P) {
   const bad = found.filter((d) => d.bad);
   if (!deltas.length) {
     return {
-      added: 0, unchanged: 0, conflicts: 0, interConflicts: 0,
+      added: 0,
+      unchanged: 0,
+      conflicts: 0,
+      interConflicts: 0,
       report: ['词典合并：没有增量，未改动', ...(bad.length ? [`⚠ ${bad.length} 份增量读不出来（已跳过）：${bad.map((b) => b.file).join('、')}`] : [])],
     };
   }
@@ -340,7 +438,10 @@ export function appendDict(entries, path) {
   let added = 0;
   for (const [w, zh] of entries) {
     const k = String(w).toLowerCase();
-    if (!m.has(k) && zh) { m.set(k, zh); added++; }
+    if (!m.has(k) && zh) {
+      m.set(k, zh);
+      added++;
+    }
   }
   if (added) {
     const rows = ['词,释义,来源', ...[...m].sort((a, b) => a[0].localeCompare(b[0])).map(([w, zh]) => `${w},${zh},${loadKbGloss().has(w) ? '教师知识库' : '归一（多数票）'}`)];
@@ -369,7 +470,10 @@ export function loadTextbookLearned(project) {
   const bIdx = ORDER.indexOf(book.trim());
   for (const [b, us] of Object.entries(d.books ?? {})) {
     const bi = ORDER.indexOf(b);
-    if (bi < bIdx) { for (const c of Object.values(us)) (c.词 ?? []).forEach((w) => learned.add(w)); continue; }
+    if (bi < bIdx) {
+      for (const c of Object.values(us)) (c.词 ?? []).forEach((w) => learned.add(w));
+      continue;
+    }
     if (b !== book.trim()) continue;
     for (const [u, c] of Object.entries(us)) {
       // "（未标单元）"→ 999：当前这册没学完时不计入（可能来自后面单元）；
