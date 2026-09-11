@@ -59,7 +59,11 @@ const REPO = P.引擎目录;
 const SRC_BASE = P.原文目录;
 const OUT_BASE = P.产物目录;
 const DATE = P.日期;
-const CN = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十'];
+/* 章节名从共享模块取（**不再在 10 个脚本里各抄一份 `['一'…'十']`**）：
+ * 那份抄写写死了"十章"，换一本 12 章的书会拼出 `第undefined章` 而**照常报成功**。
+ * 现在优先级是「配置 > 原文目录 > 默认（第N章 × 章数）」，
+ * 最后那层逐字符复现旧行为，所以既没配置、也没有可扫目录的老项目结果不变。 */
+const CN = SHARED.chapterNames(P);
 const MODEL = 'deepseek-chat'; // 实测路由到 deepseek-flash（最便宜那档）
 /** 提示词版本：开场措辞、复检回流措辞、冻结格式改动时**必须**递增。
  *  与段级输入哈希一起进事件日志，失败复现时能定位"是哪版提示词写的这段"。 */
@@ -731,7 +735,7 @@ console.log(`路径布局：${RUN.layout}${RUN.layout === 'legacy' ? '（沿用�
 
 // 预算估算
 const chSegs = CH_IDS.map((i) => {
-  const f = join(SRC_BASE, `第${CN[i - 1]}章`, '原文_规范化.md');
+  const f = join(SRC_BASE, CN[i - 1], '原文_规范化.md');
   if (!existsSync(f)) return { i, segs: 0, words: 0 };
   const md = readFileSync(f, 'utf-8');
   const segs = splitChapter(md).body.match(/\[P\d+\][\s\S]*?(?=\[P\d+\]|$)/g) ?? [];
@@ -774,7 +778,8 @@ if (!state.annotated) {
      *  `existsSync` 全 false → **账本一个词都没读回来 → 跨章去重静默失效 →
      *  同一个词被反复加注**，而脚本照常报告成功。
      *  这正是"文件命名约定"那个规模崩点的典型样子：不报错、结果错。 */
-    const p0 = R.any('正文', { chapter: `第${cn}章` });
+    // `cn` 现在就是**完整章名**（`chapterNames(P)` 给的），不要再包一层「第…章」
+    const p0 = R.any('正文', { chapter: cn });
     if (!existsSync(p0)) continue;
     for (const m of readFileSync(p0, 'utf-8').matchAll(/([A-Za-z][A-Za-z'-]*)（[^）]{1,24}）/g)) state.annotated.add(m[1].toLowerCase());
   }
@@ -782,7 +787,7 @@ if (!state.annotated) {
 }
 
 for (const { i } of chSegs) {
-  const ch = `第${CN[i - 1]}章`;
+  const ch = CN[i - 1];
   const src = join(SRC_BASE, ch, '原文_规范化.md');
   if (!existsSync(src)) {
     failures.push(`${ch}：缺规范化原文`);

@@ -30,7 +30,12 @@ const { runQc } = await import(`${REPO}/dist/src/core/qc.js`);
 const LEX = buildLexicon({ vocabCsvTexts: [readFileSync(VOCAB, 'utf-8')] });
 const RULES = readFileSync(join(BASE, '校正规则_v1.md'), 'utf-8');
 
-const CN = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十'];
+/* 章节名从共享模块取（**不再在 10 个脚本里各抄一份 `['一'…'十']`**）：
+ * 那份抄写写死了"十章"，换一本 12 章的书会拼出 `第undefined章` 而**照常报成功**。
+ * 现在优先级是「配置 > 原文目录 > 默认（第N章 × 章数）」，
+ * 最后那层逐字符复现旧行为，所以既没配置、也没有可扫目录的老项目结果不变。 */
+const SHARED = await import('./LayerText_AF词表与词典.mjs');
+const CN = SHARED.chapterNames(P);
 
 /** AF 专名（人物/动物/地名/作品名）——QC 口径不计 OOV（与教师专名表机制同语义） */
 const PROPER = P.PROPER;
@@ -65,7 +70,7 @@ const cleanSeg = (text, marker) => {
 };
 
 async function runChapter(i) {
-  const ch = `第${CN[i - 1]}章`;
+  const ch = CN[i - 1];
   const src = join(BASE, ch, '原文_规范化.md');
   const md = readFileSync(src, 'utf-8');
   const chLine = md.match(/^## Chapter \w+.*$/m)?.[0] ?? '## Chapter One';
@@ -146,7 +151,7 @@ if (dry) {
 }
 const results = [];
 for (const i of chapters) {
-  console.log(`▶ 第${CN[i - 1]}章`);
+  console.log(`▶ ${CN[i - 1]}`);
   try {
     results.push(await runChapter(i));
   } catch (e) {

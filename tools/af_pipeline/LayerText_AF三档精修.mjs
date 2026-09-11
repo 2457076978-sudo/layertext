@@ -12,7 +12,6 @@ const REPO = P.引擎目录;
 const SRC_BASE = P.原文目录;
 const OUT_BASE = P.产物目录;
 const DATE = P.日期;
-const CN = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十'];
 const MODEL = 'deepseek-chat';
 
 const CFG = JSON.parse(readFileSync(`${process.env.HOME}/.layertext.json`, 'utf-8'));
@@ -21,7 +20,12 @@ const { splitChapter, extractParas, sentsOf } = await import(`${REPO}/dist/src/c
 const { runQc } = await import(`${REPO}/dist/src/core/qc.js`);
 const { alignSentencePairs } = await import(`${REPO}/dist/src/core/align.js`);
 // 词表/词典集中一份（2026-09-10：三份拷贝各漏 clover/squealer/mollie，才注出"三叶草""告密者"）
-const { makeKnownChecker, loadDict, appendDict, loadLexicon } = await import('./LayerText_AF词表与词典.mjs');
+const { makeKnownChecker, loadDict, appendDict, loadLexicon, chapterNames } = await import('./LayerText_AF词表与词典.mjs');
+/* 章节名从共享模块取（**不再在 10 个脚本里各抄一份 `['一'…'十']`**）：
+ * 那份抄写写死了"十章"，换一本 12 章的书会拼出 `第undefined章` 而**照常报成功**。
+ * 现在优先级是「配置 > 原文目录 > 默认（第N章 × 章数）」，
+ * 最后那层逐字符复现旧行为，所以既没配置、也没有可扫目录的老项目结果不变。 */
+const CN = chapterNames(P);
 const PROPER = P.PROPER;
 const LEX = await loadLexicon(P);
 const isKnown = await makeKnownChecker(P); // 与 QC 同一套已知口径
@@ -78,7 +82,7 @@ const toRefs = (md) => {
 };
 
 async function refineChapter(tk, tag, i) {
-  const ch = `第${CN[i - 1]}章`;
+  const ch = CN[i - 1];
   const path = RR(tag).any('正文', { chapter: ch });
   let md = readFileSync(path, 'utf-8');
   const srcRefs = toRefs(readFileSync(join(SRC_BASE, ch, '原文_规范化.md'), 'utf-8'));
@@ -175,7 +179,7 @@ const results = [];
 const failures = [];
 for (const tk of tiers) {
   for (const i of chapters) {
-    process.stdout.write(`▶ ${tk} 第${CN[i - 1]}章…`);
+    process.stdout.write(`▶ ${tk} ${CN[i - 1]}…`);
     try {
       const r = await refineChapter(tk, TAGS[tk], i);
       results.push(r);

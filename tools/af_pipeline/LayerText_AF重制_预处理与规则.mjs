@@ -23,14 +23,19 @@ const OUT = P.原文目录;
 const SRC_CLEAN = P.原文基线清理版名 ?? '原文基线_清理对齐版.md';
 const SRC_RAW = P.原文基线重建稿名 ?? '原文基线_重建稿.txt';
 const CH_COUNT = Number(P.章数 ?? 10);
-const CN = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十'];
+/* 章节名从共享模块取（**不再在 10 个脚本里各抄一份 `['一'…'十']`**）：
+ * 那份抄写写死了"十章"，换一本 12 章的书会拼出 `第undefined章` 而**照常报成功**。
+ * 现在优先级是「配置 > 原文目录 > 默认（第N章 × 章数）」，
+ * 最后那层逐字符复现旧行为，所以既没配置、也没有可扫目录的老项目结果不变。 */
+const SHARED = await import('./LayerText_AF词表与词典.mjs');
+const CN = SHARED.chapterNames(P);
 const wc = (t) => (t.match(/[A-Za-z][A-Za-z'-]*/g) ?? []).length;
 
 mkdirSync(OUT, { recursive: true });
 const report = [];
 
 for (let i = 1; i <= CH_COUNT; i++) {
-  const ch = `第${CN[i - 1]}章`;
+  const ch = CN[i - 1];
   const dir = join(WS, ch);
   const outDir = join(OUT, ch);
   mkdirSync(outDir, { recursive: true });

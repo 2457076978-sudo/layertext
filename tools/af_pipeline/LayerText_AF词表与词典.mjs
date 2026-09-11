@@ -173,13 +173,16 @@ const _preloadEngineDir = (() => {
   }
 })();
 
-const _engineMods = { manifest: null, store: null, files: null };
+const _engineMods = { manifest: null, store: null, files: null, chapters: null };
 /** 预载失败的原因（人话，按模块分开放）。`engineModsFor` 会把它变成一句可执行的建议 */
 const _engineLoadErrors = {};
 for (const [key, file] of [
   ['manifest', 'manifest.js'],
   ['store', 'lexiconstore.js'],
   ['files', 'files.js'],
+  // 章节名：`chapterNames(P)` 要它。**同步**调用（脚本里 `const CN = SHARED.chapterNames(P)`），
+  // 所以只能走预载——`chapters.js` 是纯逻辑，预载失败时按"没有它"处理并如实报。
+  ['chapters', 'chapters.js'],
 ]) {
   try {
     _engineMods[key] = await import(`${distOf(_preloadEngineDir)}/src/core/${file}`);
@@ -1055,4 +1058,50 @@ export async function readRunIdentity(roots, want = {}, opts = {}) {
     fallbackRunId,
   });
   return { ...choice.identity, source: choice.source, warning: choice.warning };
+}
+
+/* ────────────────────── 章节名：这本书有哪些章 ────────────────────── */
+
+/**
+ * 本书的章节名清单（`['第一章','第二章',…]`）。
+ *
+ * 存在的理由（《工程优化总计划》阶段 3 验收：「**第二本书只需新建 manifest，不复制脚本**」）：
+ * 这条清单原来在 **10 个脚本**里各抄了一份 `['一','二',…,'十']`，靠 `第${CN[i-1]}章` 拼名字——
+ * 于是**写死了"十章"**。换一本 12 章的书，`CN[10]` 是 `undefined`，
+ * `第undefined章` 会一路拼进路径和报表，而脚本照常报成功。
+ * 真项目上没暴露，只因为 Animal Farm 恰好十章——**又一个"换本书才炸"的坑**。
+ *
+ * 优先级：**配置 > 原文目录 > 默认（第N章 × 章数）**。
+ * 目录事实比默认可信（目录里真有什么章就是什么章）；默认那一层逐字符复现旧行为，
+ * 所以**既没配置、也没有可扫目录的老项目，结果一个字都不变**。
+ */
+export function chapterNames(P) {
+  const { mods, why } = engineModsFor(P, 'core');
+  if (!mods?.chapters) {
+    // 拿不到就**不猜**：退回第N章 × 章数（旧行为），并说清为什么
+    console.warn(`⚠ [章节名] 拿不到引擎的 chapters.js（${why ?? '未预载'}）——退回"第N章 × 章数"的旧行为`);
+    const n = Number.isFinite(Number(P?.章数)) && Number(P.章数) > 0 ? Math.floor(Number(P.章数)) : 10;
+    return Array.from({ length: n }, (_, i) => `第${['一', '二', '三', '四', '五', '六', '七', '八', '九', '十', '十一', '十二'][i] ?? i + 1}章`);
+  }
+  const { resolveChapterNames } = mods.chapters;
+  let dirEntries;
+  const dir = P?.原文目录;
+  if (dir) {
+    try {
+      dirEntries = readdirSync(dir);
+    } catch {
+      /* 原文目录读不到（还没建、或没权限）：交给 `resolveChapterNames` 走默认并如实报告 */
+    }
+  }
+  const r = resolveChapterNames({
+    configured: P?.章节名,
+    dirEntries,
+    count: Number(P?.章数 ?? 10),
+  });
+  // **说出来**：章名是从哪儿来的、缺了哪几章。这类信息一旦丢了，"这本书几章"就没人说得清。
+  for (const w of r.warnings) console.warn(`⚠ [章节名] ${w}`);
+  if (r.source !== '默认（第N章 × 章数）') {
+    console.log(`[章节名] ${r.names.length} 章（来自${r.source}）：${r.names.join('、')}`);
+  }
+  return r.names;
 }

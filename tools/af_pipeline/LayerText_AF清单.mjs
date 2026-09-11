@@ -53,7 +53,11 @@ const REPO = P.引擎目录;
 const OUT_BASE = P.产物目录;
 const SRC_BASE = P.原文目录;
 const DATE = P.日期;
-const CN = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十'];
+/* 章节名从共享模块取（**不再在 10 个脚本里各抄一份 `['一'…'十']`**）：
+ * 那份抄写写死了"十章"，换一本 12 章的书会拼出 `第undefined章` 而**照常报成功**。
+ * 现在优先级是「配置 > 原文目录 > 默认（第N章 × 章数）」，
+ * 最后那层逐字符复现旧行为，所以既没配置、也没有可扫目录的老项目结果不变。 */
+const CN = SHARED.chapterNames(P);
 /* 层级标签与指针命名都从引擎取——**不在脚本里再抄一份**（抄一份就会有一天改漏） */
 
 const M = await import(`${SHARED.distOf(REPO)}/src/core/manifest.js`);
@@ -137,7 +141,7 @@ function buildInputs(sources) {
   return [
     ...sources,
     ...CH_IDS.map((ci) => {
-      const ch = `第${CN[ci - 1]}章`;
+      const ch = CN[ci - 1];
       const p = join(SRC_BASE, ch, '原文_规范化.md');
       const text = readIf(p);
       return text === null ? null : refOf(`原文/${ch}`, p, text);
@@ -205,7 +209,7 @@ function scanArtifacts() {
       : undefined;
     const rr = selfPaths(cur?.manifest?.runId ?? '');
     for (const ci of CH_IDS) {
-      const ch = `第${CN[ci - 1]}章`;
+      const ch = CN[ci - 1];
       const abs = rr.any('正文', { chapter: ch, tier: tag, date: DATE });
       const rel = abs.replace(`${OUT_BASE}/`, '');
       if (!existsSync(abs)) continue;

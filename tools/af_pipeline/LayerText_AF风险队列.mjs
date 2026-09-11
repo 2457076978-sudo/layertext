@@ -32,7 +32,11 @@ const REPO = P.引擎目录;
 const SRC_BASE = P.原文目录;
 const OUT_BASE = P.产物目录;
 const DATE = P.日期;
-const CN = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十'];
+/* 章节名从共享模块取（**不再在 10 个脚本里各抄一份 `['一'…'十']`**）：
+ * 那份抄写写死了"十章"，换一本 12 章的书会拼出 `第undefined章` 而**照常报成功**。
+ * 现在优先级是「配置 > 原文目录 > 默认（第N章 × 章数）」，
+ * 最后那层逐字符复现旧行为，所以既没配置、也没有可扫目录的老项目结果不变。 */
+const CN = SHARED.chapterNames(P);
 const TAGS = { A: 'A层85', M: 'M层75', B: 'B层60' };
 const TIER_INFO = {
   A: { label: 'A 层（挑战）', ratio: 0.85, maxLen: 20 },
@@ -104,7 +108,7 @@ for (const tier of TIERS) {
   const info = TIER_INFO[tier];
   const tag = TAGS[tier];
   for (const ci of CH_IDS) {
-    const ch = `第${CN[ci - 1]}章`;
+    const ch = CN[ci - 1];
     const srcPath = join(SRC_BASE, ch, '原文_规范化.md');
     const outPath = makeResolver(RUN.layout, { out: OUT_BASE, work: P.调适工作区 }, { runId: RUN.runId, tier: tag, date: DATE, suffix: SUFFIX }).any('正文', { chapter: ch });
     if (!existsSync(srcPath)) { unreadable.push(`${ch}：缺规范化原文`); continue; }

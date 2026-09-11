@@ -51,7 +51,11 @@ const REPO = P.引擎目录;
 const SRC_BASE = P.原文目录;
 const OUT_BASE = P.产物目录;
 const DATE = P.日期;
-const CN = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十'];
+/* 章节名从共享模块取（**不再在 10 个脚本里各抄一份 `['一'…'十']`**）：
+ * 那份抄写写死了"十章"，换一本 12 章的书会拼出 `第undefined章` 而**照常报成功**。
+ * 现在优先级是「配置 > 原文目录 > 默认（第N章 × 章数）」，
+ * 最后那层逐字符复现旧行为，所以既没配置、也没有可扫目录的老项目结果不变。 */
+const CN = SHARED.chapterNames(P);
 const TAGS = { A: 'A层85', M: 'M层75', B: 'B层60' };
 
 /* ────────────────────── 命令行 ────────────────────── */
@@ -130,7 +134,7 @@ const oovOf = (text) => {
   return [...new Set(runQc(md, LEX, { tier: TIER, fileName: 'seg.md', dict: DICT }).oov)].filter((w) => w.length > 2);
 };
 
-const ch = `第${CN[CH - 1]}章`;
+const ch = CN[CH - 1];
 const srcPath = join(SRC_BASE, ch, '原文_规范化.md');
 if (!existsSync(srcPath)) {
   console.error(`✗ 缺规范化原文：${srcPath}`);

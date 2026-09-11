@@ -29,7 +29,11 @@ const P = loadProject();
 const REPO = P.引擎目录;
 const OUT_BASE = P.产物目录;
 const DATE = P.日期;
-const CN = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十'];
+/* 章节名从共享模块取（**不再在 10 个脚本里各抄一份 `['一'…'十']`**）：
+ * 那份抄写写死了"十章"，换一本 12 章的书会拼出 `第undefined章` 而**照常报成功**。
+ * 现在优先级是「配置 > 原文目录 > 默认（第N章 × 章数）」，
+ * 最后那层逐字符复现旧行为，所以既没配置、也没有可扫目录的老项目结果不变。 */
+const CN = SHARED.chapterNames(P);
 const MODEL = 'deepseek-chat';
 const TAGS = { A: 'A层85', M: 'M层75', B: 'B层60' };
 
@@ -149,7 +153,7 @@ const failures = [];
 for (const tk of tiers) {
   const tag = TAGS[tk];
   for (const i of chapters) {
-    const ch = `第${CN[i - 1]}章`;
+    const ch = CN[i - 1];
     const path = RR(tag).any('正文', { chapter: ch });
     try {
       if (!existsSync(path)) throw new Error(`缺产物文件：${path}`);

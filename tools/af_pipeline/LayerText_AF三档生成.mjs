@@ -25,7 +25,11 @@ const { runQc } = await import(`${REPO}/dist/src/core/qc.js`);
 // 词表 + 本书专名（专名不计 OOV）——2026-09-10：原先只喂词库，Napoleon 等被算成生词
 const LEX = await loadLexicon(P);
 
-const CN = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十'];
+/* 章节名从共享模块取（**不再在 10 个脚本里各抄一份 `['一'…'十']`**）：
+ * 那份抄写写死了"十章"，换一本 12 章的书会拼出 `第undefined章` 而**照常报成功**。
+ * 现在优先级是「配置 > 原文目录 > 默认（第N章 × 章数）」，
+ * 最后那层逐字符复现旧行为，所以既没配置、也没有可扫目录的老项目结果不变。 */
+const CN = SHARED.chapterNames(P);
 const wc = (t) => (t.match(/[A-Za-z][A-Za-z'-]*/g) ?? []).length;
 
 /** 三档：比例=占原文词数百分比；maxLen=分层句长（A20/M16/B14 定稿口径）；retryLine=段级重试线 */
@@ -123,7 +127,7 @@ const cleanSeg = (text, marker) => {
 };
 
 async function runChapter(i, t) {
-  const ch = `第${CN[i - 1]}章`;
+  const ch = CN[i - 1];
   const src = join(SRC_BASE, ch, '原文_规范化.md');
   if (!existsSync(src)) throw new Error(`${ch} 缺规范化原文`);
   const md = readFileSync(src, 'utf-8');
@@ -198,7 +202,7 @@ if (dry) {
 const results = [];
 for (const tk of tiers) {
   for (const i of chapters) {
-    console.log(`▶ ${tk} 第${CN[i - 1]}章`);
+    console.log(`▶ ${tk} ${CN[i - 1]}`);
     try {
       results.push(await runChapter(i, TIERS[tk]));
     } catch (e) {
