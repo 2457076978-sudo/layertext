@@ -165,6 +165,9 @@ const lines = [
   `生成：${new Date().toLocaleString('zh-CN')}｜层级：${TIERS.map((t) => TIER_INFO[t].label).join(' / ')}｜章节：${CH_IDS.join(',')}`,
   `排序口径：**风险 = 概率 × 后果**（${Object.values(GATE_RULES).map((r) => `${r.label} ${(r.weight * r.probability).toFixed(1)}`).join('，')}）`,
   '',
+  '> 「级别」是**规则级别**（约束"生成时能不能算完成"）；本层权威的"没做完"信号是上面那张未完成段落表。',
+  '> 拿旧流水线的产物用新门禁重扫时，长度类规则会成片命中——那是**待判断**的偏差，不是废弃。',
+  '',
   '## 先看这里',
   '',
   `- 队列共 **${queue.summary.total}** 条（其中不可完成 ${queue.summary.blockers} 条），估时 **${queue.summary.estimatedMinutes} 分钟**`,
@@ -243,6 +246,20 @@ writeFileSync(
   ),
   'utf-8',
 );
+
+/* 队列构成：先说清楚"不可完成"是什么意思，免得教师被一个大数字吓到。
+ * 严重度是**规则级别**——它约束的是"生成这一层时能不能算完成"；
+ * 而"未完成段落"（生成时门禁真的拦下来的那些）才是权威的"没做完"信号。
+ * 把旧流水线产出的稿子拿新门禁重扫，LEN-01 会成片命中（它是**待判断**的长度偏差），
+ * 不解释清楚就会被误读成"这本书全是废的"。 */
+if (queue.summary.total) {
+  console.log('\n队列构成（按规则）：');
+  for (const [rule, n] of Object.entries(queue.summary.byRule).sort((a, b) => b[1] - a[1])) {
+    console.log(`  ${rule} ${GATE_RULES[rule]?.label ?? ''}：${n} 条（级别：${GATE_RULES[rule]?.severity === 'blocker' ? '不可完成' : '待判断'}）`);
+  }
+  console.log('  说明：「不可完成」是**规则级别**（约束生成时能否算完成）；权威的"没做完"信号是上面的「未完成段落」。');
+  console.log('        拿旧流水线的产物用新门禁重扫时，长度类规则会成片命中——那是待判断的偏差，不是废弃。');
+}
 
 if (warnings.length) {
   console.warn(`\n⚠ ${warnings.length} 个段落切不出句子（已跳过，不计入覆盖率）：`);

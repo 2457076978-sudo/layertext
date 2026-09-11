@@ -190,6 +190,14 @@ test('并发写入探测：同一运行 ID 还有活进程 → 报警（报告 �
   assert.equal(detectCollision(a, manifest({ teacher: 'li', owner: { pid: 1, host: 'other' } }), () => false), null, '不同运行不该互相报警');
 });
 
+test('空清单不许报绿：一件产物都没登记 = 这份校验证明不了任何事', () => {
+  const m = manifest();   // 没登记任何 artifact
+  const r = verifyManifest(m, { exists: () => true, lexiconVersion: m.lexicon.version });
+  assert.equal(r.ok, false, '0 件产物却报"可以当作完成品"是最坏的一种假绿');
+  assert.equal(r.problems.some((p) => p.kind === 'artifact-missing' && p.severity === 'blocked'), true);
+  assert.match(r.problems[0]!.message, /证明不了任何事/);
+});
+
 test('清单摘要：deliverable 是"能不能交付"的唯一答复', () => {
   let m = manifest();
   m = upsertArtifact(m, { path: 'a.md', kind: '正文', status: 'ok' });

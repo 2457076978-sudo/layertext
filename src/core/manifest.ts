@@ -342,6 +342,17 @@ export function verifyManifest(m: RunManifest, cur: VerifyManifestInput): { ok: 
   if (m.pendingReview > 0) {
     problems.push({ kind: 'needs-review', severity: 'blocked', message: `本次运行还有 ${m.pendingReview} 段未通过门禁（见 _待复核/），不能当作完成品` });
   }
+  // ★ 一件产物都没登记 = 这份校验**证明不了任何事**。
+  //   实测踩到：只跑了 --new（建清单）没跑 --stamp（盖章），verify 会输出
+  //   "✓ 清单一致：0 件产物……这次运行可以当作完成品引用"——一句彻头彻尾的假绿，
+  //   正是本项目要根治的那类"静默成功"。空清单必须判 blocked。
+  if (!m.artifacts.length) {
+    problems.push({
+      kind: 'artifact-missing',
+      severity: 'blocked',
+      message: '清单里没有任何产物登记——这份校验证明不了任何事（跑生成/管线时会自动盖章；手工建清单后请跑一次 --stamp）',
+    });
+  }
   for (const s of m.steps) {
     if (!s.ok) problems.push({ kind: 'step-failed', severity: 'blocked', message: `步骤「${s.id}」失败（${s.sec}s）` });
   }
