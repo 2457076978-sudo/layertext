@@ -382,6 +382,37 @@
         padding: 12px;
         min-width: 0;
       }
+      /* 风险队列面板（2026-09-11）：只看机器点名的地方——按 风险=概率×后果 排序的卡片流 */
+      .rq-head { padding: 14px 18px 8px; border-bottom: 1px solid var(--line); }
+      .rq-title { font-size: var(--fs-xl); font-weight: 600; margin-bottom: 6px; }
+      .rq-stat { font-size: var(--fs-md); color: var(--fg); margin-bottom: 4px; }
+      .rq-over { color: var(--oov); }
+      .rq-advice { font-size: var(--fs-sm); color: var(--muted); margin-bottom: 6px; }
+      .rq-plan { display: flex; gap: 6px; flex-wrap: wrap; }
+      .rq-phase {
+        font-size: var(--fs-xs); color: var(--muted); background: var(--seg-slot);
+        border-radius: var(--r-pill); padding: 2px 10px;
+      }
+      .rq-list { padding: 10px 18px 24px; display: flex; flex-direction: column; gap: 10px; }
+      .rq-card { border: 1px solid var(--line); border-radius: var(--r-md); padding: 10px 12px; background: var(--panel); }
+      .rq-card-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
+      .rq-rank { font-size: var(--fs-sm); color: var(--muted); min-width: 18px; }
+      .rq-rule { font-family: ui-monospace, monospace; font-size: var(--fs-xs); color: var(--brand); }
+      .rq-sev { font-size: var(--fs-xs); border-radius: var(--r-pill); padding: 1px 8px; }
+      .rq-sev-block { background: var(--riskbg); color: var(--oov); }
+      .rq-sev-warn { background: #fff4e5; color: var(--pending); }
+      .rq-risk { font-size: var(--fs-xs); color: var(--muted); }
+      .rq-pos { font-size: var(--fs-xs); color: var(--muted); margin-left: auto; }
+      .rq-issue { font-size: var(--fs-lg); margin-bottom: 6px; }
+      .rq-pair { font-size: var(--fs-md); line-height: 1.7; }
+      .rq-pair > div { padding-left: 52px; position: relative; }
+      .rq-lab {
+        position: absolute; left: 0; top: 0; font-size: var(--fs-xs); color: var(--muted);
+        background: var(--bg); border-radius: var(--r-sm); padding: 0 6px;
+      }
+      .rq-ctx { color: var(--muted); font-size: var(--fs-sm); }
+      .rq-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+      .rq-hint { font-size: var(--fs-xs); color: var(--muted); }
       /* 数据面板 */
       .dp { padding: 14px 18px; color: var(--fg); }
       .dp-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px; }
@@ -3339,6 +3370,9 @@
         </section>
         <section id="pane-board" class="pane">
           <div class="empty">从书架进入一本书，这里显示全书审校看板：每章门禁状态、标记数、生词率、建议采纳率</div>
+        </section>
+        <section id="pane-risk" class="pane">
+          <div class="empty"><b>风险队列：只看机器点名的地方</b><br />不再从第一段读到第 245 段——按「风险 = 概率 × 后果」排序，事实差异置顶，其次是漏注与超长，最后才是低风险语言润色。<br /><span style="font-size: var(--fs-sm)">每张卡：原句 · 改写句 · 上下文各一句 · 触发规则；三个键只记决定（不可变事件），改书稿仍走正文里的标记/建议。<br />队列还没有？在管线里跑「风险队列」那一步。</span></div>
         </section>
         <section id="pane-dossier" class="pane">
           <div class="empty">审校过程档案：指标对照 + 逐句对照摘要 + AI 决策记录 + 标记门禁，一键导出成卷（论文素材）</div>

@@ -18,7 +18,8 @@ import {
 } from './pure.js';
 import { parseEpubChapters, epubChapterMd } from './bookpure.js';
 import { renderModePill, switchView as switchViewDom, bindViewTabs, type ViewName } from './widgets.js';
-import { renderDataPane } from './datapanel.js';
+import { findProjectConfig, io as panelIo, renderDataPane } from './datapanel.js';
+import { renderRiskPane, setRiskIo, TAGS as RISK_TAGS } from './risk.js';
 import { S, esc } from './state.js';
 import { $, setStatus, toast, pop, hidePop } from './uikit.js';
 import { showSyncMarksDialog, syncPop, hideSyncPop } from './pipew.js';
@@ -303,7 +304,42 @@ const VIEW_HOOKS: Partial<Record<ViewName, () => void>> = {
   dossier: () => void renderDossierPane(),
   retro: () => void renderRetroPane(),
   data: () => void renderDataPane(S.currentBookDir ?? '').catch(() => undefined),
+  // 风险队列：只看机器点名的地方（审查报告 §一：按段顺序呈现是流程缺陷）
+  risk: () => void openRiskPane().catch(() => undefined),
 };
+
+/** 风险队列页：从当前书定位调适项目 → 解析产物目录/调适工作区 → 渲染队列。
+ *  三个决定键只写事件日志（不可变），不改书稿——改书稿仍走正文里的标记/建议。 */
+let riskTier = 'A';
+export function setRiskTier(t: string): void {
+  riskTier = t;
+}
+async function openRiskPane(): Promise<void> {
+  const dir = S.currentBookDir;
+  if (!dir) return;
+  const found = await findProjectConfig(dir);
+  const cfg = (found?.config ?? {}) as Record<string, unknown>;
+  const outDir = typeof cfg['产物目录'] === 'string' ? cfg['产物目录'] : '';
+  const workDir = typeof cfg['调适工作区'] === 'string' ? cfg['调适工作区'] : '';
+  if (!outDir || !workDir) {
+    $('pane-risk').innerHTML =
+      '<div class="empty"><b>这本书还没有调适项目配置</b><br/>风险队列靠 <code>调适项目_*.json</code> 定位产物目录与调适工作区。<br/><span style="font-size:12px">写法见 docs/快速开始.md 第 2 节</span></div>';
+    return;
+  }
+  // 与 datapanel 共用同一套 IO（Tauri 下是 read_text_file/write_text_file）——
+  // 各写一套 IO 的话，测试替身与真机行为会分叉
+  setRiskIo({
+    read: (p) => panelIo.read(p),
+    write: (p, c) => panelIo.write(p, c),
+    listDir: (d) => panelIo.listDir(d),
+  });
+  await renderRiskPane({
+    dom: document as unknown as Parameters<typeof renderRiskPane>[0]['dom'],
+    tier: riskTier,
+    paths: { outDir, workDir, sourceVersion: RISK_TAGS[riskTier] ?? riskTier },
+    teacherId: (S.appConfig as { teacherId?: string }).teacherId ?? 'unknown',
+  });
+}
 
 let curView: ViewName = 'text';
 
