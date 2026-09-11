@@ -83,7 +83,7 @@ export async function adoptPathsFor(io: TxIo, input: { sourcePath: string; confi
       runId = m.runId ?? '';
     }
   } catch {
-    /* 还没有清单 = 老项目，legacy 布局——这是正常路径，不是错误 */
+    /* 有意兜底：还没有清单＝老项目（legacy 布局）——这是正常路径，不是错误。 */
   }
   // 层级标签走**同一个**映射（定义在 src/core/manifest.ts）——
   // 自己再写一份 `A → A层85`，版本日志就会落到另一个文件里，两本账各说各话
@@ -172,6 +172,8 @@ export async function adoptRewrite(io: TxIo, input: AdoptRewriteInput): Promise<
     return reject('正文在编辑器里有未保存的改动（或已被别处改过）。先保存，再采纳这一条', 'stale');
   }
 
+  /* 有意兜底：版本日志还没有＝这本书还没改过（缺失文件本来就是报错的），
+   * baseVersion 于是按当前正文自身算；真与账本对不上时 applyChange 会拒绝并记 rejected。 */
   const nodes = parseVersionLog(await io.read(paths.versionPath).catch(() => '')).nodes;
   const segId = segIdOfIndex(input.pi);
 

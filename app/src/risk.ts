@@ -96,6 +96,8 @@ export function parseQueueFile(text: string): RiskQueueFile | null {
     if (!o || !Array.isArray(o.队列)) return null;
     return o;
   } catch {
+    /* 有意兜底：解析不了＝这份队列不可用，返回 null 交给调用方——它会当场写成
+     * "队列文件格式不对：<路径>"显示在面板上，不是静默当成空队列。 */
     return null;
   }
 }
@@ -311,6 +313,8 @@ export async function loadRunIdentity(paths: ProjectPaths, want?: { teacher?: st
         updatedAt: raw.updatedAt,
       };
     } catch {
+      /* 有意兜底：指针文件没有/坏了＝"没有最近一次运行"。返回 null 让 chooseIdentity 去判——
+       * 教师/层级对不上时它会**拒绝采用并给出警告**，不把别人的运行当成自己的。 */
       return null;
     }
   };
@@ -364,7 +368,7 @@ export async function loadRiskQueue(
   try {
     events = parseDecisionLog(await io.read(R.decision())).events;
   } catch {
-    /* 还没有任何决定——这是正常的，不是错误 */
+    /* 有意兜底：还没有任何决定记录＝这本还没开过工，是常态不是错误（与下面两本账同一约定）。 */
   }
   /* ★ `sourceVersion` = **这份队列产物的内容哈希**，不是层级标签。
    * 原来传的是 `A层85` 这类标签，于是决定日志回答不了"这条决定是对着哪一版做的"——
@@ -385,7 +389,8 @@ export async function appendDecision(paths: ProjectPaths, tier: string, event: D
   try {
     prev = await io.read(path);
   } catch {
-    prev = ''; // 还没有决定日志 = 第一条决定
+    /* 有意兜底：还没有决定日志＝这就是第一条决定，从空串接着写。 */
+    prev = '';
   }
   await io.write(path, prev + toDecisionLine(event));
 }
@@ -415,6 +420,7 @@ export async function loadWorkbenchMarkers(paths: ProjectPaths, tier: string, id
   try {
     return parseWorkbenchLog(await io.read(workbenchLogPath(paths, identity, tier))).markers;
   } catch {
+    /* 有意兜底：读不到暂停点账本＝从来没暂停过，是常态不是错误（与决定日志同一约定）。 */
     return [];
   }
 }
@@ -433,7 +439,7 @@ export async function appendWorkbenchMarker(paths: ProjectPaths, tier: string, m
   try {
     prev = await io.read(path);
   } catch {
-    /* 还没有这本账 = 第一次暂停（prev 保持空串） */
+    /* 有意兜底：还没有这本账＝第一次暂停，从空串接着写。 */
   }
   await io.write(path, prev + line);
 }
@@ -513,7 +519,9 @@ export async function renderRiskPane(
        * 永远显示"还没有记录"——那个数就在这条事件的 reason 里，而这一屏正是它刚写的时候。 */
       events.push(opened);
     } catch {
-      /* 记不上不影响用队列；指标里会显示"算不出来" */
+      /* 有意兜底：开工事件记不上不影响用队列——`productMetrics` 会明说
+       * "首次上手时间：缺 session-open 或还没有任何采纳，算不出来（不是 0）"，
+       * 也就是说这个失败在这块面板上是**看得见**的，不是靠这句注释自证。 */
     }
   }
   const stat = panelStat(file, events, budget);
@@ -774,8 +782,12 @@ async function txTargetFor(paths: ProjectPaths, identity: RunIdentity, tier: str
   try {
     doc = await io!.read(docPath);
   } catch {
+    /* 有意兜底：读不到正文＝这条动作没有"当前版本"可谈，交回 null 让上游把话说清楚——
+     * 两处调用点已经写成了 rejected 事件 / "读不到正文，未撤销"，所以这里是交接，不是静默。 */
     return null;
   }
+  /* 有意兜底：版本日志还没有＝这本书还没改过（缺失文件本来就是报错的），
+   * baseVersion 于是按当前正文自身算；真与账本对不上时 applyChange 会当场拒绝并记 rejected。 */
   const log = await io!.read(R.version()).catch(() => '');
   return {
     versionPath: R.version(),
@@ -1037,7 +1049,7 @@ async function loadBookDict(paths: ProjectPaths): Promise<Map<string, string>> {
   try {
     for (const e of parseDictCsv(await io.read(paths.dictPath))) out.set(e.word, e.zh);
   } catch {
-    /* 读不到 = 空词典；补注动作会因此被拒并说明原因，不静默 */
+    /* 有意兜底：读不到＝空词典；补注动作会因此被拒并说明原因（"未带词典"），不静默 */
   }
   return out;
 }

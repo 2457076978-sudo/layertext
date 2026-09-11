@@ -11,15 +11,7 @@ import { scheduleHeatRail } from './edit.js';
 import { showGateHelp } from './chat.js';
 import { showSentenceEditor, applyZhAnnotations, applyWordSimplifications } from './pipew.js';
 import { aiRewriteSentence } from './aiflow.js';
-import {
-  jumpTo,
-  refreshBookmarksDom,
-  refreshMarkDom,
-  removeMarkDom,
-  renderSidebar,
-  restoreAllMarkDom,
-  scheduleSave,
-} from './review.js';
+import { jumpTo, refreshBookmarksDom, refreshMarkDom, removeMarkDom, renderSidebar, restoreAllMarkDom, scheduleSave } from './review.js';
 import { WORD_TYPES, SENT_TYPES, newMarkId, typeLabel, type FileSession, type Mark, type MarkLevel, type MarkType } from './types.js';
 import { phraseSpan, toggleParaBookmark } from './pure.js';
 import bundledCefr from '../../assets/wordlists/cefrj_levels.txt?raw';

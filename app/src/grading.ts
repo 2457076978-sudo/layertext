@@ -16,16 +16,7 @@ import { buildGradingPrompt } from './ai.js';
 import { runQc } from '../../src/core/qc.js';
 import { extractParas, sentsOf, splitChapter, tokenizeTxt } from '../../src/core/textpipe.js';
 import { sentenceRisks } from '../../src/core/risks.js';
-import {
-  GRADING_TYPE_LABEL,
-  buildClassGradingMd,
-  buildGradingSheetMd,
-  classGradingCsv,
-  normalizeAndSplitChapters,
-  parseGradingItems,
-  type ClassGradingRow,
-  type GradingNote,
-} from './pure.js';
+import { GRADING_TYPE_LABEL, buildClassGradingMd, buildGradingSheetMd, classGradingCsv, normalizeAndSplitChapters, parseGradingItems, type ClassGradingRow, type GradingNote } from './pure.js';
 
 /* ---------- 引擎分析（单份学生文本：归一化 → QC → 未学结构句清单 → 复现产出） ---------- */
 
@@ -38,14 +29,13 @@ interface Analysis {
   queue: string[] | undefined;
   used: string[];
   missing: string[];
+  /** 难句清单没算出来时的原因——带着它走，报告与 AI 摘要才不会把"没算"说成"没有" */
+  riskError?: string;
 }
 
 function vocabNote(): string {
   const q = reinforceWordsNow();
-  return (
-    `课标1600（内置）${S.vocabCsvText ? ` + ${S.vocabName ?? '自定义词库'}` : ''}${S.termsText ? ' + 术语表' : ''}` +
-    (q ? `；复现队列 ${q.length} 词` : '；复现队列未启用')
-  );
+  return `课标1600（内置）${S.vocabCsvText ? ` + ${S.vocabName ?? '自定义词库'}` : ''}${S.termsText ? ' + 术语表' : ''}` + (q ? `；复现队列 ${q.length} 词` : '；复现队列未启用');
 }
 
 async function analyzeProduction(raw: string): Promise<Analysis> {
@@ -60,6 +50,7 @@ async function analyzeProduction(raw: string): Promise<Analysis> {
   });
   const risks: { sent: string; badges: string[] }[] = [];
   const longSents: string[] = [];
+  let riskError: string | undefined;
   try {
     extractParas(splitChapter(md).body).forEach((p) =>
       sentsOf(p, false).forEach((sent) => {
@@ -69,12 +60,15 @@ async function analyzeProduction(raw: string): Promise<Analysis> {
         if (r.overlong) longSents.push(sent);
       }),
     );
-  } catch {
-    /* 句清单尽力而为 */
+  } catch (e) {
+    /* 以前这里只写"尽力而为"，于是一份正文解析不了的学生文稿会**安安静静地**报出
+     * "未学结构 0 句、超长句 0 句"——那读起来像"这学生没犯错"，其实是"我没算"。
+     * 现在把这个区别带出函数：报告里点名、喂 AI 的摘要里也点名。 */
+    riskError = String(e).slice(0, 80);
   }
   const used = queue ? (report.reinforceHitList ?? []) : [];
   const missing = queue ? queue.filter((w) => !used.includes(w)) : [];
-  return { md, report, risks, longSents, wordCount: tokenizeTxt(md).length, queue, used, missing };
+  return { md, report, risks, longSents, wordCount: tokenizeTxt(md).length, queue, used, missing, riskError };
 }
 
 /** 引擎体检摘要（喂给 AI 批改的 {{engine}}，只供参考） */
@@ -83,9 +77,12 @@ function engineSummary(a: Analysis): string {
   return [
     `词数 ${a.wordCount}，句数 ${a.report.sentCount}，平均句长 ${a.report.avgLenNarrRaw.toFixed(1)}，最长 ${a.report.maxLen} 词`,
     `未学结构：被动 ${a.report.passive} / 定语从句 ${a.report.relcl} / 过去完成 ${a.report.pastperf}；超长句 ${a.longSents.length}`,
+    a.riskError ? `⚠ 逐句难句清单**没算出来**（${a.riskError}）——上面这行与"超长句"两项因此不可信，不要当成"学生没写"` : '',
     oov.length ? `超纲词（前 20）：${oov.slice(0, 20).join(', ')}` : '无超纲词',
     a.queue ? `复现词产出命中 ${a.used.length}/${a.queue.length}（用上：${a.used.slice(0, 12).join(', ') || '无'}）` : '复现队列未启用',
-  ].join('；');
+  ]
+    .filter(Boolean)
+    .join('；');
 }
 
 function productionReportMd(name: string, a: Analysis, date: string): string {
@@ -97,6 +94,7 @@ function productionReportMd(name: string, a: Analysis, date: string): string {
     '',
     `**总览**：词数 ${a.wordCount} ｜ 句数 ${a.report.sentCount} ｜ 平均句长 ${a.report.avgLenNarrRaw.toFixed(1)} 词 ｜ 最长句 ${a.report.maxLen} 词`,
     '',
+    ...(a.riskError ? [`> ⚠ 本文的**逐句难句清单没算出来**（${a.riskError}）：下面①④两节因此可能偏少——这是"我没算出来"，不是"学生没写"。`, ''] : []),
     `## ① 未学结构误用（${a.risks.length} 句——被动/定从/过去完成，学生未学；可能是超前学或背范文，教师判断）`,
     ...(a.risks.length ? a.risks.map((r) => `- [${r.badges.join('/')}] ${r.sent}`) : ['- 无']),
     '',
@@ -186,7 +184,14 @@ function renderSingleReport(name: string, text: string, a: Analysis, notes: Grad
       <span class="dim" style="font-size:12px">${esc(vocabNote())}</span>
     </div>
     <table class="gtable">
-      <tr><td>未学结构误用（被动/定从/过去完成）</td><td><b>${a.risks.length}</b> 句${a.risks.length ? `<span class="dim">（${a.risks.slice(0, 3).map((r) => r.sent.slice(0, 30) + '…').join('｜')}）</span>` : ''}</td></tr>
+      <tr><td>未学结构误用（被动/定从/过去完成）</td><td><b>${a.risks.length}</b> 句${
+        a.risks.length
+          ? `<span class="dim">（${a.risks
+              .slice(0, 3)
+              .map((r) => r.sent.slice(0, 30) + '…')
+              .join('｜')}）</span>`
+          : ''
+      }</td></tr>
       <tr><td>超纲词（班级词库之外）</td><td><b>${oov.length}</b> 个</td></tr>
       <tr><td>超长句</td><td><b>${a.longSents.length}</b> 句</td></tr>
       ${a.queue ? `<tr class="${a.used.length ? '' : 'warnrow'}"><td>复现词产出命中（读后写作用上队列词）</td><td><b>${a.used.length}/${a.queue.length}</b>${a.used.length ? `：${esc(a.used.slice(0, 10).join('、'))}` : '（一个都没用上）'}</td></tr>` : `<tr><td>复现词产出命中</td><td class="dim">队列未启用（书目录放 _已学词.csv 或班级定制勾选）</td></tr>`}
@@ -245,11 +250,7 @@ async function runAiGrading(name: string, text: string, a: Analysis): Promise<vo
   }
   setStatus('AI 批改候选生成中（只出候选，勾选的才进批改稿）…');
   try {
-    const { raw } = await chatUntilJson(
-      [{ role: 'user', content: await buildGradingPrompt({ student: name, vocabNote: vocabNote(), engine: engineSummary(a), text }) }],
-      3000,
-      'AI 批改',
-    );
+    const { raw } = await chatUntilJson([{ role: 'user', content: await buildGradingPrompt({ student: name, vocabNote: vocabNote(), engine: engineSummary(a), text }) }], 3000, 'AI 批改');
     const { ok, rejected } = parseGradingItems(raw, text);
     if (rejected > 0) toast(`已拒收 ${rejected} 条不合规批改（类型不明/原文定位不到/无批语）`, 'info');
     if (ok.length === 0) {
@@ -301,13 +302,14 @@ export async function showClassGradingPop(): Promise<void> {
 async function pickClassDir(): Promise<void> {
   const dir = await openFileDialog({ directory: true, title: '选择班级文件夹（一份文件=一个学生）' });
   if (typeof dir !== 'string') return;
-  let paths: string[] = [];
+  let paths: string[];
   try {
-    paths = (await invoke<string[]>('list_dir', { dir })).filter(
-      (f) => /\.(txt|md|markdown|docx)$/i.test(f) && !/(^|\/)_/.test(f) && !/生词卡|复现队列|批改汇总/.test(f),
-    );
-  } catch {
-    /* 目录不可读 */
+    paths = (await invoke<string[]>('list_dir', { dir })).filter((f) => /\.(txt|md|markdown|docx)$/i.test(f) && !/(^|\/)_/.test(f) && !/生词卡|复现队列|批改汇总/.test(f));
+  } catch (e) {
+    /* 读不了 ≠ 里面没有东西。以前两种情况都会走到下面那句"没有学生文稿"，
+     * 于是教师会去翻文件夹找自己"忘了放"的作文，而真正的错因一个字都没露。 */
+    setStatus(`学生文稿目录读不出来：${String(e)}——这不代表文件夹是空的，先确认路径与权限`, 'err');
+    return;
   }
   if (paths.length === 0) {
     setStatus('这个文件夹里没有学生文稿（txt/md/docx；_ 开头配置与已生成的批改产物不算）', 'err');
@@ -332,9 +334,12 @@ async function pickClassDir(): Promise<void> {
         oovWords: new Set(a.report.oov).size,
         used: a.used.length,
         queue: a.queue?.length ?? 0,
+        ...(a.riskError ? { error: `难句清单没算出来（${a.riskError}）——"未学结构/长句"两列偏低` } : {}),
       });
-    } catch {
-      rows.push({ name, words: 0, sents: 0, avgLen: 0, structure: 0, longSents: 0, oovWords: 0, used: 0, queue: 0 });
+    } catch (e) {
+      /* 读不到/解不了的学生文稿**不许混进正常行**：以前这里填一排 0，
+       * 在表里与"学生交了个空文件"长得一模一样，教师据此去批评学生会很难解释。 */
+      rows.push({ name, words: 0, sents: 0, avgLen: 0, structure: 0, longSents: 0, oovWords: 0, used: 0, queue: 0, failed: true, error: `没能读进来/算出来：${String(e).slice(0, 80)}` });
     }
   }
   const q = reinforceWordsNow();

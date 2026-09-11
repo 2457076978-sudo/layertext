@@ -47,8 +47,9 @@ export interface BookReportRow {
   relcl: number;
   pastperf: number;
   overlong: number;
-  /** 书级替换规则残留总数 */
-  ruleLeft: number;
+  /** 书级替换规则残留总数；`null` ＝ **没核到**（正文解析失败），不是 0——
+   *  这一列是拿去做交付判断的数，"0"的意思是"全书一遍都没漏"，不许由兜底填出来 */
+  ruleLeft: number | null;
   elapsedMs: number;
   outTokens: number;
   status: 'done' | 'failed';
@@ -71,12 +72,15 @@ export function buildBookReportMd(rows: BookReportRow[], meta: { book: string; d
     '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|',
     ...rows.map(
       (r) =>
-        `| ${r.chapter} | ${r.status === 'failed' ? '（失败）' : r.output} | ${cell(r, (x) => x.segCount)} | ${cell(r, (x) => (x.shrinkPct === undefined ? '—' : x.shrinkPct >= 0 ? `−${x.shrinkPct}%` : `+${-x.shrinkPct}%`))} | ${cell(r, (x) => x.oovRate)} | ${cell(r, (x) => x.avgLen)} | ${cell(r, (x) => x.maxLen)} | ${cell(r, (x) => x.passive)} | ${cell(r, (x) => x.relcl)} | ${cell(r, (x) => x.pastperf)} | ${cell(r, (x) => x.overlong)} | ${cell(r, (x) => x.ruleLeft)} | ${cell(r, (x) => `${(x.elapsedMs / 1000).toFixed(0)}s`)} | ${cell(r, (x) => x.outTokens)} |`,
+        `| ${r.chapter} | ${r.status === 'failed' ? '（失败）' : r.output} | ${cell(r, (x) => x.segCount)} | ${cell(r, (x) => (x.shrinkPct === undefined ? '—' : x.shrinkPct >= 0 ? `−${x.shrinkPct}%` : `+${-x.shrinkPct}%`))} | ${cell(r, (x) => x.oovRate)} | ${cell(r, (x) => x.avgLen)} | ${cell(r, (x) => x.maxLen)} | ${cell(r, (x) => x.passive)} | ${cell(r, (x) => x.relcl)} | ${cell(r, (x) => x.pastperf)} | ${cell(r, (x) => x.overlong)} | ${cell(r, (x) => (x.ruleLeft === null ? '—（没核到）' : x.ruleLeft))} | ${cell(r, (x) => `${(x.elapsedMs / 1000).toFixed(0)}s`)} | ${cell(r, (x) => x.outTokens)} |`,
     ),
-    `| **合计** | | ${sum((r) => r.segCount)} | | | | ${sum((r) => r.passive)} | ${sum((r) => r.relcl)} | ${sum((r) => r.pastperf)} | ${sum((r) => r.overlong)} | ${sum((r) => r.ruleLeft)} | ${(sum((r) => r.elapsedMs) / 1000).toFixed(0)}s | ${sum((r) => r.outTokens)} |`,
+    `| **合计** | | ${sum((r) => r.segCount)} | | | | ${sum((r) => r.passive)} | ${sum((r) => r.relcl)} | ${sum((r) => r.pastperf)} | ${sum((r) => r.overlong)} | ${sum((r) => r.ruleLeft ?? 0)} | ${(sum((r) => r.elapsedMs) / 1000).toFixed(0)}s | ${sum((r) => r.outTokens)} |`,
     '',
   );
-  const attention = rows.filter((r) => r.status === 'failed' || (r.status === 'done' && (r.passive + r.relcl + r.pastperf + r.overlong > 0 || r.ruleLeft > 0 || (r.shrinkPct ?? 0) > 15)));
+  /* `ruleLeft === null`（没核到）也算"要人工看一眼"：**没核过 ≠ 干净** */
+  const attention = rows.filter(
+    (r) => r.status === 'failed' || (r.status === 'done' && (r.passive + r.relcl + r.pastperf + r.overlong > 0 || r.ruleLeft === null || r.ruleLeft > 0 || (r.shrinkPct ?? 0) > 15)),
+  );
   if (attention.length) {
     lines.push('## 建议人工复查', '');
     for (const r of attention) {
@@ -87,7 +91,7 @@ export function buildBookReportMd(rows: BookReportRow[], meta: { book: string; d
           r.relcl ? `定从 ${r.relcl}` : '',
           r.pastperf ? `过去完成 ${r.pastperf}` : '',
           r.overlong ? `超长 ${r.overlong}` : '',
-          r.ruleLeft ? `替换规则残留 ${r.ruleLeft} 处` : '',
+          r.ruleLeft === null ? '替换规则残留没核到（正文解析失败，需人工看一眼）' : r.ruleLeft ? `替换规则残留 ${r.ruleLeft} 处` : '',
           (r.shrinkPct ?? 0) > 15 ? `篇幅收缩 ${r.shrinkPct}%（超守恒线，检查是否丢细节）` : '',
         ].filter(Boolean);
         lines.push(`- ${r.chapter}：${bits.join('、')}——打开产物做标记精修`);
@@ -170,6 +174,8 @@ export function parseWorkspaces(raw: string): Workspace[] {
   try {
     j = JSON.parse(raw) as { 工作区?: unknown };
   } catch {
+    /* 有意兜底：工作区配置坏了/没有＝按"无工作区"处理（函数文档注释本来就写着"宽容…返回 [] 表示无工作区"），
+     * 上游 loadWorkspaces 据此退回单版本书架。 */
     return [];
   }
   if (!Array.isArray(j.工作区)) return [];

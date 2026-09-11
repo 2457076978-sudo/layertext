@@ -134,6 +134,8 @@ export async function loadLocalExampleConfig(): Promise<void> {
       try {
         return await invoke<string>('read_text_file', { path: `${dir}/${name}` });
       } catch {
+        /* 有意兜底：示例目录里这几个配套文件都是**可选**的（教师只放自己有的那几个），
+         * 缺了就返回 null，调用方按"这一项没有"处理。 */
         return null;
       }
     };
@@ -160,6 +162,6 @@ export async function loadLocalExampleConfig(): Promise<void> {
       S.reinforceName = reinforceCsv ? '_已学词.csv（本地）' : '_已学词.txt（本地）';
     }
   } catch {
-    /* 目录不可用则跳过 */
+    /* 有意兜底：示例目录整个读不到就跳过——这一路本来就是"有则加载"，不是必须成功的一步。 */
   }
 }

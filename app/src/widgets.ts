@@ -52,8 +52,7 @@ const SUB_LABELS: Record<ViewName, string> = {
   data: '数据',
 };
 
-const groupOf = (v: ViewName): { label: string; hint: string; views: readonly ViewName[] } =>
-  VIEW_GROUPS.find((g) => g.views.includes(v)) ?? VIEW_GROUPS[0]!;
+const groupOf = (v: ViewName): { label: string; hint: string; views: readonly ViewName[] } => VIEW_GROUPS.find((g) => g.views.includes(v)) ?? VIEW_GROUPS[0]!;
 
 /** 每组最近视图（会话级记忆：点一级组回到上次所在页） */
 const lastOfGroup: Record<string, ViewName> = {};
@@ -74,13 +73,8 @@ export function syncViewTabs(root: Document, active: ViewName): void {
   const groupsEl = root.getElementById('vt-groups');
   const subEl = root.getElementById('vt-sub');
   if (!groupsEl || !subEl) return;
-  groupsEl.innerHTML = VIEW_GROUPS.map(
-    (x) => `<button class="vt-g${x.label === g.label ? ' active' : ''}" data-vt-group="${x.label}" title="${x.hint}">${x.label}</button>`,
-  ).join('');
-  subEl.innerHTML =
-    g.views.length > 1
-      ? g.views.map((v) => `<button class="vt-s${v === active ? ' active' : ''}" data-vt-view="${v}">${SUB_LABELS[v]}</button>`).join('')
-      : '';
+  groupsEl.innerHTML = VIEW_GROUPS.map((x) => `<button class="vt-g${x.label === g.label ? ' active' : ''}" data-vt-group="${x.label}" title="${x.hint}">${x.label}</button>`).join('');
+  subEl.innerHTML = g.views.length > 1 ? g.views.map((v) => `<button class="vt-s${v === active ? ' active' : ''}" data-vt-view="${v}">${SUB_LABELS[v]}</button>`).join('') : '';
 }
 
 /** 两级页签事件委托（一级=回该组上次视图；二级=切具体视图）——main 侧唯一绑定入口 */

@@ -46,7 +46,9 @@ export async function loadPrompt(name: string): Promise<{ version: string; body:
     const custom = (await invoke<string>('read_text_file', { path: `${dir}/${name}.md` })).trim();
     if (custom) out = { version: out.version + '*', body: custom, custom: true };
   } catch {
-    /* 无自定义则用内置 */
+    /* 有意兜底：自定义提示词目录里**大多数名字本来就没有文件**（教师只覆盖个别几个），
+     * 所以"读不到"是每次加载都会走的常态，不是异常。代价也写清楚：
+     * 真读不到时台账记的是内置版本号——这是本设计里已知的取舍。 */
   }
   promptCache.set(name, out);
   return out;
@@ -67,8 +69,13 @@ export async function promptSetVersion(): Promise<string> {
 export async function loadConfig(): Promise<AppConfig> {
   try {
     S.appConfig = JSON.parse(await invoke<string>('load_app_config')) as AppConfig;
-  } catch {
+  } catch (e) {
+    /* 读设置失败**不许假装"这台机器从没配过"**：S.appConfig 一变成空对象，
+     * 后面任何一次 saveConfig()（切章、记最近文件、换主题都会触发）都会把空设置**写回磁盘**，
+     * 教师的 AI 配置与阅读进度就这样静默消失。所以这里必须说出来，并明确"先别动设置"。
+     * 本层无界面依赖（依赖注入的 onStatus 就是它的状态出口），所以走 ui?.onStatus。 */
     S.appConfig = {};
+    ui?.onStatus?.(`⚠ 设置文件读不出来：${String(e)}——本次按默认设置运行；先修好它，否则改设置会把原文件覆盖成默认值`);
   }
   return S.appConfig;
 }
@@ -106,6 +113,8 @@ async function activeTargets(): Promise<ProviderTarget[]> {
     try {
       fallbackKeys[i] = await invoke<string>('load_api_key', { account: 'fb' + i });
     } catch {
+      /* 有意兜底：备用供应商的 Key 允许没配（没配就没配，不是错误）。
+       * 空串交给 buildTargets，它会退回主 Key 或跳过这一路。 */
       fallbackKeys[i] = '';
     }
   }
@@ -113,6 +122,9 @@ async function activeTargets(): Promise<ProviderTarget[]> {
 }
 
 /* ---------- 成本台账（每次 AI 调用一行，全落 reports_dir） ---------- */
+
+/** 台账写失败只在本次会话提示一次（每调用一次提示一次＝谁都会去关掉的状态行） */
+let costLogWarned = false;
 
 async function logCost(scene: string, t: ProviderTarget, elapsedMs: number, ok: boolean, usage?: { promptTokens?: number; completionTokens?: number }, note?: string): Promise<void> {
   try {
@@ -125,7 +137,8 @@ async function logCost(scene: string, t: ProviderTarget, elapsedMs: number, ok: 
     try {
       csv = await invoke<string>('read_text_file', { path });
     } catch {
-      /* 新建 */
+      /* 有意兜底：台账还不存在＝第一次记账（`read_text_file` 对缺失文件是报错的，
+       * 所以这条 catch 就是"首次"的正常路径），下面补表头。 */
     }
     if (!csv.trim()) csv = COST_HEADER.join(',') + '\n';
     csv += toCostLine({
@@ -144,8 +157,14 @@ async function logCost(scene: string, t: ProviderTarget, elapsedMs: number, ok: 
       note,
     });
     await invoke('write_text_file', { path, content: csv });
-  } catch {
-    /* 成本台账尽力而为 */
+  } catch (e) {
+    /* 这张表教师平时不盯着，所以**更容易坏得无声无息**：它一坏，复盘页的"本书 AI 成本"
+     * 与诊断包里的台账就少记，而"少记"和"本来就只用了这么点"在界面上长得一模一样。
+     * 每次调用都提示会变噪音，所以整个会话只说一次。 */
+    if (!costLogWarned) {
+      costLogWarned = true;
+      ui?.onStatus?.(`⚠ AI 成本台账写不上：${String(e)}——本次会话之后的用量不再记账（复盘页的成本会少记）`);
+    }
   }
 }
 
@@ -378,6 +397,7 @@ export async function chatStream(
       let reasoning = '';
       const tc = new Map<number, { id: string; name: string; arguments: string }>();
       const nums: UsageNums = {};
+      let droppedSse = 0; // 解析失败的流片段数（心跳属正常，截断属事故，两者都要让人看得见有多少）
       for (;;) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -413,8 +433,12 @@ export async function chatStream(
               nums.promptTokens = j.usage.prompt_tokens;
               nums.completionTokens = j.usage.completion_tokens;
             }
-          } catch {
-            /* 忽略半行 */
+          } catch (e) {
+            /* 这里以前写的是"忽略半行"，其实不准确：切出来的每一行都是完整的 SSE 行。
+             * 会解析失败的只有两种——服务商的非 JSON 片段（心跳），或者**内容真被截断**。
+             * 后者会让人拿到一份变短的答案而毫无察觉，所以计数并让状态行说一句。 */
+            droppedSse++;
+            if (droppedSse === 1) ui?.onStatus?.(`⚠ 这次回答里有流片段没能解析（${String(e).slice(0, 60)}）——若是内容被截断，回答会明显变短，重试一次`);
           }
         }
       }

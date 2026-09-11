@@ -61,13 +61,11 @@ const looksLikeChapter = (f: string): boolean => /^原文_.*\.md$/.test(f);
  *   ③ 上一级目录下各子目录里的 `.md`（Animal Farm 的产物是 `重制三版/第X章/原文_*.md`）
  * 超出上限就停下，并把"没扫完"写进 notes —— 不静默。
  */
-export async function loadLedger(input: {
-  currentText: string;
-  sourcePath?: string | null;
-}): Promise<{ words: Set<string>; notes: string[] }> {
+export async function loadLedger(input: { currentText: string; sourcePath?: string | null }): Promise<{ words: Set<string>; notes: string[] }> {
   const words = annotationLedgerOf(input.currentText);
   const notes: string[] = [];
   let read = 1; // 当前章已算
+  let unread = 0; // 读不到的文件数：账本不全必须报出来（见下面的 notes）
   let bytes = input.currentText.length;
 
   const src = input.sourcePath;
@@ -83,6 +81,8 @@ export async function loadLedger(input: {
     try {
       files = await gio.listDir(d);
     } catch {
+      /* 有意兜底：这一层目录扫不了就换下一层（子目录/父目录），
+       * 全部失败时 read=0，上面的 notes 会如实报"扫了 0 个文件"。 */
       return;
     }
     for (const f of files) {
@@ -96,7 +96,10 @@ export async function loadLedger(input: {
         read++;
         bytes += t.length;
       } catch {
-        /* 读不到就跳过——但下面的 notes 会把"没扫完"说出来 */
+        /* 读不到就跳过，但**必须计数**：这句注释原来承诺"下面的 notes 会把没扫完说出来"，
+         * 而下面对应的 notes 只报扫描上限与成功读到的文件数——少读的文件是隐形的。
+         * 后果很实在：账本不全 → 门禁以为这个词没注过 → 放行一次重复注。 */
+        unread++;
       }
     }
   };
@@ -110,9 +113,11 @@ export async function loadLedger(input: {
       await tryDir(`${parent}/${sub}`);
     }
   } catch {
-    /* 没有上一级可扫 */
+    /* 有意兜底：没有上一级可扫（书稿根目录本身就是顶层）——这不是错误，
+     * 扫描量会由下面的 notes 如实报出来。 */
   }
 
+  if (unread) notes.push(`已注词账本：有 ${unread} 个章节文件读不到，账本**不全**——跨章重复注可能漏判`);
   if (read >= LEDGER_SCAN_LIMIT.files || bytes >= LEDGER_SCAN_LIMIT.bytes) {
     notes.push(`已注词账本扫到上限（${read} 个文件 / ${Math.round(bytes / 1024)}KB）——跨章重复注可能漏判`);
   } else {
@@ -131,6 +136,8 @@ export async function loadBookDict(config: Record<string, unknown> | null): Prom
     for (const e of parseDictCsv(await gio.read(path))) map.set(e.word, e.zh);
     return map;
   } catch {
+    /* 有意兜底：词典读不到＝空词典，**判定端会如实报"未带词典"**（见 buildAppPolicy 的 notes）；
+     * tests/rewritegate.test.ts 把"读不到=空 Map"钉成了契约。 */
     return new Map();
   }
 }

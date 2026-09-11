@@ -29,8 +29,12 @@ function scheduleChatSave(): void {
         try {
           const dir = await invoke<string>('reports_dir');
           await invoke('write_text_file', { path: `${dir}/AI会话.json`, content: JSON.stringify(S.chatMsgs, null, 1) });
-        } catch {
-          /* 尽力保存 */
+        } catch (e) {
+          /* 上面刚写过"（已自动保存）"——保存真失败时那句话必须**当场**被推翻，
+           * 否则教师以为重启还能接着聊，实际重启就没了。
+           * 不用 toast：自动保存是防抖触发的，坏一次会连响很多声。 */
+          const st = document.getElementById('chat-status');
+          if (st) st.textContent = `⚠ 对话没能自动保存：${String(e)}（重启后这一段会丢，可先复制走）`;
         }
       })(),
     800,
@@ -46,7 +50,7 @@ export async function restoreChat(): Promise<void> {
       chatRender();
     }
   } catch {
-    /* 无历史 */
+    /* 有意兜底：会话文件还不存在＝第一次用（读缺失文件本来就是报错的），没有历史可恢复。 */
   }
 }
 
@@ -129,11 +133,14 @@ const AI_TOOLS = [
 async function executeTool(name: string, argsJson: string): Promise<string> {
   const s = activeSession();
   if (!s) return '错误：当前未打开任何章节';
-  let args: Record<string, unknown> = {};
+  let args: Record<string, unknown>;
   try {
     args = JSON.parse(argsJson || '{}');
   } catch {
-    /* 空 */
+    /* 参数是**模型**发来的，可能被截断。以前这里给个空对象就继续跑，
+     * 于是工具会以"没有任何参数"执行——查的是错的东西，结果看上去却正常。
+     * 改成把失败原样回给模型：它看得见，下一轮就能改。 */
+    return `错误：工具参数不是合法 JSON（${argsJson.slice(0, 120)}）——请重新调用 ${name}`;
   }
   try {
     switch (name) {
@@ -374,7 +381,8 @@ async function maybeCompactChat(): Promise<void> {
     const estAfter = plan.estTail + estTokens(content) + 80;
     setStatus(`✓ 对话历史已自动压缩：约 ${plan.estBefore} → ${estAfter} tokens（旧轮要点保留在摘要里，不影响回答质量）`, 'saved');
   } catch {
-    /* 压缩失败不影响使用，留待下次 */
+    /* 有意兜底：压缩是"省 token"的优化，失败只是这一轮不省——
+     * 对话内容一个字没动，下一轮还会再试。 */
   }
 }
 

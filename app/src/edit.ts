@@ -128,13 +128,16 @@ export async function replaceAllFind(): Promise<void> {
     try {
       csv = await invoke<string>('read_text_file', { path: logPath });
     } catch {
-      /* 新建 */
+      /* 有意兜底：变更日志还不存在＝这张表第一次写（读缺失文件本来就是报错的），下面补表头。 */
     }
     if (!csv.trim()) csv = CHANGELOG_HEADER.join(',') + '\n';
     csv += ['R1', date, `标准${simplifyMaxLen()}词`, '', '', q, r, 'R15', `教师查找替换（${n} 处，可撤销）`, '人工矫正-查找替换'].map(csvCell).join(',') + '\n';
     await invoke('write_text_file', { path: logPath, content: csv });
-  } catch {
-    /* 日志失败不阻塞替换 */
+  } catch (e) {
+    /* 替换**已经写进正文了**（上面那条 toast 也已经说过"已替换 N 处"），
+     * 但变更日志这一行没落上——那意味着这次改动在整个审计链里根本不存在。
+     * 所以必须再见一次光："有据可查"这句话不能被一次写盘失败悄悄作废。 */
+    toast(`正文已替换，但变更日志没写上：${String(e)}——这次改动不会出现在台账/档案里`, 'err');
   }
 }
 
@@ -241,7 +244,11 @@ function buildHeatRail(): void {
     rail!.appendChild(d);
   };
   // 按句聚合三类信号：红=句法风险 / 橙=句内生词 / 蓝=标记（紫=风险+标记融合，title 汇总同句多标记）
-  interface RailFlags { risk: boolean; vocab: number; mark: string | null }
+  interface RailFlags {
+    risk: boolean;
+    vocab: number;
+    mark: string | null;
+  }
   const flags = new Map<HTMLElement, RailFlags>();
   const flagOf = (el: HTMLElement): RailFlags => {
     let f = flags.get(el);

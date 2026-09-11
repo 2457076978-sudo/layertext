@@ -9,29 +9,14 @@ import { open as openFileDialog, save as saveFileDialog } from '@tauri-apps/plug
 import { zipSync, strToU8 } from 'fflate';
 import { S, esc } from './state.js';
 import { $, setStatus } from './uikit.js';
-import {
-  activeSession,
-  chatUntilJson,
-  docxToText,
-  openPathIntoSession,
-  readTextSmart,
-  renderAll,
-} from './main.js';
+import { activeSession, chatUntilJson, docxToText, openPathIntoSession, readTextSmart, renderAll } from './main.js';
 import { buildLexiconNow, mergedSelection, reinforceWordsNow } from './lexicon.js';
 import { addMark, sidebarHandlers } from './reader.js';
 import { tocChapters } from './shelf.js';
 import { renderDiffPane } from './widgets.js';
 import { scheduleSave, renderSidebar } from './review.js';
 import { GATES, newMarkId, typeLabel, type FileSession } from './types.js';
-import {
-  alignSentencePairs,
-  buildDiagSummary,
-  mergeQuotaTexts,
-  normalizeAndSplitChapters,
-  parseQuizItems,
-  pickSentMarkType,
-  buildQuizMd,
-} from './pure.js';
+import { alignSentencePairs, buildDiagSummary, mergeQuotaTexts, normalizeAndSplitChapters, parseQuizItems, pickSentMarkType, buildQuizMd } from './pure.js';
 import { boardSummary, buildChapterDossierMd, dossierFileName, workspaceChipName, type DossierData, type QcSummaryLite } from './bookpure.js';
 import { runQc, toLegacyReport } from '../../src/core/qc.js';
 import { aggregate, diagnose, parseLedger, type LedgerRow } from '../../src/core/adoption.js';
@@ -339,23 +324,25 @@ async function aiQuiz(s: FileSession): Promise<void> {
         )
         .join('')}
       <div class="row-btns" style="margin-top:8px"><button id="quiz-export" class="primary">导出检测卷（勾选题数）</button></div>`;
-    $('quiz-export').addEventListener('click', () =>
-      void (async () => {
-        const picked = [...out.querySelectorAll<HTMLInputElement>('[data-quiz]:checked')].map((cb) => ok[Number(cb.dataset.quiz)]).filter(Boolean);
-        if (picked.length === 0) {
-          setStatus('先勾选要进卷的题', 'err');
-          return;
-        }
-        const date = new Date().toLocaleDateString('sv-SE');
-        const savePath = await saveFileDialog({
-          defaultPath: `读后检测_${s.fileName.replace(/\.(md|txt|markdown)$/i, '')}_${date}.md`,
-          filters: [{ name: 'Markdown', extensions: ['md'] }],
-        });
-        if (typeof savePath !== 'string') return;
-        await invoke('write_text_file', { path: savePath, content: buildQuizMd(s.fileName, picked, { date, maxLen: 16 }) });
-        setStatus(`检测卷已导出（${picked.length} 题，含教师答案页）：${savePath}`, 'saved');
-        void invoke('reveal_path', { path: savePath });
-      })(),
+    $('quiz-export').addEventListener(
+      'click',
+      () =>
+        void (async () => {
+          const picked = [...out.querySelectorAll<HTMLInputElement>('[data-quiz]:checked')].map((cb) => ok[Number(cb.dataset.quiz)]).filter(Boolean);
+          if (picked.length === 0) {
+            setStatus('先勾选要进卷的题', 'err');
+            return;
+          }
+          const date = new Date().toLocaleDateString('sv-SE');
+          const savePath = await saveFileDialog({
+            defaultPath: `读后检测_${s.fileName.replace(/\.(md|txt|markdown)$/i, '')}_${date}.md`,
+            filters: [{ name: 'Markdown', extensions: ['md'] }],
+          });
+          if (typeof savePath !== 'string') return;
+          await invoke('write_text_file', { path: savePath, content: buildQuizMd(s.fileName, picked, { date, maxLen: 16 }) });
+          setStatus(`检测卷已导出（${picked.length} 题，含教师答案页）：${savePath}`, 'saved');
+          void invoke('reveal_path', { path: savePath });
+        })(),
     );
   } catch (e) {
     out.innerHTML = '';
@@ -379,6 +366,8 @@ export async function renderRetroPane(): Promise<void> {
     const outDir = s?.sourcePath ? s.sourcePath.slice(0, s.sourcePath.lastIndexOf('/')) : await invoke<string>('reports_dir');
     csv = await invoke<string>('read_text_file', { path: `${outDir}/AI建议台账.csv` });
   } catch {
+    /* 有意兜底：台账文件还不存在＝还没采纳/拒绝过任何建议（缺失文件本来就是报错的）。
+     * 代价写明：权限之类的真错误也会走到这句"还没有台账数据"上。 */
     pane.innerHTML = `<div class="empty">还没有台账数据。<br/>你在正文里点 ✓ 采纳或 ✗ 放弃 AI 建议时，这里会自动积累记录（与变更日志同一文件夹）。<br/><span style="font-size:12px">想看跨书全量分析：菜单 帮助 → 打开本地示例文件夹 旁的《AI建议台账.csv》可用命令行工具聚合（见 docs/W2 交付报告）</span></div>`;
     return;
   }
@@ -407,7 +396,8 @@ export async function renderRetroPane(): Promise<void> {
       );
     }
   } catch {
-    /* 无成本台账则不显示卡片 */
+    /* 有意兜底：这本书还没有成本台账＝没跑过 AI，于是**不显示这张卡**——
+     * 而不是显示一张 "0 tokens / 0 次调用" 的假卡。 */
   }
   const groupRows = (list: typeof a.byMark) =>
     list
@@ -456,12 +446,15 @@ export async function renderRetroPane(): Promise<void> {
   $('retro-refresh').addEventListener('click', () => void renderRetroPane());
 }
 
-
 /* ---------- 诊断包与本地错误日志（W5：零遥测——只写本机，导出自愿） ---------- */
 
 /** 前端未捕获错误 → 本地错误日志（轮转保留 5 份，见 main.rs append_log） */
 function reportError(kind: string, e: unknown): void {
   const detail = e instanceof Error ? `${e.message}\n${e.stack ?? ''}` : String(e);
+  /* 有意兜底：这个错误**已经**由 uikit.ts 的 window 'error'/'unhandledrejection' 监听弹到教师眼前了，
+   * 这里只是往本地错误日志里抄一份（诊断包用）。日志写不上时**不能再报一次**——
+   * 那会让"报错"本身变成新的错误源，循环下去。代价是诊断包里少一个文件，
+   * 而 exportDiagnostics 会把"没装进去"写在导出结果里。 */
   void invoke('append_log', { lines: `[${kind}] ${detail}\n` }).catch(() => undefined);
 }
 
@@ -476,29 +469,41 @@ export async function exportDiagnostics(): Promise<void> {
     filters: [{ name: '诊断包 ZIP', extensions: ['zip'] }],
   });
   if (typeof savePath !== 'string') return;
+  /** 本该装进 zip 却没装进去的东西（说在导出结果里，读包的人才知道现场其实缺了一块） */
+  const missing: string[] = [];
   try {
+    /* 有意兜底：版本号/构建指纹取不到就写成"未知 / unavailable"——
+     * 那是给读诊断包的人看的**占位符**，写进 JSON 里就是"这里没取到"，不是假装取到了。 */
     const version = await getVersion().catch(() => '未知');
     // 构建指纹（版权举证）：git commit+构建时间，官方 Release 唯一
+    /* 有意兜底：构建指纹取不到就写 'unavailable'——同样是把"没取到"写在诊断包里，不是编一个 */
     const buildId = await invoke<string>('get_build_id').catch(() => 'unavailable');
     const summary = { ...buildDiagSummary(S.appConfig, version, navigator.userAgent), buildId };
     const files: Record<string, Uint8Array> = { '诊断信息.json': strToU8(JSON.stringify(summary, null, 1)) };
     try {
       const log = await invoke<string>('read_error_log');
       if (log.trim()) files['错误日志.log'] = strToU8(log.slice(-128 * 1024)); // 最多带最近 128KB
-    } catch {
-      /* 无日志 */
+    } catch (e) {
+      /* 诊断包里**少装了一个文件**这件事必须写在导出结果里：拿到 zip 的人会默认
+       * "里面就是全部现场"，而少了错误日志的包基本等于白导。 */
+      missing.push(`错误日志（${String(e).slice(0, 60)}）`);
     }
     try {
       const dir = await invoke<string>('reports_dir');
       const cost = await invoke<string>('read_text_file', { path: `${dir}/AI成本台账.csv` });
       if (cost.trim()) files['AI成本台账.csv'] = strToU8(cost.slice(-64 * 1024));
-    } catch {
-      /* 无台账 */
+    } catch (e) {
+      /* 同上。成本台账本来就可能还没建过（没跑过 AI），这里分不出"没建"与"读不到"，
+       * 那就一律写出来，让读包的人自己判断。 */
+      missing.push(`AI成本台账（${String(e).slice(0, 60)}）`);
     }
     const zipped = zipSync(files, { level: 6 });
     const zbuf = zipped.buffer.slice(zipped.byteOffset, zipped.byteOffset + zipped.byteLength) as ArrayBuffer;
     await invoke('write_file_base64', { path: savePath, b64: bufToB64(zbuf) });
-    setStatus(`诊断包已导出（${Object.keys(files).length} 个文件，不含任何书稿与学生文本）：${savePath}`, 'saved');
+    setStatus(
+      `诊断包已导出（${Object.keys(files).length} 个文件，不含任何书稿与学生文本）：${savePath}` + (missing.length ? `｜⚠ 没装进去：${missing.join('；')}` : ''),
+      missing.length ? 'dirty' : 'saved',
+    );
     void invoke('reveal_path', { path: savePath });
   } catch (e) {
     setStatus('诊断包导出失败：' + e, 'err');
@@ -528,6 +533,8 @@ function chapterSents(md: string): { pi: number; si: number; text: string }[] {
   try {
     return extractParas(splitChapter(md).body).flatMap((p, pi) => sentsOf(p, false).map((text, si) => ({ pi, si, text })));
   } catch {
+    /* 有意兜底：解析不出句子就给空表——对照页在空表上显示"没有可对照的句子"，
+     * 而不是把一段读不懂的正文硬画成对照表。 */
     return [];
   }
 }
@@ -630,6 +637,7 @@ export async function readReviewJson(chapterPath: string): Promise<{ marks?: unk
     const j = JSON.parse(await invoke<string>('read_text_file', { path: `${chapterPath.slice(0, chapterPath.lastIndexOf('/'))}/${base}_审校标记.json` }));
     return j as { marks?: unknown[]; bookmarks?: unknown[]; gate?: Record<string, boolean> };
   } catch {
+    /* 有意兜底：没有标记文件＝这一章还没审（函数自己的文档注释就是"未审不报错"）。 */
     return null;
   }
 }
@@ -649,7 +657,19 @@ export async function renderBoardPane(): Promise<void> {
   }
   const ledger = await readLedger();
   const cur = s?.sourcePath ?? null;
-  const rows: { path: string; 章: string; 门禁勾选: number; 门禁总数: number; 标记数: number; 书签数: number; 生词率: number | null; 建议数: number; 采纳数: number; 传播待办: number; 当前: boolean }[] = [];
+  const rows: {
+    path: string;
+    章: string;
+    门禁勾选: number;
+    门禁总数: number;
+    标记数: number;
+    书签数: number;
+    生词率: number | null;
+    建议数: number;
+    采纳数: number;
+    传播待办: number;
+    当前: boolean;
+  }[] = [];
   for (const f of chapters) {
     const r = await readReviewJson(f);
     const gates = r?.gate ? Object.values(r.gate).filter(Boolean).length : 0;
@@ -659,7 +679,8 @@ export async function renderBoardPane(): Promise<void> {
       try {
         rate = runQc(await invoke<string>('read_text_file', { path: f }), buildLexiconNow(), { tier: 'M', fileName: '' }).newWordRate;
       } catch {
-        /* 文件读不了留空 */
+        /* 有意兜底：看板上这一格留空（渲染成 —），**不写 0**——
+         * "生词率算不出来"与"生词率 0%"在这里是完全相反的两件事。 */
       }
     }
     const mine = ledgerOf(ledger, workspaceChipName(f), f);
@@ -717,6 +738,7 @@ async function readLedger(): Promise<LedgerRow[]> {
   try {
     return parseLedger(await invoke<string>('read_text_file', { path: `${S.currentBookDir}/AI建议台账.csv` }));
   } catch {
+    /* 有意兜底：书目录还没有台账文件＝这本书没采纳过建议，空表。 */
     return [];
   }
 }
@@ -826,7 +848,19 @@ async function exportBookDossier(): Promise<void> {
     }
     const ledger = await readLedger();
     const parts: string[] = [];
-    const boardRows: { path: string; 章: string; 门禁勾选: number; 门禁总数: number; 标记数: number; 书签数: number; 生词率: number | null; 建议数: number; 采纳数: number; 传播待办: number; 当前: boolean }[] = [];
+    const boardRows: {
+      path: string;
+      章: string;
+      门禁勾选: number;
+      门禁总数: number;
+      标记数: number;
+      书签数: number;
+      生词率: number | null;
+      建议数: number;
+      采纳数: number;
+      传播待办: number;
+      当前: boolean;
+    }[] = [];
     for (const f of chapters) {
       const md = await invoke<string>('read_text_file', { path: f });
       const r = runQc(md, buildLexiconNow(), { tier: 'M', fileName: f.slice(f.lastIndexOf('/') + 1) });

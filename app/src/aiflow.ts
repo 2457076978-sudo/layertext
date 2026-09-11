@@ -358,6 +358,9 @@ export async function acceptSuggestion(g: Suggestion, opts: { scene?: string; ou
         try {
           await invoke<string>('read_text_file', { path: bak });
         } catch {
+          /* 有意兜底：读不到就当作"还没有备份"（首改前留一份＝这个 catch 的主用途）。
+           * 风险写明：后端没给错误码，"文件不存在"与"文件存在但读不出来"在这里分不出来，
+           * 后一种情况下这一写会把原始备份换成当前内容。 */
           await invoke('write_text_file', { path: bak, content: c });
         }
       },
@@ -414,7 +417,7 @@ export async function acceptSuggestion(g: Suggestion, opts: { scene?: string; ou
     try {
       csv = await invoke<string>('read_text_file', { path: logPath });
     } catch {
-      /* 新建 */
+      /* 有意兜底：变更日志还不存在＝这张表第一次写（读缺失文件本来就是报错的），下面补表头。 */
     }
     if (!csv.trim()) csv = CHANGELOG_HEADER.join(',') + '\n';
     csv +=
@@ -645,6 +648,7 @@ export async function aiRewriteSentence(pi: number, si: number, intent: string, 
 }
 
 /** AI 建议台账（W2 数据闭环）：每次建议被 采纳/拒绝/直改 落一行，复盘页与分析脚本据此聚合 */
+let ledgerWarned = false; // 台账写失败只在本次会话提示一次
 export async function logSuggestion(s: FileSession, g: Suggestion, outcome: '采纳' | '拒绝' | '直改', scene: string, mark?: Mark): Promise<void> {
   try {
     const outDir = s.sourcePath ? s.sourcePath.slice(0, s.sourcePath.lastIndexOf('/')) : await invoke<string>('reports_dir');
@@ -653,6 +657,8 @@ export async function logSuggestion(s: FileSession, g: Suggestion, outcome: '采
     try {
       host = new URL(host).host;
     } catch {
+      /* 有意兜底：baseUrl 可能本来就不是标准 URL（教师手填的域名/内网地址），
+       * 那就记成"自定义"——台账里看得见这个字，而不是假装解析成功了。 */
       if (host) host = '自定义';
     }
     // 欠账#8：failover 切过供应商时记实际那家（与成本台账同一命名），不再误记主服务商
@@ -678,8 +684,14 @@ export async function logSuggestion(s: FileSession, g: Suggestion, outcome: '采
       rejectReason: outcome === '拒绝' ? '（点✗放弃，未填原因）' : '',
     };
     await appendCsvLine(`${outDir}/AI建议台账.csv`, LEDGER_HEADER, toLedgerLine(row));
-  } catch {
-    /* 台账尽力而为，不影响主流程 */
+  } catch (e) {
+    /* 尽不了力就别写"尽力而为"了：这张表是复盘页采纳率的**唯一**数据源，
+     * 少记一行采纳率就偏，而界面上没有任何地方能看出"少了"。
+     * 每条建议都提示会变噪音，所以整个会话只说一次。 */
+    if (!ledgerWarned) {
+      ledgerWarned = true;
+      toast(`AI 建议台账写不上：${String(e)}——复盘页的采纳率会少记（这次操作本身已经生效）`, 'err');
+    }
   }
 }
 

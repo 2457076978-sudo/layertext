@@ -6,21 +6,12 @@
 import { invoke } from '@tauri-apps/api/core';
 import { open as openFileDialog } from '@tauri-apps/plugin-dialog';
 import { S, esc } from './state.js';
-import { $, setStatus } from './uikit.js';
-import {
-  activeSession,
-  addSession,
-  docxToText,
-  readTextSmart,
-  runQcCurrent,
-} from './main.js';
+import { $, setStatus, toast } from './uikit.js';
+import { activeSession, addSession, docxToText, readTextSmart, runQcCurrent } from './main.js';
 import { buildLexiconNow, mergedSelection, reinforceWordsNow } from './lexicon.js';
 import { showAiSettings } from './settings.js';
 import { applyRewrite, loadBookConfig } from './bookio.js';
-import {
-  chnoFromPath,
-  normalizeAndSplitChapters,
-} from './pure.js';
+import { chnoFromPath, normalizeAndSplitChapters } from './pure.js';
 import { buildBookReportMd, planBatchChapters, type BatchChapterItem, type BatchProgressFile, type BookReportRow } from './bookpure.js';
 import { buildDraftSystemPrompt, callChat, simplifyMaxLen } from './ai.js';
 import { runQc } from '../../src/core/qc.js';
@@ -167,7 +158,14 @@ async function generateDraft(): Promise<void> {
   ($('draft-cancel') as HTMLElement).style.display = '';
   $('draft-progress').style.display = '';
   try {
-    const { md: newMd, outTokens: tokens, segCount, srcWords, outWords, retried } = await simplifyChapterCore(
+    const {
+      md: newMd,
+      outTokens: tokens,
+      segCount,
+      srcWords,
+      outWords,
+      retried,
+    } = await simplifyChapterCore(
       s.md,
       instructions,
       (i, total, head) => {
@@ -261,11 +259,14 @@ async function pickBatchDir(): Promise<void> {
   $('bt-dir-label').textContent = dir;
   // 本书配置自动生效（与打开单章同口径）
   if (await loadBookConfig(dir)) setStatus('已自动加载本书配置（词库/术语/约定/规则）——全书批处理将按本书规则执行', 'saved');
-  let paths: string[] = [];
+  let paths: string[];
   try {
     paths = await invoke<string[]>('list_dir', { dir });
-  } catch {
-    /* 目录不可读 */
+  } catch (e) {
+    /* 读不了 ≠ 里面没东西。以前两件事都落到下面那句"这个文件夹里没有可处理的章节文件"，
+     * 于是教师会以为自己的书是空的、跑去翻文件夹，而真正的错因（路径/权限）一个字都没露。 */
+    setStatus(`目录读不出来：${String(e)}——这不代表文件夹是空的，先确认路径与权限`, 'err');
+    return;
   }
   if (paths.length === 0) {
     $('bt-list-fld').style.display = '';
@@ -278,7 +279,7 @@ async function pickBatchDir(): Promise<void> {
   try {
     progress = JSON.parse(await invoke<string>('read_text_file', { path: `${dir}/${BATCH_PROGRESS_FILE}` })) as BatchProgressFile;
   } catch {
-    /* 无进度文件 */
+    /* 有意兜底：没有进度文件＝这本书还没跑过批处理（读缺失文件本来就是报错的），按全新队列走。 */
   }
   batchItems = [];
   for (const p of paths) {
@@ -287,7 +288,8 @@ async function pickBatchDir(): Promise<void> {
       const { chapters } = normalizeAndSplitChapters(await readChapterRaw(p), item.name);
       item.segCount = chapters.reduce((n, ch) => n + (ch.md.match(/\[P\d+\]/g)?.length ?? 0), 0);
     } catch {
-      /* 读不了的章段数显示为空 */
+      /* 有意兜底：这里只是**列表预览**的段数估计，读不了就先空着——
+       * 真有问题的章会在 runBatch 里整章失败并写明原因（那一步不吞错误）。 */
     }
     batchItems.push(item);
   }
@@ -330,19 +332,32 @@ function renderBatchList(progress: BatchProgressFile | null): void {
 async function saveBatchProgress(progress: BatchProgressFile): Promise<void> {
   try {
     await invoke('write_text_file', { path: `${batchDir}/${BATCH_PROGRESS_FILE}`, content: JSON.stringify(progress, null, 1) });
-  } catch {
-    /* 进度尽力而为 */
+  } catch (e) {
+    /* 进度写不上不影响本次跑，但**必须说**：教师中途取消或应用意外退出，
+     * 回来时这段进度就没了、得从本章重来——那是要花 AI 额度的。
+     * 每章都记一次盘，所以只在第一次失败时提示一次。 */
+    if (!progressWarned) {
+      progressWarned = true;
+      toast(`批处理进度写不上盘：${String(e)}——中途取消/意外退出后无法接着跑，会从本章重来`, 'err');
+    }
   }
 }
 
-/** 书级替换规则残留计数（机器核对，不靠 AI 自觉；与 rewriteCheck 同口径） */
-function countRuleLeft(md: string): number {
+/** 进度落盘失败只提示一次（每章一次＝状态行/弹窗会被灌满） */
+let progressWarned = false;
+
+/** 书级替换规则残留计数（机器核对，不靠 AI 自觉；与 rewriteCheck 同口径）。
+ *  解析不出来时返回 `null` ＝**没核到**，不是 0。这一点很要紧：
+ *  报告里"规则残留 0"的意思是"全书一遍都没漏"，这是拿去做交付判断的数；
+ *  拿一个假的 0 去填，等于替一本根本没核过的书签了字。 */
+function countRuleLeft(md: string): number | null {
   let left = 0;
   let body: string;
   try {
     body = splitChapter(md).body;
   } catch {
-    return 0;
+    /* 没核到 ≠ 核过且干净：返回 null（报告里渲染成"—（没核到）"），不再填 0 冒充"全书一遍没漏" */
+    return null;
   }
   for (const r of S.rewriteRules.replacements) {
     if (!r.from) continue;
@@ -369,7 +384,7 @@ async function runBatch(): Promise<void> {
     const old = JSON.parse(await invoke<string>('read_text_file', { path: `${batchDir}/${BATCH_PROGRESS_FILE}` })) as BatchProgressFile;
     for (const [k, v] of Object.entries(old.status ?? {})) if (v === 'done') progress.status[k] = 'done';
   } catch {
-    /* 全新队列 */
+    /* 有意兜底：读不到旧进度＝这本没跑过（或上次跑完被删了），于是整队都是新的。 */
   }
 
   batchAbort = new AbortController();
@@ -401,7 +416,13 @@ async function runBatch(): Promise<void> {
         const tCh = Date.now();
         const base = item.name.replace(/\.(md|txt|markdown|docx)$/i, '');
         const outName = `${chapters.length > 1 ? `${base}_${chi + 1}` : base}_简化_${date}${mergedSelection().active ? `_${mergedSelection().label.replace(/[/\\?%*:|"<>&]/g, '')}` : ''}.md`;
-        const { md: newMd, outTokens: tk, segCount, srcWords, outWords } = await simplifyChapterCore(
+        const {
+          md: newMd,
+          outTokens: tk,
+          segCount,
+          srcWords,
+          outWords,
+        } = await simplifyChapterCore(
           ch.md,
           instructions,
           (i, total) => {
@@ -458,7 +479,7 @@ async function runBatch(): Promise<void> {
         relcl: 0,
         pastperf: 0,
         overlong: 0,
-        ruleLeft: 0,
+        ruleLeft: null, // 失败章：不是"残留 0 处"，是**没核到**（报告里渲染成 —）
         elapsedMs: Date.now() - tFile,
         outTokens: 0,
         status: 'failed',
@@ -501,7 +522,8 @@ async function runBatch(): Promise<void> {
     try {
       await invoke('remove_file', { path: `${batchDir}/${BATCH_PROGRESS_FILE}` });
     } catch {
-      /* 删除失败不影响结果 */
+      /* 有意兜底：删不掉的只是"已完成的进度记录"，留着也不误导——
+       * 它记的都是 done，下次打开那几章默认不勾选（本来也确实做完了）。 */
     }
   }
   // 恢复对话框为可再次选择状态

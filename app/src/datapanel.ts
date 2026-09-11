@@ -34,7 +34,12 @@ export let io: PanelIo = {
   },
   async appendLog(logPath, line) {
     let prev = '';
-    try { prev = await io.read(logPath); } catch { /* 首次没有这个文件 */ }
+    /* 有意兜底：还没有变更日志＝第一次写（缺失文件本来就是报错的），从空串接着写 */
+    try {
+      prev = await io.read(logPath);
+    } catch {
+      /* 有意兜底：首次没有这个文件 */
+    }
     const head = prev.startsWith('\uFEFF') ? prev : '\uFEFF' + prev;
     await io.write(logPath, head.replace(/\n*$/, '\n') + line + '\n');
   },
@@ -47,7 +52,10 @@ export let io: PanelIo = {
 /** 变更日志文件名（与项目配置同目录） */
 export const CHANGE_LOG_NAME = '数据面板变更日志.csv';
 
-export interface ProjectHit { config: Record<string, unknown>; dir: string }
+export interface ProjectHit {
+  config: Record<string, unknown>;
+  dir: string;
+}
 
 /** 在某本书的根目录里找 调适项目_*.json（数据面板靠它知道各数据文件在哪）。
  *  找不到则逐级向上再试，方便 调适工作区/ 这类层级。 */
@@ -64,13 +72,18 @@ export async function findProjectConfig(bookDir: string): Promise<ProjectHit | n
       const files = await io.listDir(d);
       const hit = files.find((f) => /^调适项目_.+\.json$/.test(f));
       if (hit) return { config: JSON.parse(await io.read(`${d}/${hit}`)) as ProjectConfig, dir: d };
-    } catch { /* 继续试下一层 */ }
+    } catch {
+      /* 有意兜底：这一层没有/读不了就继续试下一层（章目录 → 书根），
+       * 全部试完返回 null，面板会显示"这本书还没有数据资产配置"并给出建法。 */
+    }
   }
   return null;
 }
 
 /** 测试/替换用 */
-export function setIo(next: PanelIo): void { io = next; }
+export function setIo(next: PanelIo): void {
+  io = next;
+}
 
 /* ══════════════ 数据类型定义 ══════════════ */
 
@@ -102,12 +115,15 @@ export interface DataKind {
 
 export const DATA_KINDS: DataKind[] = [
   {
-    id: 'vocab', label: '词库', pathKey: '词库', format: 'csv', uniqueBy: '词',
+    id: 'vocab',
+    label: '词库',
+    pathKey: '词库',
+    format: 'csv',
+    uniqueBy: '词',
     note: '判定"学生学过没有"的唯一锚。只能来自权威来源（课标/教材词表），AI 补的词必须核对后方可入库。',
     columns: [
       { key: '词', type: 'text', required: true },
-      { key: '类型', type: 'enum', values: ['单词', '课标词', '短语', '句型', '待定词'], required: true,
-        hint: '只有 单词/课标词/待定词 会被当作"学生已学"；不确定时填「待定词」' },
+      { key: '类型', type: 'enum', values: ['单词', '课标词', '短语', '句型', '待定词'], required: true, hint: '只有 单词/课标词/待定词 会被当作"学生已学"；不确定时填「待定词」' },
       { key: '词性', type: 'text' },
       { key: '释义', type: 'text' },
       { key: '来源册', type: 'text', required: true, hint: '教材册次或「课标1600」' },
@@ -117,7 +133,11 @@ export const DATA_KINDS: DataKind[] = [
     ],
   },
   {
-    id: 'kb', label: '知识库', pathKey: '书级.知识库', format: 'csv', uniqueBy: '词',
+    id: 'kb',
+    label: '知识库',
+    pathKey: '书级.知识库',
+    format: 'csv',
+    uniqueBy: '词',
     note: '每本书一份：教师确认的加注词 + 换词倾向，注入生成提示词。',
     columns: [
       { key: '类型', type: 'enum', values: ['加注词', '换词倾向'], required: true },
@@ -127,7 +147,11 @@ export const DATA_KINDS: DataKind[] = [
     ],
   },
   {
-    id: 'dict', label: '注释词典', pathKey: '书级.词典', format: 'csv', uniqueBy: '词',
+    id: 'dict',
+    label: '注释词典',
+    pathKey: '书级.词典',
+    format: 'csv',
+    uniqueBy: '词',
     note: '跨章同词同义的正本。⚠ 一个词只允许一个释义——同名多义会由校验拦下。',
     columns: [
       { key: '词', type: 'text', required: true },
@@ -136,11 +160,18 @@ export const DATA_KINDS: DataKind[] = [
     ],
   },
   {
-    id: 'proper', label: '专名表', pathKey: '书级.专名表', format: 'txt',
+    id: 'proper',
+    label: '专名表',
+    pathKey: '书级.专名表',
+    format: 'txt',
     note: '每本书一份：人名/地名/作品名。QC 不计生词、改写不加注。⚠ 漏一个主要人物就会把名字注成普通名词。',
   },
   {
-    id: 'groups', label: '分层参数', pathKey: '分层正本', format: 'json', derived: true,
+    id: 'groups',
+    label: '分层参数',
+    pathKey: '分层正本',
+    format: 'json',
+    derived: true,
     note: '分层参数的唯一正本（json）。App 分组配置与 Markdown 参数表都由它派生；本页只读，改参数请用导出脚本回环校验。',
   },
 ];
@@ -150,29 +181,50 @@ export const DATA_KINDS: DataKind[] = [
 /** 宽容 CSV 解析（BOM / 引号 / CRLF），与 tools/validate_data.mjs 同口径 */
 export function parseCsv(text: string): string[][] {
   const rows: string[][] = [];
-  let row: string[] = [], cell = '', inQ = false;
+  let row: string[] = [],
+    cell = '',
+    inQ = false;
   const s = text.replace(/^\uFEFF/, '');
   for (let i = 0; i < s.length; i++) {
     const c = s[i]!;
     if (inQ) {
-      if (c === '"') { if (s[i + 1] === '"') { cell += '"'; i++; } else inQ = false; }
-      else cell += c;
+      if (c === '"') {
+        if (s[i + 1] === '"') {
+          cell += '"';
+          i++;
+        } else inQ = false;
+      } else cell += c;
     } else if (c === '"') inQ = true;
-    else if (c === ',') { row.push(cell); cell = ''; }
-    else if (c === '\n') { row.push(cell); rows.push(row); row = []; cell = ''; }
-    else if (c !== '\r') cell += c;
+    else if (c === ',') {
+      row.push(cell);
+      cell = '';
+    } else if (c === '\n') {
+      row.push(cell);
+      rows.push(row);
+      row = [];
+      cell = '';
+    } else if (c !== '\r') cell += c;
   }
-  if (cell !== '' || row.length) { row.push(cell); rows.push(row); }
+  if (cell !== '' || row.length) {
+    row.push(cell);
+    rows.push(row);
+  }
   return rows.filter((r) => r.some((v) => v.trim() !== ''));
 }
 
 const csvCell = (v: string) => (/[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
 
 export function parseTxt(text: string): string[] {
-  return text.split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
+  return text
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l && !l.startsWith('#'));
 }
 
-export interface Table { header: string[]; rows: Record<string, string>[] }
+export interface Table {
+  header: string[];
+  rows: Record<string, string>[];
+}
 
 export function toTable(text: string): Table {
   const rows = parseCsv(text);
@@ -202,7 +254,10 @@ export function validateUnit(kind: DataKind, unit: Record<string, string>, table
   if (!kind.columns) return errs;
   for (const c of kind.columns) {
     const v = (unit[c.key] ?? '').trim();
-    if (c.required && !v) { errs.push(`「${c.key}」为必填，不能为空`); continue; }
+    if (c.required && !v) {
+      errs.push(`「${c.key}」为必填，不能为空`);
+      continue;
+    }
     if (!v) continue;
     if (c.type === 'int' && !/^\d+$/.test(v)) errs.push(`「${c.key}」必须是数字，实际「${v}」`);
     if (c.type === 'enum' && c.values && !c.values.includes(v)) {
@@ -244,10 +299,15 @@ export function validateText(kind: DataKind, text: string): string[] {
           if (g['类型'] && !['组', '人'].includes(String(g['类型']))) errs.push(`${p}.类型 取值非法`);
           if (g['类型'] === '组' && g['成员数'] === undefined) errs.push(`${p}.成员数 缺失（组必填）`);
           const id = String(g['id'] ?? '');
-          if (id) { if (ids.has(id)) errs.push(`${p}.id 重复：${id}`); ids.add(id); }
+          if (id) {
+            if (ids.has(id)) errs.push(`${p}.id 重复：${id}`);
+            ids.add(id);
+          }
         });
       }
-    } catch (e) { errs.push('JSON 解析失败：' + String(e)); }
+    } catch (e) {
+      errs.push('JSON 解析失败：' + String(e));
+    }
     return errs;
   }
   if (kind.format === 'txt') {
@@ -263,7 +323,10 @@ export function validateText(kind: DataKind, text: string): string[] {
     return errs;
   }
   const t = toTable(text);
-  if (!t.header.length) { errs.push('文件无表头'); return errs; }
+  if (!t.header.length) {
+    errs.push('文件无表头');
+    return errs;
+  }
   if (kind.columns) {
     for (const c of kind.columns) if (!t.header.includes(c.key)) errs.push(`缺列「${c.key}」（现有：${t.header.join(',')}）`);
   }
@@ -274,7 +337,10 @@ export function validateText(kind: DataKind, text: string): string[] {
     for (const e of validateUnit(kind, r, peer)) errs.push(`第 ${i + 2} 行：${e}`);
     if (kind.uniqueBy) {
       const k = `${r['类型'] ?? ''}:${(r[kind.uniqueBy!] ?? '').toLowerCase()}`;
-      if (r[kind.uniqueBy!]) { if (seen.has(k)) errs.push(`第 ${i + 2} 行：「${r[kind.uniqueBy!]}」重复`); seen.add(k); }
+      if (r[kind.uniqueBy!]) {
+        if (seen.has(k)) errs.push(`第 ${i + 2} 行：「${r[kind.uniqueBy!]}」重复`);
+        seen.add(k);
+      }
     }
   });
   return errs;
@@ -360,21 +426,27 @@ export interface PanelState {
 /** 项目配置：字段名→值（值为字符串或嵌套对象）。取值处显式转换。 */
 export type ProjectConfig = Record<string, unknown>;
 
-export const panelState: PanelState & { project: ProjectConfig | null; projectDir: string | null } =
-  { active: 'vocab', tables: {}, filter: '', log: [], project: null, projectDir: null };
+export const panelState: PanelState & { project: ProjectConfig | null; projectDir: string | null } = { active: 'vocab', tables: {}, filter: '', log: [], project: null, projectDir: null };
 
 /** 表格一次渲染多少行（词库 3600+ 行全量入 DOM 会拖慢输入与滚动）。
  *  2026-09-11 加：默认 200 行，底部「显示更多」每次再加 400。 */
 export const PAGE_STEP = 400;
 export let rowsShown = 200;
-export function moreRows(): void { rowsShown += PAGE_STEP; }
-export function resetRows(): void { rowsShown = 200; }
+export function moreRows(): void {
+  rowsShown += PAGE_STEP;
+}
+export function resetRows(): void {
+  rowsShown = 200;
+}
 
 /** 载入全部数据文件（含校验） */
 export async function loadAll(kinds: DataKind[], project: ProjectConfig): Promise<void> {
   for (const k of kinds) {
     const path = getPath(project, k.pathKey) as string | undefined;
-    if (!path) { panelState.tables[k.id] = { text: '', errs: [`项目配置缺「${k.pathKey}」`] }; continue; }
+    if (!path) {
+      panelState.tables[k.id] = { text: '', errs: [`项目配置缺「${k.pathKey}」`] };
+      continue;
+    }
     try {
       const text = await io.read(path);
       panelState.tables[k.id] = { text, errs: validateText(k, text) };
@@ -404,7 +476,10 @@ export function newErrors(fresh: string[], existing: string[]): string[] {
 /** 保存：写前校验（只拦新引入的错误）→ 写 → 写后校验 → 追加变更日志。
  *  `existingErrs` 是本次编辑前该文件的校验结果；`logDir` 是变更日志所在目录。 */
 export async function save(
-  kind: DataKind, project: ProjectConfig, newText: string, what: string,
+  kind: DataKind,
+  project: ProjectConfig,
+  newText: string,
+  what: string,
   opts: { existingErrs?: string[]; logDir?: string } = {},
 ): Promise<{ ok: boolean; error?: string; warned?: string }> {
   const pre = newErrors(validateText(kind, newText), opts.existingErrs ?? []);
@@ -413,7 +488,9 @@ export async function save(
   if (!path) return { ok: false, error: `项目配置缺「${kind.pathKey}」` };
   try {
     await io.write(path, newText);
-  } catch (e) { return { ok: false, error: `写入失败：${String(e)}` }; }
+  } catch (e) {
+    return { ok: false, error: `写入失败：${String(e)}` };
+  }
   const back = await io.read(path);
   const post = newErrors(validateText(kind, back), opts.existingErrs ?? []);
   if (post.length) return { ok: false, error: '写后校验未通过（文件已写入，请检查）：' + post.slice(0, 3).join('；') };
@@ -435,7 +512,7 @@ export async function save(
 
 /* ══════════════ DOM 渲染 ══════════════ */
 
-const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
+const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
 
 export async function renderDataPane(bookDir: string): Promise<void> {
   const el = document.getElementById('pane-data');
@@ -474,7 +551,10 @@ export async function renderDataPane(bookDir: string): Promise<void> {
   const saveOpts = { existingErrs: st.errs, logDir: panelState.projectDir ?? undefined };
   const doSave = async (newText: string, what: string) => {
     const res = await save(cur, project, newText, what, saveOpts);
-    if (!res.ok) { alert(res.error); return false; }
+    if (!res.ok) {
+      alert(res.error);
+      return false;
+    }
     if (res.warned) alert(res.warned);
     await renderDataPane(bookDir);
     return true;
@@ -492,19 +572,28 @@ export async function renderDataPane(bookDir: string): Promise<void> {
   }
   if (cur.format === 'json') {
     let data: { groups?: Record<string, unknown>[] } | null = null;
-    try { data = JSON.parse(st.text); } catch { /* 解析失败时下面按空表渲染 */ }
+    try {
+      data = JSON.parse(st.text);
+    } catch {
+      /* 有意兜底：这里按空表渲染；解析失败**不会因此消失**——同一个文件在 validateText 里
+       * 被记成"JSON 解析失败"，页签上的红色徽标与下方"N 个校验问题"就是它。 */
+    }
     const gs = data?.groups ?? [];
     const 组 = gs.filter((g) => g['类型'] === '组');
     const 人 = gs.filter((g) => g['类型'] === '人');
     body += `<div class="dp-toolbar"><span class="dp-count">${组.length} 个组 · ${人.length} 个个人条目 · 合计 ${组.reduce((a, g) => a + (Number(g['成员数']) || 0), 0)} 人</span></div>
       <table class="dp-table"><thead><tr>
         <th>梯队</th><th>人数</th><th>句长上限</th><th>覆盖目标</th><th>生词率上限</th><th>支架密度</th><th>已学词</th><th>到期词</th>
-      </tr></thead><tbody>${组.map((g) => `<tr>
+      </tr></thead><tbody>${组
+        .map(
+          (g) => `<tr>
         <td><b>${esc(String(g['名称'] ?? g['id']))}</b></td><td>${esc(String(g['成员数'] ?? ''))}</td>
         <td>${esc(String(g['句长上限'] ?? ''))}</td><td>${esc(String(g['覆盖目标'] ?? ''))}%</td>
         <td>${esc(String(g['生词率上限'] ?? ''))}%</td><td>${esc(String(g['支架密度'] ?? ''))}</td>
         <td>${((g['已学词'] as unknown[]) ?? []).length}</td><td>${((g['到期词'] as unknown[]) ?? []).length}</td>
-      </tr>`).join('')}</tbody></table>
+      </tr>`,
+        )
+        .join('')}</tbody></table>
       <div class="dp-note" style="margin-top:10px">个人条目 ${人.length} 条（每人独立参数，此处折叠）。改动请编辑正本后重跑 <code>分层_导出App配置.py</code>。</div>`;
   } else if (cur.format === 'txt') {
     const lines = parseTxt(st.text);
@@ -518,10 +607,7 @@ export async function renderDataPane(bookDir: string): Promise<void> {
         .join('')}</div>`;
   } else {
     const t = toTable(st.text);
-    const rows = t.rows
-      .map((r, i) => ({ r, i }))
-      .filter(({ r }) => !panelState.filter ||
-        Object.values(r).some((v) => String(v).toLowerCase().includes(panelState.filter.toLowerCase())));
+    const rows = t.rows.map((r, i) => ({ r, i })).filter(({ r }) => !panelState.filter || Object.values(r).some((v) => String(v).toLowerCase().includes(panelState.filter.toLowerCase())));
     // 每个词型出现几次——多于一次时删除要问"删哪一行"
     const keyCol = cur.uniqueBy ?? t.header[0]!;
     const dupCount = new Map<string, number>();
@@ -540,20 +626,28 @@ export async function renderDataPane(bookDir: string): Promise<void> {
       <span class="dp-count">共 ${t.rows.length} 行${rows.length !== t.rows.length ? `，命中 ${rows.length}` : ''}${rest > 0 ? `，已显示 ${shown.length}` : ''}</span></div>
       <div class="dp-form" id="dp-form">
         <b id="dp-form-title">新增一行</b>
-        ${cols.map((c) => `<label><span class="dp-lab">${esc(c.key)}${c.required ? '<em>*</em>' : ''}</span>
-          <input data-dp-field="${esc(c.key)}" placeholder="${esc(c.hint ?? '')}" value=""></label>`).join('')}
+        ${cols
+          .map(
+            (c) => `<label><span class="dp-lab">${esc(c.key)}${c.required ? '<em>*</em>' : ''}</span>
+          <input data-dp-field="${esc(c.key)}" placeholder="${esc(c.hint ?? '')}" value=""></label>`,
+          )
+          .join('')}
         <div class="dp-form-actions">
           <button id="dp-save" class="dp-primary">保存</button>
           <button id="dp-clear">清空</button>
         </div>
       </div>
       <table class="dp-table"><thead><tr>${t.header.map((h) => `<th${wide.has(h) ? ' class="dp-wide"' : ''}>${esc(h)}</th>`).join('')}<th></th></tr></thead>
-      <tbody>${shown.map(({ r, i }) => `<tr>
+      <tbody>${shown
+        .map(
+          ({ r, i }) => `<tr>
         ${t.header.map((h) => `<td${wide.has(h) ? ' class="dp-wide"' : ''}>${esc(r[h] ?? '')}</td>`).join('')}
         <td class="dp-ops">
           <button data-dp-edit="${i}">编辑</button>
           <button data-dp-delrow="${i}">删除${(dupCount.get((r[keyCol] ?? '').toLowerCase()) ?? 1) > 1 ? '此行' : ''}</button>
-        </td></tr>`).join('')}</tbody></table>
+        </td></tr>`,
+        )
+        .join('')}</tbody></table>
       ${rest > 0 ? `<div class="dp-more"><button id="dp-more">显示更多（还有 ${rest} 行）</button></div>` : ''}`;
   }
 
@@ -567,14 +661,24 @@ export async function renderDataPane(bookDir: string): Promise<void> {
     </div>`;
 
   el.querySelectorAll('[data-dp-tab]').forEach((b) =>
-    b.addEventListener('click', () => { panelState.active = (b as HTMLElement).dataset.dpTab!; resetRows(); void renderDataPane(bookDir); }));
+    b.addEventListener('click', () => {
+      panelState.active = (b as HTMLElement).dataset.dpTab!;
+      resetRows();
+      void renderDataPane(bookDir);
+    }),
+  );
   el.querySelector('#dp-filter')?.addEventListener('input', (e) => {
-    panelState.filter = (e.target as HTMLInputElement).value; resetRows(); void renderDataPane(bookDir);
+    panelState.filter = (e.target as HTMLInputElement).value;
+    resetRows();
+    void renderDataPane(bookDir);
   });
   el.querySelector('#dp-add')?.addEventListener('click', async () => {
     const inp = el.querySelector('#dp-new') as HTMLInputElement;
     const r = upsertProperLine(st.text, inp.value);
-    if (r.error) { alert(r.error); return; }
+    if (r.error) {
+      alert(r.error);
+      return;
+    }
     await doSave(r.text, `新增专名 ${inp.value.trim().toLowerCase()}`);
   });
 
@@ -596,12 +700,18 @@ export async function renderDataPane(bookDir: string): Promise<void> {
     });
     return unit;
   };
-  el.querySelector('#dp-more')?.addEventListener('click', () => { moreRows(); void renderDataPane(bookDir); });
+  el.querySelector('#dp-more')?.addEventListener('click', () => {
+    moreRows();
+    void renderDataPane(bookDir);
+  });
   el.querySelector('#dp-clear')?.addEventListener('click', () => fillForm(null, '新增一行'));
   el.querySelector('#dp-save')?.addEventListener('click', async () => {
     const unit = readForm();
     const r = upsertRow(cur, st.text, unit);
-    if (r.error) { alert(r.error); return; }
+    if (r.error) {
+      alert(r.error);
+      return;
+    }
     const key = unit[cur.uniqueBy ?? ''] ?? '';
     await doSave(r.text, key ? `保存 ${key}` : '新增一行');
     fillForm(null, '新增一行');
@@ -614,7 +724,8 @@ export async function renderDataPane(bookDir: string): Promise<void> {
       if (!row) return;
       fillForm(row, `编辑第 ${i + 2} 行`);
       form?.scrollIntoView({ block: 'nearest' });
-    }));
+    }),
+  );
   el.querySelectorAll('[data-dp-delrow]').forEach((b) =>
     b.addEventListener('click', async () => {
       const i = Number((b as HTMLElement).dataset.dpDelrow);
@@ -623,13 +734,18 @@ export async function renderDataPane(bookDir: string): Promise<void> {
       if (!row) return;
       const keyCol = cur.uniqueBy ?? t.header[0]!;
       const same = t.rows.filter((r) => (r[keyCol] ?? '').toLowerCase() === (row[keyCol] ?? '').toLowerCase());
-      const preview = t.header.map((h) => row[h]).filter(Boolean).join(' | ');
-      const msg = same.length > 1
-        ? `「${row[keyCol]}」共有 ${same.length} 行，本次只删第 ${i + 2} 行：\n${preview}\n\n确认？`
-        : `确认删除：\n${preview}？`;
+      const preview = t.header
+        .map((h) => row[h])
+        .filter(Boolean)
+        .join(' | ');
+      const msg = same.length > 1 ? `「${row[keyCol]}」共有 ${same.length} 行，本次只删第 ${i + 2} 行：\n${preview}\n\n确认？` : `确认删除：\n${preview}？`;
       if (!confirm(msg)) return;
       const r = deleteRowAt(cur, st.text, i);
-      if (r.error) { alert(r.error); return; }
+      if (r.error) {
+        alert(r.error);
+        return;
+      }
       await doSave(r.text, `删除第 ${i + 2} 行 ${preview}`);
-    }));
+    }),
+  );
 }

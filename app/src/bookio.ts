@@ -65,6 +65,8 @@ export async function loadBookConfig(dir: string): Promise<boolean> {
       S.rewriteRules = { replacements: cfg.rewrite.replacements ?? [], viewpoint: cfg.rewrite.viewpoint ?? 'keep', viewpointName: cfg.rewrite.viewpointName ?? '', extra: cfg.rewrite.extra ?? '' };
     return Boolean(cfg.vocabCsv || cfg.terms || cfg.proper?.length || cfg.rewrite);
   } catch {
+    /* 有意兜底：这本书没有配置＝绝大多数书的常态（`read_text_file` 对缺失文件是报错的）。
+     * 代价写明：配置损坏与"没配过"在这里分不出，都会退到"没有本书配置"。 */
     return false;
   }
 }
@@ -320,7 +322,10 @@ function chapterWords(md: string, marks: { level?: string; type?: string; word?:
   const oov = (() => {
     try {
       return runQc(md, buildLexiconNow(), { tier: 'M', fileName: '' }).oov;
-    } catch {
+    } catch (e) {
+      /* 算不出来就给空表，但**必须记一笔**：这一章的"词表外生词"凭空没了，
+       * 导出预览上只会看到总词数变少，没人知道是谁少了。 */
+      ankiMisses.push(`本章生词算不出来（${String(e).slice(0, 60)}）`);
       return [];
     }
   })();
@@ -328,7 +333,12 @@ function chapterWords(md: string, marks: { level?: string; type?: string; word?:
   return [...new Set([...oov, ...marked])];
 }
 
+/** 生词卡导出过程中"没读到/没算出来"的账：导出前在预览里、导出后在状态行里一并说出来。
+ *  这是"少给了"型错误——不记下来，界面上只会显示一个偏小的词数。 */
+let ankiMisses: string[] = [];
+
 export async function showAnkiExport(): Promise<void> {
+  ankiMisses = [];
   const s = activeSession();
   if (!s) {
     setStatus('先打开一个章节（词源=本章生词+已标记词）；全书导出需要从书架进入这本书', 'err');
@@ -346,8 +356,10 @@ export async function showAnkiExport(): Promise<void> {
       const md = await invoke<string>('read_text_file', { path: f });
       const rv = await readReviewJson(f);
       chapters.push({ from: f.slice(f.lastIndexOf('/') + 1), md, words: chapterWords(md, rv?.marks as { level?: string; type?: string; word?: string }[] | undefined) });
-    } catch {
-      /* 读不了的章跳过 */
+    } catch (e) {
+      /* 跳过的章要**点名**：不然导出的词表少了一截，而状态行上写着"（N 词）"，
+       * 谁也看不出 N 本来该更大。 */
+      ankiMisses.push(`${f.slice(f.lastIndexOf('/') + 1)} 读不到（${String(e).slice(0, 60)}）`);
     }
   }
   if (bookDir === '' && S.currentBookDir) bookDir = S.currentBookDir;
@@ -361,7 +373,8 @@ export async function showAnkiExport(): Promise<void> {
         if (local[i]) dictZh[w] = local[i]!;
       });
     } catch {
-      /* 系统词典不可用则留空 */
+      /* 有意兜底：系统词典（macOS 自带）不可用时释义留空——
+       * 这件事**在预览里看得见**（"N 个无释义（留空，导入 Anki 后可补）"），不是偷偷少一列。 */
     }
   }
   const rows = ankiRowsOf(chapters, zhNotes, dictZh, cefrOfWord);
@@ -379,11 +392,17 @@ export async function showAnkiExport(): Promise<void> {
     <p class="dim" style="font-size:12px;line-height:1.8;margin:4px 0 8px">
       词源 = 各章词表外生词 ∪ 你标记的「加中文标注/复现锚点」词（共 <b>${rows.length}</b> 词，去重）。
       释义优先用正文已有注释，其次系统词典${missZh ? `，<b>${missZh} 个无释义（留空，导入 Anki 后可补）</b>` : '，全部有释义'}。
+      ${ankiMisses.length ? `<b style="color:var(--danger)">⚠ ${ankiMisses.length} 处没能读到/算出来，词表会不全</b>：${ankiMisses.slice(0, 3).map(esc).join('；')}。<br/>` : ''}
       将写入：<code>${esc(bookDir || '示例目录')}/生词卡_Anki_日期.csv</code>（词/CEFR/释义/例句/出处）与 <code>复现队列_日期.csv</code>（词,hits——可用 <code>node dist/src/cli.js fsrs</code> 看 FSRS 间隔建议）。
     </p>
     <div style="max-height:200px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:4px">
       <table class="sgtable"><tr><th>词</th><th>CEFR</th><th>释义</th><th>例句</th></tr>
-      ${rows.slice(0, 60).map((r) => `<tr><td>${esc(r.word)}</td><td>${esc(r.cefr)}</td><td>${esc(r.zh) || '<span class="dim">—</span>'}</td><td class="dim" title="${esc(r.sent)}">${esc(r.sent.slice(0, 40))}</td></tr>`).join('')}
+      ${rows
+        .slice(0, 60)
+        .map(
+          (r) => `<tr><td>${esc(r.word)}</td><td>${esc(r.cefr)}</td><td>${esc(r.zh) || '<span class="dim">—</span>'}</td><td class="dim" title="${esc(r.sent)}">${esc(r.sent.slice(0, 40))}</td></tr>`,
+        )
+        .join('')}
       </table>
       ${rows.length > 60 ? `<div class="dim" style="padding:4px">（预览前 60 词，共 ${rows.length}）</div>` : ''}
     </div>
@@ -400,7 +419,11 @@ export async function showAnkiExport(): Promise<void> {
       await invoke('write_text_file', { path: `${dir}/生词卡_Anki_${date}.csv`, content: ankiCsv(rows) });
       await invoke('write_text_file', { path: `${dir}/复现队列_${date}.csv`, content: reinforceQueueCsv(rows) });
       panel.classList.remove('open');
-      setStatus(`生词卡已导出（${rows.length} 词，含复现队列）：${dir}/生词卡_Anki_${date}.csv——Anki 直接导入（逗号分隔）；复现队列可用 fsrs 命令看间隔建议`, 'saved');
+      setStatus(
+        `生词卡已导出（${rows.length} 词，含复现队列）：${dir}/生词卡_Anki_${date}.csv——Anki 直接导入（逗号分隔）；复现队列可用 fsrs 命令看间隔建议` +
+          (ankiMisses.length ? `｜⚠ ${ankiMisses.length} 处没读到/算出来，词表不全：${ankiMisses.slice(0, 3).join('；')}` : ''),
+        ankiMisses.length ? 'dirty' : 'saved',
+      );
       void invoke('reveal_path', { path: `${dir}/生词卡_Anki_${date}.csv` });
     } catch (e) {
       setStatus('生词卡导出失败：' + e, 'err');

@@ -197,6 +197,8 @@ export function parseAiJson(raw: string): unknown[] {
       const v = JSON.parse(s) as unknown;
       return Array.isArray(v) ? v : [v];
     } catch {
+      /* 有意兜底：这是"多策略取值"里的一试（整段 → 方括号截取 → 补右括号），
+       * 试不通就返回 null 换下一种；全部试完由调用方抛"未找到 JSON"。 */
       return null;
     }
   };
@@ -275,8 +277,42 @@ export function findOriginalFlex(md: string, original: string): { start: number;
 /** 正文已有生词注释放射：word（中文）→ { word: 中文 }（生词卡释义优先用它——教师校过的释义最可信）。
  *  英文 run 会贪婪吃掉前置词（"The boar（野猪）"的 run 是 "The boar"）——剥离前导虚词后作 key */
 const ZH_NOTE_LEADING_STOPWORDS = new Set([
-  'the', 'a', 'an', 'of', 'his', 'her', 'its', 'their', 'our', 'my', 'your', 'this', 'that', 'these', 'those',
-  'to', 'in', 'on', 'for', 'with', 'and', 'but', 'or', 'was', 'is', 'are', 'were', 'be', 'been', 'he', 'she', 'it', 'they', 'we', 'you', 'i',
+  'the',
+  'a',
+  'an',
+  'of',
+  'his',
+  'her',
+  'its',
+  'their',
+  'our',
+  'my',
+  'your',
+  'this',
+  'that',
+  'these',
+  'those',
+  'to',
+  'in',
+  'on',
+  'for',
+  'with',
+  'and',
+  'but',
+  'or',
+  'was',
+  'is',
+  'are',
+  'were',
+  'be',
+  'been',
+  'he',
+  'she',
+  'it',
+  'they',
+  'we',
+  'you',
+  'i',
 ]);
 export function extractZhNotes(md: string): Record<string, string> {
   const out: Record<string, string> = {};
@@ -301,18 +337,15 @@ export interface AnkiRow {
 
 /** 生词卡组装：多章词去重（首章出例句，出处累记）；释义优先级=正文已有注释 > 系统词典 > 留空教师补；
  *  例句=含该词（词边界、大小写不敏感）的第一个句子，截断 90 字符 */
-export function ankiRowsOf(
-  chapters: { from: string; md: string; words: string[] }[],
-  zhNotes: Record<string, string>,
-  dictZh: Record<string, string>,
-  cefrOfWord: (w: string) => string,
-): AnkiRow[] {
+export function ankiRowsOf(chapters: { from: string; md: string; words: string[] }[], zhNotes: Record<string, string>, dictZh: Record<string, string>, cefrOfWord: (w: string) => string): AnkiRow[] {
   const rows = new Map<string, AnkiRow>();
   for (const ch of chapters) {
     const sents = (() => {
       try {
         return extractParas(splitChapter(ch.md).body).flatMap((p) => sentsOf(p, false));
       } catch {
+        /* 有意兜底：纯函数没有界面出口，句清单取不到就留空——但"例句空着"这件事
+         * **在导出预览里看得见**（例句列是空的），卡片其余信息照常。 */
         return [];
       }
     })();
@@ -368,7 +401,14 @@ export function parseQuizItems(raw: unknown[]): { ok: QuizItem[]; rejected: numb
     const opts = Array.isArray(x?.options) ? x.options.filter((o) => typeof o === 'string' && o.trim()) : [];
     const answer = typeof x?.answer === 'string' ? x.answer.trim().toUpperCase() : '';
     const focus = x?.focus;
-    if (!q || opts.length < 3 || opts.length > 5 || !/^[A-D]$/.test(answer) || answer.charCodeAt(0) - 65 >= opts.length || (focus !== 'comprehension' && focus !== 'inference' && focus !== 'vocabulary')) {
+    if (
+      !q ||
+      opts.length < 3 ||
+      opts.length > 5 ||
+      !/^[A-D]$/.test(answer) ||
+      answer.charCodeAt(0) - 65 >= opts.length ||
+      (focus !== 'comprehension' && focus !== 'inference' && focus !== 'vocabulary')
+    ) {
       rejected++;
       continue;
     }
@@ -438,7 +478,10 @@ export function parseGradingItems(raw: unknown[], text: string): { ok: GradingNo
 /** 批改稿组装：原文按空行分段保留，勾选的批注挂在包含其 original 的段之后；comment 类进头部总评；
  *  定位不到段的批注集中列尾（不静默丢弃） */
 export function buildGradingSheetMd(name: string, text: string, notes: GradingNote[], meta: { date: string; vocabNote?: string }): string {
-  const paras = text.split(/\n{2,}/).map((p) => p.trim()).filter(Boolean);
+  const paras = text
+    .split(/\n{2,}/)
+    .map((p) => p.trim())
+    .filter(Boolean);
   const matches = (p: string, o: string) => p.includes(o) || normWs(p).includes(normWs(o));
   const comments = notes.filter((n) => n.type === 'comment');
   const inline = notes.filter((n) => n.type !== 'comment');
@@ -471,6 +514,11 @@ export interface ClassGradingRow {
   oovWords: number;
   used: number;
   queue: number;
+  /** 这一行没走到正常口径的原因。**不是"学生没写"**——以前失败的行会填一串 0 混在正常行里，
+   *  教师看到的就是"这个学生交了篇空的"，而不是"这份文件我没读进来"。 */
+  error?: string;
+  /** 数字列整行都不可信（文件根本没读进来）：渲染成 —，绝不留一排 0 冒充数据 */
+  failed?: boolean;
 }
 export function buildClassGradingMd(rows: ClassGradingRow[], meta: { date: string; folder: string; vocabNote?: string }): string {
   const sum = (f: (r: ClassGradingRow) => number) => rows.reduce((n, r) => n + f(r), 0);
@@ -484,7 +532,12 @@ export function buildClassGradingMd(rows: ClassGradingRow[], meta: { date: strin
     '',
     '| 学生 | 词数 | 句数 | 均长 | 未学结构 | 长句 | 超纲词 | 复现命中 |',
     '|---|---|---|---|---|---|---|---|',
-    ...rows.map((r) => `| ${r.name} | ${r.words} | ${r.sents} | ${r.avgLen.toFixed(1)} | ${r.structure} | ${r.longSents} | ${r.oovWords} | ${r.queue ? `${r.used}/${r.queue}` : '—' } |`),
+    ...rows.map((r) =>
+      r.failed
+        ? `| ${r.name} | — | — | — | — | — | — | — |`
+        : `| ${r.name}${r.error ? ' ⚠' : ''} | ${r.words} | ${r.sents} | ${r.avgLen.toFixed(1)} | ${r.structure} | ${r.longSents} | ${r.oovWords} | ${r.queue ? `${r.used}/${r.queue}` : '—'} |`,
+    ),
+    ...(rows.some((r) => r.error) ? ['', '## ⚠ 这些行没能按正常口径算完（不是"学生没写"）', ...rows.filter((r) => r.error).map((r) => `- ${r.name}：${r.error}`), ''] : []),
     '',
     '> 指标口径：未学结构=被动/定语从句/过去完成（学生未学，出现即列出教师判断）；超纲词=班级词库（课标1600+教师词库）之外；复现命中=复现队列词在本篇产出中的使用（词形家族计一次）。全部本地引擎计算。',
     '',
@@ -492,7 +545,17 @@ export function buildClassGradingMd(rows: ClassGradingRow[], meta: { date: strin
   return head.join('\n') + '\n';
 }
 export function classGradingCsv(rows: ClassGradingRow[]): string {
-  return '\ufeff' + ['学生,词数,句数,平均句长,未学结构,长句,超纲词,复现命中,队列词数', ...rows.map((r) => [r.name, r.words, r.sents, r.avgLen.toFixed(1), r.structure, r.longSents, r.oovWords, r.used, r.queue].map((v) => csvCell(String(v))).join(','))].join('\n') + '\n';
+  /* 口径没走完的行不许渲染成一排 0（那在表格里与"学生一个词没写"一模一样）：
+   * 数字列给 —，学生名后面挂 ⚠，原因在 md 那一版里逐条列出。 */
+  const cellOf = (r: ClassGradingRow): string[] =>
+    r.failed
+      ? ['—', '—', '—', '—', '—', '—', '—', '—']
+      : [String(r.words), String(r.sents), r.avgLen.toFixed(1), String(r.structure), String(r.longSents), String(r.oovWords), String(r.used), String(r.queue)];
+  return (
+    '\ufeff' +
+    ['学生,词数,句数,平均句长,未学结构,长句,超纲词,复现命中,队列词数', ...rows.map((r) => [`${r.name}${r.error ? ' ⚠' : ''}`, ...cellOf(r)].map((v) => csvCell(v)).join(','))].join('\n') +
+    '\n'
+  );
 }
 
 /** ⚠︎ 复核角标随正文重排（与 remapMarks 同思想）：角标条目带原句身份（pi:si|原句|原因），
@@ -516,10 +579,7 @@ export function remapWarns(warns: string[] | undefined, md: string): string[] {
  *  ① 缺坐标或坐标句已变 → locateSent 重定位（尽力而为，只影响日志）；
  *  ② indexOf 精确匹配；③ findOriginalFlex 宽容匹配（空白/连字符差异，命中回写正文原句形态）。
  *  返回 null = 定位失败：建议留在「修订建议」页人工处理，绝不写错位置（UI 归宿②）。 */
-export function resolveSuggestionTarget(
-  md: string,
-  g: { pi?: number; si?: number; original: string },
-): { pi?: number; si?: number; at: number; original: string } | null {
+export function resolveSuggestionTarget(md: string, g: { pi?: number; si?: number; original: string }): { pi?: number; si?: number; at: number; original: string } | null {
   if (!g.original.trim()) return null; // 空 original：indexOf("") 恒返 0，会把建议写进文首——直接定位失败
   let { pi, si } = g;
   const original0 = g.original;
@@ -683,9 +743,13 @@ export function decodeAuto(bin: Uint8Array): string {
   try {
     return new TextDecoder('utf-8', { fatal: true }).decode(bin);
   } catch {
+    /* 有意兜底：严格 UTF-8 解不开＝这份文件不是 UTF-8（从 Word/网页粘出来的常见），
+     * 换 GB18030 再试一次——这是编码探测，不是错误。 */
     try {
       return new TextDecoder('gb18030').decode(bin);
     } catch {
+      /* 有意兜底：两种编码都不认（罕见的混字节），最后用带替换字符的解码——
+       * 正文里会出现 �：教师看得见"这里有东西没读对"，总比整个文件打不开好。 */
       return new TextDecoder('utf-8').decode(bin); // 兜底替换字符（总比打不开好）
     }
   }
@@ -803,6 +867,8 @@ export function buildDiagSummary(cfg: DiagConfigInput, appVersion: string, userA
   try {
     host = new URL(host).host;
   } catch {
+    /* 有意兜底：baseUrl 可能不是标准 URL，诊断包里写"(自定义地址)"——
+     * 读包的人看得见这个占位符，不是把解析失败记成域名。 */
     if (host) host = '(自定义地址)';
   }
   return {
@@ -892,4 +958,3 @@ export function toggleParaBookmark(list: { pi: number; text: string; ts: number 
 
 export { alignSentencePairs, signalsOf, lostSignals } from '../../src/core/align.js';
 export type { AlignSentRef, AlignRow } from '../../src/core/align.js';
-

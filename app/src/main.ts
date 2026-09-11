@@ -8,14 +8,7 @@ import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { open as openFileDialog, save as saveFileDialog } from '@tauri-apps/plugin-dialog';
 import { unzipSync, strFromU8 } from 'fflate';
-import {
-  chnoFromPath,
-  tagFromPath,
-  normalizeAndSplitChapters,
-  parseAiJson,
-  routeSelection,
-  decodeAuto,
-} from './pure.js';
+import { chnoFromPath, tagFromPath, normalizeAndSplitChapters, parseAiJson, routeSelection, decodeAuto } from './pure.js';
 import { parseEpubChapters, epubChapterMd } from './bookpure.js';
 import { renderModePill, switchView as switchViewDom, bindViewTabs, type ViewName } from './widgets.js';
 import { findProjectConfig, io as panelIo, renderDataPane } from './datapanel.js';
@@ -26,8 +19,37 @@ import { showSyncMarksDialog, syncPop, hideSyncPop } from './pipew.js';
 import { aiSuggest, renderSuggestions, attachInlineSuggestions, logSuggestion, focusNextSuggestion, suggestionByEl, acceptSuggestion } from './aiflow.js';
 import { showDraftPop, showBatchPop, closeDraftPop, closeBatchPop, batchPop } from './batch.js';
 import { renderReportPane, renderDiff, renderAlignPane, renderBoardPane, renderDossierPane, renderRetroPane, exportDiagnostics, simulateError } from './report.js';
-import { ensureClassGroups, toggleClsPanel, applyTheme, applyReaderLineHeight, applyReaderFont, stepTheme, stepReaderFont, toggleSettings, showStandardPop, showAiSettings, aiPop, tierPop, showWelcome, tourShow } from './settings.js';
-import { renderShelf, touchProgress, tocPanelEl, refreshToc, renderWorkspaceBar, backToShelf, toggleToc, closeToc, closeShelfCtxMenu, switchWorkspace, scheduleSaveLastSession, saveLastSession, loadWorkspaces } from './shelf.js';
+import {
+  ensureClassGroups,
+  toggleClsPanel,
+  applyTheme,
+  applyReaderLineHeight,
+  applyReaderFont,
+  stepTheme,
+  stepReaderFont,
+  toggleSettings,
+  showStandardPop,
+  showAiSettings,
+  aiPop,
+  tierPop,
+  showWelcome,
+  tourShow,
+} from './settings.js';
+import {
+  renderShelf,
+  touchProgress,
+  tocPanelEl,
+  refreshToc,
+  renderWorkspaceBar,
+  backToShelf,
+  toggleToc,
+  closeToc,
+  closeShelfCtxMenu,
+  switchWorkspace,
+  scheduleSaveLastSession,
+  saveLastSession,
+  loadWorkspaces,
+} from './shelf.js';
 import { renderReader, updateMarkBadge, sidebarHandlers, showWordPanel, showSentPanel, showPhrasePanel } from './reader.js';
 import { restoreChat, chatRender, hideGatePop, gatePop } from './chat.js';
 import { saveBookConfig, loadBookConfig, exportDocx, exportTts, showRewritePop, showAnkiExport } from './bookio.js';
@@ -35,22 +57,13 @@ import { showGradingPop, showClassGradingPop } from './grading.js';
 import { showRevPop } from './reviewgen.js';
 import { scrollEl, scrollNow, doUndo, doRedo, openFind, closeFind, runFind, jumpFind, replaceAllFind, jumpNextRisk, popHotkey, resetRiskJump } from './edit.js';
 import { buildLexiconNow, mergedSelection, reinforceWordsNow, importVocabFile, importTermsFile, importProperFile, loadLocalExampleConfig } from './lexicon.js';
-import {
-  callChat,
-  loadConfig,
-  saveConfig,
-  setAiUi,
-} from './ai.js';
+import { callChat, loadConfig, saveConfig, setAiUi } from './ai.js';
 import exampleMd from '../../examples/texts/aesop_tortoise_hare.md?raw';
 import exampleVocab from '../../examples/vocab/sample_teaching_vocab.csv?raw';
 import { runQc, toLegacyReport } from '../../src/core/qc.js';
 import { extractParas, sentsOf, splitChapter } from '../../src/core/textpipe.js';
 import { renderSidebar, scheduleSave } from './review.js';
-import {
-  GATES,
-  newReviewState,
-  type FileSession,
-} from './types.js';
+import { GATES, newReviewState, type FileSession } from './types.js';
 
 /* ---------- 全局状态 ---------- */
 
@@ -106,7 +119,7 @@ export async function addSession(md: string, fileName: string, sourcePath: strin
       review.bookmarks = Array.isArray(parsed.bookmarks) ? parsed.bookmarks : [];
     }
   } catch {
-    /* 无历史标记，正常 */
+    /* 有意兜底：这一章还没审过＝没有标记文件，是常态（`read_text_file` 对缺失文件是报错的）。 */
   }
   S.sessions.push({ md, fileName, sourcePath, markPath, review, report: null, reportSavedPath: null, dirty: false });
   S.activeIdx = S.sessions.length - 1;
@@ -284,7 +297,6 @@ export async function runQcCurrent(opts: { auto?: boolean } = {}): Promise<void>
   if (!opts.auto) switchView('report');
 }
 
-
 /* ---------- 最近编辑 ---------- */
 
 async function pushRecent(fileName: string, sourcePath: string | null): Promise<void> {
@@ -303,9 +315,12 @@ const VIEW_HOOKS: Partial<Record<ViewName, () => void>> = {
   board: () => void renderBoardPane(),
   dossier: () => void renderDossierPane(),
   retro: () => void renderRetroPane(),
-  data: () => void renderDataPane(S.currentBookDir ?? '').catch(() => undefined),
+  /* 这两个页签点下去要 await 一段读盘渲染。以前失败被 `.catch(() => undefined)` 吃掉，
+   * 于是就成了计划里点名的那种症状：**点了没反应、卡片还在**——教师点「数据」，
+   * 屏幕什么都不变，也没有任何人告诉他为什么。 */
+  data: () => void renderDataPane(S.currentBookDir ?? '').catch((e) => setStatus('数据面板没能打开：' + e, 'err')),
   // 风险队列：只看机器点名的地方（审查报告 §一：按段顺序呈现是流程缺陷）
-  risk: () => void openRiskPane().catch(() => undefined),
+  risk: () => void openRiskPane().catch((e) => setStatus('风险队列没能打开：' + e, 'err')),
 };
 
 /** 风险队列页：从当前书定位调适项目 → 解析产物目录/调适工作区 → 渲染队列。
@@ -340,6 +355,9 @@ async function openRiskPane(): Promise<void> {
       try {
         await invoke<string>('read_text_file', { path: bak });
       } catch {
+        /* 有意兜底：读不到＝还没有备份（"首改前留一份"就是这个 catch 的用途）。
+         * 风险写明：后端没给错误码，"不存在"与"存在但读不出来"在这里分不出，
+         * 后一种情况下这一写会覆盖原始备份——所以备份**只在这里写**，不做每次覆盖。 */
         await invoke('write_text_file', { path: bak, content: c });
       }
     },
@@ -348,9 +366,7 @@ async function openRiskPane(): Promise<void> {
      * `O_APPEND` 让"一行一次写"成为原子的。 */
     append: (p, line) => invoke('append_text_file', { path: p, content: line }).then(() => undefined),
   });
-  const dictPath = typeof (cfg['书级'] as Record<string, unknown> | undefined)?.['词典'] === 'string'
-    ? ((cfg['书级'] as Record<string, unknown>)['词典'] as string)
-    : undefined;
+  const dictPath = typeof (cfg['书级'] as Record<string, unknown> | undefined)?.['词典'] === 'string' ? ((cfg['书级'] as Record<string, unknown>)['词典'] as string) : undefined;
   await renderRiskPane({
     dom: document as unknown as Parameters<typeof renderRiskPane>[0]['dom'],
     tier: riskTier,
@@ -384,7 +400,8 @@ async function openDemoMenu(): Promise<void> {
   try {
     locals = await invoke<string[]>('list_local_examples');
   } catch {
-    /* 目录不可用 */
+    /* 有意兜底：本地示例目录可能根本不存在（教师还没放文稿），
+     * 那就退回内置示例——他点的是"打开示例"，仍然得到一样能用的东西。 */
   }
   if (locals.length === 0) {
     loadBuiltinDemo();
@@ -720,7 +737,7 @@ export async function appendCsvLine(path: string, header: readonly string[], lin
   try {
     csv = await invoke<string>('read_text_file', { path });
   } catch {
-    /* 新建 */
+    /* 有意兜底：台账还不存在＝第一次写（读缺失文件本来就是报错的），下面补表头。 */
   }
   if (!csv.trim()) csv = header.join(',') + '\n';
   await invoke('write_text_file', { path, content: csv + line });
@@ -743,6 +760,9 @@ export async function persistEdit(s: FileSession, newMd: string): Promise<string
     try {
       await invoke<string>('read_text_file', { path: backup });
     } catch {
+      /* 有意兜底：读不到＝还没有备份，写一份（这是"首次改动前留原始版"的正常路径）。
+       * 风险写明：若备份其实存在、只是读不出来，这一写会把真原始版换成当前的 s.md；
+       * 后端没给错误码分不出来，只能接受，并靠"有备份就不覆盖"把概率压到最小。 */
       await invoke('write_text_file', { path: backup, content: s.md });
     }
     await invoke('write_text_file', { path: s.sourcePath, content: newMd });
@@ -921,8 +941,7 @@ document.addEventListener('mouseup', (e) => {
   // 选区句子一律取 Range 文档序（start/end 与拖选方向无关）：从右往左拖时 anchor/focus 反转，
   // 曾致框选后一句、面板却锚到前一句（Wayne 09-10 实测抓出）
   const range = sel.getRangeAt(0);
-  const sentOf = (n: Node | null): HTMLElement | null =>
-    ((n?.nodeType === 3 ? n.parentElement : (n as HTMLElement | null))?.closest('.sent') as HTMLElement | null) ?? null;
+  const sentOf = (n: Node | null): HTMLElement | null => ((n?.nodeType === 3 ? n.parentElement : (n as HTMLElement | null))?.closest('.sent') as HTMLElement | null) ?? null;
   const startSent = sentOf(range.startContainer);
   const endSent = sentOf(range.endContainer);
   const s = activeSession();

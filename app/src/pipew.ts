@@ -7,16 +7,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { S, esc } from './state.js';
 import { $, setStatus, toast, hidePop, showSummaryPop } from './uikit.js';
 import { switchSide } from './chat.js';
-import {
-  activeSession,
-  renderAll,
-  runQcCurrent,
-  persistEdit,
-  markPathFor,
-  readTextSmart,
-  chatUntilJson,
-  flashApplied,
-} from './main.js';
+import { activeSession, renderAll, runQcCurrent, persistEdit, markPathFor, readTextSmart, chatUntilJson, flashApplied } from './main.js';
 import { renderReader, sidebarHandlers, updateMarkBadge } from './reader.js';
 import { scheduleHeatRail } from './edit.js';
 import { restoreAllMarkDom, renderSidebar, scheduleSave } from './review.js';
@@ -86,7 +77,8 @@ export async function applyZhAnnotations(s: FileSession, marks: Mark[]): Promise
         }
       }
     } catch {
-      /* AI 失败则走原有"未收录可手写"路径 */
+      /* 有意兜底：这条是"短语走一次额外 AI 注释"的支线，失败就退回原来那条路——
+       * 那条路**会把结果说出来**（下面那句"词典未收录 N 个词…（未加注，可在正文手写）"）。 */
     }
   }
   const stillMissed = missed.filter((w) => !gloss[w] && !gloss[w.toLowerCase()] && !gloss[w.replace(/\s+/g, ' ')]);
@@ -148,13 +140,15 @@ export async function applyZhAnnotations(s: FileSession, marks: Mark[]): Promise
     try {
       csv = await invoke<string>('read_text_file', { path: logPath });
     } catch {
-      /* 新建 */
+      /* 有意兜底：变更日志还不存在＝这张表第一次写（读缺失文件本来就是报错的），下面补表头。 */
     }
     if (!csv.trim()) csv = CHANGELOG_HEADER.join(',') + '\n';
     for (const d of done) csv += ['R1', date, `标准${simplifyMaxLen()}词`, '', '', d, d, 'R13', '加中文标注（机器插入，原句不动）', 'AI直改-加注'].map(csvCell).join(',') + '\n';
     await invoke('write_text_file', { path: logPath, content: csv });
-  } catch {
-    /* 日志失败不阻塞 */
+  } catch (e) {
+    /* 正文**已经改了**（状态行与 toast 都说了"已换词/已加注"），只是变更日志这一行没落上。
+     * 那不是"少一条记录"，是这次改动在审计链里根本不存在——必须再见一次光。 */
+    toast(`正文已改，但变更日志没写上：${String(e)}——这次改动不会出现在台账/档案里`, 'err');
   }
   flashApplied(done[done.length - 1]);
   setStatus(`已加中文标注 ${done.length} 处（原句未动）：${done.slice(0, 6).join('、')}${done.length > 6 ? '…' : ''}`, 'saved');
@@ -271,14 +265,16 @@ export async function applyWordSimplifications(s: FileSession, marks: Mark[]): P
     try {
       csv = await invoke<string>('read_text_file', { path: logPath });
     } catch {
-      /* 新建 */
+      /* 有意兜底：变更日志还不存在＝这张表第一次写（读缺失文件本来就是报错的），下面补表头。 */
     }
     if (!csv.trim()) csv = CHANGELOG_HEADER.join(',') + '\n';
     for (const d of done)
       csv += ['R1', date, `标准${simplifyMaxLen()}词`, '', '', d.split('→')[0], d.split('→')[1], 'R14', '词汇简化（机器词级替换，句子不动）', 'AI直改-换词'].map(csvCell).join(',') + '\n';
     await invoke('write_text_file', { path: logPath, content: csv });
-  } catch {
-    /* 日志失败不阻塞 */
+  } catch (e) {
+    /* 正文**已经改了**（状态行与 toast 都说了"已换词/已加注"），只是变更日志这一行没落上。
+     * 那不是"少一条记录"，是这次改动在审计链里根本不存在——必须再见一次光。 */
+    toast(`正文已改，但变更日志没写上：${String(e)}——这次改动不会出现在台账/档案里`, 'err');
   }
   if (done.length) flashApplied(done[done.length - 1].split('→')[1]);
   // 总结面板：换词/降级加注/词形待复核全量明细（此前只有状态行截断前 3 条，长清单看不全）
@@ -322,8 +318,7 @@ function renderEditLive(): void {
 
 /** 编辑页恢复空态说明（保存/完成后回到这里） */
 function resetEditPane(): void {
-  document.getElementById('side-edit')!.innerHTML =
-    '<div class="side-empty">句子编辑工作台：正文里点句 → 「✎ 手动改这句」（或按 E 键），这里显示原句上下文＋大编辑框＋改后即时指标</div>';
+  document.getElementById('side-edit')!.innerHTML = '<div class="side-empty">句子编辑工作台：正文里点句 → 「✎ 手动改这句」（或按 E 键），这里显示原句上下文＋大编辑框＋改后即时指标</div>';
 }
 
 /** 手动改这句（侧栏编辑工作台）：原句+前后文灰显 + 大编辑框 + 即时指标；定稿权在教师 */
@@ -401,7 +396,7 @@ async function applyManualSentenceEdit(pi: number, si: number): Promise<void> {
   s.review.marks = marksSurvivingManualEdit(s.review.marks, { pi, si }, exact, revised);
   s.review.warns = (s.review.warns ?? []).filter((x) => !x.startsWith(`${pi}:${si}|`)); // 教师亲手改过=复核完成
   remapMarks(s.review.marks, s.md);
-    s.review.warns = remapWarns(s.review.warns, s.md);
+  s.review.warns = remapWarns(s.review.warns, s.md);
   switchSide('review');
   resetEditPane();
   const date = new Date().toLocaleDateString('sv-SE');
@@ -413,7 +408,7 @@ async function applyManualSentenceEdit(pi: number, si: number): Promise<void> {
     try {
       csv = await invoke<string>('read_text_file', { path: logPath });
     } catch {
-      /* 新建 */
+      /* 有意兜底：变更日志还不存在＝这张表第一次写（读缺失文件本来就是报错的），下面补表头。 */
     }
     if (!csv.trim()) csv = CHANGELOG_HEADER.join(',') + '\n';
     csv +=
@@ -488,7 +483,8 @@ export async function applySyncPlans(plans: SyncTargetPlan[]): Promise<{ wrote: 
       try {
         review = { ...base, ...(JSON.parse(await invoke<string>('read_text_file', { path: markPath })) as typeof base) };
       } catch {
-        /* 新建标记文件 */
+        /* 有意兜底：目标还没有标记文件＝第一次往这个版本同步（缺失文件本来就是报错的），
+         * 于是从空基准开始建。 */
       }
       review.marks = [...(review.marks ?? []), ...created];
       review.updatedAt = Date.now();
@@ -500,12 +496,20 @@ export async function applySyncPlans(plans: SyncTargetPlan[]): Promise<{ wrote: 
 }
 
 /** 同目录其他版本 md 文件（同 showSyncMarksDialog 的过滤口径，供传播复用） */
+/** 上一次列举"同目录其他版本"失败的原因（成功则为 null）——
+ *  它一路走到面板上那句"无新增传播"里，不然读目录失败会被说成"本来就没有别的版本"。 */
+let listError: string | null = null;
+
 export async function siblingVersionFiles(sourcePath: string): Promise<{ name: string; path: string }[]> {
+  listError = null;
   const dir = sourcePath.slice(0, sourcePath.lastIndexOf('/'));
   let names: string[];
   try {
     names = await invoke<string[]>('list_dir', { dir });
-  } catch {
+  } catch (e) {
+    /* 有意兜底：读不到目录＝这份"可传播版本"列表是空的。空列表与"这本就一章"最后会撞成
+     * 同一句话（面板上的"无新增传播"），所以把原因留给 propagateCorrection 去说清楚。 */
+    listError = String(e);
     return [];
   }
   return names
@@ -525,7 +529,8 @@ async function propagateCorrection(s: FileSession, done: { word: string; type: '
   if (!s.sourcePath || !done.length) return null;
   try {
     const targets = await siblingVersionFiles(s.sourcePath);
-    if (!targets.length) return null;
+    /* 空列表有两种可能，**不能混成一句**：真的没有别的版本，还是目录根本没读进来 */
+    if (!targets.length) return listError ? `⇄ 没能传播：同目录其他版本读不到（${listError.slice(0, 80)}）——本版校正已生效，低层版本没收到待办` : null;
     const date = new Date().toLocaleDateString('sv-SE');
     const srcName = s.fileName.replace(/\.md$/i, '');
     // ① 知识沉淀（书目录 _校正知识.csv）
@@ -535,7 +540,7 @@ async function propagateCorrection(s: FileSession, done: { word: string; type: '
     try {
       kcsv = await invoke<string>('read_text_file', { path: kPath });
     } catch {
-      /* 新建 */
+      /* 有意兜底：`_校正知识.csv` 还不存在＝这本书第一次做校正传播，下面补表头。 */
     }
     if (!kcsv.trim()) kcsv = '版本,日期,词,处理,结果,传播到\n';
     // ② 每个版本建标记（幂等：已有同词同类型跳过）；origin 让低层侧栏 ⇄ 徽章/看板传播列可感知
@@ -549,7 +554,7 @@ async function propagateCorrection(s: FileSession, done: { word: string; type: '
         const parsed = JSON.parse(saved) as { marks?: Mark[] };
         if (Array.isArray(parsed.marks)) existing = parsed.marks;
       } catch {
-        /* 无标记文件 */
+        /* 有意兜底：目标版本还没有标记文件＝它还没审过（缺失文件本来就是报错的），从空集合开始。 */
       }
       const srcMarks: Mark[] = done.map((d) => ({ id: 'k' + d.word + d.type, level: 'word', pi: 0, si: 0, wi: 0, word: d.word, text: '', type: d.type, origin: srcName, ts: Date.now() }));
       const plan = syncMarksToMd(srcMarks, md, existing, newMarkId);
@@ -563,9 +568,11 @@ async function propagateCorrection(s: FileSession, done: { word: string; type: '
     toast(`高层次校正已传播：${plans.map((p) => `${p.name.replace(/\.md$/i, '')} 建 ${p.plan.totalCreated} 条标记`).join('、')}（仅标记，正文不动）`, 'ok');
     setStatus(`校正知识已沉淀到 _校正知识.csv 并传播到低层版本待办（${r.wrote + r.refreshed} 个文件）`, 'saved');
     return msg;
-  } catch {
-    /* 传播失败不影响本版校正 */
-    return null;
+  } catch (e) {
+    /* 传播失败**不等于"没有传播"**。本版校正已经生效，低层版本却没收到待办；
+     * 以前这里返回 null，而调用方的 null 分支写的是"无新增传播（本目录无其他版本…）"——
+     * 教师读到的变成"本来就没事"，实际是"这件事没做成"。 */
+    return `⇄ 传播失败：${String(e).slice(0, 80)}——本版校正已生效，但低层版本**没有**收到待办，可稍后重试`;
   }
 }
 
@@ -593,6 +600,7 @@ export async function showSyncMarksDialog(): Promise<void> {
   }
   const targets = names.filter((n) => /\.md$/i.test(n) && `${dir}/${n}` !== s.sourcePath).filter((n) => !/质检报告|审校档案|全书简化|基准|AI修订|分层初稿|工作稿|原始备份|词句卡/.test(n));
   const plans: SyncTargetPlan[] = [];
+  const skippedTargets: string[] = [];
   for (const n of targets) {
     const path = `${dir}/${n}`;
     try {
@@ -603,11 +611,13 @@ export async function showSyncMarksDialog(): Promise<void> {
         const parsed = JSON.parse(saved) as { marks?: Mark[] };
         if (Array.isArray(parsed.marks)) existing = parsed.marks;
       } catch {
-        /* 目标还没有标记文件 */
+        /* 有意兜底：这个版本还没有标记文件＝它还没审过（缺失文件本来就是报错的），从空集合开始。 */
       }
       plans.push({ name: n, path, plan: syncMarksToMd(syncable, md, existing, newMarkId) });
-    } catch {
-      /* 目标文件读不了就跳过 */
+    } catch (e) {
+      /* 跳过的版本要**点名**：不点名的话，下面"将新建 N 条"读起来像"所有版本都同步到了"，
+       * 而实际有一个版本连读都没读到——教师会以为它已经领到待办了。 */
+      skippedTargets.push(`${n}（${String(e).slice(0, 40)}）`);
     }
   }
   if (!plans.length) {
@@ -628,6 +638,7 @@ export async function showSyncMarksDialog(): Promise<void> {
         .join('')}
     </table>
     <p class="dim">目标无此词 = 更简版本已把该词换掉或删掉（等于已处理），属正常；已标过 = 不重复建（幂等）。只同步标记待办，不改任何正文。</p>
+    ${skippedTargets.length ? `<p class="warn-badge2">⚠ ${skippedTargets.length} 个版本文件读不了，本弹层没把它们算进去：${esc(skippedTargets.join('；'))}</p>` : ''}
     <div class="pop-btns" style="margin-top:10px">
       <button id="sync-go" class="primary">同步 ${totalCreated} 条标记</button>
       <button id="sync-cancel">取消</button>

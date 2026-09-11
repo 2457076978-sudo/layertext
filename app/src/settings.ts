@@ -7,23 +7,11 @@ import { invoke } from '@tauri-apps/api/core';
 import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
 import { S, esc } from './state.js';
 import { $, setStatus, toast } from './uikit.js';
-import {
-  activeSession,
-  fileSummary,
-  renderAll,
-  updateModePill,
-} from './main.js';
+import { activeSession, fileSummary, renderAll, updateModePill } from './main.js';
 import { mergedSelection, reinforceWordsNow } from './lexicon.js';
 import { showVocabEditor } from './pipew.js';
 import { scheduleHeatRail } from './edit.js';
-import {
-  AI_PROVIDERS,
-  aiErrHuman,
-  loadConfig,
-  reloadPrompts,
-  saveConfig,
-  simplifyMaxLen,
-} from './ai.js';
+import { AI_PROVIDERS, aiErrHuman, loadConfig, reloadPrompts, saveConfig, simplifyMaxLen } from './ai.js';
 import { filterTargets, type ClassTarget } from './bookpure.js';
 
 /* ---------- 班级多人定制（折叠多选栏，feature/reinforce） ---------- */
@@ -33,18 +21,24 @@ export async function loadClassGroups(): Promise<void> {
     const dir = await invoke<string>('class_groups_dir');
     const files = (await invoke<string[]>('list_dir', { dir })).filter((f) => f.toLowerCase().endsWith('.json'));
     const targets: ClassTarget[] = [];
+    const skipped: string[] = [];
     for (const f of files) {
       try {
         const j = JSON.parse(await invoke<string>('read_text_file', { path: f })) as { targets?: ClassTarget[] };
         if (Array.isArray(j.targets)) targets.push(...j.targets);
-      } catch {
-        /* 单个文件损坏跳过 */
+      } catch (e) {
+        /* 一个分组文件坏掉＝这个班从"班级定制"里**整个消失**。以前它只是静默跳过，
+         * 教师只会觉得"我的班怎么少了一个"，然后去查别的地方。 */
+        skipped.push(`${f.slice(f.lastIndexOf('/') + 1)}（${String(e).slice(0, 40)}）`);
       }
     }
     S.classTargets = targets;
     S.selectedIds = S.selectedIds.filter((id) => targets.some((t) => t.id === id));
-  } catch {
+    if (skipped.length) setStatus(`有 ${skipped.length} 个班级分组文件读不进来，相关班级不会出现在定制栏：${skipped.join('；')}`, 'err');
+  } catch (e) {
+    /* 目录整个读不到时定制栏会**空着**，而空着与"本来就没建过分组"在界面上一模一样。 */
     S.classTargets = [];
+    setStatus(`班级分组目录读不出来：${String(e)}——定制栏会是空的，这不代表你没建过分组`, 'err');
   }
 }
 
@@ -131,7 +125,6 @@ function renderClsPanel(): void {
   });
 }
 
-
 /* ---------- 阅读体验：主题（白/灰/深色）与行距 ---------- */
 
 const THEMES: { key: 'light' | 'gray' | 'dark'; label: string; icon: string }[] = [
@@ -172,7 +165,6 @@ function setReaderLineHeight(v: number): void {
   toast(`行距 ${v}`);
 }
 
-
 /** 班级多人定制面板：工具栏不再常驻，入口在 质检 菜单 与 设置 弹层 */
 export function toggleClsPanel(): void {
   const p = document.getElementById('cls-panel') as HTMLElement | null;
@@ -181,7 +173,6 @@ export function toggleClsPanel(): void {
   renderClsPanel();
   p.style.display = show ? 'block' : 'none';
 }
-
 
 /* ================= AI 审核建议（AI 只出候选，教师握定稿权） ================= */
 
@@ -339,7 +330,6 @@ export function showAiSettings(): void {
   });
 }
 
-
 /* ---- 阅读字号 ---- */
 /** 正文字号：写 CSS 变量 --read-fs（正文/行内建议统一跟随；英文正文默认 17——x-height 小，须大于界面字级） */
 export function applyReaderFont(): void {
@@ -353,7 +343,6 @@ export function stepReaderFont(d: number): void {
   void saveConfig();
   toast('字号 ' + n + 'px');
 }
-
 
 /* ---- 设置弹层 ---- */
 export function toggleSettings(): void {
@@ -430,7 +419,6 @@ function renderSettings(): void {
     toast('已保存');
   });
 }
-
 
 export const tierPop = $('tier-pop');
 

@@ -7,21 +7,13 @@ import { invoke } from '@tauri-apps/api/core';
 import { open as openFileDialog } from '@tauri-apps/plugin-dialog';
 import { S, esc } from './state.js';
 import { $, setStatus, toast, hidePop } from './uikit.js';
-import {
-  activeSession,
-  fileSummary,
-  loadBuiltinDemo,
-  openPathIntoSession,
-  renderAll,
-  syncChrome,
-} from './main.js';
+import { activeSession, fileSummary, loadBuiltinDemo, openPathIntoSession, renderAll, syncChrome } from './main.js';
 import { ensureClassGroups } from './settings.js';
 import { loadBookConfig } from './bookio.js';
 import { scrollEl, scrollNow } from './edit.js';
 import { saveConfig } from './ai.js';
 import { jumpToBookmark } from './review.js';
-import {
-} from './pure.js';
+import {} from './pure.js';
 import { buildVersionCards, coverTitlePx, filterShelfBooks, parseWorkspaces, progressPct, shelfGroupsOf, workspaceChipName } from './bookpure.js';
 
 /* ---------- 工作区（书目录 _工作区.json：3 层次=3 工作区，浏览器标签式切换） ---------- */
@@ -38,7 +30,8 @@ export async function loadWorkspaces(dir: string): Promise<void> {
         return;
       }
     } catch {
-      /* 无配置则试上级 */
+      /* 有意兜底：这一层没有 _工作区.json 就试上一层（章目录 → 书稿根目录），
+       * 两层都没有＝单版本书，S.workspaces 留空，书架按单版本显示。 */
     }
   }
   S.workspaces = [];
@@ -98,7 +91,10 @@ async function loadShelf(): Promise<ShelfBook[]> {
     const raw = await invoke<string>('read_text_file', { path: await shelfPath() });
     const j = JSON.parse(raw) as { 书?: ShelfBook[] };
     return Array.isArray(j.书) ? j.书.filter((b) => b.名 && b.目录) : [];
-  } catch {
+  } catch (e) {
+    /* 返回空表本身没错，错在**它后面接着会发生什么**：书架显示成空的，教师往里加一本书，
+     * saveShelf 就把整份注册表覆盖成"只有这一本"。所以这里必须喊一声，并让他先别加书。 */
+    setStatus(`书架读不出来：${String(e)}——显示为空**不代表你的书没了**；先别往里加书，否则会覆盖原注册表`, 'err');
     return [];
   }
 }
@@ -133,6 +129,7 @@ async function coverDataUrl(dir: string): Promise<string | null> {
     const b64 = await invoke<string>('read_file_base64', { path: imgs[0] });
     return `data:image/${mime};base64,${b64}`;
   } catch {
+    /* 有意兜底：没有封面图＝用书名色块封面（书架上看得见"这是文字封面"，不是空白卡片）。 */
     return null;
   }
 }
@@ -381,7 +378,7 @@ async function addBookToShelf(): Promise<void> {
       wsCount = ws.length;
       chCount = ws.reduce((n, w) => n + w.文件.length, 0);
     } catch {
-      /* 无工作区配置也可注册 */
+      /* 有意兜底：这本书没有 _工作区.json＝单卷书，照样能注册；下面按"文件数"写副标题。 */
     }
     if (chCount === 0) {
       setStatus('该文件夹没有可打开的章节文件（.md/.txt/.docx）', 'err');
@@ -541,7 +538,10 @@ export async function tocChapters(): Promise<string[]> {
     try {
       const fs = await invoke<string[]>('list_dir', { dir: S.currentBookDir });
       return fs.filter((f) => /\.(md|txt)$/i.test(f));
-    } catch {
+    } catch (e) {
+      /* 空表会让目录、看板、档案页一起说"没有章节"（看板那句甚至是"从书架进入一本书"——
+       * 而教师明明就在一本书里）。空表可以返回，但真正的错因必须露出来。 */
+      setStatus(`读章节列表失败：${String(e)}——不一定是"这本书没有章节"，先确认目录还在不在`, 'err');
       return [];
     }
   }
@@ -592,7 +592,7 @@ export async function refreshToc(): Promise<void> {
           const n = Array.isArray(j.marks) ? j.marks.length : 0;
           if (n) label = `${n} 标记`;
         } catch {
-          /* 无标记文件 */
+          /* 有意兜底：这一章还没有标记文件＝还没审过（缺失文件本来就是报错的），徽标显示"未标记"。 */
         }
         const b = badgeOf(f);
         if (b) b.textContent = label;
@@ -674,12 +674,15 @@ async function resumeLastSession(): Promise<void> {
   }
   S.currentBookDir = ls.bookDir ?? null; // 进度记账锚定回书根
   let opened = 0;
+  const failedFiles: string[] = [];
   for (const f of ls.files) {
     try {
       await openPathIntoSession(f.path);
       opened++;
     } catch {
-      /* 文件可能被移走，跳过 */
+      /* 文件可能被移走，跳过——但**要记下是哪几个**：只丢一个文件时下面那句
+       * "上次的文件都打不开了"不会触发，教师会以为"上次就只开了这几章"。 */
+      failedFiles.push(f.path.slice(f.path.lastIndexOf('/') + 1));
     }
   }
   if (opened === 0) {
@@ -687,6 +690,7 @@ async function resumeLastSession(): Promise<void> {
     toast('上次的文件都打不开了（可能被移动）', 'err');
     return;
   }
+  if (failedFiles.length) toast(`有 ${failedFiles.length} 个上次的文件打不开了（可能被移动）：${failedFiles.slice(0, 3).join('、')}`, 'err');
   if (ls.workspace && S.workspaces.some((w) => w.名 === ls.workspace)) switchWorkspace(ls.workspace);
   const idx = Math.min(ls.activeIdx, S.sessions.length - 1);
   S.activeIdx = idx;
