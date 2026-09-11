@@ -431,3 +431,35 @@ test('卡片显示情节先验：等级 + 依据（只影响排序，不拦任�
   assert.match(html, /情节估计：高｜命中 底线原文锚点：i will work harder/);
   assert.match(html, /角色\/地名：boxer/);
 });
+
+test('★ 事件写失败 → 正文回滚，不留"改了稿却没记录"的状态', async () => {
+  const f: RiskQueueFile = {
+    schemaVersion: 1, 层级: ['A'], 章节: [1],
+    摘要: { total: 1, blockers: 1, byRule: {}, byCategory: {}, estimatedMinutes: 0.5 },
+    章节产物: { 第一章: '/out/第一章/原文_A层85_2026-09-10.md' },
+    队列: [ANNO_ITEM()],
+  };
+  const src = '## Chapter One\n\n[P01] The boy ran to the barn.\n';
+  const files: Record<string, string> = {
+    [`/out/_运行/风险队列_${TAG}.json`]: JSON.stringify(f),
+    '/out/第一章/原文_A层85_2026-09-10.md': src,
+    '/p/dict.csv': '词,释义,来源\nbarn,谷仓\n',
+  };
+  win.document.body.innerHTML = '<section id="pane-risk"></section>';
+  setRiskIo({
+    read: (p) => (p in files ? Promise.resolve(files[p]!) : Promise.reject(new Error('no file'))),
+    // 决定日志**写不进去**；正文照写——正好构造"改稿成功、记账失败"
+    write: (p, c) => (/决定/.test(p) ? Promise.reject(new Error('磁盘满')) : ((files[p] = c), Promise.resolve())),
+    listDir: () => Promise.resolve([]),
+  });
+  await renderRiskPane({
+    dom: win.document as never, tier: 'A',
+    paths: { outDir: '/out', workDir: '/work', sourceVersion: 's', dictPath: '/p/dict.csv' },
+    teacherId: 'wayne',
+  });
+  const btn = win.document.querySelector('#pane-risk [data-act="insert-annotation"]') as unknown as { click(): void };
+  btn.click();
+  await new Promise((res) => setTimeout(res, 40));
+  assert.equal(files['/out/第一章/原文_A层85_2026-09-10.md'], src, '记账失败必须把正文改回去');
+  assert.match(win.document.getElementById('pane-risk')!.innerHTML, /已把正文改回原样/);
+});

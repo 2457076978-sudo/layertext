@@ -588,23 +588,34 @@ async function runRiskAction(
   const action: RuleAction = actionOf(it.ruleId);
   const d = it.detail ?? {};
   const word = typeof d.word === 'string' ? d.word : typeof d.signal === 'string' ? d.signal : '';
-  const mkDecision = (kind: DecisionKind, extra: Partial<Parameters<typeof decisionLineFor>[2]> = {}): void => {
-    void appendDecision(
+  /* 记一条决定。**返回 Promise，不许 `void` 掉**：
+   * 事件写失败原来是 unhandled rejection（测试当场抓到），在 App 里就是一条无人处理的红字。
+   * 记账失败必须能被调用方看见并处理——这正是"改稿必有记录"那条约束的另一半。 */
+  const mkDecision = (kind: DecisionKind, extra: Partial<Parameters<typeof decisionLineFor>[2]> = {}): Promise<void> =>
+    appendDecision(
       input.paths,
       input.tier,
       decisionLineFor(it, kind, { teacherId: input.teacherId, sourceVersion: input.paths.sourceVersion, ...extra }),
       identity,
     );
-  };
   /** 失败了要留痕，而且**卡片不许消失**：写 rejected 事件（它不是"已处理完"），把原因交回调用方显示 */
-  const reject = (why: string): { ok: false; message: string } => {
-    mkDecision('rejected', { reason: why });
+  const reject = async (why: string): Promise<{ ok: false; message: string }> => {
+    try {
+      await mkDecision('rejected', { reason: why });
+    } catch {
+      // 连失败都记不上：如实告诉人（不要静默），卡片仍然留着
+      return { ok: false, message: `${why}（且失败记录未能写入日志）` };
+    }
     return { ok: false, message: why };
   };
 
   // 纯表态的动作：不改正文，直接记事件
   if (!action.mutates) {
-    mkDecision('accept', { reason: action.effect });
+    try {
+      await mkDecision('accept', { reason: action.effect });
+    } catch (e) {
+      return { ok: false, message: `决定写入失败：${e instanceof Error ? e.message : String(e)}` };
+    }
     return { ok: true };
   }
 
@@ -615,7 +626,7 @@ async function runRiskAction(
   try {
     doc = await io!.read(docPath);
   } catch {
-    return reject(`读不到正文（${docPath}）——产物可能被移动或删除了`);
+    return await reject(`读不到正文（${docPath}）——产物可能被移动或删除了`);
   }
   const res = applyAction(action, {
     doc,
@@ -625,19 +636,31 @@ async function runRiskAction(
     removeAll: it.detail?.crossSegment === true,
   });
   if (!res.ok) {
-    return reject(failureText(res));
+    return await reject(failureText(res));
   }
-  // 先备份再写：改稿不可逆的操作不该没有退路
+  // 事务：备份 → 写正文 → 写事件；**事件写失败就把正文改回去**。
+  // 跨两个文件的"真原子"做不到，但可以做到"不留下改了稿却没记录"的状态——
+  // 否则就会出现最坏的一种：正文变了、日志里查不到是谁改的、撤销也无从下手。
   try {
     if (io!.backup) await io!.backup(docPath, doc);
     await io!.write(docPath, res.next);
   } catch (e) {
-    return reject(`写入失败：${e instanceof Error ? e.message : String(e)}`);
+    return await reject(`写入失败：${e instanceof Error ? e.message : String(e)}`);
   }
-  mkDecision('accept', {
-    after: res.after,
-    reason: `${action.label}：${res.before} → ${res.after}`,
-  });
+  try {
+    await appendDecision(
+      input.paths,
+      input.tier,
+      decisionLineFor(it, 'accept', { teacherId: input.teacherId, sourceVersion: input.paths.sourceVersion, after: res.after, reason: `${action.label}：${res.before} → ${res.after}` }),
+      identity,
+    );
+  } catch (e) {
+    // 回滚正文：宁可这次没改成，也不能让稿子带着一处"无名改动"
+    try {
+      await io!.write(docPath, doc);
+    } catch { /* 回滚也失败：至少上面的 reject 会写进日志并告诉教师 */ }
+    return await reject(`事件写入失败，已把正文改回原样：${e instanceof Error ? e.message : String(e)}`);
+  }
   return { ok: true, message: `${action.label}：${res.before} → ${res.after}` };
 }
 
@@ -645,10 +668,12 @@ async function runRiskAction(
  * 撤销一条决定。
  *
  * 两件事，一个事务：
- *   ① 写一条 `undo` 事件（`undoOf` 指回被撤销的那条）——**历史一条都不删**；
- *   ② 如果被撤销的是**改稿动作**，把正文按事件里记的 before/after 改回去
- *      （`after` 必须仍在原处，否则报"稿件已改过"并**不写 undo 事件**——宁可撤销失败，也不留下假账）。
- * 撤销成功后该项回到待办。
+ *   ① 如果被撤销的是**改稿动作**，把正文按事件里记的 before/after 改回去
+ *      （`after` 必须仍在原处，否则报"稿件已改过"并且**不写 undo 事件**——宁可撤销失败，也不留下假账）；
+ *   ② 写一条 `undo` 事件（`undoOf` 指回被撤销的那条）——**历史一条都不删**。
+ *
+ * 两条写入的次序是"先改稿、后写事件"，**事件写不进去就把稿子改回来**：
+ * 跨两个文件的真原子做不到，但"稿子被改了、日志里查不到、撤销也无从下手"是必须避免的。
  */
 async function undoDecision(
   input: RiskRenderInput,
@@ -663,48 +688,68 @@ async function undoDecision(
 
   const it = file.队列.find((x) => x.id === target.itemId);
   const action = it ? actionOf(it.ruleId) : null;
-  // 改稿动作：先把正文改回去
-  if (it && action?.mutates && target.after && target.after !== target.before) {
-    const docPath = file.章节产物?.[it.chapter] ?? pathsFor(input.paths, identity, input.tier).any('正文', { chapter: it.chapter });
-    let doc: string;
+  const writeUndo = async (): Promise<void> => {
+    await appendDecision(
+      input.paths,
+      input.tier,
+      makeDecisionEvent({
+        itemId: target.itemId,
+        decision: 'undo',
+        before: target.after,
+        after: target.before,
+        reason: `撤销 ${DECISION_LABEL[target.decision] ?? target.decision}（${target.timestamp}）`,
+        ruleIds: target.ruleIds,
+        teacherId: input.teacherId,
+        sourceVersion: input.paths.sourceVersion,
+        category: target.category,
+        subject: target.subject,
+        undoOf: ref,
+      }),
+      identity,
+    );
+  };
+
+  // 纯表态的动作（没改过正文）：只写 undo 事件
+  if (!it || !action?.mutates || !target.after || target.after === target.before) {
     try {
-      doc = await io!.read(docPath);
-    } catch {
-      return { ok: false, message: `读不到正文（${docPath}），未撤销` };
-    }
-    const segId = segIdOf(it);
-    const ast = parseDoc(doc);
-    const seg = ast.segments.find((seg) => seg.id === segId);
-    if (!seg || !seg.raw.includes(target.after)) {
-      return { ok: false, message: `正文里已经找不到「${target.after}」了（稿件改过），未撤销` };
-    }
-    try {
-      if (io!.backup) await io!.backup(docPath, doc);
-      await io!.write(docPath, doc.replace(target.after, target.before));
+      await writeUndo();
     } catch (e) {
-      return { ok: false, message: `撤销写入失败：${e instanceof Error ? e.message : String(e)}` };
+      return { ok: false, message: `撤销事件写入失败：${e instanceof Error ? e.message : String(e)}` };
     }
+    return { ok: true };
   }
-  await appendDecision(
-    input.paths,
-    input.tier,
-    makeDecisionEvent({
-      itemId: target.itemId,
-      decision: 'undo',
-      before: target.after,
-      after: target.before,
-      reason: `撤销 ${DECISION_LABEL[target.decision] ?? target.decision}（${target.timestamp}）`,
-      ruleIds: target.ruleIds,
-      teacherId: input.teacherId,
-      sourceVersion: input.paths.sourceVersion,
-      category: target.category,
-      subject: target.subject,
-      undoOf: ref,
-    }),
-    identity,
-  );
+
+  const docPath = file.章节产物?.[it.chapter] ?? pathsFor(input.paths, identity, input.tier).any('正文', { chapter: it.chapter });
+  let doc: string;
+  try {
+    doc = await io!.read(docPath);
+  } catch {
+    return { ok: false, message: `读不到正文（${docPath}），未撤销` };
+  }
+  const segId = segIdOf(it);
+  const ast = parseDoc(doc);
+  const seg = ast.segments.find((x) => x.id === segId);
+  if (!seg || !seg.raw.includes(target.after)) {
+    return { ok: false, message: `正文里已经找不到「${target.after}」了（稿件改过），未撤销` };
+  }
+  try {
+    if (io!.backup) await io!.backup(docPath, doc);
+    await io!.write(docPath, doc.replace(target.after, target.before));
+  } catch (e) {
+    return { ok: false, message: `撤销写入失败：${e instanceof Error ? e.message : String(e)}` };
+  }
+  try {
+    await writeUndo();
+  } catch (e) {
+    // 撤销事件写不进去 → 把正文改回来（不然就是"稿子被改了、日志里没有"）
+    try {
+      await io!.write(docPath, doc);
+    } catch { /* 回滚也失败：下面如实报 */ }
+    return { ok: false, message: `撤销事件写入失败，已把正文改回原样：${e instanceof Error ? e.message : String(e)}` };
+  }
   return { ok: true };
 }
+
 
 /**
  * 批量应用一个组。
@@ -715,6 +760,9 @@ async function undoDecision(
  *   · **按章聚合写盘**：一章只读一次、写一次（否则 12 条就是 12 次读改写，慢且更容易出岔）；
  *   · 任一条失败**不静默跳过**：那一条写 `rejected`、留在待办，其余照做，最后如实报告几成几败。
  * 返回 `ok` 只在**全部成功**时为真——部分成功也算没做完。
+ *
+ * 写入次序：**先在内存里跑完整章 → 写正文 → 写事件**；事件写失败就把正文回滚。
+ * 反过来（先写事件后写正文）会留下"日志里有、稿子没变"的假账，那比失败更糟。
  */
 async function runBatchApply(
   input: RiskRenderInput,
@@ -746,7 +794,7 @@ async function runBatchApply(
     }
     const dict = await loadBookDict(input.paths);
     let cur = doc;
-    const okIds: string[] = [];
+    const applied: { it: RiskItem; before: string; after: string; label: string }[] = [];
     for (const it of items) {
       const action = actionOf(it.ruleId);
       const res = applyAction(action, {
@@ -763,20 +811,34 @@ async function runBatchApply(
         continue;
       }
       cur = res.next;
-      okIds.push(it.id);
-      doneCount++;
-      await appendDecision(input.paths, input.tier, decisionLineFor(it, 'accept', { teacherId: input.teacherId, sourceVersion: input.paths.sourceVersion, after: res.after, reason: `批量${action.label}：${res.before} → ${res.after}` }), identity);
+      applied.push({ it, before: res.before, after: res.after, label: action.label });
     }
     if (cur !== doc) {
       try {
         if (io!.backup) await io!.backup(docPath, doc);
         await io!.write(docPath, cur);
       } catch (e) {
-        // 写盘失败：把**这一章**的条目改成 rejected（正文没落盘，不能让它们显示成已办）
-        failedCount += okIds.length;
-        doneCount -= okIds.length;
+        // 正文没落盘 → 这一章的条目全部 rejected（绝不能显示成已办）
+        failedCount += applied.length;
         if (!firstError.length) firstError.push(`写入失败：${e instanceof Error ? e.message : String(e)}`);
+        for (const a of applied) {
+          await appendDecision(input.paths, input.tier, decisionLineFor(a.it, 'rejected', { teacherId: input.teacherId, sourceVersion: input.paths.sourceVersion, reason: `批量：写入失败（${e instanceof Error ? e.message : String(e)}）` }), identity);
+        }
+        continue;
       }
+    }
+    // 正文已落盘，再写事件；事件写失败 → 回滚正文，保持"改稿必有记录"
+    try {
+      for (const a of applied) {
+        await appendDecision(input.paths, input.tier, decisionLineFor(a.it, 'accept', { teacherId: input.teacherId, sourceVersion: input.paths.sourceVersion, after: a.after, reason: `批量${a.label}：${a.before} → ${a.after}` }), identity);
+        doneCount++;
+      }
+    } catch (e) {
+      try {
+        await io!.write(docPath, doc);
+      } catch { /* 回滚也失败：下面如实报 */ }
+      failedCount += applied.length;
+      if (!firstError.length) firstError.push(`事件写入失败，已把正文改回原样：${e instanceof Error ? e.message : String(e)}`);
     }
   }
   const message = `全部应用：成功 ${doneCount} 处，失败 ${failedCount} 处${firstError.length ? `（${firstError[0]}）` : ''}`;
