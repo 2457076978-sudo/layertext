@@ -10,7 +10,7 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { buildRiskQueue, oneHourPlan, type SegmentRiskInput } from '../src/core/riskqueue.js';
+import { batchImpact, buildRiskQueue, groupQueue, oneHourPlan, sessionState, type SegmentRiskInput } from '../src/core/riskqueue.js';
 import { gateSegment, type GateProblem } from '../src/core/segmentgate.js';
 
 /** 用真实门禁产出一段的问题清单（门禁规则本身由 segmentgate.test.ts 覆盖） */
@@ -172,4 +172,102 @@ test('排序稳定：同 risk 同时按章序、段序排（可回读、可比�
   });
   const q = buildRiskQueue([mk('第二章', 3), mk('第一章', 5), mk('第一章', 1)]);
   assert.deepEqual(q.items.map((i) => i.segLabel), ['第一章 第2段', '第一章 第6段', '第二章 第4段']);
+});
+
+/* ────────────────── 任务组：卡片流 → 一次处理一类（v4 方向第 3 条） ────────────────── */
+
+const MUTATING = ['ANNO-01', 'ANNO-02', 'ANNO-03', 'AST-02'];
+
+test('聚合优先级：同一词 → 同一段同一规则 → 同章同类型', () => {
+  const q = buildRiskQueue([
+    // 同一个词（windmill）在三个不同段里漏注 → 一组
+    { chapter: '第一章', segIndex: 0, source: 'a', rewritten: 'a', problems: [{ ruleId: 'ANNO-01', category: '加注', severity: 'blocker', weight: 10, risk: 10, message: 'm', detail: { missing: ['windmill'] } }] },
+    { chapter: '第一章', segIndex: 3, source: 'b', rewritten: 'b', problems: [{ ruleId: 'ANNO-01', category: '加注', severity: 'blocker', weight: 10, risk: 10, message: 'm', detail: { missing: ['windmill'] } }] },
+    { chapter: '第二章', segIndex: 1, source: 'c', rewritten: 'c', problems: [{ ruleId: 'ANNO-01', category: '加注', severity: 'blocker', weight: 10, risk: 10, message: 'm', detail: { missing: ['windmill'] } }] },
+  ]);
+  const groups = groupQueue(q.items, { mutatingRules: MUTATING });
+  assert.equal(groups.length, 1, '同一个词跨章也要归一组');
+  assert.equal(groups[0]!.kind, 'word');
+  assert.equal(groups[0]!.count, 3);
+  assert.equal(groups[0]!.chapters.length, 2, '涉及两章要显示出来（批量应用前让人知道影响面）');
+  assert.equal(groups[0]!.uniformAction, true, '全是 ANNO-01 → 可以一键批量');
+  assert.equal(groups[0]!.actionable, 3);
+});
+
+test('同一段同一规则归一组（数字/专名类）', () => {
+  const q = buildRiskQueue([
+    { chapter: '第一章', segIndex: 2, source: 'In 1911 there were 12 pigs.', rewritten: 'Some pigs.', problems: [
+      { ruleId: 'FACT-01', category: '事实', severity: 'warn', weight: 22, risk: 13.2, message: 'm', detail: { signals: ['1911', '12'] } },
+    ] },
+  ]);
+  const groups = groupQueue(q.items, { mutatingRules: MUTATING });
+  assert.equal(groups.length, 1);
+  assert.equal(groups[0]!.kind, 'segment-rule', '同段的两个数字归一组，不是散成两张卡');
+  assert.equal(groups[0]!.count, 2);
+  assert.equal(groups[0]!.uniformAction, false, '事实类不改正文，不给"全部应用"');
+});
+
+test('同章同类型的散项归一组（语言类）', () => {
+  const q = buildRiskQueue([
+    { chapter: '第一章', segIndex: 0, source: 's', rewritten: '[P01] a', problems: [{ ruleId: 'SENT-01', category: '语言', severity: 'blocker', weight: 8, risk: 8, message: 'm', detail: { sentences: ['a'], maxLen: 5 } }] },
+    { chapter: '第一章', segIndex: 5, source: 's', rewritten: '[P06] b', problems: [{ ruleId: 'SENT-01', category: '语言', severity: 'blocker', weight: 8, risk: 8, message: 'm', detail: { sentences: ['b'], maxLen: 5 } }] },
+  ]);
+  const groups = groupQueue(q.items, { mutatingRules: MUTATING });
+  assert.equal(groups[0]!.kind, 'segment-rule', '超长句是按句定位的，落在"同一段同一规则"这一档');
+});
+
+test('代表样本最多 3 条（报告给的数），组里其余靠展开看', () => {
+  const problems = Array.from({ length: 7 }, (_, i) => ({ chapter: '第一章', segIndex: i, source: 's', rewritten: 's', problems: [{ ruleId: 'ANNO-01', category: '加注' as const, severity: 'blocker' as const, weight: 10, risk: 10, message: 'm', detail: { missing: ['barn'] } }] }));
+  const groups = groupQueue(buildRiskQueue(problems).items, { mutatingRules: MUTATING });
+  assert.equal(groups[0]!.samples.length, 3);
+  assert.equal(groups[0]!.items.length, 7, '展开能拿到全部');
+});
+
+test('组间排序按组内最高风险（事实类那组排在语言类前面）', () => {
+  const q = buildRiskQueue([
+    { chapter: '第一章', segIndex: 0, source: 'In 1911 x', rewritten: 'y', problems: [{ ruleId: 'FACT-01', category: '事实', severity: 'warn', weight: 22, risk: 13.2, message: 'm', detail: { signals: ['1911'] } }] },
+    { chapter: '第一章', segIndex: 9, source: 's', rewritten: '[P10] z', problems: [{ ruleId: 'SENT-01', category: '语言', severity: 'blocker', weight: 8, risk: 8, message: 'm', detail: { sentences: ['z'], maxLen: 5 } }] },
+  ]);
+  const groups = groupQueue(q.items, { mutatingRules: MUTATING });
+  assert.equal(groups[0]!.topRisk, 13.2);
+  assert.equal(groups[0]!.rules[0], 'FACT-01');
+});
+
+test('动作不统一的组不给"全部应用"（宁可少给一个按钮，也不做半对的事）', () => {
+  const q = buildRiskQueue([
+    { chapter: '第一章', segIndex: 1, source: 's', rewritten: 's', problems: [
+      { ruleId: 'ANNO-01', category: '加注', severity: 'blocker', weight: 10, risk: 10, message: 'm', detail: { missing: ['barn'] } },
+      { ruleId: 'ANNO-03', category: '加注', severity: 'warn', weight: 9, risk: 6.3, message: 'm', detail: { conflicts: [{ word: 'barn', zh: '仓房', expected: '谷仓' }] } },
+    ] },
+  ]);
+  const groups = groupQueue(q.items, { mutatingRules: MUTATING });
+  assert.equal(groups[0]!.count, 2);
+  assert.equal(groups[0]!.uniformAction, false, '同一个词但两种动作 → 只能逐条');
+});
+
+test('批量应用前说清影响面（会改动多少处 / 多少段 / 多少章）', () => {
+  const q = buildRiskQueue([
+    { chapter: '第一章', segIndex: 0, source: 's', rewritten: 's', problems: [{ ruleId: 'ANNO-01', category: '加注', severity: 'blocker', weight: 10, risk: 10, message: 'm', detail: { missing: ['barn'] } }] },
+    { chapter: '第二章', segIndex: 4, source: 's', rewritten: 's', problems: [{ ruleId: 'ANNO-01', category: '加注', severity: 'blocker', weight: 10, risk: 10, message: 'm', detail: { missing: ['barn'] } }] },
+  ]);
+  const g = groupQueue(q.items, { mutatingRules: MUTATING })[0]!;
+  const text = batchImpact(g);
+  assert.match(text, /改动 2 处/);
+  assert.match(text, /2 段/);
+  assert.match(text, /2 章/);
+});
+
+test('「本次完成」只看"还有没有未处理的条目"，不看估时', () => {
+  const q = buildRiskQueue([
+    { chapter: '第一章', segIndex: 0, source: 's', rewritten: 's', problems: [{ ruleId: 'ANNO-01', category: '加注', severity: 'blocker', weight: 10, risk: 10, message: 'm', detail: { missing: ['barn'] } }] },
+  ]);
+  const groups = groupQueue(q.items, { mutatingRules: MUTATING });
+  const pending = sessionState(q.items, groups);
+  assert.equal(pending.done, false);
+  assert.match(pending.text, /还没完：剩 1 条/);
+  assert.match(pending.text, /可批量/);
+
+  const finished = sessionState([], []);
+  assert.equal(finished.done, true);
+  assert.match(finished.text, /本次完成/);
 });

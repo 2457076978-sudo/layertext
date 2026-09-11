@@ -171,7 +171,9 @@ function expand(input: SegmentRiskInput, p: GateProblem): RiskItem[] {
       return list(p.detail?.words).map((w) => make(w, `同一个词 ${w} 注了不止一次`, w, { word: w }));
     case 'ANNO-03': {
       const cs = (p.detail?.conflicts ?? []) as { word: string; zh: string; expected: string }[];
-      return cs.map((c) => make(c.word, `${c.word} 注成「${c.zh}」，统一词典是「${c.expected}」`, c.word, { conflict: c }));
+      // pivot 必须**带上 word**：聚合的"同一个词"那一档靠它认人。
+      // 少了它，释义冲突就归不进同词组，而报告点名要按"同一词（漏注/释义冲突/重复注）"聚合。
+      return cs.map((c) => make(c.word, `${c.word} 注成「${c.zh}」，统一词典是「${c.expected}」`, c.word, { word: c.word, conflict: c }));
     }
     case 'SENT-01':
       // 每个超长句单独一条，并把原文对位句一并给出（人要看懂这句原本是什么）
@@ -267,5 +269,166 @@ export function oneHourPlan(queue: RiskQueue, budget = 60): OneHourPlan {
     advice: overBudget
       ? `队列估时 ${estimatedMinutes} 分钟，超过 ${budget} 分钟预算 → 停止扩展审校，先修生成规则或词库（否则每本书都要花这么多人工）。`
       : `队列估时 ${estimatedMinutes} 分钟，在 ${budget} 分钟预算内，按阶段顺序走即可。`,
+  };
+}
+
+/* ────────────────────── 任务组：把卡片流变成"一次处理一类" ────────────────────── */
+
+/**
+ * 来源：《LayerText 审查报告 v4_方向》第 3 条 ——
+ *   「`oneHourPlan` 仍按事实/加注/其余分组，组内还是逐条卡片。先按『同一词/同一规则/同一段』聚合，
+ *     展示 3 条代表例，提供『全部应用/逐条查看』，并有明确的『本次完成』状态。
+ *     **它比继续调整估时数字更能改变行为。**」
+ *
+ * 为什么要聚合：70 张卡片到第 25 条，教师会开始不看内容直接点。
+ * 而同一类的十二条（都是同一个词、或都是同一段的数字问题）**本来就该一起看**——
+ * 逐条看是在为机器的问题拆分付人工费。
+ *
+ * 聚合优先级（报告给定，不另发挥）：
+ *   ① 同一词（漏注 / 释义冲突 / 重复注）——同一处的决定只需做一次
+ *   ② 同一段同一规则（数字或专名）
+ *   ③ 同章同类型（语言类问题）
+ * 报告同时说了为什么不能只按规则或只按章节聚合：
+ *   「按纯规则聚合会把互不相关的问题混在一起，按章节聚合则失去可批量修复性。」
+ */
+export type GroupKind = 'word' | 'segment-rule' | 'chapter-category';
+
+export interface TaskGroup {
+  id: string;
+  kind: GroupKind;
+  /** 人话标题（直接进界面） */
+  title: string;
+  /** 这一组影响多少条 */
+  count: number;
+  /** 代表性样本（默认 3 条） */
+  samples: RiskItem[];
+  /** 组内全部条目（展开用） */
+  items: RiskItem[];
+  /** 组内最高风险（组间排序用） */
+  topRisk: number;
+  rules: string[];
+  /** 组内**有确定性动作**的条数（能一键批量处理的量） */
+  actionable: number;
+  /** 组内动作是否同一种（不同则不给"全部应用"，只给逐条——宁可少给一个按钮，也不做半对的事） */
+  uniformAction: boolean;
+  /** 这一组涉及几个章 / 几个段（批量应用前要显示"会改动多少"） */
+  chapters: string[];
+  segments: string[];
+}
+
+const SUBJECT_WORD_KINDS = new Set(['word']);
+
+/**
+ * 这条决定针对什么——离线汇总器靠它决定"该提议进哪里"。
+ * **下沉到引擎**：App 面板与聚合都要用它，放在 App 层会让引擎反向依赖界面。
+ */
+export function subjectOf(item: RiskItem): { kind: 'word' | 'number' | 'proper' | 'sentence' | 'other'; value: string } {
+  const d = item.detail ?? {};
+  const word = typeof d.word === 'string' ? d.word : '';
+  if (word) return { kind: 'word', value: word };
+  const signal = typeof d.signal === 'string' ? d.signal : '';
+  if (signal) return /^\d/.test(signal) ? { kind: 'number', value: signal } : { kind: 'proper', value: signal };
+  if (item.ruleId === 'SENT-01' || item.ruleId === 'LEN-01') return { kind: 'sentence', value: item.rewrittenSentence || item.id };
+  return { kind: 'other', value: item.id };
+}
+
+/** 取这一条的"靶子"（词 / 数字 / 专名），没有就返回空串 */
+function subjectKeyOf(it: RiskItem): string {
+  const d = it.detail ?? {};
+  if (typeof d.word === 'string' && d.word) return d.word.toLowerCase();
+  const s = subjectOf(it);
+  return SUBJECT_WORD_KINDS.has(s.kind) ? s.value.toLowerCase() : '';
+}
+
+export interface GroupOptions {
+  /** 每组留几条代表例（默认 3，报告给的数） */
+  samples?: number;
+  /** 有确定性动作的规则集合（由调用方从 riskaction 取，避免本模块反向依赖动作层） */
+  mutatingRules?: Iterable<string>;
+}
+
+/** 逐条展开成任务组（已排序：组内最高风险降序 → 条数降序 → id 稳定） */
+export function groupQueue(items: RiskItem[], opts: GroupOptions = {}): TaskGroup[] {
+  const samples = opts.samples ?? 3;
+  const mutating = new Set(opts.mutatingRules ?? []);
+  const buckets = new Map<string, { kind: GroupKind; title: string; items: RiskItem[] }>();
+  const push = (id: string, kind: GroupKind, title: string, it: RiskItem): void => {
+    let b = buckets.get(id);
+    if (!b) {
+      b = { kind, title, items: [] };
+      buckets.set(id, b);
+    }
+    b.items.push(it);
+  };
+
+  for (const it of items) {
+    const word = subjectKeyOf(it);
+    if (word) {
+      push(`word:${word}`, 'word', `同一个词：${word}`, it);
+      continue;
+    }
+    if (it.segIndex >= 0 && it.chapter) {
+      push(`seg:${it.chapter}#${it.segIndex}:${it.ruleId}`, 'segment-rule', `${it.segLabel} 的同类问题`, it);
+      continue;
+    }
+    push(`ch:${it.chapter}:${it.category}`, 'chapter-category', `${it.chapter} 的${it.category}类问题`, it);
+  }
+
+  const groups: TaskGroup[] = [];
+  for (const [id, b] of buckets) {
+    const sorted = [...b.items].sort(compare);
+    const rules = [...new Set(sorted.map((x) => x.ruleId))].sort();
+    const kinds = new Set(sorted.map((x) => x.ruleId));
+    groups.push({
+      id,
+      kind: b.kind,
+      title: b.title,
+      count: sorted.length,
+      samples: sorted.slice(0, samples),
+      items: sorted,
+      topRisk: sorted[0]?.risk ?? 0,
+      rules,
+      actionable: sorted.filter((x) => mutating.has(x.ruleId)).length,
+      uniformAction: kinds.size === 1 && mutating.has([...kinds][0]!),
+      chapters: [...new Set(sorted.map((x) => x.chapter))],
+      segments: [...new Set(sorted.map((x) => x.segLabel))],
+    });
+  }
+  return groups.sort(
+    (a, b) => b.topRisk - a.topRisk || b.count - a.count || (a.id < b.id ? -1 : 1),
+  );
+}
+
+/** 批量应用前的说明：「会改动 N 处 / 涉及 M 段 K 章」——动手之前先让人知道影响面 */
+export function batchImpact(g: TaskGroup): string {
+  if (!g.actionable) return `这一组 ${g.count} 条都没有确定性修法，只能逐条看`;
+  return `全部应用会改动 ${g.actionable} 处，涉及 ${g.segments.length} 段、${g.chapters.length} 章`;
+}
+
+/** 「本次完成」：队列里还剩什么（报告的"明确的完成状态"）。
+ *  判据只有一个：**还有没有未处理的条目**——不是"估时降到了几分钟以内"。 */
+export interface SessionState {
+  total: number;
+  remaining: number;
+  done: boolean;
+  groups: number;
+  /** 剩余条目里还有确定性动作的条数 */
+  actionable: number;
+  text: string;
+}
+
+export function sessionState(items: RiskItem[], groups: TaskGroup[]): SessionState {
+  const remaining = items.length;
+  const actionable = items.filter((i) => groups.some((g) => g.uniformAction && g.items.includes(i))).length;
+  return {
+    total: remaining,
+    remaining,
+    done: remaining === 0,
+    groups: groups.length,
+    actionable,
+    text:
+      remaining === 0
+        ? '✓ 本次完成：队列里没有未处理的条目了'
+        : `还没完：剩 ${remaining} 条、归成 ${groups.length} 组${actionable ? `（其中 ${actionable} 条可批量）` : ''}`,
   };
 }

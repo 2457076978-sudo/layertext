@@ -205,7 +205,7 @@ test('主键按钮文案跟着规则走（不再是三个统一的"采纳/退回
   assert.match(html, /＋ 补上注释/, 'ANNO-01 的主键是"补上注释"');
   assert.match(html, /✓ 认可这个删减/, 'FACT-01 的主键是"认可这个删减"');
   assert.equal(html.includes('✓ 采纳改写'), false, '模糊的"采纳改写"必须消失');
-  assert.equal(html.includes('主键会**改正文**'), true, '改正文的卡片要说明主键会改稿');
+  assert.match(html, /主键会改正文并同时记事件/, '改正文的卡片要说明主键会改稿');
 });
 
 test('点「补上注释」= 改正文 + 记事件（一次事务），两个结果都落在盘上', async () => {
@@ -302,4 +302,100 @@ test('没有统一词典时补注被拒并说明原因（不插一个空括号�
   const ev = parseDecisionLog(files[`/work/_决定/${TAG}.jsonl`] ?? '').events;
   assert.equal(ev[0]!.decision, 'rejected');
   assert.match(ev[0]!.reason, /释义/);
+});
+
+/* ────────────────── 任务组与批量应用（v4 方向第 3 条） ────────────────── */
+
+test('按任务组呈现：同词一组、给代表样本、其余可展开', async () => {
+  const items = Array.from({ length: 5 }, (_, i) =>
+    ANNO_ITEM({ id: `第一章#${i}:ANNO-01:barn`, segIndex: i, segLabel: `第一章 第${i + 1}段` }),
+  );
+  const f: RiskQueueFile = {
+    schemaVersion: 1, 层级: ['A'], 章节: [1],
+    摘要: { total: 5, blockers: 5, byRule: {}, byCategory: {}, estimatedMinutes: 2.5 },
+    章节产物: { 第一章: '/out/第一章/原文_A层85_2026-09-10.md' },
+    队列: items,
+  };
+  const files: Record<string, string> = { [`/out/_运行/风险队列_${TAG}.json`]: JSON.stringify(f) };
+  actionSetup(files);
+  await renderRiskPane({
+    dom: win.document as never, tier: 'A',
+    paths: { outDir: '/out', workDir: '/work', sourceVersion: 's', dictPath: '/p/dict.csv' },
+    teacherId: 'wayne',
+  });
+  const html = win.document.getElementById('pane-risk')!.innerHTML;
+  assert.match(html, /同一个词：barn/, '同词聚成一组');
+  assert.match(html, /5 条/);
+  // 代表样本在 <details> 之外（默认可见），其余收在折叠区里——数"折叠前"的卡片才作数
+  const beforeDetails = html.split('<details class="rq-more"')[0]!;
+  assert.equal((beforeDetails.match(/data-item=/g) ?? []).length, 3, '默认只展开 3 条代表样本');
+  assert.equal((html.match(/data-item=/g) ?? []).length, 5, '全部条目仍在 DOM 里（展开即可见）');
+  assert.match(html, /展开这一组其余 2 条/);
+  assert.match(html, /⚡ 全部应用（5 处）/, '动作统一 → 给批量入口');
+  assert.match(html, /本次预算怎么排/, '一小时路径降级为折叠的后台估算');
+  assert.match(html, /还没完：剩 5 条/, '"本次完成"状态是队列的权威判据');
+});
+
+test('批量应用：一章只读一次写一次，逐条走同一个 applyAction', async () => {
+  const items = Array.from({ length: 3 }, (_, i) =>
+    ANNO_ITEM({ id: `第一章#${i}:ANNO-01:barn`, segIndex: i, segLabel: `第一章 第${i + 1}段` }),
+  );
+  const f: RiskQueueFile = {
+    schemaVersion: 1, 层级: ['A'], 章节: [1],
+    摘要: { total: 3, blockers: 3, byRule: {}, byCategory: {}, estimatedMinutes: 1.5 },
+    章节产物: { 第一章: '/out/第一章/原文_A层85_2026-09-10.md' },
+    队列: items,
+  };
+  const src = '## Chapter One\n\n[P01] A barn here.\n\n[P02] A barn there.\n\n[P03] A barn again.\n';
+  const files: Record<string, string> = {
+    [`/out/_运行/风险队列_${TAG}.json`]: JSON.stringify(f),
+    '/out/第一章/原文_A层85_2026-09-10.md': src,
+    '/p/dict.csv': '词,释义,来源\nbarn,谷仓\n',
+  };
+  // 只数**正文**的写入次数（决定日志本来就要一条一条写，混在一起数说明不了任何事）
+  let docWrites = 0;
+  const DOC = '/out/第一章/原文_A层85_2026-09-10.md';
+  win.document.body.innerHTML = '<section id="pane-risk"></section>';
+  setRiskIo({
+    read: (p) => (p in files ? Promise.resolve(files[p]!) : Promise.reject(new Error('no file'))),
+    write: (p, c) => { if (p === DOC) docWrites++; files[p] = c; return Promise.resolve(); },
+    listDir: () => Promise.resolve([]),
+  });
+  await renderRiskPane({
+    dom: win.document as never, tier: 'A',
+    paths: { outDir: '/out', workDir: '/work', sourceVersion: 's', dictPath: '/p/dict.csv' },
+    teacherId: 'wayne',
+  });
+  const btn = win.document.querySelector('#pane-risk [data-batch]') as unknown as { click(): void };
+  btn.click();
+  await new Promise((res) => setTimeout(res, 40));
+
+  const out = files['/out/第一章/原文_A层85_2026-09-10.md']!;
+  assert.equal((out.match(/barn（谷仓）/g) ?? []).length, 3, '三段都补上了注释');
+  assert.equal(docWrites, 1, '一章只写一次（不是每条一次读改写）');
+  const ev = parseDecisionLog(files[`/work/_决定/${TAG}.jsonl`] ?? '').events;
+  assert.equal(ev.filter((e) => e.decision === 'accept').length, 3);
+  assert.equal(ev.every((e) => /^批量/.test(e.reason)), true, '批量来源要留痕，事后分得清是批量还是逐条');
+});
+
+test('动作不统一的组不给批量入口（宁可少一个按钮，也不做半对的事）', async () => {
+  const f: RiskQueueFile = {
+    schemaVersion: 1, 层级: ['A'], 章节: [1],
+    摘要: { total: 2, blockers: 1, byRule: {}, byCategory: {}, estimatedMinutes: 1 },
+    章节产物: { 第一章: '/out/第一章/原文_A层85_2026-09-10.md' },
+    队列: [
+      ANNO_ITEM({ detail: { word: 'barn' } }),
+      item({ id: '第一章#0:ANNO-03:barn', ruleId: 'ANNO-03', category: '加注', severity: 'warn', risk: 6.3, title: 'barn 注成「仓房」', detail: { word: 'barn' } }),
+    ],
+  };
+  const files: Record<string, string> = { [`/out/_运行/风险队列_${TAG}.json`]: JSON.stringify(f) };
+  actionSetup(files);
+  await renderRiskPane({
+    dom: win.document as never, tier: 'A',
+    paths: { outDir: '/out', workDir: '/work', sourceVersion: 's', dictPath: '/p/dict.csv' },
+    teacherId: 'wayne',
+  });
+  const html = win.document.getElementById('pane-risk')!.innerHTML;
+  assert.match(html, /同一个词：barn/, '还是归一组（同一个词）');
+  assert.equal(html.includes('data-batch'), false, '但动作不同 → 不给"全部应用"');
 });

@@ -413,6 +413,28 @@
       .rq-ctx { color: var(--muted); font-size: var(--fs-sm); }
       .rq-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
       .rq-hint { font-size: var(--fs-xs); color: var(--muted); }
+      .rq-session { margin: 6px 0; font-size: var(--fs-md); font-weight: 600; color: var(--pending); }
+      .rq-session-done { color: var(--accent); }
+      .rq-budget { margin-bottom: 6px; }
+      .rq-budget > summary { font-size: var(--fs-xs); color: var(--muted); cursor: pointer; }
+      .rq-group { border-top: 1px solid var(--line); padding-top: 8px; }
+      .rq-group-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+      .rq-group-title { font-size: var(--fs-lg); font-weight: 600; }
+      .rq-group-count { font-size: var(--fs-xs); color: var(--muted); }
+      .rq-group-rules { font-family: ui-monospace, monospace; font-size: var(--fs-xs); color: var(--brand); }
+      .rq-group-impact { font-size: var(--fs-xs); color: var(--muted); margin: 2px 0 8px; }
+      .rq-btn-batch { margin-left: auto; }
+      .rq-more { margin: 6px 0 0 18px; }
+      .rq-more > summary { font-size: var(--fs-sm); color: var(--brand); cursor: pointer; }
+      .rq-flash { margin: 0 18px 8px; padding: 8px 10px; background: var(--riskbg); color: var(--oov); border-radius: var(--r-sm); font-size: var(--fs-md); }
+      .rq-card-failed { border-color: var(--oov); }
+      .rq-done { margin-top: 6px; }
+      .rq-done > summary { font-size: var(--fs-sm); color: var(--muted); cursor: pointer; }
+      .rq-done-list { margin-top: 4px; max-height: 220px; overflow: auto; }
+      .rq-done-row { display: flex; align-items: center; gap: 8px; font-size: var(--fs-sm); padding: 2px 0; }
+      .rq-done-undone { color: var(--muted); text-decoration: line-through; }
+      .rq-done-pos { font-size: var(--fs-xs); color: var(--muted); }
+      .rq-done-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       /* 数据面板 */
       .dp { padding: 14px 18px; color: var(--fg); }
       .dp-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px; }

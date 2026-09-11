@@ -18,7 +18,18 @@ import { parseDictCsv } from '../../src/core/dictmerge.js';
 import { parseDoc } from '../../src/core/docast.js';
 import { DECISION_LABEL } from '../../src/core/decision.js';
 import { actionOf, applyAction, failureText, type RuleAction } from '../../src/core/riskaction.js';
-import { oneHourPlan, type RiskItem, type RiskQueue } from '../../src/core/riskqueue.js';
+/** 有确定性动作的规则（批量应用只在这几类上给） */
+const MUTATING_RULES = ['ANNO-01', 'ANNO-02', 'ANNO-03', 'AST-02'];
+import {
+  batchImpact,
+  groupQueue,
+  sessionState,
+  subjectOf,
+  type RiskItem,
+  type RiskQueue,
+  type TaskGroup,
+} from '../../src/core/riskqueue.js';
+import { oneHourPlan } from '../../src/core/riskqueue.js';
 import { GATE_RULES, type GateCategory } from '../../src/core/segmentgate.js';
 
 export interface RiskIo {
@@ -173,16 +184,9 @@ export function decisionLineFor(
   });
 }
 
-/** 这条决定针对什么——离线汇总器靠它决定"该提议进哪里"（词典/词表例外/改写模板） */
-export function subjectOf(item: RiskItem): { kind: 'word' | 'number' | 'proper' | 'sentence' | 'other'; value: string } {
-  const d = item.detail ?? {};
-  const word = typeof d.word === 'string' ? d.word : '';
-  if (word) return { kind: 'word', value: word };
-  const signal = typeof d.signal === 'string' ? d.signal : '';
-  if (signal) return /^\d/.test(signal) ? { kind: 'number', value: signal } : { kind: 'proper', value: signal };
-  if (item.ruleId === 'SENT-01' || item.ruleId === 'LEN-01') return { kind: 'sentence', value: item.rewrittenSentence || item.id };
-  return { kind: 'other', value: item.id };
-}
+/** 这条决定针对什么：**实现在引擎**（`src/core/riskqueue.ts` 的 `subjectOf`），
+ *  聚合与汇总器都要用它，放在 App 层会让引擎反向依赖界面。这里只做转出。 */
+export { subjectOf } from '../../src/core/riskqueue.js';
 
 /** 面板顶部的一行统计：报告要的"先看统计"就在这一行里 */
 export interface PanelStat {
@@ -375,6 +379,8 @@ export async function renderRiskPane(
   const stat = panelStat(file, events, budget);
   const left = pendingItems(file, events);
   const done = decidedRows(file, events);
+  const groups = groupQueue(left, { mutatingRules: MUTATING_RULES });
+  const session = sessionState(left, groups);
   const planned = oneHourPlan(
     { items: file.队列, summary: file.摘要 },
     budget,
@@ -390,7 +396,12 @@ export async function renderRiskPane(
         ${stat.unfinished ? `｜<b class="rq-over">未完成段落 ${stat.unfinished}</b>` : ''}
       </div>
       <div class="rq-advice">${esc(stat.advice)}｜路径布局 <b>${esc(identity.layout)}</b>${identity.runId ? `（${esc(identity.runId)}）` : ''}</div>
-      <div class="rq-plan">${planned.phases.map((p) => `<span class="rq-phase">${esc(p.title)} ${p.budget}′ / ${p.items.length} 条</span>`).join('')}</div>
+      <div class="rq-session ${session.done ? 'rq-session-done' : ''}">${esc(session.text)}</div>
+      <details class="rq-budget">
+        <summary>本次预算怎么排（后台估算，不是任务模型）</summary>
+        <div class="rq-plan">${planned.phases.map((p) => `<span class="rq-phase">${esc(p.title)} ${p.budget}′ / ${p.items.length} 条</span>`).join('')}</div>
+        <div class="rq-hint">${esc(planned.advice)}</div>
+      </details>
       ${done.length ? `<details class="rq-done"><summary>看我判过的（${done.length} 条，可撤销）</summary><div class="rq-done-list">${done
         .map(
           (r) => `<div class="rq-done-row${r.undone ? ' rq-done-undone' : ''}">
@@ -415,35 +426,49 @@ export async function renderRiskPane(
   const flashBar = flash
     ? `<div class="rq-flash">⚠ ${esc(flash.text)} <span style="color:var(--muted)">（这一条仍在待办里，正文没有改动）</span></div>`
     : '';
-  const cards = left
-    .map(
-      (it, i) => `
-    <div class="rq-card${flash && flash.itemId === it.id ? ' rq-card-failed' : ''}" data-item="${esc(it.id)}">
-      <div class="rq-card-head">
-        <span class="rq-rank">${i + 1}</span>
-        <span class="rq-rule" title="${esc(ruleLabel(it.ruleId))}">${esc(it.ruleId)}</span>
-        <span class="rq-sev rq-sev-${it.severity === 'blocker' ? 'block' : 'warn'}">${SEV_LABEL[it.severity] ?? it.severity}</span>
-        <span class="rq-risk">风险 ${it.risk}</span>
-        <span class="rq-pos">${esc(it.segLabel)}${it.tier ? `（${esc(it.tier)} 层）` : ''}</span>
-      </div>
-      <div class="rq-issue">${esc(it.title)}</div>
-      <div class="rq-pair">
-        <div><span class="rq-lab">原句</span>${esc(it.sourceSentence || '（未定位到原句）')}</div>
-        <div><span class="rq-lab">改写</span>${esc(it.rewrittenSentence || '（改写里找不到）')}</div>
-        <div class="rq-ctx"><span class="rq-lab">上下文</span>上「${esc(it.context.prev || '—')}」／下「${esc(it.context.next || '—')}」</div>
-      </div>
-      <div class="rq-actions">
-        <button class="rq-btn rq-btn-main" data-act="${esc(actionOf(it.ruleId).kind)}" data-id="${esc(it.id)}"
-          title="${esc(actionOf(it.ruleId).effect)}">${esc(actionOf(it.ruleId).label)}</button>
-        <button class="rq-btn" data-decide="reject" data-id="${esc(it.id)}">↺ 退回重写</button>
-        <button class="rq-btn" data-decide="false-positive" data-id="${esc(it.id)}">⚑ 标记误报</button>
-        ${actionOf(it.ruleId).mutates ? '<span class="rq-hint">主键会**改正文**并同时记事件（可撤销）</span>' : '<span class="rq-hint">主键只记录决定，正文不变</span>'}
-      </div>
-    </div>`,
-    )
-    .join('');
+  const card = (it: RiskItem): string => `
+      <div class="rq-card${flash && flash.itemId === it.id ? ' rq-card-failed' : ''}" data-item="${esc(it.id)}">
+        <div class="rq-card-head">
+          <span class="rq-rule" title="${esc(ruleLabel(it.ruleId))}">${esc(it.ruleId)}</span>
+          <span class="rq-sev rq-sev-${it.severity === 'blocker' ? 'block' : 'warn'}">${SEV_LABEL[it.severity] ?? it.severity}</span>
+          <span class="rq-risk">风险 ${it.risk}</span>
+          <span class="rq-pos">${esc(it.segLabel)}${it.tier ? `（${esc(it.tier)} 层）` : ''}</span>
+        </div>
+        <div class="rq-issue">${esc(it.title)}</div>
+        <div class="rq-pair">
+          <div><span class="rq-lab">原句</span>${esc(it.sourceSentence || '（未定位到原句）')}</div>
+          <div><span class="rq-lab">改写</span>${esc(it.rewrittenSentence || '（改写里找不到）')}</div>
+          <div class="rq-ctx"><span class="rq-lab">上下文</span>上「${esc(it.context.prev || '—')}」／下「${esc(it.context.next || '—')}」</div>
+        </div>
+        <div class="rq-actions">
+          <button class="rq-btn rq-btn-main" data-act="${esc(actionOf(it.ruleId).kind)}" data-id="${esc(it.id)}"
+            title="${esc(actionOf(it.ruleId).effect)}">${esc(actionOf(it.ruleId).label)}</button>
+          <button class="rq-btn" data-decide="reject" data-id="${esc(it.id)}">↺ 退回重写</button>
+          <button class="rq-btn" data-decide="false-positive" data-id="${esc(it.id)}">⚑ 标记误报</button>
+          ${actionOf(it.ruleId).mutates ? '<span class="rq-hint">主键会改正文并同时记事件（可撤销）</span>' : '<span class="rq-hint">主键只记录决定，正文不变</span>'}
+        </div>
+      </div>`;
 
-  el.innerHTML = `${head}${flashBar}<div class="rq-list">${cards}</div>`;
+  // 按任务组呈现（v4 方向第 3 条）：一条一条翻 70 张卡，到第 25 条就开始盲点了
+  const groupHtml = (g: TaskGroup, gi: number): string => `
+    <section class="rq-group" data-group="${esc(g.id)}">
+      <div class="rq-group-head">
+        <span class="rq-rank">${gi + 1}</span>
+        <span class="rq-group-title">${esc(g.title)}</span>
+        <span class="rq-group-count">${g.count} 条</span>
+        <span class="rq-group-rules">${esc(g.rules.join('、'))}</span>
+        ${g.uniformAction ? `<button class="rq-btn rq-btn-batch" data-batch="${esc(g.id)}" title="${esc(batchImpact(g))}">⚡ 全部应用（${g.actionable} 处）</button>` : ''}
+      </div>
+      <div class="rq-group-impact">${esc(batchImpact(g))}</div>
+      ${g.samples.map(card).join('')}
+      ${
+        g.count > g.samples.length
+          ? `<details class="rq-more"><summary>展开这一组其余 ${g.count - g.samples.length} 条</summary>${g.items.slice(g.samples.length).map(card).join('')}</details>`
+          : ''
+      }
+    </section>`;
+
+  el.innerHTML = `${head}${flashBar}<div class="rq-list">${groups.map(groupHtml).join('')}</div>`;
 
   // 主键 = 规则特定动作（可能改正文）；其余键 = 只记决定。两者都写不可变事件。
   for (const btn of Array.from(input.dom.querySelectorAll('#pane-risk [data-decide]'))) {
@@ -472,6 +497,18 @@ export async function renderRiskPane(
       void undoDecision(input, file, identity, ref).then((r) => {
         if (r.ok) void renderRiskPane(input);
         else void renderRiskPane(input, { itemId: '', text: r.message ?? '撤销未完成' });
+      });
+    });
+  }
+  // 批量应用：只对"动作统一、且有确定性修法"的组开放（其余组连按钮都不给）
+  for (const btn of Array.from(input.dom.querySelectorAll('#pane-risk [data-batch]'))) {
+    btn.addEventListener('click', (ev) => {
+      const gid = (ev.currentTarget as HTMLElement).getAttribute('data-batch');
+      const g = groups.find((x) => x.id === gid);
+      if (!g) return;
+      (ev.currentTarget as HTMLElement).setAttribute('disabled', 'true');
+      void runBatchApply(input, file, identity, g).then((r) => {
+        void renderRiskPane(input, r.ok ? undefined : { itemId: '', text: r.message ?? '批量应用未完成' });
       });
     });
   }
@@ -638,6 +675,83 @@ async function undoDecision(
     identity,
   );
   return { ok: true };
+}
+
+/**
+ * 批量应用一个组。
+ *
+ * 报告第 3 条要的"全部应用"在这里落地。语义上它**不是**"把 N 条一次记完"，
+ * 而是"把同一类改动一次做完"——所以：
+ *   · 逐条执行**同一个** `applyAction`（不另写一条批量路径，避免两套口径）；
+ *   · **按章聚合写盘**：一章只读一次、写一次（否则 12 条就是 12 次读改写，慢且更容易出岔）；
+ *   · 任一条失败**不静默跳过**：那一条写 `rejected`、留在待办，其余照做，最后如实报告几成几败。
+ * 返回 `ok` 只在**全部成功**时为真——部分成功也算没做完。
+ */
+async function runBatchApply(
+  input: RiskRenderInput,
+  file: RiskQueueFile,
+  identity: RunIdentity,
+  group: TaskGroup,
+): Promise<{ ok: boolean; message?: string }> {
+  if (!group.uniformAction) return { ok: false, message: '这一组的动作不统一，只能逐条处理' };
+  const byChapter = new Map<string, RiskItem[]>();
+  for (const it of group.items) {
+    if (!byChapter.has(it.chapter)) byChapter.set(it.chapter, []);
+    byChapter.get(it.chapter)!.push(it);
+  }
+  let doneCount = 0;
+  let failedCount = 0;
+  const firstError: string[] = [];
+  for (const [chapter, items] of byChapter) {
+    const docPath = file.章节产物?.[chapter] ?? pathsFor(input.paths, identity, input.tier).any('正文', { chapter });
+    let doc: string;
+    try {
+      doc = await io!.read(docPath);
+    } catch {
+      failedCount += items.length;
+      if (!firstError.length) firstError.push(`读不到正文（${docPath}）`);
+      for (const it of items) {
+        await appendDecision(input.paths, input.tier, decisionLineFor(it, 'rejected', { teacherId: input.teacherId, sourceVersion: input.paths.sourceVersion, reason: `批量：读不到正文（${docPath}）` }), identity);
+      }
+      continue;
+    }
+    const dict = await loadBookDict(input.paths);
+    let cur = doc;
+    const okIds: string[] = [];
+    for (const it of items) {
+      const action = actionOf(it.ruleId);
+      const res = applyAction(action, {
+        doc: cur,
+        segId: segIdOf(it),
+        word: typeof it.detail?.word === 'string' ? it.detail.word : '',
+        zh: glossFor(it, dict),
+        removeAll: it.detail?.crossSegment === true,
+      });
+      if (!res.ok) {
+        failedCount++;
+        if (!firstError.length) firstError.push(failureText(res));
+        await appendDecision(input.paths, input.tier, decisionLineFor(it, 'rejected', { teacherId: input.teacherId, sourceVersion: input.paths.sourceVersion, reason: `批量：${failureText(res)}` }), identity);
+        continue;
+      }
+      cur = res.next;
+      okIds.push(it.id);
+      doneCount++;
+      await appendDecision(input.paths, input.tier, decisionLineFor(it, 'accept', { teacherId: input.teacherId, sourceVersion: input.paths.sourceVersion, after: res.after, reason: `批量${action.label}：${res.before} → ${res.after}` }), identity);
+    }
+    if (cur !== doc) {
+      try {
+        if (io!.backup) await io!.backup(docPath, doc);
+        await io!.write(docPath, cur);
+      } catch (e) {
+        // 写盘失败：把**这一章**的条目改成 rejected（正文没落盘，不能让它们显示成已办）
+        failedCount += okIds.length;
+        doneCount -= okIds.length;
+        if (!firstError.length) firstError.push(`写入失败：${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+  }
+  const message = `全部应用：成功 ${doneCount} 处，失败 ${failedCount} 处${firstError.length ? `（${firstError[0]}）` : ''}`;
+  return { ok: failedCount === 0, message };
 }
 
 /** 风险项 → 段号（P07）。队列项 id 形如 `第一章#2:FACT-01:1911`，段序从 0 起。 */
