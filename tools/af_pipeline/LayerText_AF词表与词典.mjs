@@ -1105,3 +1105,94 @@ export function chapterNames(P) {
   }
   return r.names;
 }
+
+/* ────────────────────── 清单本身 ────────────────────── */
+
+/**
+ * 读当前运行的那份清单（读不到返回 `null`）。
+ *
+ * 存在的理由（《工程优化总计划》阶段 3 验收：「**删除缓存不影响从 manifest 重建队列**」）：
+ * 清单里记着 `tiers` 与 `chapters`——也就是"这次运行该覆盖哪些层、哪些章"，
+ * 而此前**没有任何脚本消费它们**：`风险队列.mjs` 的层与章一律从命令行来
+ * （`--tier` / `--chapters`），不给就自己猜一个默认。
+ * 于是"把队列删了重建"这件事做不到——删掉之后没人记得当初扫的是哪几章，
+ * 只能靠人回忆着把命令行再敲一遍，敲漏一章也不会有任何提示。
+ *
+ * 现在：命令行优先（显式意图最强），没给才回落到清单，清单也没有才用默认。
+ * 三层都要**说出来**是从哪儿来的，免得"这次为什么只扫了两章"没人答得上。
+ */
+export function readManifest(P, runId) {
+  const outRoot = P?.产物目录;
+  if (!outRoot) return null;
+  const runDir = join(outRoot, '_运行');
+  const readIf = (p) => {
+    try {
+      return existsSync(p) ? JSON.parse(readFileSync(p, 'utf-8')) : null;
+    } catch {
+      /* 坏清单当没有——**不静默**：下面会说出来 */
+      return null;
+    }
+  };
+  // 先按 runId 点名的那份；没有点名就读"最新"指针指的那份
+  if (runId) {
+    const named = readIf(join(runDir, `清单_${runId}.json`));
+    if (named) return named;
+  }
+  const ptr = readIf(join(runDir, '清单_最新.json'));
+  if (ptr?.path) return readIf(ptr.path);
+  return null;
+}
+
+/**
+ * 这次运行该覆盖哪些层、哪些章——**命令行 > 清单 > 默认**。
+ *
+ * 返回 `{ tiers, chapters, sources }`，`sources` 说明每一项是从哪一层来的，
+ * 直接进日志。**这就是"删掉队列还能重建"的全部机制**：范围不再只存在于
+ * 某个人的命令行历史里，而是记在清单上。
+ */
+export function scopeOf(P, cli = {}) {
+  const { tierTagOf } = engineModsFor(P, 'core').mods?.manifest ?? {};
+  const tagOf = (t) => (tierTagOf ? tierTagOf(String(t)) : String(t));
+  const parseTiers = (s) =>
+    String(s)
+      .split(',')
+      .map((x) => x.trim().toUpperCase())
+      .filter(Boolean);
+  const parseChapters = (s) =>
+    String(s)
+      .split(',')
+      .map((x) => Number(x.trim()))
+      .filter((n) => Number.isInteger(n) && n > 0);
+
+  const m = readManifest(P, cli.runId);
+  const sources = { tiers: '', chapters: '' };
+
+  let tiers;
+  if (cli.tier && String(cli.tier).trim()) {
+    tiers = parseTiers(cli.tier).map(tagOf);
+    sources.tiers = '命令行';
+  } else if (m?.tiers?.length) {
+    // 清单里记的是层键（A/M/B）或标签，统一成标签
+    tiers = m.tiers.map((t) => tagOf(t));
+    sources.tiers = '清单';
+  } else {
+    tiers = ['A层85'];
+    sources.tiers = '默认';
+  }
+
+  let chapters;
+  if (cli.chapters && String(cli.chapters).trim()) {
+    chapters = parseChapters(cli.chapters);
+    sources.chapters = '命令行';
+  } else if (m?.chapters?.length) {
+    chapters = [...m.chapters].sort((a, b) => a - b);
+    sources.chapters = '清单';
+  } else {
+    chapters = [];
+    sources.chapters = '默认（全部章）';
+  }
+
+  console.log(`[范围] 层 ${tiers.join('/')}（来自${sources.tiers}）｜章 ${chapters.length ? chapters.join(',') : '全部'}（来自${sources.chapters}）`);
+  if (!m) console.log('[范围] 没有读到运行清单——范围只能靠命令行与默认。建一份清单（清单.mjs --new）之后，删了队列也能照样重建。');
+  return { tiers, chapters, sources, manifest: m };
+}

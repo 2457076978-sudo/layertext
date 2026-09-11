@@ -47,12 +47,32 @@ const TIER_INFO = {
 const argv = process.argv.slice(2);
 const arg = (n, d) => { const i = argv.indexOf(n); return i >= 0 ? argv[i + 1] : d; };
 const has = (n) => argv.includes(n);
-const TIERS = (arg('--tier', 'A')).split(',').map((s) => s.trim().toUpperCase()).filter((t) => TIER_INFO[t]);
 const SUFFIX = arg('--out', '') ? '_' + arg('--out') : '';
 const BUDGET = Number(arg('--budget', '60'));
 const BASELINE = P.情节底线 ?? '调适工作区/规则与底线/全书情节底线_v0.1.md';
-const CH_IDS = arg('--chapters', '')
-  ? arg('--chapters').split(',').map((x) => Number(x.trim())).filter((n) => n >= 1 && n <= 10)
+
+/* ★ 范围：**命令行 > 清单 > 默认**。这是「删除缓存不影响从 manifest 重建队列」那条验收的落点。
+ * 原来层与章都只从命令行来，不给就各自猜一个默认；而清单里明明记着
+ * `tiers` 与 `chapters`（"这次运行该覆盖哪些层、哪些章"），却**没有任何脚本消费它们**。
+ * 后果很具体：把队列删掉之后，"重建"只能靠人回忆当初敲过什么，
+ * 敲漏一章也不会有任何提示——而漏掉的那一章会安静地不进队列。
+ * `scopeOf` 会把它从哪一层取到的打进日志，于是"这次为什么只扫了两章"当场可答。 */
+const TEACHER = arg('--teacher', process.env.LAYERTEXT_TEACHER ?? process.env.USER ?? 'unknown');
+/* 找运行身份只需要**命令行的** `--tier`（用来定位分片指针），不需要解析后的 `TIERS`——
+ * 否则 `RUN` 依赖 `TIERS`、`TIERS` 又依赖 `RUN`，绕成一个环。
+ * 命令行没给层时传 `undefined`：`readRunIdentity` 会退回"最近一次"并自行核对。 */
+const RUN = await SHARED.readRunIdentity(
+  { out: OUT_BASE, work: P.调适工作区 },
+  { teacher: TEACHER, tier: arg('--tier', undefined) || undefined },
+  { runId: arg('--run', undefined) },
+);
+if (RUN.warning) console.warn(`\n⚠ ${RUN.warning}`);
+console.log(`运行身份：${RUN.source}｜${RUN.teacher}｜${RUN.runId || '（无）'}`);
+
+const SCOPE = SHARED.scopeOf(P, { tier: arg('--tier', undefined), chapters: arg('--chapters', undefined), runId: RUN.runId });
+const TIERS = SCOPE.tiers.map((t) => t.replace(/^([AMB])层.*$/, '$1')).filter((t) => TIER_INFO[t]);
+const CH_IDS = SCOPE.chapters.length
+  ? SCOPE.chapters
   : CN.slice(0, Number(P.章数 ?? 10)).map((_, i) => i + 1);
 
 if (!TIERS.length) { console.error('✗ --tier 只能是 A / M / B 的组合'); process.exit(2); }
@@ -86,11 +106,7 @@ const oovOf = (seg) => {
 
 /** 运行身份 + 路径解析：与命令行其它脚本、App 面板共用**同一个** `readRunIdentity`
  *  （报告 §三：「都只能通过 manifest 解析路径」——谁自己拼字符串、谁自己读指针，
- *   谁就是下一个撞名点/身份被换掉的入口）。 */
-const TEACHER = arg('--teacher', process.env.LAYERTEXT_TEACHER ?? process.env.USER ?? 'unknown');
-const RUN = await SHARED.readRunIdentity({ out: OUT_BASE, work: P.调适工作区 }, { teacher: TEACHER, tier: TAGS[TIERS[0]] ?? TIERS[0] }, { runId: arg('--run', undefined) });
-if (RUN.warning) console.warn(`\n⚠ ${RUN.warning}`);
-console.log(`运行身份：${RUN.source}｜${RUN.teacher}｜${RUN.runId || '（无）'}`);
+ *   谁就是下一个撞名点/身份被换掉的入口）。身份在上面解析范围之前就取好了。 */
 const R = makeResolver(RUN.layout, { out: OUT_BASE, work: P.调适工作区 }, { runId: RUN.runId, tier: TAGS[TIERS[0]] ?? TIERS[0], date: DATE });
 
 console.log('════ AF 段级风险队列 ════');

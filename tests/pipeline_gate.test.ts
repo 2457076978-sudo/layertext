@@ -12,7 +12,7 @@
 
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
@@ -639,4 +639,92 @@ test('★ 会话日志有坏行时必须**说出来**，而不是静默跳过（
   // 而且必须留痕：进 warning 事件，事后查得到
   const after = readFileSync(logPath, 'utf-8');
   assert.match(after, /session-log-bad-lines/, '坏行要写进事件日志，事后能查');
+});
+
+/* ────────────────── 阶段 3 验收：删除缓存不影响从 manifest 重建队列 ────────────────── */
+
+/** 两章、A 层、已有产物的项目（够跑风险队列，不需要 API） */
+function makeTwoChapterProduced(): { root: string; json: string } {
+  const root = mkdtempSync(join(tmpdir(), 'lt-scope-'));
+  const w = (...p: string[]): string => join(root, ...p);
+  for (const [i, ch] of ['第一章', '第二章'].entries()) {
+    mkdirSync(w('原文', ch), { recursive: true });
+    mkdirSync(w('产物', ch), { recursive: true });
+    const en = i === 0 ? 'One' : 'Two';
+    writeFileSync(w('原文', ch, '原文_规范化.md'), `## Chapter ${en}\n\n[P01] The boy ran to the red barn and saw a small dog.\n`, 'utf-8');
+    writeFileSync(w('产物', ch, `原文_${TAG}_${DATE}.md`), `## Chapter ${en}\n\n[P01] The boy ran to the red barn（谷仓）and saw a small dog.\n`, 'utf-8');
+  }
+  writeFileSync(w('词库.csv'), ['词,类型', ...['the', 'boy', 'ran', 'to', 'red', 'barn', 'and', 'saw', 'a', 'small', 'dog'].map((x) => `${x},单词`)].join('\n') + '\n', 'utf-8');
+  writeFileSync(w('专名表.txt'), '# 专名\n', 'utf-8');
+  writeFileSync(w('知识库.csv'), '类型,词,值,次数\n', 'utf-8');
+  writeFileSync(w('词典.csv'), '词,释义,来源\n', 'utf-8');
+  const json = w('调适项目_自测.json');
+  writeFileSync(
+    json,
+    JSON.stringify(
+      { 书名: '范围自测', 工作区: root, 调适工作区: w('调适'), 原文目录: w('原文'), 产物目录: w('产物'), 词库: w('词库.csv'), 书级: { 专名表: w('专名表.txt'), 知识库: w('知识库.csv'), 词典: w('词典.csv') }, 日期: DATE, 章数: 2, 引擎目录: REPO },
+      null,
+      2,
+    ),
+    'utf-8',
+  );
+  return { root, json };
+}
+
+test('★ 删除缓存不影响从 manifest 重建队列（阶段 3 验收原文）', () => {
+  const { root, json } = makeTwoChapterProduced();
+  const env = { ...process.env, LAYERTEXT_PROJECT: json, LAYERTEXT_ENGINE: REPO };
+  const runQ = (args: string[]): { status: number | null; out: string } => {
+    const r = spawnSync(process.execPath, [join(ARCHIVE, 'LayerText_AF风险队列.mjs'), ...args], { cwd: REPO, encoding: 'utf-8', env });
+    return { status: r.status, out: `${r.stdout ?? ''}${r.stderr ?? ''}` };
+  };
+
+  // ① 建清单：A 层、第 1–2 章（**范围记在清单上，不在某个人的命令行历史里**）
+  const init = spawnSync(process.execPath, [join(ARCHIVE, 'LayerText_AF清单.mjs'), '--new', '--tier', 'A', '--chapters', '1,2', '--teacher', 'wayne'], { cwd: REPO, encoding: 'utf-8', env });
+  assert.equal(init.status, 0, `${init.stdout ?? ''}${init.stderr ?? ''}`);
+
+  // ② 不给任何范围参数，直接跑——范围必须从清单来
+  const first = runQ([]);
+  assert.equal(first.status, 0, first.out);
+  assert.match(first.out, /层 A层85（来自清单）/, `层要从清单来：${first.out}`);
+  assert.match(first.out, /章 1,2（来自清单）/, `章要从清单来：${first.out}`);
+
+  const qPath = join(root, '产物', '_运行', `风险队列_${TAG}.json`);
+  const before = JSON.parse(readFileSync(qPath, 'utf-8')) as { 队列: { chapter: string }[]; 摘要: unknown };
+  assert.deepEqual([...new Set(before.队列.map((x) => x.chapter))].sort(), ['第一章', '第二章'], '两章都要在队列里');
+
+  // ③ 把队列删掉（"缓存没了"），再跑一次同样不给参数
+  rmSync(qPath);
+  const second = runQ([]);
+  assert.equal(second.status, 0, second.out);
+  const after = JSON.parse(readFileSync(qPath, 'utf-8')) as { 队列: { chapter: string }[]; 摘要: unknown };
+  /* 比的是**事实**，不是时间戳：`生成时间` 天然会变，把它一起比会逼出"改时间戳让它相等"
+   * 这种毫无意义的操作，最后连这条用例本身也没人信了。
+   * 除它以外的字段——章节、规则命中、每条队列项、估时——必须逐字段相同。 */
+  const strip = (o: Record<string, unknown>): Record<string, unknown> => {
+    const { 生成时间: _t, ...rest } = o;
+    void _t;
+    return rest;
+  };
+  assert.deepEqual(
+    strip(after as unknown as Record<string, unknown>),
+    strip(before as unknown as Record<string, unknown>),
+    '**删掉再重建，除生成时间外必须逐字段相同**——这就是"缓存不影响事实"的意思',
+  );
+  assert.equal(typeof (after as unknown as Record<string, unknown>)['生成时间'], 'string', '生成时间本身还是要有的（能证明这是新生成的一份）');
+
+  rmSync(root, { recursive: true, force: true });
+});
+
+test('★ 没有清单时要如实说"范围只能靠命令行与默认"，而不是假装知道', () => {
+  const { root, json } = makeTwoChapterProduced();
+  const r = spawnSync(process.execPath, [join(ARCHIVE, 'LayerText_AF风险队列.mjs')], {
+    cwd: REPO,
+    encoding: 'utf-8',
+    env: { ...process.env, LAYERTEXT_PROJECT: json, LAYERTEXT_ENGINE: REPO },
+  });
+  const out = `${r.stdout ?? ''}${r.stderr ?? ''}`;
+  assert.match(out, /没有读到运行清单/, `没清单就要说出来：${out.slice(0, 400)}`);
+  assert.match(out, /删了队列也能照样重建|重建/, '要把"该建一份清单"这个可行动建议给出来');
+  rmSync(root, { recursive: true, force: true });
 });
