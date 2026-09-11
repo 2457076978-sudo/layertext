@@ -293,11 +293,20 @@ function loadSession() {
   let stats = { calls: 0, in: 0, out: 0, cached: 0 };
   let carryAt = -1; // 最后一个 window 事件之后的消息才是"当前窗口"
   let lastCarry = '';
+  /* 坏行**计数**而不是静默跳过。
+   *
+   * 这条日志是 `--resume` 重建会话的唯一依据，而本项目对它的要求是明确的：
+   * 「续跑必须重放同样的裁剪，重建出合法会话——否则等于**同一份日志两种上下文**」。
+   * 一行 JSON 坏掉被悄悄丢掉，重建出来的对话就少了一轮：
+   * 上下文变了 → 模型看到的和上一轮不一样 → 产物不一样，**而没有人会知道为什么**。
+   * 所以坏行必须计数、必须说出来，并且要和"这次是续跑"绑在一起看。 */
+  let badLines = 0;
   for (const l of lines) {
     let o;
     try {
       o = JSON.parse(l);
     } catch {
+      badLines++;
       continue;
     }
     if (o.t === 'window') {
@@ -328,7 +337,14 @@ function loadSession() {
   // 会话滚动事件：`--resume` 重建时必须**重放同样的裁剪**，否则续跑后的上下文
   // 比全新一轮长得多（同一份日志会给出两种不同的会话），注意力稀释又回来了。
   const windowed = carryAt >= 0 ? messages.slice(carryAt) : messages;
-  return { messages: windowed, done, stats, warnings, carryText: lastCarry };
+  if (badLines) {
+    // 说出来，而不是只计数：这件事直接改变重建出来的上下文，必须让人当场看见
+    const msg = `会话日志有 ${badLines} 行读不出来（${f}）——重建出来的对话**比上一轮少**，` + `续跑后模型看到的上下文与原轮不同，结果可能悄悄变样。建议先备份日志，再决定是继续还是重跑。`;
+    console.error(`\n⚠ ${msg}`);
+    warnings.push({ t: 'warning', kind: 'session-log-bad-lines', message: msg, badLines });
+    logLine({ t: 'warning', kind: 'session-log-bad-lines', message: msg, badLines });
+  }
+  return { messages: windowed, done, stats, warnings, carryText: lastCarry, badLines };
 }
 const logLine = (o) => {
   mkdirSync(dirname(sessionFile()), { recursive: true });
@@ -810,7 +826,9 @@ for (const { i } of chSegs) {
        * 全都拿不到就记 null —— "不知道"和"没截断"是两件事，不能合并。 */
       const finishReason = usage.some((c) => c.finishReason === 'length')
         ? 'length'
-        : (usage.every((c) => typeof c.finishReason === 'string' && c.finishReason) ? usage[usage.length - 1].finishReason : null);
+        : usage.every((c) => typeof c.finishReason === 'string' && c.finishReason)
+          ? usage[usage.length - 1].finishReason
+          : null;
       state.stats.calls += usage.length;
       state.stats.in += u.in;
       state.stats.out += u.out;

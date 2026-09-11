@@ -32,11 +32,7 @@ const SOURCE = '[P01] The boy ran to the red barn and saw a small dog.';
 function makeTwoChapterProject(): { root: string; json: string } {
   const { root, json } = makeProject();
   mkdirSync(join(root, '原文', '第二章'), { recursive: true });
-  writeFileSync(
-    join(root, '原文', '第二章', '原文_规范化.md'),
-    '## Chapter Two\n\n[P01] The barn was old and the boy ran to it.\n',
-    'utf-8',
-  );
+  writeFileSync(join(root, '原文', '第二章', '原文_规范化.md'), '## Chapter Two\n\n[P01] The barn was old and the boy ran to it.\n', 'utf-8');
   // 词库里去掉 barn → barn 在两章都是超纲词
   writeFileSync(
     join(root, '词库.csv'),
@@ -64,11 +60,7 @@ function makeProjectUnder(root: string): { root: string; json: string } {
   mkdirSync(w('原文', '第一章'), { recursive: true });
   mkdirSync(w('调适', '_会话'), { recursive: true });
   mkdirSync(w('产物'), { recursive: true });
-  writeFileSync(
-    w('原文', '第一章', '原文_规范化.md'),
-    `## Chapter One\n\n${SOURCE}\n`,
-    'utf-8',
-  );
+  writeFileSync(w('原文', '第一章', '原文_规范化.md'), `## Chapter One\n\n${SOURCE}\n`, 'utf-8');
   writeFileSync(
     w('词库.csv'),
     // 类型必须是「单词/课标词/待定词」才计入 known（lexicon.ts 的口径），
@@ -82,18 +74,22 @@ function makeProjectUnder(root: string): { root: string; json: string } {
   const json = w('调适项目_自检.json');
   writeFileSync(
     json,
-    JSON.stringify({
-      书名: '门禁自检',
-      工作区: root,
-      调适工作区: w('调适'),
-      原文目录: w('原文'),
-      产物目录: w('产物'),
-      词库: w('词库.csv'),
-      书级: { 专名表: w('专名表.txt'), 知识库: w('知识库.csv'), 词典: w('词典.csv') },
-      日期: DATE,
-      章数: 1,
-      引擎目录: REPO,
-    }, null, 2),
+    JSON.stringify(
+      {
+        书名: '门禁自检',
+        工作区: root,
+        调适工作区: w('调适'),
+        原文目录: w('原文'),
+        产物目录: w('产物'),
+        词库: w('词库.csv'),
+        书级: { 专名表: w('专名表.txt'), 知识库: w('知识库.csv'), 词典: w('词典.csv') },
+        日期: DATE,
+        章数: 1,
+        引擎目录: REPO,
+      },
+      null,
+      2,
+    ),
     'utf-8',
   );
   return { root, json };
@@ -174,7 +170,9 @@ test('P0 续跑语义：未通过的段不进 done，--resume 会重跑它而不
 
   // 第一轮留下的会话日志里，done 事件数必须是 0（未通过 = 没完成）
   const log = readFileSync(join(root, '调适', '_会话', `${TAG}${SUFFIX}.jsonl`), 'utf-8')
-    .split('\n').filter(Boolean).map((l) => JSON.parse(l) as { t: string });
+    .split('\n')
+    .filter(Boolean)
+    .map((l) => JSON.parse(l) as { t: string });
   const doneEvents = log.filter((o) => o.t === 'done');
   const reviewEvents = log.filter((o) => o.t === 'review');
   assert.equal(doneEvents.length, 0, '未通过的段绝不能写 done 事件');
@@ -203,7 +201,6 @@ test('P0 旧标记作废：同一层的上一轮成功标记必须被本轮失�
   assert.equal(existsSync(join(root, '产物', '_运行', `${TAG}${SUFFIX}.待复核.json`)), true);
 });
 
-
 test('跨章不重复注：第 1 章注过的词，第 2 章不再注也**不算漏注**（提示词与门禁不能打架）', () => {
   const { root, json } = makeTwoChapterProject();
   // 先只跑第 1 章：产物里会把 barn 注出来
@@ -228,12 +225,14 @@ test('跨章不重复注：第 1 章注过的词，第 2 章不再注也**不算
 test('本地去重：模型在后面的章节里重复注同一个词，会被本地清掉（保首次）', () => {
   const { root, json } = makeTwoChapterProject();
   const run1 = spawnSync(process.execPath, [SCRIPT, '--tier', 'A', '--chapters', '1', '--out', '去重'], {
-    cwd: REPO, encoding: 'utf-8',
+    cwd: REPO,
+    encoding: 'utf-8',
     env: { ...process.env, LAYERTEXT_FAKE_LLM: 'annotate', LAYERTEXT_PROJECT: json, LAYERTEXT_ENGINE: REPO },
   });
   assert.equal(run1.status, 0, run1.stderr);
   const run2 = spawnSync(process.execPath, [SCRIPT, '--tier', 'A', '--chapters', '2', '--out', '去重'], {
-    cwd: REPO, encoding: 'utf-8',
+    cwd: REPO,
+    encoding: 'utf-8',
     env: { ...process.env, LAYERTEXT_FAKE_LLM: 'annotate', LAYERTEXT_PROJECT: json, LAYERTEXT_ENGINE: REPO },
   });
   assert.equal(run2.status, 0, run2.stderr);
@@ -243,7 +242,7 @@ test('本地去重：模型在后面的章节里重复注同一个词，会被�
 });
 
 test('查词走严格 schema 的 tool call：往返成功、事件日志留下 tool 记录', () => {
-  const { root, json } = makeTwoChapterProject();   // barn 在词库外 → 会走一次真实查词
+  const { root, json } = makeTwoChapterProject(); // barn 在词库外 → 会走一次真实查词
   const r = spawnSync(process.execPath, [SCRIPT, '--tier', 'A', '--chapters', '1', '--out', '工具'], {
     cwd: REPO,
     encoding: 'utf-8',
@@ -251,27 +250,40 @@ test('查词走严格 schema 的 tool call：往返成功、事件日志留下 t
   });
   assert.equal(r.status, 0, `工具往返后应通过，实得 ${r.status}\n${r.stderr}`);
   const log = readFileSync(join(root, '调适', '_会话', `${TAG}_工具.jsonl`), 'utf-8')
-    .split('\n').filter(Boolean).map((l) => JSON.parse(l) as { t: string; words?: string[]; role?: string; tool_call_id?: string });
+    .split('\n')
+    .filter(Boolean)
+    .map((l) => JSON.parse(l) as { t: string; words?: string[]; role?: string; tool_call_id?: string });
   const toolEvents = log.filter((o) => o.t === 'tool');
   assert.equal(toolEvents.length >= 1, true, '「查词」必须留下 tool 事件（回放时能看到模型问过什么）');
   assert.deepEqual(toolEvents[0].words, ['barn']);
   // 工具协议要求回一条 role:'tool' 的消息（带 tool_call_id），否则下一次调用是非法的；
   // 而且它必须**写进事件日志**——否则 --resume 重建会话时会缺这一条，API 直接拒。
   const msgs = log.filter((o) => o.t === 'msg') as unknown as { role?: string; tool_call_id?: string; tool_calls?: unknown[] }[];
-  assert.equal(msgs.some((m) => m.role === 'tool' && m.tool_call_id === 'call_1'), true, '工具回复必须带 tool_call_id 且进日志');
-  assert.equal(msgs.some((m) => m.role === 'assistant' && Array.isArray(m.tool_calls)), true, '带 tool_calls 的助手回合也要进日志');
+  assert.equal(
+    msgs.some((m) => m.role === 'tool' && m.tool_call_id === 'call_1'),
+    true,
+    '工具回复必须带 tool_call_id 且进日志',
+  );
+  assert.equal(
+    msgs.some((m) => m.role === 'assistant' && Array.isArray(m.tool_calls)),
+    true,
+    '带 tool_calls 的助手回合也要进日志',
+  );
   assert.match(readFileSync(join(root, '产物', '第一章', `原文_${TAG}_${DATE}_工具.md`), 'utf-8'), /barn（/);
 });
 
 test('会话滚动窗口：超出窗口就归档历史、只结转结构化状态，且这一轮照样跑完', () => {
   const { root, json } = makeManySegmentProject(6);
   const r = spawnSync(process.execPath, [SCRIPT, '--tier', 'A', '--chapters', '1', '--out', '滚动', '--window', '1'], {
-    cwd: REPO, encoding: 'utf-8',
+    cwd: REPO,
+    encoding: 'utf-8',
     env: { ...process.env, LAYERTEXT_FAKE_LLM: 'exact', LAYERTEXT_PROJECT: json, LAYERTEXT_ENGINE: REPO },
   });
   assert.equal(r.status, 0, r.stderr);
   const log = readFileSync(join(root, '调适', '_会话', `${TAG}_滚动.jsonl`), 'utf-8')
-    .split('\n').filter(Boolean).map((l) => JSON.parse(l) as Record<string, unknown>);
+    .split('\n')
+    .filter(Boolean)
+    .map((l) => JSON.parse(l) as Record<string, unknown>);
   const wins = log.filter((o) => o.t === 'window');
   assert.equal(wins.length >= 1, true, '超出窗口必须留下 window 事件（否则无从知道历史被归档过）');
   assert.match(String(wins[0].carry), /结转上下文/);
@@ -280,7 +292,8 @@ test('会话滚动窗口：超出窗口就归档历史、只结转结构化状�
 
   // 续跑：必须重放同样的裁剪，重建出合法会话（否则等于"同一份日志两种上下文"）
   const r2 = spawnSync(process.execPath, [SCRIPT, '--tier', 'A', '--chapters', '1', '--out', '滚动', '--window', '1', '--resume'], {
-    cwd: REPO, encoding: 'utf-8',
+    cwd: REPO,
+    encoding: 'utf-8',
     env: { ...process.env, LAYERTEXT_FAKE_LLM: 'exact', LAYERTEXT_PROJECT: json, LAYERTEXT_ENGINE: REPO },
   });
   assert.equal(r2.status, 0, `滚动后的续跑必须能跑通，实得 ${r2.status}\n${r2.stderr}`);
@@ -289,7 +302,8 @@ test('会话滚动窗口：超出窗口就归档历史、只结转结构化状�
 test('不滚动（--window 0）时行为与从前一致：不留 window 事件', () => {
   const { root, json } = makeManySegmentProject(4);
   const r = spawnSync(process.execPath, [SCRIPT, '--tier', 'A', '--chapters', '1', '--out', '不滚', '--window', '0'], {
-    cwd: REPO, encoding: 'utf-8',
+    cwd: REPO,
+    encoding: 'utf-8',
     env: { ...process.env, LAYERTEXT_FAKE_LLM: 'exact', LAYERTEXT_PROJECT: json, LAYERTEXT_ENGINE: REPO },
   });
   assert.equal(r.status, 0, r.stderr);
@@ -299,11 +313,11 @@ test('不滚动（--window 0）时行为与从前一致：不留 window 事件',
 /* ────────────────── 路径布局：第二个人/第二次运行不许撞名（报告 §三） ────────────────── */
 
 function initManifest(root: string, json: string, layout: string, teacher: string): { status: number | null; stdout: string } {
-  const r = spawnSync(
-    process.execPath,
-    [join(REPO, 'tools', 'af_pipeline', 'LayerText_AF清单.mjs'), '--new', '--tier', 'A', '--chapters', '1', '--layout', layout, '--teacher', teacher],
-    { cwd: REPO, encoding: 'utf-8', env: { ...process.env, LAYERTEXT_PROJECT: json, LAYERTEXT_ENGINE: REPO } },
-  );
+  const r = spawnSync(process.execPath, [join(REPO, 'tools', 'af_pipeline', 'LayerText_AF清单.mjs'), '--new', '--tier', 'A', '--chapters', '1', '--layout', layout, '--teacher', teacher], {
+    cwd: REPO,
+    encoding: 'utf-8',
+    env: { ...process.env, LAYERTEXT_PROJECT: json, LAYERTEXT_ENGINE: REPO },
+  });
   void root;
   return { status: r.status, stdout: r.stdout ?? '' };
 }
@@ -321,7 +335,8 @@ test('run 布局：产物收进运行私有目录，两位教师各跑一次互�
    * 现在身份按 `--teacher`/`LAYERTEXT_TEACHER`（或 `--run`）自己声明，
    * 分片指针按 (教师, 层级) 各存一份，谁也覆盖不了谁。 */
   const run1 = spawnSync(process.execPath, [SCRIPT, '--tier', 'A', '--chapters', '1', '--teacher', 'wayne'], {
-    cwd: REPO, encoding: 'utf-8',
+    cwd: REPO,
+    encoding: 'utf-8',
     env: { ...process.env, LAYERTEXT_FAKE_LLM: 'annotate', LAYERTEXT_PROJECT: json, LAYERTEXT_ENGINE: REPO },
   });
   assert.equal(run1.status, 0, run1.stderr);
@@ -340,7 +355,8 @@ test('run 布局：产物收进运行私有目录，两位教师各跑一次互�
   assert.notEqual(ridA, ridB, '不同教师必须是不同的运行 ID');
 
   const run2 = spawnSync(process.execPath, [SCRIPT, '--tier', 'A', '--chapters', '1', '--teacher', 'li'], {
-    cwd: REPO, encoding: 'utf-8',
+    cwd: REPO,
+    encoding: 'utf-8',
     env: { ...process.env, LAYERTEXT_FAKE_LLM: 'annotate', LAYERTEXT_PROJECT: json, LAYERTEXT_ENGINE: REPO },
   });
   assert.equal(run2.status, 0, run2.stderr);
@@ -360,16 +376,13 @@ test('★ 身份不明时**拒绝**借用别人的运行：教师对不上就退
   // **不能**把 li 的运行当成自己的（那会把产物写进别人的目录），
   // 也不能静默——要么报错要么退回 legacy 并说明。
   const r = spawnSync(process.execPath, [SCRIPT, '--tier', 'A', '--chapters', '1', '--teacher', 'wayne'], {
-    cwd: REPO, encoding: 'utf-8',
+    cwd: REPO,
+    encoding: 'utf-8',
     env: { ...process.env, LAYERTEXT_FAKE_LLM: 'annotate', LAYERTEXT_PROJECT: json, LAYERTEXT_ENGINE: REPO },
   });
   const out = `${r.stdout ?? ''}${r.stderr ?? ''}`;
   assert.match(out, /教师对不上/, `必须把"我读到的不是我的运行"说出来：${out}`);
-  assert.equal(
-    existsSync(join(root, '产物', '_运行', rid, '正文', '第一章', `原文_${TAG}_${DATE}.md`)),
-    false,
-    '**一个字节都不许写进别人的运行目录**',
-  );
+  assert.equal(existsSync(join(root, '产物', '_运行', rid, '正文', '第一章', `原文_${TAG}_${DATE}.md`)), false, '**一个字节都不许写进别人的运行目录**');
 });
 
 test('legacy 布局（默认）：路径与从前逐字符一致，教师已有工作流不受影响', () => {
@@ -377,7 +390,8 @@ test('legacy 布局（默认）：路径与从前逐字符一致，教师已有�
   const a = initManifest(root, json, 'legacy', 'wayne');
   assert.equal(a.status, 0, a.stdout);
   const run1 = spawnSync(process.execPath, [SCRIPT, '--tier', 'A', '--chapters', '1'], {
-    cwd: REPO, encoding: 'utf-8',
+    cwd: REPO,
+    encoding: 'utf-8',
     env: { ...process.env, LAYERTEXT_FAKE_LLM: 'annotate', LAYERTEXT_PROJECT: json, LAYERTEXT_ENGINE: REPO },
   });
   assert.equal(run1.status, 0, run1.stderr);
@@ -396,7 +410,7 @@ const withFake = (fake: string, json: string) => ({
 });
 
 test('统一词典：生成阶段只写运行私有增量，不动共享词典（并发写入不再互相覆盖）', () => {
-  const { root, json } = makeTwoChapterProject();   // barn 超纲 → 会走一次真实「查词 + 配释义」
+  const { root, json } = makeTwoChapterProject(); // barn 超纲 → 会走一次真实「查词 + 配释义」
   const dictPath = join(root, '词典.csv');
   const before = readFileSync(dictPath, 'utf-8');
 
@@ -409,7 +423,10 @@ test('统一词典：生成阶段只写运行私有增量，不动共享词典�
   const delta = join(root, '产物', '_运行', `${TAG}_词.词典增量.json`);
   assert.equal(existsSync(delta), true, '必须写运行私有增量（否则并行跑就会互相覆盖）');
   const deltaJson = JSON.parse(readFileSync(delta, 'utf-8')) as { entries: { word: string; zh: string }[] };
-  assert.equal(deltaJson.entries.some((e) => e.word === 'barn'), true);
+  assert.equal(
+    deltaJson.entries.some((e) => e.word === 'barn'),
+    true,
+  );
   assert.equal(readFileSync(dictPath, 'utf-8'), before, '生成阶段不该直接改共享词典');
 
   // 合并是显式的一步
@@ -448,7 +465,9 @@ test('run 布局：风险队列也写进运行私有目录（App 面板按同一
   assert.equal(spawnSync(process.execPath, [SCRIPT, '--tier', 'A', '--chapters', '1'], withFake('annotate', json)).status, 0);
 
   const rq = spawnSync(process.execPath, [join(REPO, 'tools', 'af_pipeline', 'LayerText_AF风险队列.mjs'), '--tier', 'A', '--chapters', '1'], {
-    cwd: REPO, encoding: 'utf-8', env: { ...process.env, LAYERTEXT_PROJECT: json, LAYERTEXT_ENGINE: REPO },
+    cwd: REPO,
+    encoding: 'utf-8',
+    env: { ...process.env, LAYERTEXT_PROJECT: json, LAYERTEXT_ENGINE: REPO },
   });
   assert.equal(rq.status, 0, `${rq.stdout}\n${rq.stderr}`);
   const runDir = join(root, '产物', '_运行', rid!);
@@ -473,11 +492,11 @@ const ARCHIVE = join(REPO, 'tools', 'af_pipeline');
 /** 造一份"已经生成过 A 层第一章产物"的项目，好让只读型脚本有东西可读 */
 function makeProducedProject(): { root: string; json: string; rid: string; product: string } {
   const { root, json } = makeProject();
-  const init = spawnSync(
-    process.execPath,
-    [join(ARCHIVE, 'LayerText_AF清单.mjs'), '--new', '--tier', 'A', '--chapters', '1', '--layout', 'run', '--teacher', 'wayne'],
-    { cwd: REPO, encoding: 'utf-8', env: { ...process.env, LAYERTEXT_PROJECT: json, LAYERTEXT_ENGINE: REPO } },
-  );
+  const init = spawnSync(process.execPath, [join(ARCHIVE, 'LayerText_AF清单.mjs'), '--new', '--tier', 'A', '--chapters', '1', '--layout', 'run', '--teacher', 'wayne'], {
+    cwd: REPO,
+    encoding: 'utf-8',
+    env: { ...process.env, LAYERTEXT_PROJECT: json, LAYERTEXT_ENGINE: REPO },
+  });
   assert.equal(init.status, 0, init.stdout + init.stderr);
   const rid = /运行 ID：(\S+)/.exec(init.stdout)?.[1] ?? '';
   assert.notEqual(rid, '', `没拿到运行 ID：${init.stdout}`);
@@ -588,4 +607,36 @@ test('★ 两个布局都跑得通，且各自落到自己的位置（同一份�
   assert.equal(r.status, 0, r.out);
   assert.equal(existsSync(join(root, '产物', '_运行', rid, `台账_${TAG}_${DATE}.md`)), true);
   assert.equal(existsSync(join(root, '产物', `台账_${TAG}_${DATE}.md`)), false, '**同一条命令在两种布局下落点不同**——这正是解析器存在的意义');
+});
+
+/* ────────────────── 纪律 3：catch 不许掩盖质量状态 ────────────────── */
+
+test('★ 会话日志有坏行时必须**说出来**，而不是静默跳过（它直接改变重建的上下文）', () => {
+  /* 这条日志是 `--resume` 重建会话的唯一依据，而项目对它的要求是明确的：
+   * 「续跑必须重放同样的裁剪，重建出合法会话——否则等于**同一份日志两种上下文**」。
+   * 一行 JSON 坏掉被悄悄丢掉，重建出来的对话就少了一轮：上下文变了 →
+   * 模型看到的和上一轮不一样 → 产物不一样，**而没有人会知道为什么**。
+   * 所以坏行必须计数、必须说出来。（原来这里是 `catch { continue; }`。） */
+  const { root, json } = makeProject();
+  assert.equal(run('exact', json).status, 0, '先跑一轮正常会话，留下日志');
+
+  const logPath = join(root, '调适', '_会话', `${TAG}${SUFFIX}.jsonl`);
+  const good = readFileSync(logPath, 'utf-8');
+  // 在中间插一行坏 JSON：模拟磁盘写坏、进程被杀写了一半
+  const lines = good.split('\n').filter(Boolean);
+  lines.splice(Math.floor(lines.length / 2), 0, '{"t":"msg","role":"user","content":"被截断的一行');
+  writeFileSync(logPath, lines.join('\n') + '\n', 'utf-8');
+
+  const r = spawnSync(process.execPath, [SCRIPT, '--tier', 'A', '--chapters', '1', '--out', '自检', '--resume'], {
+    cwd: REPO,
+    encoding: 'utf-8',
+    env: { ...process.env, LAYERTEXT_FAKE_LLM: 'exact', LAYERTEXT_PROJECT: json, LAYERTEXT_ENGINE: REPO },
+  });
+  const out = `${r.stdout ?? ''}${r.stderr ?? ''}`;
+  assert.match(out, /有 1 行读不出来/, `坏行必须被报出来，实得：${out.slice(-500)}`);
+  assert.match(out, /重建出来的对话\*\*比上一轮少\*\*|比上一轮少/, '要说清后果（上下文变了），而不是只说"有个警告"');
+
+  // 而且必须留痕：进 warning 事件，事后查得到
+  const after = readFileSync(logPath, 'utf-8');
+  assert.match(after, /session-log-bad-lines/, '坏行要写进事件日志，事后能查');
 });
