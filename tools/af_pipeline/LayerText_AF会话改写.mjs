@@ -402,7 +402,7 @@ function fakeChat(messages, tools = null) {
   if (glossAsk) {
     const map = {};
     for (const w of glossAsk[1].split(/[,\s，]+/).filter(Boolean)) map[w.trim().toLowerCase()] = '风车';
-    return { text: JSON.stringify(map), toolCalls: [], usage: { in: 0, out: 0, cached: 0 } };
+    return { text: JSON.stringify(map), toolCalls: [], finishReason: 'stop', usage: { in: 0, out: 0, cached: 0 } };
   }
   // 注意：复检回流那一轮的"最后一条 user 消息"是反馈而不是原文段，
   // 所以要取**最后一条含原文段**的消息，否则重写轮会退化成无原文的瞎写。
@@ -415,12 +415,12 @@ function fakeChat(messages, tools = null) {
   const seg = withSeg ?? [...messages].reverse().find((m) => m.role === 'user')?.content ?? '';
   const target = Math.round(wc(seg) * T.ratio);
   if (FAKE_LLM === 'long') {
-    return { text: `[P01] ${Array.from({ length: 120 }, (_, i) => `word${i}`).join(' ')}.`, toolCalls: [], usage: { in: 0, out: 0, cached: 0 } };
+    return { text: `[P01] ${Array.from({ length: 120 }, (_, i) => `word${i}`).join(' ')}.`, toolCalls: [], finishReason: 'stop', usage: { in: 0, out: 0, cached: 0 } };
   }
   if (FAKE_LLM === 'exact') {
     const words = (seg.match(/[A-Za-z][A-Za-z'-]*/g) ?? []).filter((w) => w !== 'P');
     const head = `[P01] ${words.slice(0, Math.max(1, target - 1)).join(' ')}`;
-    return { text: head, toolCalls: [], usage: { in: 0, out: 0, cached: 0 } };
+    return { text: head, toolCalls: [], finishReason: 'stop', usage: { in: 0, out: 0, cached: 0 } };
   }
   if (FAKE_LLM === 'annotate') {
     // 按目标词数回放原文，并把本段的超纲词**全部**加注——用来验证
@@ -432,7 +432,7 @@ function fakeChat(messages, tools = null) {
       .slice(0, Math.max(1, target - 1))
       .join(' ')
       .replace(/\b[A-Za-z][A-Za-z'-]*\b/g, (w) => (oov.includes(w.toLowerCase()) ? `${w}（风车）` : w));
-    return { text: `[P01] ${kept}`, toolCalls: [], usage: { in: 0, out: 0, cached: 0 } };
+    return { text: `[P01] ${kept}`, toolCalls: [], finishReason: 'stop', usage: { in: 0, out: 0, cached: 0 } };
   }
   if (FAKE_LLM === 'tool' && tools) {
     // 第一轮发一次严格 schema 的 tool call（模拟"我不确定，问一下"），
@@ -442,6 +442,7 @@ function fakeChat(messages, tools = null) {
       return {
         text: '',
         toolCalls: [{ id: 'call_1', type: 'function', function: { name: 'lookup_words', arguments: JSON.stringify({ words: ['barn'] }) } }],
+        finishReason: 'stop',
         usage: { in: 0, out: 0, cached: 0 },
       };
     }
@@ -452,9 +453,9 @@ function fakeChat(messages, tools = null) {
       .slice(0, Math.max(1, target - 1))
       .join(' ')
       .replace(/\b[A-Za-z][A-Za-z'-]*\b/g, (w) => (oov.includes(w.toLowerCase()) ? `${w}（风车）` : w));
-    return { text: `[P01] ${body}`, toolCalls: [], usage: { in: 0, out: 0, cached: 0 } };
+    return { text: `[P01] ${body}`, toolCalls: [], finishReason: 'stop', usage: { in: 0, out: 0, cached: 0 } };
   }
-  return { text: FAKE_LLM, toolCalls: [], usage: { in: 0, out: 0, cached: 0 } };
+  return { text: FAKE_LLM, toolCalls: [], finishReason: 'stop', usage: { in: 0, out: 0, cached: 0 } };
 }
 
 /** 一次对话调用。`tools` 非空时启用函数调用协议（「查词」走它，而不是正文里的文本标记）。 */
@@ -476,6 +477,11 @@ async function callChat(messages, maxTokens = 3000, tools = null) {
   return {
     text: (j.choices?.[0]?.message?.content ?? '').trim(),
     toolCalls: j.choices?.[0]?.message?.tool_calls ?? [],
+    /* `finish_reason` 是"这次响应有没有被截断"的**唯一事实**（`length` = 撞上了 max_tokens）。
+     * 不记它，四格实验的「截断率」就只能报"算不出来"——
+     * 而"算不出来"和"没有被截断"是两件事，混起来会让成本与质量的结论都失真。
+     * 拿不到时给 `null` 而不是 `'stop'`：**不知道就是不知道**。 */
+    finishReason: typeof j.choices?.[0]?.finish_reason === 'string' ? j.choices[0].finish_reason : null,
     usage: { in: u.prompt_tokens ?? 0, out: u.completion_tokens ?? 0, cached: u.prompt_cache_hit_tokens ?? 0 },
   };
 }
@@ -615,7 +621,7 @@ async function rewriteSegment(messages, seg, chLabel, k, total, annotatedSoFar, 
   pushMsg(messages, 'user', `${carry ? carry + '\n\n' : ''}${chLabel} · 第 ${k + 1}/${total} 段\n\n${facts}\n\n【原文段落】\n${seg.trim()}\n\n请改写这一段。`);
   let first = await callChat(messages, 3000, LOOKUP_TOOL);
   let text = first.text;
-  const callUsage = [first.usage];
+  const callUsage = [{ ...first.usage, finishReason: first.finishReason ?? null }];
 
   /* 「查词」往返：**严格 schema 的 tool call**（审查报告 §二）。
    * 为什么不继续用正文里的 `【查 词1 词2】` 文本标记：它逼模型在正文之外再写一行，
@@ -634,7 +640,7 @@ async function rewriteSegment(messages, seg, chLabel, k, total, annotatedSoFar, 
         const r = await callChat(messages, 3000, LOOKUP_TOOL);
         text = r.text;
         first = r;
-        callUsage.push(r.usage);
+        callUsage.push({ ...r.usage, finishReason: r.finishReason ?? null });
         continue;
       }
       break;
@@ -651,7 +657,7 @@ async function rewriteSegment(messages, seg, chLabel, k, total, annotatedSoFar, 
     const r = await callChat(messages, 3000, LOOKUP_TOOL);
     text = r.text;
     first = r;
-    callUsage.push(r.usage);
+    callUsage.push({ ...r.usage, finishReason: r.finishReason ?? null });
   }
 
   /* 本地复检回流：不达标就让模型自己改（最多 QC_ROUNDS 轮）。
@@ -800,6 +806,11 @@ for (const { i } of chSegs) {
         segList[k].id,
       );
       const u = usage.reduce((a, c) => ({ in: a.in + c.in, out: a.out + c.out, cached: a.cached + c.cached }), { in: 0, out: 0, cached: 0 });
+      /* 这一段这一轮里，**任意一次**撞上 max_tokens 就算截断（`length` 优先）；
+       * 全都拿不到就记 null —— "不知道"和"没截断"是两件事，不能合并。 */
+      const finishReason = usage.some((c) => c.finishReason === 'length')
+        ? 'length'
+        : (usage.every((c) => typeof c.finishReason === 'string' && c.finishReason) ? usage[usage.length - 1].finishReason : null);
       state.stats.calls += usage.length;
       state.stats.in += u.in;
       state.stats.out += u.out;
@@ -859,6 +870,8 @@ for (const { i } of chSegs) {
           t: 'done',
           key,
           usage: u,
+          // 截断事实：四格实验的"截断率"只认它（拿不到就是 null，**不是 'stop'**）
+          finishReason,
           rounds: qcRounds,
           status,
           inputHash,
