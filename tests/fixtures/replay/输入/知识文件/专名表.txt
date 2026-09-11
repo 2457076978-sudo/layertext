@@ -1,0 +1,29 @@
+# Animal Farm 专名表
+# 作用：质检时不计生词；改写时不加中文注释
+# 格式：一行一名，小写；多词名用空格分隔。以 # 开头的行是注释。
+# ⚠️ 2026-09-10 补入 clover / squealer / mollie —— 原先三个脚本都漏了这三个主要人物，
+#    导致马名 Clover 被注成「三叶草」、Squealer 被注出四种不同意思。
+jones
+major
+snowball
+napoleon
+benjamin
+muriel
+bluebell
+jessie
+pincher
+boxer
+moses
+pilkington
+frederick
+minimus
+whymper
+clover
+squealer
+mollie
+manor
+willingdon
+beauty
+england
+ireland
+animal farm
