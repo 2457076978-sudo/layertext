@@ -75,7 +75,15 @@ const argv = process.argv.slice(2);
 const arg = (n, d) => { const i = argv.indexOf(n); return i >= 0 ? argv[i + 1] : d; };
 const has = (n) => argv.includes(n);
 const TIER = (arg('--tier', 'A')).toUpperCase();
-const SCOPE = arg('--scope', 'tier');              // tier=一层一个会话（默认）｜chapter ｜ book
+/** 会话粒度（2026-09-11 由"只改文件名"变成**真的换会话**）：
+ *  tier（默认）= 一层一条会话；chapter = 每章重置；segment = 每段重置（独立调用，实验对照组）。
+ *  原先这个参数只影响会话日志文件名，`--scope chapter` 其实还是"一本书一条会话"——
+ *  也就是说，报告批评的"无限增长会话"根本没法通过参数避开。 */
+const SCOPE = arg('--scope', 'tier')
+const VALID_SCOPES = ['tier', 'book', 'chapter', 'segment'];
+if (!VALID_SCOPES.includes(SCOPE)) { console.error(`✗ 未知会话粒度「${SCOPE}」，只能是 ${VALID_SCOPES.join(' / ')}`); process.exit(2); }
+/** 词表注入维度（四格实验的第二个因子）：full=开场给全词表（默认）｜lite=只给"该注哪些词"（2% 那版的老口径） */
+const VOCAB = arg('--vocab', 'full')
 const DRY = has('--dry');
 const OUT_SUFFIX = arg('--out', '');   // 试跑用：产物与会话日志都加后缀，不碰正式文件
 const RESUME = has('--resume');
@@ -146,6 +154,14 @@ function buildOpener() {
   const baselinePath = P.工作区 ? join(P.工作区, BASELINE) : '';
   const baseline = baselinePath && existsSync(baselinePath) ? readFileSync(baselinePath, 'utf-8') : '（未提供情节底线文件）';
 
+  const vocabBlock =
+    VOCAB === 'lite'
+      ? `【词汇表：本轮**不提供**全表】学生学过哪些词不在这份提示里；每段我会单独告诉你"这一段哪些词该注"。`
+      : `【词汇表：学生已经学过的词（格式：词<TAB>类型）】
+表中出现的词＝学生学过，**不要加注**；不在表中的词＝学生没学过，**必须加注**。
+（表末如遇长词条被截断，以你能看到的行为准；不确定的用【查 词】问我。）
+<<<VOCAB>>>`;
+
   const content = `你是初中英语名著分层简化的审校助手，负责把《${P.书名}》改写成**${T.label}**。
 
 【本次任务·全程有效】
@@ -178,10 +194,7 @@ ${kbLines}
 【全书情节底线（最高优先级，任何简化都不得违反）】
 ${baseline}
 
-【词汇表：学生已经学过的词（格式：词<TAB>类型）】
-表中出现的词＝学生学过，**不要加注**；不在表中的词＝学生没学过，**必须加注**。
-（表末如遇长词条被截断，以你能看到的行为准；不确定的用【查 词】问我。）
-<<<VOCAB>>>
+${vocabBlock}
 
 【统一释义词典（格式：词<TAB>中文释义）——加注时优先用这里的释义】
 <<<DICT>>>
@@ -195,12 +208,13 @@ ${baseline}
 【输出格式】每条消息只回**这一段**的改写正文：以 \`[P##]\` 标记开头，纯英文，
 除 \`word（中文）\` 注释外不得出现任何中文，不要任何解释、不要复述提示词。`;
 
-  return { system: content.replace('<<<VOCAB>>>', '\n' + vb.text + '\n').replace('<<<DICT>>>', '\n' + db.text + '\n'), vb, db };
+  const filled = VOCAB === 'lite' ? content : content.replace('<<<VOCAB>>>', '\n' + vb.text + '\n');
+  return { system: filled.replace('<<<DICT>>>', '\n' + db.text + '\n'), vb, db };
 }
 
 /* ────────────────────── 会话日志（事件日志式，append-only，可续跑/可回放） ────────────────────── */
 const SESSION_DIR = join(P.调适工作区, '_会话');
-const sessionFile = () => join(SESSION_DIR, `${TAG}${SCOPE === 'tier' ? '' : '_' + SCOPE}${SUFFIX}.jsonl`);
+const sessionFile = () => join(SESSION_DIR, `${TAG}${SCOPE === 'tier' || SCOPE === 'book' ? '' : '_' + SCOPE}${VOCAB === 'full' ? '' : '_' + VOCAB}${SUFFIX}.jsonl`);
 const RUN_DIR = join(OUT_BASE, '_运行');
 const REVIEW_DIR = join(OUT_BASE, '_待复核', `${TAG}${SUFFIX}`);
 const doneMarker = () => join(RUN_DIR, `${TAG}${SUFFIX}.完成.json`);
@@ -251,6 +265,18 @@ function warn(kind, message, extra = {}) {
   state.warnings.push(ev);
   console.warn(`⚠ ${message}`);
 }
+
+/* ────────────────────── 会话粒度（审查报告 §二） ────────────────────── */
+/** 把对话重置回「开场（system）+ 结转状态」。
+ *  重置的只是**对话历史**，不是身份：已注词账本、章摘要、新配释义全都随结转跟过去，
+ *  否则 `--scope chapter` 会让第 2 章重复注第 1 章注过的词。 */
+function resetConversation(why) {
+  messages.splice(1, messages.length - 1);
+  pendingCarry = carryState();
+  logLine({ t: 'reset', why, keptMessages: 1 });
+  console.log(`\n↺ 会话重置（${why}）：只带开场与结转状态开始新一轮`);
+}
+let globalSegIndex = 0;
 
 /* ────────────────────── 会话滚动窗口（审查报告 §二） ────────────────────── */
 /** 窗口之间只传**结构化状态**（专名表、已采纳术语、章摘要、改写约束），而不是全部历史。
@@ -609,6 +635,14 @@ for (const { i } of chSegs) {
   for (let k = 0; k < segList.length; k++) {
     const key = `${ch}#${k}`;
     if (state.done.has(key)) { process.stdout.write(`· ${ch} ${k + 1}/${segList.length} 已完成\r`); continue; }
+    // 会话粒度真正生效：章首（chapter）或段首（segment）把对话重置回"开场 + 结转状态"。
+    // 重置的是**对话历史**，不是身份：已注词账本、章摘要、新配释义全部随结转保留。
+    if (globalSegIndex > 0) {
+      if (SCOPE === 'segment') resetConversation(`segment:${key}`);
+      else if (SCOPE === 'chapter' && k === 0) resetConversation(`chapter:${ch}`);
+      // tier / book：不重置，靠 rollWindow 控制长度
+    }
+    globalSegIndex++;
     rollWindow();
     try {
       const { status, body, verdict, attempts, qcRounds, usage, inputHash, strippedAnnotations, reinforceHints } = await rewriteSegment(

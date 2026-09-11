@@ -85,6 +85,13 @@ const STEPS = [
     needsApi: false,
   },
   {
+    id: '四格实验', script: 'LayerText_AF四格实验.mjs',
+    args: ['--tier', tierArg, ...(chapters ? ['--chapters', chapters] : [])],
+    note: '把「2%→98%」拆成可归因的单因子增益（独立/会话 × 全词表/无）——**会真跑 4 遍，消耗 API 额度**，默认不在计划里（用 --only 四格实验 单独跑）',
+    needsApi: true,
+    optional: true,
+  },
+  {
     id: '决定汇总', script: 'LayerText_AF决定汇总.mjs',
     args: ['--tier', tierArg],
     note: '把教师在风险队列上的决定汇总成**待人工确认的**入库提议（词典/词表例外/改写模板）；本步只提议不入库',
@@ -94,12 +101,12 @@ const STEPS = [
 
 const only = arg('--only', null);
 const from = arg('--from', null);
-let plan = STEPS;
+let plan = STEPS.filter((s) => !s.optional);   // optional 的步骤（如四格实验）只在 --only/--from 点名时跑
 if (only) plan = STEPS.filter((s) => s.id === only);
 else if (from) {
   const i = STEPS.findIndex((s) => s.id === from);
   if (i < 0) { console.error(`✗ 未知步骤「${from}」，可选：${STEPS.map((s) => s.id).join('/')}`); process.exit(2); }
-  plan = STEPS.slice(i);
+  plan = STEPS.slice(i).filter((s) => !s.optional || s.id === from || only);
 }
 if (!plan.length) { console.error(`✗ 未知步骤，可选：${STEPS.map((s) => s.id).join('/')}`); process.exit(2); }
 
