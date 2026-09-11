@@ -349,6 +349,8 @@ export async function acceptSuggestion(g: Suggestion, opts: { scene?: string; ou
     {
       read: (p) => invoke<string>('read_text_file', { path: p }),
       write: (p, c) => invoke('write_text_file', { path: p, content: c }).then(() => undefined),
+      // 版本日志与决定日志都是 append-only：用 O_APPEND 追加，避免"读全文→写全文"互相覆盖
+      append: (p, line) => invoke('append_text_file', { path: p, content: line }).then(() => undefined),
       backup: async (p, c) => {
         // 首改前留一份"原始备份"（与 persistEdit 同一约定），有备份就不覆盖
         const dir = p.slice(0, p.lastIndexOf('/'));

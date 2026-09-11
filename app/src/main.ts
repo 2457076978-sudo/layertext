@@ -332,6 +332,21 @@ async function openRiskPane(): Promise<void> {
     read: (p) => panelIo.read(p),
     write: (p, c) => panelIo.write(p, c),
     listDir: (d) => panelIo.listDir(d),
+    /* 改稿前备份：不可逆的操作不该没有退路。与 persistEdit 同一约定——
+     * 首改前留一份"原始备份"，已经有就不覆盖（否则第二次改稿会把真正的原始版冲掉）。 */
+    backup: async (p, c) => {
+      const dir = p.slice(0, p.lastIndexOf('/'));
+      const bak = `${dir}/${p.slice(p.lastIndexOf('/') + 1).replace(/\.(md|txt|markdown)$/i, '')}_原始备份.md`;
+      try {
+        await invoke<string>('read_text_file', { path: bak });
+      } catch {
+        await invoke('write_text_file', { path: bak, content: c });
+      }
+    },
+    /* 账本用**追加**而不是"读全文→拼一行→写全文"：后者在两个人同时记一条时
+     * 会把对方的整份内容覆盖掉——丢的是一整条决定或一整版记录，而且毫无迹象。
+     * `O_APPEND` 让"一行一次写"成为原子的。 */
+    append: (p, line) => invoke('append_text_file', { path: p, content: line }).then(() => undefined),
   });
   const dictPath = typeof (cfg['书级'] as Record<string, unknown> | undefined)?.['词典'] === 'string'
     ? ((cfg['书级'] as Record<string, unknown>)['词典'] as string)

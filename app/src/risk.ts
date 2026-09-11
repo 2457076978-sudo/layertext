@@ -13,7 +13,7 @@
  */
 
 import { buildProposals, makeDecisionEvent, parseDecisionLog, summarizeDecisions, toDecisionLine, type DecisionEvent, type DecisionKind } from '../../src/core/decision.js';
-import { chooseIdentity, LATEST_POINTER_NAME, makeResolver, pointerNameOf, TIER_TAG, type Layout, type ManifestPointer } from '../../src/core/manifest.js';
+import { chooseIdentity, contentHash, LATEST_POINTER_NAME, makeResolver, pointerNameOf, TIER_TAG, type Layout, type ManifestPointer } from '../../src/core/manifest.js';
 import { parseDictCsv } from '../../src/core/dictmerge.js';
 import { plotLine } from '../../src/core/plotweight.js';
 import { POSITIONING_LINE } from '../../src/core/positioning.js';
@@ -320,15 +320,17 @@ export async function loadRiskQueue(
   tier: string,
   id?: RunIdentity,
   teacher?: string,
-): Promise<{ file: RiskQueueFile | null; events: DecisionEvent[]; error?: string; identity: RunIdentity }> {
+): Promise<{ file: RiskQueueFile | null; events: DecisionEvent[]; error?: string; identity: RunIdentity; sourceVersion: string }> {
   const identity = id ?? (await loadRunIdentity(paths, { teacher, tier: TAGS[tier] ?? tier }));
-  if (!io) return { file: null, events: [], error: '面板 IO 未注入', identity };
+  if (!io) return { file: null, events: [], error: '面板 IO 未注入', identity, sourceVersion: paths.sourceVersion };
   const R = pathsFor(paths, identity, tier);
   const queuePath = R.any('风险队列', { ext: '.json' });
   let file: RiskQueueFile | null = null;
   let error: string | undefined;
+  let queueText = '';
   try {
-    file = parseQueueFile(await io.read(queuePath));
+    queueText = await io.read(queuePath);
+    file = parseQueueFile(queueText);
     if (!file) error = `队列文件格式不对：${queuePath}`;
   } catch {
     error = `还没生成过风险队列（${TAGS[tier] ?? tier}，${identity.layout} 布局）。先在管线里跑「风险队列」那一步。`;
@@ -339,7 +341,14 @@ export async function loadRiskQueue(
   } catch {
     /* 还没有任何决定——这是正常的，不是错误 */
   }
-  return { file, events, error, identity };
+  /* ★ `sourceVersion` = **这份队列产物的内容哈希**，不是层级标签。
+   * 原来传的是 `A层85` 这类标签，于是决定日志回答不了"这条决定是对着哪一版做的"——
+   * 一个季度后再看，`A层85` 指向的那份稿早被改过很多次了。
+   * 队列是教师这一轮**实际在看的东西**，它的哈希就是"这一轮复核对着哪一版"，
+   * 而且整个会话里稳定（不会每改一句就换一次，那样反而查不动）。
+   * 更精确的"哪一章的哪一版"由版本节点的 `parentHash`/`contentHash` 回答。 */
+  const sourceVersion = queueText ? contentHash(queueText) : paths.sourceVersion;
+  return { file, events, error, identity, sourceVersion };
 }
 
 /** 追加一条不可变事件（读→拼接→写；事件日志只增不改）。路径按清单布局解析。 */
@@ -391,7 +400,12 @@ export async function renderRiskPane(
 ): Promise<{ ok: boolean; message: string }> {
   const el = input.dom.getElementById('pane-risk');
   if (!el) return { ok: false, message: '缺 pane-risk 容器' };
-  const { file, events, error, identity } = await loadRiskQueue(input.paths, input.tier, undefined, input.teacherId);
+  const { file, events, error, identity, sourceVersion } = await loadRiskQueue(input.paths, input.tier, undefined, input.teacherId);
+  /* 本面板**所有**决定都带这一轮的产物版本（不是层级标签）——统一在入口换一次，
+   * 下游不必各自记得换，也就不会出现"有的决定有版本、有的没有"。 */
+  const paths: ProjectPaths = { ...input.paths, sourceVersion };
+  // 下游（动作 / 撤销 / 批量）都用 `input.paths`——在这里换一次，免得每个调用点各自记得换
+  input = { ...input, paths };
   if (!file) {
     el.innerHTML = `<div class="empty"><b>还没有风险队列</b><br/>${esc(error ?? '')}<br/><span style="font-size:12px">在管线里跑「风险队列」那一步即可生成（<code>node tools/af_pipeline/LayerText_AF风险队列.mjs --tier A</code>）</span></div>`;
     return { ok: false, message: error ?? '没有队列' };

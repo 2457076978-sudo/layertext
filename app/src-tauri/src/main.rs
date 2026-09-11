@@ -193,6 +193,28 @@ fn write_file_base64(path: String, b64: String) -> Result<(), String> {
     std::fs::write(&path, bin).map_err(|e| e.to_string())
 }
 
+/// **追加**一行到文本文件（append-only 账本专用：决定日志、版本日志）。
+///
+/// 为什么不复用 `write_text_file`：账本是"读全文 → 拼一行 → 写全文"，
+/// 两个人（或两个窗口）同时追加时后写的那次会把前一次的整份内容覆盖掉——
+/// 丢的是一整条决定或一整版记录，而且**没有任何迹象**。
+/// `O_APPEND` 的内核语义是"写入时原子地把偏移推到文件末尾再写"，
+/// 所以一行一次 append 不会互相覆盖。账本行都很短（远小于一次写的大小上限），
+/// 这是"不改存储引擎也能拿到的原子性"。
+#[tauri::command]
+fn append_text_file(path: String, content: String) -> Result<(), String> {
+    if let Some(dir) = std::path::Path::new(&path).parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    use std::io::Write;
+    let mut f = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .map_err(|e| e.to_string())?;
+    f.write_all(content.as_bytes()).map_err(|e| e.to_string())
+}
+
 fn base64_decode(s: &str) -> Result<Vec<u8>, String> {
     const REV: &[i8] = &[
         -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
@@ -765,6 +787,7 @@ fn main() {
             read_text_file,
             read_file_base64,
             write_text_file,
+            append_text_file,
             get_build_id,
             dict_lookup_zh,
             reports_dir,

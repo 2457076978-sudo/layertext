@@ -35,7 +35,12 @@ SENT-01（A 层 >20 词）门禁报出：19 句
 - `LayerText_AF会话改写.mjs` 的**已注词账本绕过了 `Resolver`**：同一个文件第 670 行的产物路径走 `R.any('正文')`，而账本这处手拼。`--layout run` 下手拼路径永远不存在 → 账本一个词都读不回来 → **跨章去重静默失效、同词被反复加注**，而脚本报成功。
 - **`清单_最新.json` 是一份全局指针**：三个脚本 + App 面板各写了一遍"读它 → 再读它指的清单"，读的是同一个文件。两位教师并发跑同一本书的不同层级时，后跑者覆盖先跑者，先跑者的进程去读到**对方的 `runId`**，把产物写进对方的运行私有目录——而两边都报成功。**`--layout run` 挡不住**（它挡的是路径撞名，不是身份被换掉）。现在指针**按 (教师, 层级) 分片**，`清单_最新.json` 退化为索引，四个消费方统一走**一个**解析入口，**对不上就拒绝借用别人的运行**并响亮说明，坏指针**不许半途生效**。
 
-**验证**：`npm run verify` 全绿——typecheck（引擎 + App）· lint `--max-warnings 0` · **测试 495 → 557**。新增 `tests/version.test.ts`（23）· `tests/adoptrewrite.test.ts`（17）· `tests/runidentity.test.ts`（14）；`tests/riskqueue.test.ts` 改 1 增 7；`tests/pipeline_gate.test.ts` 增 1 改 2。真项目样本 `tests/fixtures/风险队列_A层85_70条.json` 入库，让"70 → ≤25 组"这条验收可复现。
+**顺带补上两处"新路径反而比旧路径少一层保险"的地方。**
+
+- **账本追加不是原子的**：版本日志与决定日志都是"读全文 → 拼一行 → 写全文"，两个人同时追加时后写的会把前一次的整份内容覆盖掉——丢的是一整条决定或一整版记录，且**毫无迹象**。Tauri 侧新增 `append_text_file`（`O_APPEND`：一次一行是原子的），面板与单句采纳都接上它；面板同时补上了 **改稿前备份**（这条退路原来只长在 `persistEdit` 上，走新事务的路径反而没有）。
+- **`sourceVersion` 不再是层级标签**：审查 A4 的结论是"数据存在但源头就是错的"——面板传的是 `A层85` 这种标签，而它要回答的是"这条决定是对着哪一版做的"。现在在面板入口处换成**这一轮队列产物的内容哈希**（换在入口而不是每个调用点，免得出现"有的决定有版本、有的没有"）。
+
+**验证**：`npm run verify` 全绿——typecheck（引擎 + App）· lint `--max-warnings 0` · **测试 495 → 557**；`npm run verify:rust`（fmt + clippy + 5 项测试）通过；`app` 前端 `vite build` 通过。新增 `tests/version.test.ts`（23）· `tests/adoptrewrite.test.ts`（17）· `tests/runidentity.test.ts`（14）；`tests/riskqueue.test.ts` 改 1 增 7；`tests/pipeline_gate.test.ts` 增 1 改 2。真项目样本 `tests/fixtures/风险队列_A层85_70条.json` 入库，让"70 → ≤25 组"这条验收可复现。
 
 ## [未发布] - 2026-09-11（main · 第三十三批：把"原子写正文和事件"做实）
 

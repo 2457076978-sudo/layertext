@@ -140,7 +140,11 @@ test('点「标记误报」= 追加一条不可变事件，卡片从待办里消
   assert.equal(events[0]!.decision, 'false-positive');
   assert.equal(events[0]!.itemId, '第一章#2:FACT-01:1911');
   assert.equal(events[0]!.teacherId, 'wayne');
-  assert.equal(events[0]!.sourceVersion, 'sha-1');
+  /* ★ `sourceVersion` 现在记的是**这一轮队列产物的内容哈希**，不是层级标签。
+   * 层级标签（`A层85`）回答不了"这条决定是对着哪一版做的"——一个季度后再看，
+   * 它指向的那份稿早被改过很多次了。哈希让"同一份队列"与"改过一点的队列"当场可区分。 */
+  assert.match(events[0]!.sourceVersion, /^[0-9a-f]{16}$/);
+  assert.notEqual(events[0]!.sourceVersion, 'sha-1', '不再是调用方随便传进来的那个标签');
   assert.equal(events[0]!.ruleIds.includes('FACT-01'), true);
   assert.deepEqual(events[0]!.subject, { kind: 'number', value: '1911' });
   const html = win.document.getElementById('pane-risk')!.innerHTML;
