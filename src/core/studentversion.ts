@@ -132,7 +132,7 @@ export function studentVersionOf(md: string, opts: StudentVersionOptions = {}): 
 
   /* ── ④ 段标记 ── */
   let markers = 0;
-  let clean = body.replace(MARKER_RE, (mm) => {
+  let clean = body.replace(MARKER_RE, () => {
     markers++;
     return '';
   });
