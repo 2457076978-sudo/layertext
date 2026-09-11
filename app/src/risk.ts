@@ -19,6 +19,10 @@ import { plotLine } from '../../src/core/plotweight.js';
 import { POSITIONING_LINE } from '../../src/core/positioning.js';
 import { DECISION_LABEL } from '../../src/core/decision.js';
 import { productMetrics, sessionOpenEvent } from '../../src/core/productmetrics.js';
+/* 「我做完了」标记：教师自己说"这一轮任务到此为止"。
+ * 没有它，"完成没完成、花了多久"只能靠**待办条数去推断**——
+ * 阶段 4 的教师任务实验要回答"完成时间"，而推断出来的时间不该冒充事实。 */
+import { TASK_DONE, taskDoneEvent } from '../../src/core/teacherexperiment.js';
 import { actionOf, REVERT_ACTION, type RuleAction } from '../../src/core/riskaction.js';
 import { applyChange, applyChangeBatch, currentVersionOf, parseVersionLog, recordOnly, type ChangeResult, type TxIo, type VersionTarget } from '../../src/core/version.js';
 /** 有确定性动作的规则（批量应用只在这几类上给） */
@@ -582,6 +586,9 @@ export async function renderRiskPane(
       <div class="rq-advice">${esc(stat.advice)}｜路径布局 <b>${esc(identity.layout)}</b>${identity.runId ? `（${esc(identity.runId)}）` : ''}${identity.source ? `｜身份来源 <b>${esc(identity.source)}</b>` : ''}</div>
       ${lastIdentityWarning ? `<div class="rq-flash">⚠ ${esc(lastIdentityWarning)}</div>` : ''}
       <div class="rq-session ${session.done ? 'rq-session-done' : ''}">${esc(session.text)}</div>
+      <div class="rq-taskdone">
+        ${taskDoneToday(events, now) ? `<span class="rq-hint">✓ 今天已标记「我做完了」（${esc(taskDoneToday(events, now)!.timestamp.slice(11, 16))}）——再点一次不会重复记</span>` : `<button class="rq-btn" data-taskdone="1" title="教师自己说'这一轮到此为止'。没有它，完成时间只能靠待办条数去推断，而推断出来的时间不该冒充事实">✓ 我做完了</button>`}
+      </div>
       ${wbBar}
       ${todayBar}
       ${pm.decisions ? `<details class="rq-metrics"><summary>我这边用得怎么样（产品指标）</summary><ul>${pm.notes.map((n) => `<li>${esc(n)}</li>`).join('')}</ul></details>` : ''}
@@ -670,6 +677,36 @@ export async function renderRiskPane(
 
   el.innerHTML = `${head}${flashBar}<div class="rq-list">${groups.map(groupHtml).join('')}</div>`;
 
+  /* 「我做完了」：**一天只记一条**（与 session-open 同一条纪律）——
+   * 重复记会让"完成时间"变成"最后一次点它的时间"。 */
+  for (const btn of Array.from(input.dom.querySelectorAll('#pane-risk [data-taskdone]'))) {
+    btn.addEventListener('click', async (ev) => {
+      (ev.currentTarget as HTMLElement).setAttribute('disabled', 'true');
+      try {
+        const settledCount = file.队列.filter((it) => !pendingItems(file, events).some((p) => p.id === it.id)).length;
+        /* 任务指纹用**本轮范围**（层+章+队列条数）——它不是"模型实验"那种严格快照，
+         * 而是"教师点下这一下时，他面对的是哪一批活"。 */
+        const taskHash = contentHash(`${input.tier}|${file.章节.join(',')}|${file.队列.length}`);
+        await appendDecision(
+          input.paths,
+          input.tier,
+          taskDoneEvent({
+            taskHash,
+            teacherId: input.teacherId,
+            sourceVersion: input.paths.sourceVersion,
+            tier: input.tier,
+            settled: settledCount,
+            timestamp: (input.now?.() ?? new Date()).toISOString(),
+          }),
+          identity,
+        );
+        await renderRiskPane({ ...input, skipSessionOpen: true });
+      } catch (e) {
+        // 记不上就要说——但**不重渲染**：重渲染会盖住这条说明（历史缺陷 #4）
+        await renderRiskPane({ ...input, skipSessionOpen: true }, { itemId: '', text: `「我做完了」没能记上：${e instanceof Error ? e.message : String(e)}` });
+      }
+    });
+  }
   // 主键 = 规则特定动作（可能改正文）；其余键 = 只记决定。两者都写不可变事件。
   for (const btn of Array.from(input.dom.querySelectorAll('#pane-risk [data-decide]'))) {
     btn.addEventListener('click', (ev) => {
@@ -795,6 +832,11 @@ async function txTargetFor(paths: ProjectPaths, identity: RunIdentity, tier: str
     baseVersion: currentVersionOf(parseVersionLog(log).nodes, doc),
     doc,
   };
+}
+
+/** 今天这条「我做完了」标记（没有就返回 null）。**只认今天**：完成时间说的是"今天这一轮"。 */
+function taskDoneToday(events: DecisionEvent[], now: Date): DecisionEvent | null {
+  return events.find((e) => e.itemId === TASK_DONE && dayOf(e.timestamp) === dayOf(now)) ?? null;
 }
 
 /** 风险项 → 版本节点要记的位置（段号、章、规则、项 ID） */

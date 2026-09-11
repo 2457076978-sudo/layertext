@@ -1,0 +1,163 @@
+/* Archive workbench: quiet surfaces, precise motion, semantic review colours. */
+:root, [data-theme='gray'] {
+  --bg: #eae5e1;
+  --bg-g2: #e3ddd7;
+  --panel: #faf8f5;
+  --ink: #24211e;
+  --muted: #777068;
+  --muted-strong: #575049;
+  --line: #d7d0c8;
+  --brand: #916425;
+  --accent: #916425;
+  --accent-hover: #78501c;
+  --accent-soft: #f0e5d3;
+  --accent-ink: #fffaf2;
+  --panel-glass: rgba(250, 248, 245, .78);
+  --glass-line: rgba(75, 61, 43, .14);
+  --glass-hi: rgba(255, 255, 255, .8);
+  --glass-shadow: 0 8px 28px rgba(62, 49, 35, .045);
+  --seg-slot: #e4ded6;
+  --btn-bg: #f7f4ef;
+  --wsbg: #f2eee8;
+  --wsline: #d7d0c8;
+  --surface-2: #f1ece5;
+  --surface-3: #e8e1d8;
+  --ok: #38614a;
+  --ok-soft: #edf2eb;
+  --ok-line: #c8d7c8;
+  --warn: #805b24;
+  --warn-soft: #f6eddc;
+  --warn-line: #dfc69f;
+  --danger: #a43c32;
+  --danger-soft: #f7ece8;
+  --danger-line: #e3c5bd;
+  --info-soft: #edf0f3;
+  --info-line: #cbd3dc;
+  --term-2: #67577e;
+}
+:root {
+  --archive-ease: cubic-bezier(.22, .68, .18, 1);
+  --archive-fast: 160ms;
+  --archive-move: 320ms;
+}
+[data-theme='dark'] {
+  --brand: #d6b27a;
+  --accent: #c9a267;
+  --accent-hover: #e1bd86;
+  --accent-soft: #393024;
+  --accent-ink: #211c15;
+}
+body, button, input, select, textarea {
+  font-family: MiSans, 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+}
+body { background: linear-gradient(135deg, var(--bg), var(--bg-g2)); }
+header, .filetabs, .wstabs, #sidebar {
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+}
+header { border-bottom: 1px solid var(--line); box-shadow: none; }
+header button.primary {
+  background: var(--ink);
+  color: var(--panel);
+  box-shadow: none;
+}
+button, input, select, textarea { border-radius: 6px; }
+button, .shelf-card, .shelf-row, .rq-card, .shelf-hero {
+  transition: background-color var(--archive-fast) ease,
+    border-color var(--archive-fast) ease,
+    box-shadow var(--archive-move) var(--archive-ease),
+    transform var(--archive-move) var(--archive-ease);
+}
+button:not(:disabled):active { transform: translateY(1px); }
+button:disabled { cursor: not-allowed; opacity: .48; }
+:where(button, input, textarea, select, [tabindex]):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+.pane { border-radius: 10px; background: var(--panel); box-shadow: var(--glass-shadow); }
+.pane.active { animation: archive-enter var(--archive-move) var(--archive-ease) both; }
+.viewtabs { background: transparent; border-bottom: 1px solid var(--line); border-radius: 0; padding: 4px 0 8px; }
+.viewtabs button { border-radius: 4px; }
+.viewtabs button.active, .filetabs .active, .wstabs .active {
+  background: var(--accent-soft);
+  color: var(--ink);
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+#sidebar { border-left: 1px solid var(--line); box-shadow: inset 1px 0 var(--glass-hi); }
+.legend { opacity: .85; border-bottom: 1px solid var(--line); padding-bottom: 12px; }
+.shelf-h { letter-spacing: -.035em; font-weight: 500; }
+.shelf-h::before {
+  content: 'READING ARCHIVE / 阅读档案';
+  display: block;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: .17em;
+  color: var(--muted);
+  margin-bottom: 10px;
+}
+.shelf-grid { gap: 24px; counter-reset: archive-file; }
+.shelf-card { counter-increment: archive-file; position: relative; }
+.shelf-cover {
+  background: linear-gradient(125deg, var(--panel), var(--surface-2));
+  border: 1px solid var(--line);
+  border-radius: 5px 10px 10px 5px;
+  box-shadow: inset 5px 0 0 var(--surface-3), inset 6px 0 0 var(--glass-hi), 0 5px 12px rgba(55, 42, 28, .045);
+  transition: transform 420ms var(--archive-ease), box-shadow 420ms var(--archive-ease);
+}
+.shelf-card:not(.add) .shelf-info::before {
+  content: 'NO. ' counter(archive-file, decimal-leading-zero);
+  display: block;
+  font-size: 11px;
+  letter-spacing: .14em;
+  color: var(--muted);
+  margin: 10px 0 5px;
+  font-variant-numeric: tabular-nums;
+}
+.shelf-card:hover { transform: none; }
+.shelf-card:hover .shelf-cover {
+  transform: translateY(-6px);
+  box-shadow: inset 3px 0 0 var(--accent), 0 12px 22px rgba(55, 42, 28, .09);
+}
+.shelf-hero { border: 1px solid var(--line); background: var(--panel-glass); box-shadow: var(--glass-shadow); }
+.shelf-hero:hover { transform: translateY(-2px); }
+.shelf-progress, .hero-progress { border-radius: 1px; }
+.shelf-progress i, .hero-progress i { transition: width 500ms var(--archive-ease); }
+.shelf-sub, .shelf-meta { color: var(--muted); }
+.rq-card {
+  padding: 18px;
+  margin: 10px 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+.rq-card:focus-within { border-color: var(--accent); box-shadow: inset 2px 0 var(--accent); }
+.rq-card-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 12px; }
+.rq-rank { font-size: 26px; font-weight: 300; font-variant-numeric: tabular-nums; color: var(--muted); }
+.rq-rule, .rq-pos, .rq-risk { font-size: 11px; letter-spacing: .035em; color: var(--muted); }
+.rq-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+.rq-ctx, .rq-hint { color: var(--muted); font-size: 12px; }
+.rq-issue { font-weight: 600; margin-bottom: 12px; }
+.rq-pair > div { padding: 7px 0; line-height: 1.7; }
+.rq-lab { display: inline-block; min-width: 58px; color: var(--muted); font-size: 11px; }
+.inline-sug { animation: archive-enter 260ms var(--archive-ease) both; }
+#pop.open, #summary-pop.open { animation: archive-enter 220ms var(--archive-ease) both; }
+.toast { animation: archive-enter 240ms var(--archive-ease) both; }
+.toast.out { animation: archive-exit 240ms ease both; }
+summary { cursor: pointer; }
+details[open] > :not(summary) { animation: archive-enter 200ms var(--archive-ease); }
+@keyframes archive-enter { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes archive-exit { to { opacity: 0; transform: translateY(4px); } }
+@media (hover: none) { .shelf-card:hover .shelf-cover { transform: none; } }
+@media (max-width: 760px) {
+  .shelf-grid { gap: 14px; }
+  .rq-card { padding: 12px; }
+  .rq-actions button { min-height: 40px; }
+  .viewtabs { max-width: 100%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+}
+@media print {
+  .shelf-h::before, .shelf-info::before { display: none !important; }
+  .pane { box-shadow: none; border: none; animation: none; }
+}

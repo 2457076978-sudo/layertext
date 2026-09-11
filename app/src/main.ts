@@ -12,6 +12,7 @@ import { chnoFromPath, tagFromPath, normalizeAndSplitChapters, parseAiJson, rout
 import { parseEpubChapters, epubChapterMd } from './bookpure.js';
 import { renderModePill, switchView as switchViewDom, bindViewTabs, type ViewName } from './widgets.js';
 import { findProjectConfig, io as panelIo, renderDataPane } from './datapanel.js';
+import { teacherIdOf } from '../../src/core/teachers.js';
 import { renderRiskPane, setRiskIo, TAGS as RISK_TAGS } from './risk.js';
 import { S, esc } from './state.js';
 import { $, setStatus, toast, pop, hidePop } from './uikit.js';
@@ -371,7 +372,10 @@ async function openRiskPane(): Promise<void> {
     dom: document as unknown as Parameters<typeof renderRiskPane>[0]['dom'],
     tier: riskTier,
     paths: { outDir, workDir, sourceVersion: RISK_TAGS[riskTier] ?? riskTier, dictPath },
-    teacherId: (S.appConfig as { teacherId?: string }).teacherId ?? 'unknown',
+    /* 教师身份**归一化之后再进面板**：面板把它写进每一条决定事件，
+     * 而 `Wayne` 与 `wayne` 若各写各的，"谁在何时做了哪条决定"就被拼写切成两半——
+     * 与清单/指针那边用的是同一个 `teacherIdOf`（身份是**算出来的**，不靠自觉）。 */
+    teacherId: teacherIdOf((S.appConfig as { teacherId?: string }).teacherId ?? 'unknown'),
   });
 }
 
