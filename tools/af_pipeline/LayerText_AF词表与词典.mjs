@@ -185,6 +185,24 @@ export function loadDict(path) {
   return m;
 }
 
+/** 按 [P##] 标记切段 → [{ id:'P07', text:'[P07] …' }]，保留原有顺序。
+ *
+ *  为什么按标记而不是按数组下标对齐（2026-09-11 审查报告 P0 的配套修正）：
+ *   段级门禁把"未通过"的段挡在正文之外，产物里就会出现空位。
+ *   若用下标配对原文与产物，空位之后的**每一段都会错位一格**——
+ *   风险队列会把第 8 段的原句配到第 7 段的改写上，人看到的对照全是错的。
+ *   标记是段落的稳定 ID，按它对齐才对。 */
+export function segmentList(md) {
+  const body = String(md).split('## 词句卡')[0];
+  return [...body.matchAll(/\[(P\d+)\][\s\S]*?(?=\[P\d+\]|$)/g)].map((m) => ({ id: m[1], text: m[0] }));
+}
+
+/** 未通过门禁的段落在产物里的占位标记。
+ *  写成 HTML 注释：教师打开文件能一眼看到缺口在哪，
+ *  而分句/分词（textpipe）不含 2 个以上连续字母，**不会污染任何 QC 指标**。 */
+export const REVIEW_PLACEHOLDER = (id, dir) =>
+  `[${id}] <!-- 本段未通过复检，未收录；原文与改写见 ${dir} -->`;
+
 /** 新词回写词典，保持跨章一致（下次遇到同词直接用既有释义）。path 必传（词典路径来自项目配置） */
 export function appendDict(entries, path) {
   if (!path) throw new Error('appendDict 需要词典路径（来自项目配置的 书级.词典）');

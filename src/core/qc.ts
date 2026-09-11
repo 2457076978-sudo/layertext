@@ -10,6 +10,7 @@
  *  - 词句卡首列词条并入已知（"注释后口径"）
  */
 
+import { chineseOutsideAnnotations, parseAnnotations } from './annot.js';
 import { FAKE, HAD_ADVERBS, IRR, PASSIVE_IRR, PART_LIST, THAT_EXEMPT } from './irregular.js';
 import type { Lexicon } from './lexicon.js';
 import { extractParas, hit, pendHit, sentsOf, splitChapter, tokenizeTxt, cardGlossWords } from './textpipe.js';
@@ -32,6 +33,8 @@ export interface QcOptions {
   propExempt?: string[];
   /** 已学词集（复现队列，feature/reinforce）：①不再计 OOV ②单独统计复现命中 */
   reinforceWords?: string[];
+  /** 统一释义词典（word→中文）：提供时统计"注释释义与词典冲突"（同形异义假通过的现场） */
+  dict?: Map<string, string>;
   fileName?: string;
 }
 
@@ -61,11 +64,23 @@ export interface QcResult {
   annotatable: number;        // 应注词型数（OOV 去重、去两字母词）
   annotated: number;          // 已注词型数
   annotMissing: string[];     // 未注词型清单（闸门报警与补注工具的依据）
+  // ---- ⑪b 注释结构（2026-09-11 按审查报告第③条改为 token 级解析） ----
+  annotationTotal: number;     // 注释总处数
+  annotationExtra: number;     // 重复注释（第 2 次起）处数
+  annotationConflict: number;  // 与统一词典释义冲突的注释处数（同形异义假通过的现场）
+  annotationFormOnly: number;  // 靠词形/连字符归一才命中、字面查不到的 OOV 数（原先会假失败）
+  chineseOutside: number;      // 注释之外混入中文的片段数（格式红线）
   // ---- ⑩ 复现指标（feature/reinforce；仅当 reinforceWords 提供时存在，保证旧报告 schema 不变） ----
   reinforceQueue?: number;     // 队列词数
   reinforceHits?: number;      // 命中队列的词种数
   reinforceTokens?: number;    // 命中 token 总次数（重复强度）
   reinforceHitList?: string[]; // 命中词清单
+  // ---- ⑩b 复现豁免的分账（审查报告第④条：复现词并入已知会掩盖本应教学注释的词，
+  //      保留该取舍，但必须单独报告"原始 OOV"和"复现豁免 OOV"） ----
+  rawOov?: string[];           // 不并入复现队列时的 OOV 词型（原始口径）
+  rawOovCount?: number;
+  reinforceExemptOov?: string[]; // 被复现队列豁免掉的 OOV（原始口径有、现行口径没有）
+  rawNewWordRate?: number;     // 原始口径生词率
 }
 
 function count(re: RegExp, t: string): number {
@@ -144,6 +159,8 @@ export function runQc(md: string, lex: Lexicon, opts: QcOptions): QcResult {
   const reinforceList = [...new Set((opts.reinforceWords ?? []).map((w) => w.trim().toLowerCase()).filter(Boolean))];
   const hasReinforce = opts.reinforceWords !== undefined;
   const known = new Set([...lex.known, ...IRR, ...gloss, ...reinforceList]);
+  /** 原始口径（不并入复现队列）：用于分账报告"复现豁免掉了哪些词" */
+  const knownRaw = new Set([...lex.known, ...IRR, ...gloss]);
 
   // ---- 覆盖率 / 生词率 / 待定词风险 ----
   const txt = allSents.join(' ');
@@ -159,12 +176,15 @@ export function runQc(md: string, lex: Lexicon, opts: QcOptions): QcResult {
   //  而当时所有报表只统计"注了多少处"，没有"该注多少"，缺口因此完全隐形。
   //  专名不计（buildLexicon 已并入已知，不会进 oov）；两字母以内的词不计（a/an/it 之类）。
   const annotable = [...new Set(oov)].filter((w) => w.length > 2);
-  //  连字符复合词要拆开记：`blood-curdling（凝结…）` 已把 curdling 注出，
-  //  若只记整串，curdling 会被永远判成"该注没注"，补注工具也就永远补不上。
-  const annotatedWords = new Set(
-    [...body.matchAll(/([A-Za-z][A-Za-z'-]*)（/g)].flatMap((m) => (m[1] ?? '').toLowerCase().split('-')).filter(Boolean),
-  );
-  const annotMissing = annotable.filter((w) => !annotatedWords.has(w));
+  //  2026-09-11（审查报告第③条）：不再用"字符串正则塞进一个 Set"——那会让
+  //  大小写、词形、连字符、同形异义四类情况各自造成假通过/假失败。
+  //  改为 token 级解析 + 词形/连字符成分归一（annot.ts），并单独统计：
+  //    · 靠归一才命中的（字面查不到，原口径会报"该注没注"）
+  //    · 重复注释、释义冲突、注释外混入中文
+  const ann = parseAnnotations(body, opts.dict);
+  const literal = new Set(ann.list.map((a) => a.key));
+  const annotMissing = annotable.filter((w) => !ann.covers(w));
+  const formOnly = annotable.filter((w) => ann.covers(w) && !literal.has(w) && !ann.parts.has(w));
   const annotationCoverage = annotable.length ? (annotable.length - annotMissing.length) / annotable.length : 1;
 
   // ---- ⑩ 复现词命中（队列词的词形家族计一次命中；token 次数计重复强度） ----
@@ -212,13 +232,35 @@ export function runQc(md: string, lex: Lexicon, opts: QcOptions): QcResult {
     annotatable: annotable.length,
     annotated: annotable.length - annotMissing.length,
     annotMissing,
+    annotationTotal: ann.list.length,
+    annotationExtra: ann.duplicates.length,
+    annotationConflict: ann.conflicts.length,
+    annotationFormOnly: formOnly.length,
+    chineseOutside: chineseOutsideAnnotations(body).length,
     ...(hasReinforce
-      ? { reinforceQueue: reinforceList.length, reinforceHits, reinforceTokens, reinforceHitList }
+      ? {
+          reinforceQueue: reinforceList.length,
+          reinforceHits,
+          reinforceTokens,
+          reinforceHitList,
+          // 分账：原始口径（不含复现队列）下的 OOV 与生词率，以及被复现豁免掉的词。
+          // 保留"复现词并入已知"的取舍，但让"本应教学注释却被豁免"这件事可被单独审计。
+          rawOov: [...new Set(toks.filter((t) => !hit(t, knownRaw) && t.length > 1))],
+          rawOovCount: new Set(toks.filter((t) => !hit(t, knownRaw) && t.length > 1)).size,
+          reinforceExemptOov: [
+            ...new Set(toks.filter((t) => !hit(t, knownRaw) && hit(t, known) && t.length > 1)),
+          ],
+          rawNewWordRate: new Set(toks).size
+            ? new Set(toks.filter((t) => !hit(t, knownRaw) && t.length > 1)).size / new Set(toks).size
+            : 0,
+        }
       : {}),
   };
 }
 
-/** 输出为与 Python 参照版（qc_chapter.py）完全同 schema 的字典（对照测试用） */
+/** 输出为与 Python 参照版（qc_chapter.py）完全同 schema 的字典（对照测试用）。
+ *  2026-09-11：审查报告要求"只统计注了多少处"的旧口径降级为**导出兼容字段**、不再当质量门禁；
+ *  这里保留原键不动，另加 ⑪b 结构化注释口径（覆盖率/重复/冲突）供报告与风险队列使用。 */
 export function toLegacyReport(r: QcResult): Record<string, unknown> {
   return {
     层级: r.tier,
@@ -244,7 +286,12 @@ export function toLegacyReport(r: QcResult): Record<string, unknown> {
       ? {
           '⑩复现词命中(队列/命中/词次)': `${r.reinforceQueue}/${r.reinforceHits}/${r.reinforceTokens}`,
           复现命中词: r.reinforceHitList ?? [],
+          '⑩b原始OOV(不复现豁免)': r.rawOovCount ?? 0,
+          复现豁免掉的OOV: r.reinforceExemptOov ?? [],
+          '⑩b原始生词率': ((r.rawNewWordRate ?? 0) * 100).toFixed(1) + '%',
         }
       : {}),
+    '⑪加注覆盖率': `${(r.annotationCoverage * 100).toFixed(1)}%（${r.annotated}/${r.annotatable} 词型）`,
+    '⑪b注释口径(处数/重复/冲突/靠归一命中/注释外中文)': `${r.annotationTotal}/${r.annotationExtra}/${r.annotationConflict}/${r.annotationFormOnly}/${r.chineseOutside}`,
   };
 }

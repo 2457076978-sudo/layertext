@@ -76,6 +76,12 @@ const STEPS = [
     note: '逐句对照台账（保留/改写/删句/数字专名缺失）',
     needsApi: false,
   },
+  {
+    id: '风险队列', script: 'LayerText_AF风险队列.mjs',
+    args: ['--tier', tierArg, ...(chapters ? ['--chapters', chapters] : [])],
+    note: '按 风险=概率×后果 排的段级人工队列（事实置顶）+ 一小时最短路径 + 未完成段落清单',
+    needsApi: false,
+  },
 ];
 
 const only = arg('--only', null);
@@ -107,7 +113,7 @@ for (const s of plan) {
   const path = join(HERE, s.script);
   if (!existsSync(path)) { console.error(`\n✗ 缺脚本：${s.script}`); process.exit(1); }
   // 补注脚本用 --tier/--chapters（与生成/精修的 A,M 位置参数不同），在这里转换
-  const stepArgs = ['补注', '修复', '复核', '台账'].includes(s.id)
+  const stepArgs = ['补注', '修复', '复核', '台账', '风险队列'].includes(s.id)
     ? ['--tier', tiers.join(','), ...(chapters ? ['--chapters', chapters] : [])]
     : s.args;
   console.log(`\n──────── ${s.id} ────────`);

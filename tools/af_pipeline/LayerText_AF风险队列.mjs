@@ -1,0 +1,208 @@
+#!/usr/bin/env node
+/** AF 段级风险队列：把"从第一段读到第 245 段"换成"只看机器点名的地方"
+ *
+ * 为什么要有它（2026-09-11 审查报告 §一）：
+ *   人工校正的 7 小时里，绝大部分花在了机器早已确定性判定为没问题的段落上。
+ *   报告给的判断是：数字/日期/专名只有 5–10% 需要人看，OOV 漏注 10–20%，句法 10–15%，
+ *   而情节事实/因果/语气必须抽查。**按段顺序呈现 = 把预算花在低风险段上**，这是流程缺陷。
+ *
+ * 本脚本把段级门禁（引擎 src/core/segmentgate.ts + riskqueue.ts）跑在**已产出的书稿**上，
+ * 产出一份按 风险 = 概率 × 后果 排序的清单：事实差异置顶 → 漏注与超长 → 低风险语言润色。
+ * 每项都给：原句 / 改写句 / 上下文各一句 / 触发规则号 / 风险分 / 一键决策按钮所需的一切。
+ *
+ * 用法：
+ *   node LayerText_AF风险队列.mjs --tier A                    # 全部章节（默认章数）
+ *   node LayerText_AF风险队列.mjs --tier A,M --chapters 7     # 指定章节
+ *   node LayerText_AF风险队列.mjs --tier A --out 试跑          # 与试跑产物同名后缀
+ *   node LayerText_AF风险队列.mjs --tier A --budget 30        # 改人工预算（默认 60 分钟）
+ *
+ * 产物：
+ *   产物目录/风险队列_<层>_<日期>.md          —— 人看的清单（勾选式）
+ *   产物目录/_运行/风险队列_<层>.json         —— App 阅读器与离线汇总器读的机器格式
+ *
+ * 退出码：0（队列是给人看的，不是门禁）。唯一例外：连产物都读不到 → 2。
+ *         "这段能不能算完成"由 LayerText_AF会话改写.mjs 的门禁负责，这里不重复判。
+ */
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+
+const SHARED = await import('./LayerText_AF词表与词典.mjs');
+const P = SHARED.loadProject();
+const REPO = P.引擎目录;
+const SRC_BASE = P.原文目录;
+const OUT_BASE = P.产物目录;
+const DATE = P.日期;
+const CN = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十'];
+const TAGS = { A: 'A层85', M: 'M层75', B: 'B层60' };
+const TIER_INFO = {
+  A: { label: 'A 层（挑战）', ratio: 0.85, maxLen: 20 },
+  M: { label: 'M 层（中梯）', ratio: 0.75, maxLen: 16 },
+  B: { label: 'B 层（支架）', ratio: 0.6, maxLen: 14 },
+};
+
+const argv = process.argv.slice(2);
+const arg = (n, d) => { const i = argv.indexOf(n); return i >= 0 ? argv[i + 1] : d; };
+const has = (n) => argv.includes(n);
+const TIERS = (arg('--tier', 'A')).split(',').map((s) => s.trim().toUpperCase()).filter((t) => TIER_INFO[t]);
+const SUFFIX = arg('--out', '') ? '_' + arg('--out') : '';
+const BUDGET = Number(arg('--budget', '60'));
+const CH_IDS = arg('--chapters', '')
+  ? arg('--chapters').split(',').map((x) => Number(x.trim())).filter((n) => n >= 1 && n <= 10)
+  : CN.slice(0, Number(P.章数 ?? 10)).map((_, i) => i + 1);
+
+if (!TIERS.length) { console.error('✗ --tier 只能是 A / M / B 的组合'); process.exit(2); }
+
+const { gateSegment, GATE_RULES } = await import(`${REPO}/dist/src/core/segmentgate.js`);
+const { buildRiskQueue, oneHourPlan } = await import(`${REPO}/dist/src/core/riskqueue.js`);
+const { runQc } = await import(`${REPO}/dist/src/core/qc.js`);
+const LEX = await SHARED.loadLexicon(P);
+const DICT = SHARED.loadDict(P.词典路径);
+const { segmentList } = SHARED;
+const wc = (t) => (t.match(/[A-Za-z][A-Za-z'-]*/g) ?? []).length;
+
+/** 该段应注的超纲词（与生成脚本同一口径：OOV 去重、去两字母词） */
+const oovOf = (seg) => {
+  const md = `## Chapter One\n\n${seg}\n`;
+  return [...new Set(runQc(md, LEX, { tier: 'M', fileName: 'seg.md', dict: DICT }).oov)].filter((w) => w.length > 2);
+};
+
+console.log('════ AF 段级风险队列 ════');
+console.log(`项目：${P._meta?.名称 ?? '（未命名）'}｜书名：${P.书名}`);
+console.log(`层级：${TIERS.join('/')}｜章节：${CH_IDS.join(',')}｜人工预算：${BUDGET} 分钟`);
+
+const allSegments = [];
+const unfinished = [];
+const unreadable = [];
+
+for (const tier of TIERS) {
+  const info = TIER_INFO[tier];
+  const tag = TAGS[tier];
+  for (const ci of CH_IDS) {
+    const ch = `第${CN[ci - 1]}章`;
+    const srcPath = join(SRC_BASE, ch, '原文_规范化.md');
+    const outPath = join(OUT_BASE, ch, `原文_${tag}_${DATE}${SUFFIX}.md`);
+    if (!existsSync(srcPath)) { unreadable.push(`${ch}：缺规范化原文`); continue; }
+    if (!existsSync(outPath)) { unreadable.push(`${ch}：缺 ${tag} 产物（先去生成）`); continue; }
+    const srcSegs = segmentList(readFileSync(srcPath, 'utf-8'));
+    const outById = new Map(segmentList(readFileSync(outPath, 'utf-8')).map((s) => [s.id, s.text]));
+    srcSegs.forEach((s, k) => {
+      const rewritten = outById.get(s.id);
+      // 产物里没有这一段 = 生成时门禁未通过、被隔离了。它不是"待判定"，是"未完成"。
+      if (!rewritten || /<!--\s*本段未通过复检/.test(rewritten)) {
+        unfinished.push({ tier, chapter: ch, segId: s.id, segIndex: k, source: s.text.trim() });
+        return;
+      }
+      const target = Math.round(wc(s.text) * info.ratio);
+      const oov = [...new Set([...oovOf(s.text), ...oovOf(rewritten)])];
+      const v = gateSegment({ text: rewritten, source: s.text, target, maxLen: info.maxLen, oov, dict: DICT });
+      allSegments.push({
+        book: P.书名, tier, chapter: ch, segIndex: k,
+        source: s.text, rewritten, problems: v.problems,
+      });
+    });
+  }
+}
+
+const queue = buildRiskQueue(allSegments);
+const plan = oneHourPlan(queue, BUDGET);
+
+/* ────────────────────── 人看的清单（Markdown） ────────────────────── */
+const CAT_ORDER = ['事实', '格式', '加注', '语言'];
+const lines = [
+  `# ${P.书名} · 段级风险队列`,
+  '',
+  `生成：${new Date().toLocaleString('zh-CN')}｜层级：${TIERS.map((t) => TIER_INFO[t].label).join(' / ')}｜章节：${CH_IDS.join(',')}`,
+  `排序口径：**风险 = 概率 × 后果**（${Object.values(GATE_RULES).map((r) => `${r.label} ${(r.weight * r.probability).toFixed(1)}`).join('，')}）`,
+  '',
+  '## 先看这里',
+  '',
+  `- 队列共 **${queue.summary.total}** 条（其中不可完成 ${queue.summary.blockers} 条），估时 **${queue.summary.estimatedMinutes} 分钟**`,
+  `- 分类：${Object.entries(queue.summary.byCategory).map(([k, v]) => `${k} ${v}`).join('，')}`,
+  `- ${plan.advice}`,
+  '',
+  '### 一小时最短路径',
+  '',
+  '| 阶段 | 分钟 | 条数 | 做什么 |',
+  '|---|---:|---:|---|',
+  ...plan.phases.map((p) => `| ${p.title} | ${p.budget} | ${p.items.length} | ${p.note} |`),
+  '',
+];
+
+if (unfinished.length) {
+  lines.push(
+    `## ⚠ 未完成段落 ${unfinished.length} 段（生成时门禁未通过、已隔离，不在正文里）`,
+    '',
+    '这些不是"待判断"，是**必须重跑或人工补写**的段落——本项目不把它们算作完成。',
+    '',
+    '| 位置 | 原文开头 |',
+    '|---|---|',
+    ...unfinished.slice(0, 60).map((u) => `| ${u.chapter} ${u.segId}（第${u.segIndex + 1}段） | ${u.source.replace(/^\[P\d+\]\s*/, '').slice(0, 60)}… |`),
+    '',
+    `重跑：同一条生成命令加 \`--resume\`（未通过的段不在 done 里，会被重跑）。隔离副本在 \`产物目录/_待复核/${TAGS[TIERS[0]]}${SUFFIX}/\`。`,
+    '',
+  );
+}
+
+for (const cat of CAT_ORDER) {
+  const items = queue.items.filter((i) => i.category === cat);
+  if (!items.length) continue;
+  lines.push(`## ${cat}类 ${items.length} 条`, '');
+  for (const [n, it] of items.entries()) {
+    lines.push(
+      `### ${n + 1}. [${it.ruleId}·${it.severity === 'blocker' ? '不可完成' : '待判断'}·风险 ${it.risk}] ${it.title}`,
+      '',
+      `- 位置：${it.segLabel}${it.tier ? `（${it.tier} 层）` : ''}`,
+      `- 原文：${it.sourceSentence || '（未定位到原句）'}`,
+      `- 改写：${it.rewrittenSentence || '（改写里找不到）'}`,
+      `- 上下文：上「${it.context.prev || '—'}」／下「${it.context.next || '—'}」`,
+      `- 决策：☐ 采纳改写  ☐ 退回重写  ☐ 标记误报    理由：________________`,
+      '',
+    );
+  }
+}
+if (!queue.items.length && !unfinished.length) lines.push('## ✓ 队列为空', '', '本层没有任何机器能点出来的风险，可直接抽样阅读。', '');
+if (unreadable.length) {
+  lines.push('## 读不到的文件', '', ...unreadable.map((u) => `- ${u}`), '');
+}
+
+const mdPath = join(OUT_BASE, `风险队列_${TAGS[TIERS[0]]}${TIERS.length > 1 ? '_等' : ''}_${DATE}.md`);
+mkdirSync(OUT_BASE, { recursive: true });
+writeFileSync(mdPath, lines.join('\n'), 'utf-8');
+
+/* ────────────────────── 机器看的格式（App 阅读器 / 离线汇总器） ────────────────────── */
+const jsonPath = join(OUT_BASE, '_运行', `风险队列_${TAGS[TIERS[0]]}${SUFFIX}.json`);
+mkdirSync(join(OUT_BASE, '_运行'), { recursive: true });
+writeFileSync(
+  jsonPath,
+  JSON.stringify(
+    {
+      schemaVersion: 1,
+      书名: P.书名,
+      层级: TIERS,
+      章节: CH_IDS,
+      生成时间: new Date().toISOString(),
+      规则表: GATE_RULES,
+      摘要: queue.summary,
+      一小时路径: { 预算: BUDGET, 超预算: plan.overBudget, 建议: plan.advice, 阶段: plan.phases.map((p) => ({ id: p.id, title: p.title, budget: p.budget, count: p.items.length, note: p.note })) },
+      未完成段落: unfinished,
+      队列: queue.items,
+    },
+    null,
+    2,
+  ),
+  'utf-8',
+);
+
+console.log(`\n队列 ${queue.summary.total} 条（不可完成 ${queue.summary.blockers}）｜未完成段落 ${unfinished.length} 段｜估时 ${queue.summary.estimatedMinutes} 分钟`);
+if (queue.summary.total) {
+  console.log('排在最前面的 5 条：');
+  for (const it of queue.items.slice(0, 5)) console.log(`  [${it.risk}] ${it.segLabel} ${it.title}`);
+}
+if (has('--strict') && (unfinished.length || queue.summary.total)) process.exit(1);
+console.log(`\n✓ ${mdPath}`);
+console.log(`✓ ${jsonPath}`);
+if (unreadable.length) {
+  console.error(`\n✗ ${unreadable.length} 个文件读不到：`);
+  for (const u of unreadable.slice(0, 10)) console.error(`   ${u}`);
+  process.exit(2);
+}
