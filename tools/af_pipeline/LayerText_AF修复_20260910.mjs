@@ -89,6 +89,12 @@ const pOf = (ch, tag) => RR(tag).any('正文', { chapter: ch });
  *  "什么算一条注释"口径不完全一致——又是一次口径漂移。
  *  现在按括号深度扫描（能处理任意深度），并保留 `word（第一个中文串）` 的既有语义。 */
 const { flattenNestedAnnotations } = await import(`${P.引擎目录}/dist/src/core/docast.js`);
+const { atomicWriteFileSync: writeAtomic } = await import(`${P.引擎目录}/dist/src/core/files.js`);
+/* 正文与产物一律**原子写**（先写同目录临时文件再 rename）。
+ * writeFileSync 的语义是「截断 → 写」，中途失败会留下**半份正文**——
+ * 对教师唯一的一份稿，半份比没有更糟：没有你知道丢了，半份看起来像改坏了，
+ * 而它其实已经被毁掉了。rename 在同一文件系统内是原子的：要么旧内容、要么新内容。 */
+
 
 function flattenNested(md) {
   return flattenNestedAnnotations(md).md;
@@ -188,7 +194,7 @@ for (const tag of TAGS) for (const ci of CHAPTER_IDS) {
   const p = pOf(ch, tag);
   const before = read(p);
   const after = repairProduct(before);
-  if (before !== after) { changes.push({ p: `${ch}/原文_${tag}`, before, after }); if (!DRY) writeFileSync(p, after, 'utf-8'); }
+  if (before !== after) { changes.push({ p: `${ch}/原文_${tag}`, before, after }); if (!DRY) writeAtomic(p, after, 'utf-8'); }
 }
 for (const ci of CHAPTER_IDS) {
   const ch = CH_NAME(ci);
@@ -196,7 +202,7 @@ for (const ci of CHAPTER_IDS) {
   if (!existsSync(sp)) continue;
   const before = read(sp);
   const after = fixSpacing(stripP01(fixMarkers(flattenNested(before)).text));
-  if (before !== after) { changes.push({ p: `${ch}/原文_规范化`, before, after }); if (!DRY) writeFileSync(sp, after, 'utf-8'); }
+  if (before !== after) { changes.push({ p: `${ch}/原文_规范化`, before, after }); if (!DRY) writeAtomic(sp, after, 'utf-8'); }
 }
 
 /* ── 写出注释词典 ── */

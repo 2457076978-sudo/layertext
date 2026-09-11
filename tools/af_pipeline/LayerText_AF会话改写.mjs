@@ -125,6 +125,12 @@ const { LOOKUP_TOOL, collectLookups, formatLookupAnswer } = await import(`${REPO
 const { makeResolver } = await import(`${REPO}/dist/src/core/manifest.js`);
 const { splitChapter } = await import(`${REPO}/dist/src/core/textpipe.js`);
 const { runQc } = await import(`${REPO}/dist/src/core/qc.js`);
+const { atomicWriteFileSync: writeAtomic } = await import(`${REPO}/dist/src/core/files.js`);
+/* 正文与产物一律**原子写**（先写同目录临时文件再 rename）。
+ * writeFileSync 的语义是「截断 → 写」，中途失败会留下**半份正文**——
+ * 对教师唯一的一份稿，半份比没有更糟：没有你知道丢了，半份看起来像改坏了，
+ * 而它其实已经被毁掉了。rename 在同一文件系统内是原子的：要么旧内容、要么新内容。 */
+
 const LEX = await SHARED.loadLexicon(P);
 const DICT = SHARED.loadDict(P.词典路径);
 const KB = SHARED.loadKbGloss(P.知识库路径);
@@ -732,7 +738,7 @@ for (const { i } of chSegs) {
       // 每段落盘（截断只丢一段，不丢整章）。未通过的段留空位——空位是可见的，
       // 而"把没过的段写进去"是不可见的，后者正是 P0 要杜绝的。
       mkdirSync(dirname(outPath), { recursive: true });
-      writeFileSync(outPath, `${header}${chLine}\n\n${outSegs.filter(Boolean).join('\n\n')}\n`, 'utf-8');
+      writeAtomic(outPath, `${header}${chLine}\n\n${outSegs.filter(Boolean).join('\n\n')}\n`, 'utf-8');
       const mark = status === 'pass' ? '' : '  ✗待复核';
       process.stdout.write(`${ch} ${k + 1}/${segList.length}（${wc(srcText(k))}→${verdict.words}）${qcRounds ? ` 复检${qcRounds}` : ''}${mark}    \r`);
     } catch (e) {
@@ -806,7 +812,7 @@ if (incomplete) {
 }
 if (emptySegWarnings) warn('empty-segment', `${emptySegWarnings} 个段落切不出句子（按无超纲词处理，未做加注检查）`);
 if (state.warnings.length) console.warn(`\n⚠ 本轮有 ${state.warnings.length} 条 warning（详见运行清单与事件日志），不阻塞完成。`);
-writeFileSync(doneMarker(), JSON.stringify({ ...runSummary, 完成时间: new Date().toISOString() }, null, 2), 'utf-8');
+writeAtomic(doneMarker(), JSON.stringify({ ...runSummary, 完成时间: new Date().toISOString() }, null, 2), 'utf-8');
 if (existsSync(reviewMarker())) rmSync(reviewMarker());
 console.log(`\n✓ 全部段落通过门禁。完成标记：${doneMarker()}`);
 console.log('下一步：精修 → 补注 → 修复 → 复核 → 台账');

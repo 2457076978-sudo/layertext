@@ -3,7 +3,7 @@
  * 用法：node LayerText_AF三档精修.mjs <A|M|B|ALL>
  * 产物：原地更新 重制三版/第X章/原文_{tag}_2026-09-10.md；精修台账落同目录
  */
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import { join } from 'node:path';
 
@@ -34,6 +34,12 @@ const NEVER_ANNOTATE = new Set(['chapter']); // 正文里的 "Chapter N" 标题�
 const TAGS = { A: 'A层85', M: 'M层75', B: 'B层60' };
 
 const { makeResolver } = await import(`${REPO}/dist/src/core/manifest.js`);
+const { atomicWriteFileSync: writeAtomic } = await import(`${REPO}/dist/src/core/files.js`);
+/* 正文与产物一律**原子写**（先写同目录临时文件再 rename）。
+ * writeFileSync 的语义是「截断 → 写」，中途失败会留下**半份正文**——
+ * 对教师唯一的一份稿，半份比没有更糟：没有你知道丢了，半份看起来像改坏了，
+ * 而它其实已经被毁掉了。rename 在同一文件系统内是原子的：要么旧内容、要么新内容。 */
+
 /* ── 路径一律经清单解析（总计划阶段 3「最关键的迁移」）─────────────────────
  * 「把路径解析集中到一个 `Resolver`，**禁止业务代码拼目录**」。
  * 本脚本原来用 `join(OUT_BASE, ch, `原文_${tag}_${DATE}.md`)` 这类手拼——
@@ -155,7 +161,7 @@ async function refineChapter(tk, tag, i) {
   // ③ 排版收尾：注释右括号后补空格、清双空格（否则 "harness（挽具）and" 这类粘连会留给读者）
   md = md.replace(/([）)])(?=[A-Za-z])/g, '$1 ').replace(/([A-Za-z])\s+（/g, '$1（').replace(/ {2,}/g, ' ');
 
-  writeFileSync(path, md, 'utf-8');
+  writeAtomic(path, md, 'utf-8');
   const qc = runQc(md, LEX, { tier: tk, fileName: path.split('/').pop() });
   return { tk, ch, noted, sigFixed, sigFail, oovRate: (qc.newWordRate * 100).toFixed(1) };
 }

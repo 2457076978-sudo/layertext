@@ -9,7 +9,7 @@
  * 用法：node LayerText_AF三档复核.mjs
  * 产物：调适工作区/重制三版/三档汇总_2026-09-10.md（覆盖旧表）
  */
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { loadLexicon } from './LayerText_AF词表与词典.mjs';
 
@@ -113,6 +113,12 @@ for (const t of TIERS) {
  * 这个产品的核心机制是"难词就地加中文注释"——它降低的是**理解门槛**，不是**阅读负荷**。
  * 合成一个"覆盖率 98%"去讲，买家会以为文本变简单了。所以抬头必须两个数、两个名字。 */
 const { positioningOf, POSITIONING_LINE } = await import(`${LTR}/dist/src/core/positioning.js`);
+const { atomicWriteFileSync: writeAtomic } = await import(`${LTR}/dist/src/core/files.js`);
+/* 正文与产物一律**原子写**（先写同目录临时文件再 rename）。
+ * writeFileSync 的语义是「截断 → 写」，中途失败会留下**半份正文**——
+ * 对教师唯一的一份稿，半份比没有更糟：没有你知道丢了，半份看起来像改坏了，
+ * 而它其实已经被毁掉了。rename 在同一文件系统内是原子的：要么旧内容、要么新内容。 */
+
 
 const L = [];
 L.push('# AF 三档重制（85/75/60）· 汇总报告（复核版）', '');
@@ -169,7 +175,7 @@ L.push('   （`properNouns` 是 buildLexicon 的参数，传给 runQc 无效）�
 L.push('4. 引擎新增指标⑪（加注覆盖率），并修正连字符复合词的"已注"识别（`blood-curdling（…）` 算 curdling 已注）。');
 
 const out = R.any('汇总报告', { name: '三档汇总' });
-writeFileSync(out, L.join('\n') + '\n', 'utf-8');
+writeAtomic(out, L.join('\n') + '\n', 'utf-8');
 console.log(L.join('\n'));
 console.log(`\n✓ 已写出 ${out}`);
 

@@ -3,7 +3,7 @@
  * 用法：node LayerText_AF对照台账.mjs
  * 产物：重制三版/台账_{A层85|M层75|B层60}_2026-09-10.md × 3 + 台账总览
  */
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const P = (await import('./LayerText_AF词表与词典.mjs')).loadProject();
@@ -86,6 +86,12 @@ const CHAPTER_IDS = argOf('--chapters', '')
   ? argOf('--chapters').split(',').map((x) => Number(x.trim())).filter((n) => n >= 1 && n <= 10)
   : CN_ALL.slice(0, Number(P.章数 ?? 10)).map((_, i) => i + 1);
 const { makeResolver } = await import(`${REPO}/dist/src/core/manifest.js`);
+const { atomicWriteFileSync: writeAtomic } = await import(`${REPO}/dist/src/core/files.js`);
+/* 正文与产物一律**原子写**（先写同目录临时文件再 rename）。
+ * writeFileSync 的语义是「截断 → 写」，中途失败会留下**半份正文**——
+ * 对教师唯一的一份稿，半份比没有更糟：没有你知道丢了，半份看起来像改坏了，
+ * 而它其实已经被毁掉了。rename 在同一文件系统内是原子的：要么旧内容、要么新内容。 */
+
 /* ── 路径一律经清单解析（总计划阶段 3「最关键的迁移」）─────────────────────
  * 「把路径解析集中到一个 `Resolver`，**禁止业务代码拼目录**」。
  * 本脚本原来用 `join(OUT_BASE, ch, `原文_${tag}_${DATE}.md`)` 这类手拼——
@@ -138,11 +144,11 @@ for (const t of TIERS) {
   }
   lines.push('', `**${t.label} 合计**：对齐 ${totals.rows} 句｜原样保留 ${totals.kept}（${((totals.kept / totals.rows) * 100).toFixed(0)}%）｜改写 ${totals.rewritten}（${((totals.rewritten / totals.rows) * 100).toFixed(0)}%）｜数字专名缺失 ${totals.sigLost}｜删句 ${totals.lost}｜**加注覆盖率 ${totals.annotatable ? ((totals.annotated / totals.annotatable) * 100).toFixed(0) : '—'}%（${totals.annotated}/${totals.annotatable} 词型）**｜加注处数 ${totals.notes}（旧口径，仅参考）｜篇幅 ${totals.sw}→${totals.ow}（${((totals.ow / totals.sw) * 100).toFixed(0)}%）`, '');
   const p = RR(t.tag).any('台账');
-  writeFileSync(p, lines.join('\n'), 'utf-8');
+  writeAtomic(p, lines.join('\n'), 'utf-8');
   overview.push(`- [${t.label}](台账_${t.tag}_${DATE}.md)：保留句 ${totals.kept}/${totals.rows}，改写 ${totals.rewritten}，删句 ${totals.lost}，加注覆盖率 ${totals.annotatable ? ((totals.annotated / totals.annotatable) * 100).toFixed(0) : '—'}%`);
   console.log(`✓ ${p}`);
 }
-writeFileSync(R.any('汇总报告', { name: '台账总览' }), overview.join('\n'), 'utf-8');
+writeAtomic(R.any('汇总报告', { name: '台账总览' }), overview.join('\n'), 'utf-8');
 console.log('✓ 台账总览');
 
 function tier_tag(t) {

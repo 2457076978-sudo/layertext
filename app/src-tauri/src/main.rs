@@ -177,10 +177,38 @@ fn base64_encode(data: &[u8]) -> String {
 
 #[tauri::command]
 fn write_text_file(path: String, content: String) -> Result<(), String> {
-    if let Some(dir) = std::path::Path::new(&path).parent() {
+    let p = std::path::Path::new(&path);
+    if let Some(dir) = p.parent() {
         let _ = std::fs::create_dir_all(dir);
     }
-    std::fs::write(&path, content).map_err(|e| e.to_string())
+    // **原子写**：先写同目录临时文件，再 rename 覆盖。
+    // `std::fs::write` 是"截断 → 写"，中途失败（进程被杀、磁盘满、断电）会留下
+    // **半份正文**——对教师唯一的一份稿，半份比没有更糟：没有你知道丢了，
+    // 半份看起来像改坏了，而它其实已经被毁掉了。
+    // rename 在同一文件系统内是原子的：读者要么看到旧内容、要么看到新内容。
+    // 临时文件必须与目标同目录（跨文件系统的 rename 会退化成 copy+unlink，就不原子了）。
+    let name = match p.file_name().and_then(|n| n.to_str()) {
+        Some(n) => n.to_string(),
+        None => return Err(format!("路径没有文件名，无法原子写：{path}")),
+    };
+    let tmp = p.with_file_name(format!(".{}.tmp-{}", name, std::process::id()));
+    let write = || -> std::io::Result<()> {
+        use std::io::Write;
+        let mut f = std::fs::File::create(&tmp)?;
+        f.write_all(content.as_bytes())?;
+        // 先落盘再 rename：否则断电后可能 rename 了一个"还没写完"的文件
+        f.sync_all()?;
+        Ok(())
+    };
+    if let Err(e) = write() {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e.to_string());
+    }
+    if let Err(e) = std::fs::rename(&tmp, p) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e.to_string());
+    }
+    Ok(())
 }
 
 /// 二进制写入（base64），供导出 Word/音频等

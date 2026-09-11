@@ -4,7 +4,7 @@
  * 产物：调适工作区/重制三版/第X章/原文_{层}{比例}_{日期}.md
  * 知识库：知识文件/AF审校知识库_v1.csv（55 加注词对=学生不会的词须加注；36 换词倾向=优先避开/换简单说法）
  */
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
+import { readFileSync, mkdirSync, existsSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import { join } from 'node:path';
 
@@ -36,6 +36,12 @@ const TIERS = {
 };
 
 const { makeResolver, dirOfPath } = await import(`${REPO}/dist/src/core/manifest.js`);
+const { atomicWriteFileSync: writeAtomic } = await import(`${REPO}/dist/src/core/files.js`);
+/* 正文与产物一律**原子写**（先写同目录临时文件再 rename）。
+ * writeFileSync 的语义是「截断 → 写」，中途失败会留下**半份正文**——
+ * 对教师唯一的一份稿，半份比没有更糟：没有你知道丢了，半份看起来像改坏了，
+ * 而它其实已经被毁掉了。rename 在同一文件系统内是原子的：要么旧内容、要么新内容。 */
+
 /* ── 路径一律经清单解析（总计划阶段 3「最关键的迁移」）─────────────────────
  * 「把路径解析集中到一个 `Resolver`，**禁止业务代码拼目录**」。
  * 本脚本原来用 `join(OUT_BASE, ch, `原文_${tag}_${DATE}.md`)` 这类手拼——
@@ -171,7 +177,7 @@ async function runChapter(i, t) {
   const outPath = RR(t.clsTag).any('正文', { chapter: ch });
   mkdirSync(dirOfPath(outPath), { recursive: true });
   const newMd = `${header}${chLine}\n\n${out.join('\n\n')}\n`;
-  writeFileSync(outPath, newMd, 'utf-8');
+  writeAtomic(outPath, newMd, 'utf-8');
   const srcWords = wc(md.split('## 词句卡')[0]);
   const outWords = wc(newMd.split('## 词句卡')[0]);
   const qc = runQc(newMd, LEX, { tier: 'M', fileName: outPath.split('/').pop(), properNouns: PROPER });
@@ -214,5 +220,5 @@ for (const r of results) {
 }
 lines.push('');
 for (const [k, v] of Object.entries(byT)) lines.push(`${k} 层合计：${v.s} → ${v.o}（${((v.o / v.s) * 100).toFixed(0)}%）`);
-writeFileSync(R.any('汇总报告', { name: '三档汇总' }), lines.join('\n'), 'utf-8');
+writeAtomic(R.any('汇总报告', { name: '三档汇总' }), lines.join('\n'), 'utf-8');
 console.log('\n' + lines.join('\n'));

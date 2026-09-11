@@ -41,6 +41,12 @@ const { buildProposals, parseDecisionLog, summarizeDecisions, contestedItems, PR
 const { openDecisionStore } = await import(`${REPO}/dist/src/core/decisiondb.js`);
 const { productMetrics } = await import(`${REPO}/dist/src/core/productmetrics.js`);
 const { makeResolver } = await import(`${REPO}/dist/src/core/manifest.js`);
+const { atomicWriteFileSync: writeAtomic } = await import(`${REPO}/dist/src/core/files.js`);
+/* 正文与产物一律**原子写**（先写同目录临时文件再 rename）。
+ * writeFileSync 的语义是「截断 → 写」，中途失败会留下**半份正文**——
+ * 对教师唯一的一份稿，半份比没有更糟：没有你知道丢了，半份看起来像改坏了，
+ * 而它其实已经被毁掉了。rename 在同一文件系统内是原子的：要么旧内容、要么新内容。 */
+
 
 /* 运行身份走**共享的那一个**解析入口（与其它脚本、App 面板同一条规则）。 */
 /* 身份从命令行取。**刻意不复用各脚本自己的参数助手**：它们的定义位置各不相同
@@ -183,7 +189,7 @@ if (contested.length) {
 if (!has('--dry')) {
   mkdirSync(R.dir('运行中间产物'), { recursive: true });
   const proposeName = `入库提议_${TAGS[TIERS[0]]}`;
-  writeFileSync(R.any('运行中间产物', { name: proposeName, ext: '.md' }), lines.join('\n'), 'utf-8');
+  writeAtomic(R.any('运行中间产物', { name: proposeName, ext: '.md' }), lines.join('\n'), 'utf-8');
   writeFileSync(
     R.any('运行中间产物', { name: proposeName }),
     JSON.stringify({ schemaVersion: 1, 生成时间: new Date().toISOString(), 决定统计: stat, 产品指标: pm, 反复改主意: contested, 提议: proposals }, null, 2),
