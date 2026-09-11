@@ -14,7 +14,9 @@ import { test } from 'node:test';
 import {
   buildLexiconSnapshot,
   contentHash,
+  detectArtifactCollisions,
   detectCollision,
+  makeResolver,
   newManifest,
   recordStep,
   refOf,
@@ -207,4 +209,72 @@ test('contentHash：稳定、区分大小写与内容、长度固定（App 与 N
   assert.notEqual(contentHash('abc'), contentHash('ABC'));
   assert.equal(contentHash(''), contentHash('').length === 16 ? contentHash('') : 'x');
   assert.equal(contentHash('任意中文内容').length, 16);
+});
+
+/* ────────────────── ③ 路径解析：所有脚本唯一的产物路径来源 ────────────────── */
+
+const ROOTS = { out: '/proj/产物', work: '/proj/调适' };
+const RID = 'AnimalFarm-v1-AM-wayne-8224fe855c4deff0';
+
+test('legacy 布局逐字符复现既有命名（教师已有的书与下游脚本一个字都不用改）', () => {
+  const r = makeResolver('legacy', ROOTS, { runId: RID, tier: 'A层85', date: '2026-09-10' });
+  assert.equal(r.any('正文', { chapter: '第一章' }), '/proj/产物/第一章/原文_A层85_2026-09-10.md');
+  assert.equal(r.session(), '/proj/调适/_会话/A层85.jsonl');
+  assert.equal(r.session({ scope: 'segment', vocab: 'lite', suffix: '_exp1' }), '/proj/调适/_会话/A层85_segment_lite_exp1.jsonl');
+  assert.equal(r.decision(), '/proj/调适/_决定/A层85.jsonl');
+  assert.equal(r.any('完成标记'), '/proj/产物/_运行/A层85.完成.json');
+  assert.equal(r.any('失败清单'), '/proj/产物/_运行/A层85.待复核.json');
+  assert.equal(r.any('风险队列'), '/proj/产物/_运行/风险队列_A层85.json');
+  assert.equal(r.any('待复核', { chapter: '第一章', segId: 'P07' }), '/proj/产物/_待复核/A层85/第一章_P07.md');
+  assert.equal(r.any('台账'), '/proj/产物/台账_A层85_2026-09-10.md');
+});
+
+test('run 布局：每类产物收进运行私有目录，跨运行不可能撞名', () => {
+  const r = makeResolver('run', ROOTS, { runId: RID, tier: 'A层85', date: '2026-09-10' });
+  assert.equal(r.any('正文', { chapter: '第一章' }), `/proj/产物/_运行/${RID}/正文/第一章/原文_A层85_2026-09-10.md`);
+  assert.equal(r.session(), `/proj/产物/_运行/${RID}/会话/A层85.jsonl`);
+  assert.equal(r.decision(), `/proj/产物/_运行/${RID}/决定/A层85.jsonl`);
+  assert.equal(r.any('词典增量'), `/proj/产物/_运行/${RID}/词典增量.json`);
+  // 同一次运行的清单仍留在 _运行 根下（它是索引，不该藏在运行目录里）
+  assert.equal(r.any('清单'), `/proj/产物/_运行/清单_${RID}.json`);
+});
+
+test('两种布局都不许出现"路径里带 undefined/…"这类半成品', () => {
+  for (const layout of ['legacy', 'run'] as const) {
+    const r = makeResolver(layout, ROOTS, { runId: RID, tier: 'A层85', date: '2026-09-10' });
+    const kinds = ['正文', '会话日志', '待复核', '完成标记', '失败清单', '风险队列', '台账', '复核报告', '词典增量', '决定日志', '清单'] as const;
+    for (const k of kinds) {
+      const p = r.any(k, { chapter: '第一章', segId: 'P01' });
+      assert.equal(p.includes('undefined'), false, `${layout}/${k} 出现 undefined：${p}`);
+      assert.equal(p.includes('…'), false, `${layout}/${k} 出现占位省略号：${p}`);
+      assert.equal(p.startsWith('/'), true, `${layout}/${k} 不是绝对路径：${p}`);
+    }
+  }
+});
+
+test('撞名探测：legacy 下两次运行必撞，run 下必不撞（报告 §三 第一个规模崩点）', () => {
+  const legacyA = [
+    { path: '第一章/原文_A层85_2026-09-10.md', kind: '正文' as const, status: 'ok' as const },
+    { path: '台账_A层85_2026-09-10.md', kind: '台账' as const, status: 'ok' as const },
+  ];
+  const legacy = detectArtifactCollisions([
+    { runId: 'run-wayne', artifacts: legacyA },
+    { runId: 'run-li', artifacts: legacyA },
+  ]);
+  assert.equal(legacy.ok, false);
+  assert.equal(legacy.collisions.length, 2);
+  assert.deepEqual(legacy.collisions[0]!.runs, ['run-li', 'run-wayne']);
+
+  const r1 = makeResolver('run', ROOTS, { runId: 'run-wayne', tier: 'A层85', date: '2026-09-10' });
+  const r2 = makeResolver('run', ROOTS, { runId: 'run-li', tier: 'A层85', date: '2026-09-10' });
+  const run = detectArtifactCollisions([
+    { runId: 'run-wayne', artifacts: [{ path: r1.any('正文', { chapter: '第一章' }) }, { path: r1.any('台账') }] },
+    { runId: 'run-li', artifacts: [{ path: r2.any('正文', { chapter: '第一章' }) }, { path: r2.any('台账') }] },
+  ]);
+  assert.equal(run.ok, true, `run 布局不该撞名，实得 ${JSON.stringify(run.collisions)}`);
+});
+
+test('清单默认 legacy 布局（保守），可显式选 run', () => {
+  assert.equal(manifest().layout, 'legacy');
+  assert.equal(manifest({ layout: 'run' }).layout, 'run');
 });

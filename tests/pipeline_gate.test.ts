@@ -292,3 +292,118 @@ test('不滚动（--window 0）时行为与从前一致：不留 window 事件',
   const log = readFileSync(join(root, '调适', '_会话', `${TAG}_不滚.jsonl`), 'utf-8');
   assert.equal(log.includes('"t":"window"'), false);
 });
+/* ────────────────── 路径布局：第二个人/第二次运行不许撞名（报告 §三） ────────────────── */
+
+function initManifest(root: string, json: string, layout: string, teacher: string): { status: number | null; stdout: string } {
+  const r = spawnSync(
+    process.execPath,
+    [join(REPO, 'tools', 'af_pipeline', 'LayerText_AF清单.mjs'), '--new', '--tier', 'A', '--chapters', '1', '--layout', layout, '--teacher', teacher],
+    { cwd: REPO, encoding: 'utf-8', env: { ...process.env, LAYERTEXT_PROJECT: json, LAYERTEXT_ENGINE: REPO } },
+  );
+  void root;
+  return { status: r.status, stdout: r.stdout ?? '' };
+}
+
+test('run 布局：产物收进运行私有目录，两位教师各跑一次互不影响', () => {
+  const { root, json } = makeProject();
+  const a = initManifest(root, json, 'run', 'wayne');
+  assert.equal(a.status, 0, a.stdout);
+  const ridA = /运行 ID：(\S+)/.exec(a.stdout)?.[1];
+  assert.ok(ridA, `没拿到运行 ID：${a.stdout}`);
+
+  const run1 = spawnSync(process.execPath, [SCRIPT, '--tier', 'A', '--chapters', '1'], {
+    cwd: REPO, encoding: 'utf-8',
+    env: { ...process.env, LAYERTEXT_FAKE_LLM: 'annotate', LAYERTEXT_PROJECT: json, LAYERTEXT_ENGINE: REPO },
+  });
+  assert.equal(run1.status, 0, run1.stderr);
+  const runDirA = join(root, '产物', '_运行', ridA!);
+  assert.equal(existsSync(join(runDirA, '正文', '第一章', `原文_${TAG}_${DATE}.md`)), true, '正文必须落在运行私有目录里');
+  assert.equal(existsSync(join(runDirA, '完成.json')), true);
+  assert.equal(existsSync(join(runDirA, '会话', `${TAG}.jsonl`)), true, '会话日志也要跟运行走，否则两人并行会串上下文');
+  // legacy 的老路径不该再被写（否则就是"两套路径并存"，比撞名更难查）
+  assert.equal(existsSync(join(root, '产物', '第一章', `原文_${TAG}_${DATE}.md`)), false);
+  assert.equal(existsSync(join(root, '产物', '_运行', `${TAG}.完成.json`)), false);
+
+  // 第二位教师：另一个运行 ID，另一套产物目录，且两边的产物都在
+  const b = initManifest(root, json, 'run', 'li');
+  const ridB = /运行 ID：(\S+)/.exec(b.stdout)?.[1];
+  assert.ok(ridB);
+  assert.notEqual(ridA, ridB, '不同教师必须是不同的运行 ID');
+
+  const run2 = spawnSync(process.execPath, [SCRIPT, '--tier', 'A', '--chapters', '1'], {
+    cwd: REPO, encoding: 'utf-8',
+    env: { ...process.env, LAYERTEXT_FAKE_LLM: 'annotate', LAYERTEXT_PROJECT: json, LAYERTEXT_ENGINE: REPO },
+  });
+  assert.equal(run2.status, 0, run2.stderr);
+  const runDirB = join(root, '产物', '_运行', ridB!);
+  assert.equal(existsSync(join(runDirB, '正文', '第一章', `原文_${TAG}_${DATE}.md`)), true);
+  assert.equal(existsSync(join(runDirA, '正文', '第一章', `原文_${TAG}_${DATE}.md`)), true, '前一位教师的产物一个字都没被动');
+});
+
+test('legacy 布局（默认）：路径与从前逐字符一致，教师已有工作流不受影响', () => {
+  const { root, json } = makeProject();
+  const a = initManifest(root, json, 'legacy', 'wayne');
+  assert.equal(a.status, 0, a.stdout);
+  const run1 = spawnSync(process.execPath, [SCRIPT, '--tier', 'A', '--chapters', '1'], {
+    cwd: REPO, encoding: 'utf-8',
+    env: { ...process.env, LAYERTEXT_FAKE_LLM: 'annotate', LAYERTEXT_PROJECT: json, LAYERTEXT_ENGINE: REPO },
+  });
+  assert.equal(run1.status, 0, run1.stderr);
+  assert.equal(existsSync(join(root, '产物', '第一章', `原文_${TAG}_${DATE}.md`)), true);
+  assert.equal(existsSync(join(root, '产物', '_运行', `${TAG}.完成.json`)), true);
+  assert.equal(existsSync(join(root, '调适', '_会话', `${TAG}.jsonl`)), true);
+});
+
+/* ────────────────── 统一词典：增量 + 显式合并（报告 §三 点名的并发写入） ────────────────── */
+
+const MERGE_SCRIPT = join(REPO, 'tools', 'af_pipeline', 'LayerText_AF词典合并.mjs');
+const withFake = (fake: string, json: string) => ({
+  cwd: REPO,
+  encoding: 'utf-8' as const,
+  env: { ...process.env, LAYERTEXT_FAKE_LLM: fake, LAYERTEXT_PROJECT: json, LAYERTEXT_ENGINE: REPO },
+});
+
+test('统一词典：生成阶段只写运行私有增量，不动共享词典（并发写入不再互相覆盖）', () => {
+  const { root, json } = makeTwoChapterProject();   // barn 超纲 → 会走一次真实「查词 + 配释义」
+  const dictPath = join(root, '词典.csv');
+  const before = readFileSync(dictPath, 'utf-8');
+
+  const run1 = spawnSync(process.execPath, [SCRIPT, '--tier', 'A', '--chapters', '1', '--out', '词'], {
+    ...withFake('tool', json),
+  });
+  assert.equal(run1.status, 0, `${run1.stdout}\n${run1.stderr}`);
+
+  // 增量落在运行私有文件里，共享词典一个字节都没动
+  const delta = join(root, '产物', '_运行', `${TAG}_词.词典增量.json`);
+  assert.equal(existsSync(delta), true, '必须写运行私有增量（否则并行跑就会互相覆盖）');
+  const deltaJson = JSON.parse(readFileSync(delta, 'utf-8')) as { entries: { word: string; zh: string }[] };
+  assert.equal(deltaJson.entries.some((e) => e.word === 'barn'), true);
+  assert.equal(readFileSync(dictPath, 'utf-8'), before, '生成阶段不该直接改共享词典');
+
+  // 合并是显式的一步
+  const merge = spawnSync(process.execPath, [MERGE_SCRIPT], { cwd: REPO, encoding: 'utf-8', env: { ...process.env, LAYERTEXT_PROJECT: json, LAYERTEXT_ENGINE: REPO } });
+  assert.equal(merge.status, 0, merge.stderr);
+  const after = readFileSync(dictPath, 'utf-8');
+  assert.match(after, /barn,风车/, '合并后共享词典应有该词');
+  assert.match(merge.stdout, /新增 1/);
+
+  // 幂等：再合一次不重复加
+  const merge2 = spawnSync(process.execPath, [MERGE_SCRIPT], { cwd: REPO, encoding: 'utf-8', env: { ...process.env, LAYERTEXT_PROJECT: json, LAYERTEXT_ENGINE: REPO } });
+  assert.equal(merge2.status, 0);
+  assert.match(merge2.stdout, /无变化 1/);
+  assert.equal(readFileSync(dictPath, 'utf-8'), after);
+});
+
+test('统一词典：合并过的词下次不再问一遍（原来会被并行运行覆盖掉）', () => {
+  const { root, json } = makeTwoChapterProject();
+  assert.equal(spawnSync(process.execPath, [SCRIPT, '--tier', 'A', '--chapters', '1', '--out', '词A'], withFake('tool', json)).status, 0);
+  assert.equal(spawnSync(process.execPath, [MERGE_SCRIPT], { cwd: REPO, encoding: 'utf-8', env: { ...process.env, LAYERTEXT_PROJECT: json, LAYERTEXT_ENGINE: REPO } }).status, 0);
+
+  // 第二次跑：词典里已经有 barn 的释义 → 不该再产生一条"新配"
+  const r2 = spawnSync(process.execPath, [SCRIPT, '--tier', 'A', '--chapters', '1', '--out', '词B'], withFake('tool', json));
+  assert.equal(r2.status, 0, r2.stderr);
+  const delta2 = join(root, '产物', '_运行', `${TAG}_词B.词典增量.json`);
+  const entries = existsSync(delta2) ? (JSON.parse(readFileSync(delta2, 'utf-8')) as { entries: unknown[] }).entries : [];
+  assert.equal(entries.length, 0, '词典里已有的词不该再被新配一次');
+  assert.match(readFileSync(join(root, '词典.csv'), 'utf-8'), /barn,风车/);
+});

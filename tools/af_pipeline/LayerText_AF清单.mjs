@@ -22,7 +22,7 @@
  *   清单_<runId>.json             运行清单
  *   清单_最新.json                指向当前清单的指针
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { join } from 'node:path';
 
@@ -36,7 +36,7 @@ const CN = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十'
 const TAGS = { A: 'A层85', M: 'M层75', B: 'B层60' };
 
 const M = await import(`${REPO}/dist/src/core/manifest.js`);
-const { buildLexiconSnapshot, refOf, newManifest, upsertArtifact, recordStep, verifyManifest, summarizeManifest, detectCollision, contentHash, verifyLexiconSnapshot } = M;
+const { buildLexiconSnapshot, refOf, newManifest, upsertArtifact, recordStep, verifyManifest, summarizeManifest, detectCollision, contentHash, verifyLexiconSnapshot, makeResolver, detectArtifactCollisions } = M;
 
 const argv = process.argv.slice(2);
 const arg = (n, d) => { const i = argv.indexOf(n); return i >= 0 ? argv[i + 1] : d; };
@@ -49,6 +49,15 @@ const TEACHER = arg('--teacher', process.env.LAYERTEXT_TEACHER ?? process.env.US
 const RUN_DIR = join(OUT_BASE, '_运行');
 const SNAP_POINTER = join(RUN_DIR, 'LexiconSnapshot.json');
 const MANIFEST_POINTER = join(RUN_DIR, '清单_最新.json');
+
+/** 路径布局：legacy（默认，沿用既有命名）｜run（产物收进 _运行/<runId>/，跨运行不会撞名）。
+ *  报告 §三 说"只能重构一处，应先建清单层……都只能通过 manifest 解析路径"——
+ *  这个开关就是那句"解析路径"的落点：改成 run 之后所有脚本自动跟着走。 */
+const LAYOUT = arg('--layout', 'legacy');
+if (!['legacy', 'run'].includes(LAYOUT)) { console.error(`✗ --layout 只能是 legacy / run`); process.exit(2); }
+/** 本脚本自己的产物路径也走同一套解析（否则它就成了唯一的例外） */
+const selfPaths = (runId) => makeResolver(LAYOUT, { out: OUT_BASE, work: P.调适工作区 }, { runId, tier: TAGS[TIERS[0]] ?? TIERS[0], date: DATE });
+
 
 const readIf = (p) => (p && existsSync(p) ? readFileSync(p, 'utf-8') : null);
 
@@ -109,16 +118,18 @@ function scanArtifacts() {
   const out = [];
   for (const t of TIERS) {
     const tag = TAGS[t];
-    const donePath = join(RUN_DIR, `${tag}.完成.json`);
-    const reviewPath = join(RUN_DIR, `${tag}.待复核.json`);
+    const rrx = selfPaths(cur?.manifest?.runId ?? '');
+    const donePath = rrx.any('完成标记', { tier: tag });
+    const reviewPath = rrx.any('失败清单', { tier: tag });
     const done = readIf(donePath);
     const review = readIf(reviewPath);
     const status = done ? 'ok' : review ? 'needs-review' : 'stale';
     const reason = review ? (JSON.parse(review).待复核明细 ?? []).map((d) => (d.规则 ?? []).join('/')).slice(0, 3).join('；') : undefined;
+    const rr = selfPaths(cur?.manifest?.runId ?? '');
     for (const ci of CH_IDS) {
       const ch = `第${CN[ci - 1]}章`;
-      const rel = join(ch, `原文_${tag}_${DATE}.md`);
-      const abs = join(OUT_BASE, rel);
+      const abs = rr.any('正文', { chapter: ch, tier: tag, date: DATE });
+      const rel = abs.replace(`${OUT_BASE}/`, '');
       if (!existsSync(abs)) continue;
       const text = readFileSync(abs, 'utf-8');
       out.push({ path: rel, kind: '正文', tier: t, chapter: ch, status, reason, hash: contentHash(text), bytes: text.length, updatedAt: new Date().toISOString() });
@@ -143,7 +154,7 @@ function scanArtifacts() {
 const pendingReviewOf = () => {
   let n = 0;
   for (const t of TIERS) {
-    const r = readIf(join(RUN_DIR, `${TAGS[t]}.待复核.json`));
+    const r = readIf(selfPaths(cur?.manifest?.runId ?? '').any('失败清单', { tier: TAGS[t] }));
     if (r) n += (JSON.parse(r).待复核 ?? 0);
   }
   return n;
@@ -164,6 +175,7 @@ if (has('--new')) {
     lexicon: { version: snapshot.version, snapshotPath: snapPath, warnings: snapshot.warnings },
     inputs,
     owner: { pid: process.pid, host: hostname() },
+    layout: LAYOUT,
   });
   const existingPath = join(RUN_DIR, `清单_${m.runId}.json`);
   const existing = readIf(existingPath);
@@ -177,6 +189,7 @@ if (has('--new')) {
   console.log('════ AF 运行清单 · 新建 ════');
   console.log(` 运行 ID：${m.runId}`);
   console.log(` 书名：${m.book}｜版本：${m.version}｜层：${m.tiers.join('/')}｜教师：${m.teacher}`);
+  console.log(` 路径布局：${LAYOUT}${LAYOUT === 'legacy' ? '（沿用既有命名，教师已有工作流不受影响）' : '（产物收进 _运行/<运行 ID>/，跨运行不会互相覆盖）'}`);
   console.log(` 词表快照：${snapshot.version}（${snapshot.sources.length} 个来源）→ ${snapPath}`);
   if (snapshot.warnings.length) for (const w of snapshot.warnings) console.warn(` ⚠ ${w}`);
   console.log(` 输入哈希：${inputs.length} 项已锁定（词表/专名/知识库/词典/底线/原文）`);
@@ -232,15 +245,31 @@ if (has('--verify')) {
   // 快照本身也留档，便于事后比对
   writeSnapshot(snapshot);
 
+  // 跨运行撞名探测（报告 §三："第二本书/第二位教师/同书多层并行会互相覆盖"）
+  const siblings = [];
+  if (existsSync(RUN_DIR)) {
+    for (const f of readdirSync(RUN_DIR)) {
+      if (!/^清单_.*\.json$/.test(f)) continue;
+      const t = readIf(join(RUN_DIR, f));
+      if (!t) continue;
+      try { siblings.push(JSON.parse(t)); } catch { /* 坏清单跳过 */ }
+    }
+  }
+  const collide = detectArtifactCollisions(siblings.map((x) => ({ runId: x.runId, artifacts: x.artifacts ?? [] })));
+
   console.log('════ AF 运行清单 · 校验 ════');
   console.log(` 运行 ID：${m.runId}｜书：${m.book} ${m.version}｜层：${m.tiers.join('/')}｜教师：${m.teacher}`);
   console.log(` 词表快照：清单 ${m.lexicon.version}｜当前 ${snapshot.version}${drift.ok ? '（一致）' : '（**已变**）'}`);
+  console.log(` 路径布局：${m.layout ?? 'legacy'}｜已登记运行 ${siblings.length} 个${collide.ok ? '（无跨运行撞名）' : `（**${collide.collisions.length} 处撞名**）`}`);
   const blocked = r.problems.filter((p) => p.severity === 'blocked');
   const warns = r.problems.filter((p) => p.severity === 'warn');
   if (!blocked.length && !warns.length) {
     console.log(`\n✓ 清单一致：${m.artifacts.length} 件产物、输入哈希全部未变、无未完成段落。`);
     console.log('  这次运行可以当作完成品引用（论文里的数字可以标注本运行 ID）。');
     process.exit(0);
+  }
+  for (const c of collide.collisions.slice(0, 5)) {
+    warns.push({ kind: 'artifact-collision', message: `产物被多次运行写过：${c.path}（${c.runs.join(' / ')}）——换 --layout run 可根治` });
   }
   for (const p of blocked) console.error(` ✗ [${p.kind}] ${p.message}`);
   for (const p of warns) console.warn(` ⚠ [${p.kind}] ${p.message}`);

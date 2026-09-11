@@ -92,6 +92,12 @@ const STEPS = [
     optional: true,
   },
   {
+    id: '词典合并', script: 'LayerText_AF词典合并.mjs',
+    args: ['--tier', tierArg],
+    note: '把各运行私有的词典增量并进共享词典（原子替换 + 基线优先 + 冲突上报；无 API）',
+    needsApi: false,
+  },
+  {
     id: '决定汇总', script: 'LayerText_AF决定汇总.mjs',
     args: ['--tier', tierArg],
     note: '把教师在风险队列上的决定汇总成**待人工确认的**入库提议（词典/词表例外/改写模板）；本步只提议不入库',
@@ -143,7 +149,7 @@ for (const s of plan) {
   const path = join(HERE, s.script);
   if (!existsSync(path)) { console.error(`\n✗ 缺脚本：${s.script}`); process.exit(1); }
   // 补注脚本用 --tier/--chapters（与生成/精修的 A,M 位置参数不同），在这里转换
-  const stepArgs = ['补注', '修复', '复核', '台账', '风险队列', '决定汇总'].includes(s.id)
+  const stepArgs = ['补注', '修复', '复核', '台账', '风险队列', '决定汇总', '词典合并'].includes(s.id)
     ? tierArgOf()
     : s.args;
   console.log(`\n──────── ${s.id} ────────`);

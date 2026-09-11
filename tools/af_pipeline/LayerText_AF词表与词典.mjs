@@ -9,7 +9,8 @@
  *   教师知识库（AF审校知识库_v1.csv 加注词）= 最高优先，永远保留
  *   专名（PROPER）= 不计生词、不加注
  */
-import { readFileSync, writeFileSync, existsSync, readdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, readdirSync, mkdirSync } from 'node:fs';
+import { hostname } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -211,7 +212,128 @@ export function segmentList(md) {
 export const REVIEW_PLACEHOLDER = (id, dir) =>
   `[${id}] <!-- 本段未通过复检，未收录；原文与改写见 ${dir} -->`;
 
-/** 新词回写词典，保持跨章一致（下次遇到同词直接用既有释义）。path 必传（词典路径来自项目配置） */
+/* ────────────────────── 统一词典：增量 + 显式合并（并发安全） ────────────────────── */
+/**
+ * 审查报告 §三 点名的第一条规模崩点：「第二本书、第二位教师或同一书多层并行时，
+ * 输出路径、会话日志、**统一词典**和标记文件可能互相覆盖」。
+ *
+ * `appendDict` 是「读整份 → 合并 → 写回整份」：两个进程同时跑，后写的把先写的整份盖掉
+ * （lost update），表现是"明明配过的词下次又问一遍"，而且**不报任何错**。
+ *
+ * 改法：每个运行只往自己的私有目录写**增量**（不共享、不可能撞），
+ * 合并变成显式的一步（`mergeDictIntoProject`），且是**原子替换 + 基线优先 + 冲突上报**。
+ */
+import { renameSync, readdirSync as _readdir, rmSync as _rm } from 'node:fs';
+
+const dictMerge = async () => await import(`${LTR}/dist/src/core/dictmerge.js`);
+
+/** 写运行私有的词典增量（append-only；同一运行多次调用按词去重，后写的同词同义忽略） */
+export function writeDictDelta(deltaPath, entries, origin) {
+  mkdirFor(deltaPath);
+  const cur = existsSync(deltaPath) ? JSON.parse(readFileSync(deltaPath, 'utf-8')) : { origin, entries: [] };
+  const seen = new Map(cur.entries.map((e) => [e.word, e]));
+  for (const [w, zh] of entries) {
+    const k = String(w).toLowerCase();
+    if (!k || !zh || seen.has(k)) continue;
+    seen.set(k, { word: k, zh: String(zh), source: `新配（${origin}）` });
+  }
+  cur.entries = [...seen.values()];
+  cur.origin = origin;
+  writeFileSync(deltaPath, JSON.stringify(cur, null, 2), 'utf-8');
+  return cur.entries.length;
+}
+
+const mkdirFor = (p) => { try { mkdirSync(dirname(p), { recursive: true }); } catch { /* 已存在 */ } };
+
+/** 在某份文件上做"独占"操作：锁文件 + 陈旧锁可夺（进程崩了不会把词典永久锁死）。
+ *  纯逻辑（锁状态三态）在引擎 src/core/dictmerge.ts 里，可单测。 */
+export async function withLock(lockPath, fn) {
+  const { lockState } = await dictMerge();
+  mkdirFor(lockPath);
+  const isAlive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  const readLock = () => { try { return JSON.parse(readFileSync(lockPath, 'utf-8')); } catch { return null; } };
+  for (let i = 0; i < 2; i++) {
+    const st = lockState(readLock(), Date.now(), isAlive);
+    if (st === 'free' || st === 'stale') break;
+    await new Promise((r) => setTimeout(r, 300));
+  }
+  const st = lockState(readLock(), Date.now(), isAlive);
+  if (st === 'held') throw new Error(`词典被另一个进程占用（${lockPath}）——等它跑完或删掉锁文件`);
+  writeFileSync(lockPath, JSON.stringify({ pid: process.pid, host: hostname(), at: new Date().toISOString() }), 'utf-8');
+  try {
+    return await fn();
+  } finally {
+    _rm(lockPath, { force: true });
+  }
+}
+
+/** 找出所有运行私有的词典增量：两种布局都要认。
+ *  · run 布局：`_运行/<runId>/词典增量.json`
+ *  · legacy 布局：`_运行/<层><后缀>.词典增量.json`
+ *  少认一种就会出现"明明配了释义却没合并进词典"，而且不报错。 */
+export function findDictDeltas(outRoot) {
+  const runRoot = join(outRoot, '_运行');
+  const out = [];
+  if (!existsSync(runRoot)) return out;
+  for (const name of _readdir(runRoot)) {
+    const runScoped = join(runRoot, name, '词典增量.json');
+    const flat = join(runRoot, name);
+    const candidates = [];
+    if (existsSync(runScoped)) candidates.push([name, runScoped]);
+    if (/^.+\.词典增量\.json$/.test(name) && existsSync(flat)) candidates.push([name.replace(/\.词典增量\.json$/, ''), flat]);
+    for (const [origin, f] of candidates) {
+      try {
+        const o = JSON.parse(readFileSync(f, 'utf-8'));
+        if (Array.isArray(o.entries) && o.entries.length) out.push({ origin: o.origin ?? origin, entries: o.entries, file: f });
+      } catch {
+        out.push({ origin, entries: [], file: f, bad: true });
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * 合并：基线词典 + 所有运行私有的增量 → 原子替换基线词典。
+ * 幂等；基线优先（教师定过的释义不被自动新配覆盖）；冲突上报给人，不静默择一。
+ * @returns {{added:number, unchanged:number, conflicts:number, interConflicts:number, report:string[]}}
+ */
+export async function mergeDictIntoProject(P) {
+  const { parseDictCsv, toDictCsv, mergeDict, describeMerge } = await dictMerge();
+  const dictPath = P.词典路径;
+  if (!dictPath) throw new Error('mergeDictIntoProject 需要词典路径（来自项目配置 书级.词典）');
+  const found = findDictDeltas(P.产物目录);
+  const deltas = found.filter((d) => !d.bad);
+  const bad = found.filter((d) => d.bad);
+  if (!deltas.length) {
+    return {
+      added: 0, unchanged: 0, conflicts: 0, interConflicts: 0,
+      report: ['词典合并：没有增量，未改动', ...(bad.length ? [`⚠ ${bad.length} 份增量读不出来（已跳过）：${bad.map((b) => b.file).join('、')}`] : [])],
+    };
+  }
+  const base = existsSync(dictPath) ? parseDictCsv(readFileSync(dictPath, 'utf-8')) : [];
+  const merged = mergeDict(base, deltas);
+  const next = toDictCsv(merged.entries);
+  const prev = existsSync(dictPath) ? readFileSync(dictPath, 'utf-8') : '';
+  if (next !== prev) {
+    // 原子替换：先写临时文件再 rename（rename 在同一文件系统上是原子的），
+    // 别人不会读到"写了一半的词典"
+    const tmp = `${dictPath}.tmp-${process.pid}`;
+    writeFileSync(tmp, next, 'utf-8');
+    renameSync(tmp, dictPath);
+  }
+  return {
+    added: merged.added,
+    unchanged: merged.unchanged,
+    conflicts: merged.conflicts.length,
+    interConflicts: merged.interConflicts.length,
+    report: describeMerge(merged),
+  };
+}
+
+/** 新词回写词典，保持跨章一致（下次遇到同词直接用既有释义）。path 必传（词典路径来自项目配置）
+ *  ⚠ 并发不安全（读整份→写回整份）。会话脚本已改为写运行私有增量 + `mergeDictIntoProject`；
+ *  这个函数保留给单进程的维护脚本用。 */
 export function appendDict(entries, path) {
   if (!path) throw new Error('appendDict 需要词典路径（来自项目配置的 书级.词典）');
   const m = loadDict(path);

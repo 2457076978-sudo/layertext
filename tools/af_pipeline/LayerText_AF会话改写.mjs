@@ -37,6 +37,7 @@
  *   node LayerText_AF会话改写.mjs --tier A --resume           # 中断后续跑（同一条命令即可）
  *   node LayerText_AF会话改写.mjs --tier M --scope chapter    # 换成"一章一个会话"
  *   node LayerText_AF会话改写.mjs --tier A --window 40         # 会话滚动窗口（默认 30 段；0=不滚动）
+ *   node LayerText_AF会话改写.mjs --tier A --merge-dict        # 跑完顺带把词典增量并进共享词典（默认只写增量）
  *
  * 产物：与其它生成脚本完全一致（产物目录/第X章/原文_<层>_<日期>.md），
  *       因此下游 精修 → 补注 → 修复 → 复核 → 台账 一个字都不用改。
@@ -53,7 +54,7 @@ import { dirname, join } from 'node:path';
 
 const SHARED = await import('./LayerText_AF词表与词典.mjs');
 const P = SHARED.loadProject();
-const { REVIEW_PLACEHOLDER, segmentList } = SHARED;
+const { REVIEW_PLACEHOLDER, segmentList, writeDictDelta, mergeDictIntoProject, withLock } = SHARED;
 const REPO = P.引擎目录;
 const SRC_BASE = P.原文目录;
 const OUT_BASE = P.产物目录;
@@ -121,6 +122,7 @@ const apiKey = () => {
 const { gateSegment, normalizeSegmentBody } = await import(`${REPO}/dist/src/core/segmentgate.js`);
 const { makeCovers, dedupeAnnotations } = await import(`${REPO}/dist/src/core/annot.js`);
 const { LOOKUP_TOOL, collectLookups, formatLookupAnswer } = await import(`${REPO}/dist/src/core/lookuptool.js`);
+const { makeResolver } = await import(`${REPO}/dist/src/core/manifest.js`);
 const { splitChapter } = await import(`${REPO}/dist/src/core/textpipe.js`);
 const { runQc } = await import(`${REPO}/dist/src/core/qc.js`);
 const LEX = await SHARED.loadLexicon(P);
@@ -213,12 +215,29 @@ ${vocabBlock}
 }
 
 /* ────────────────────── 会话日志（事件日志式，append-only，可续跑/可回放） ────────────────────── */
-const SESSION_DIR = join(P.调适工作区, '_会话');
-const sessionFile = () => join(SESSION_DIR, `${TAG}${SCOPE === 'tier' || SCOPE === 'book' ? '' : '_' + SCOPE}${VOCAB === 'full' ? '' : '_' + VOCAB}${SUFFIX}.jsonl`);
-const RUN_DIR = join(OUT_BASE, '_运行');
-const REVIEW_DIR = join(OUT_BASE, '_待复核', `${TAG}${SUFFIX}`);
-const doneMarker = () => join(RUN_DIR, `${TAG}${SUFFIX}.完成.json`);
-const reviewMarker = () => join(RUN_DIR, `${TAG}${SUFFIX}.待复核.json`);
+/* ── 路径一律经清单解析（报告 §三：「引擎、管线、App 仍可保留，但都只能通过 manifest 解析路径」）──
+ * 脚本里再出现 `join(OUT_BASE, …)` 这类拼字符串，就是"文件命名约定与并发写入"那个
+ * 规模崩点的复发点：第二本书/第二位教师/同书多层并行时路径会撞，而脚本照常报告成功。
+ * 布局由清单决定：legacy 逐字符复现既有命名（不破坏教师已有工作流），
+ * run 把每类产物收进 `_运行/<runId>/`（跨运行不可能撞名）。 */
+const MANIFEST_POINTER = join(OUT_BASE, '_运行', '清单_最新.json');
+function runIdentity() {
+  try {
+    const ptr = JSON.parse(readFileSync(MANIFEST_POINTER, 'utf-8'));
+    const m = JSON.parse(readFileSync(ptr.path, 'utf-8'));
+    return { layout: m.layout ?? 'legacy', runId: m.runId, teacher: m.teacher, from: '清单' };
+  } catch {
+    // 没建过清单（单独跑本脚本）：退回 legacy 布局 + 一个由身份信息拼出的运行 ID
+    return { layout: 'legacy', runId: `${TAG}-${process.env.USER ?? 'unknown'}`, teacher: process.env.USER ?? 'unknown', from: '（无清单，按 legacy 布局）' };
+  }
+}
+const RUN = runIdentity();
+const R = makeResolver(RUN.layout, { out: OUT_BASE, work: P.调适工作区 }, { runId: RUN.runId, tier: TAG, date: DATE, suffix: SUFFIX });
+const sessionFile = () => R.session({ scope: SCOPE, vocab: VOCAB });
+const REVIEW_DIR = R.dir('待复核', { chapter: '第X章', segId: 'P00' });
+const doneMarker = () => R.any('完成标记');
+const reviewMarker = () => R.any('失败清单');
+const RUN_DIR = R.dir('清单');
 
 function loadSession() {
   const f = sessionFile();
@@ -252,7 +271,7 @@ function loadSession() {
   const windowed = carryAt >= 0 ? messages.slice(carryAt) : messages;
   return { messages: windowed, done, stats, warnings, carryText: lastCarry };
 }
-const logLine = (o) => { mkdirSync(SESSION_DIR, { recursive: true }); appendFileSync(sessionFile(), JSON.stringify(o) + '\n', 'utf-8'); };
+const logLine = (o) => { mkdirSync(dirname(sessionFile()), { recursive: true }); appendFileSync(sessionFile(), JSON.stringify(o) + '\n', 'utf-8'); };
 /** 推一条消息进会话，**同时写进事件日志**（否则 --resume 会丢上下文——首版就踩了这个坑） */
 function pushMsg(messages, role, content, extra = {}) {
   messages.push({ role, content, ...extra });
@@ -313,6 +332,14 @@ function rollWindow() {
  *  tool   = 先发一次 lookup_words 工具调用再给正文（验证严格 schema 的查词往返）
  *  exact = 按目标词数精确回放原文（可通过门禁，用于验证"通过路径确实写了完成标记"） */
 function fakeChat(messages, tools = null) {
+  // 「配释义」这一路也要能被自检覆盖，否则词典增量/合并那条路永远没有测试走过。
+  const lastUserAll = [...messages].reverse().find((m) => m.role === 'user')?.content ?? '';
+  const glossAsk = lastUserAll.match(/给这些词配释义：(.+)$/);
+  if (glossAsk) {
+    const map = {};
+    for (const w of glossAsk[1].split(/[,\s，]+/).filter(Boolean)) map[w.trim().toLowerCase()] = '风车';
+    return { text: JSON.stringify(map), toolCalls: [], usage: { in: 0, out: 0, cached: 0 } };
+  }
   // 注意：复检回流那一轮的"最后一条 user 消息"是反馈而不是原文段，
   // 所以要取**最后一条含原文段**的消息，否则重写轮会退化成无原文的瞎写。
   const segOf = (m) => m.content.match(/【原文段落】\n([\s\S]*?)\n\n请改写这一段/)?.[1];
@@ -586,6 +613,7 @@ const { system, vb, db } = buildOpener();
 const openerTokens = Math.round(system.length / 3.2);
 console.log(`会话开场：${system.length} 字符 ≈ ${openerTokens} tokens（词汇表 ${vb.n} 词 / 词典 ${db.n} 条）`);
 console.log(`会话文件：${sessionFile()}${RESUME ? '（续跑）' : ''}`);
+console.log(`路径布局：${RUN.layout}${RUN.layout === 'legacy' ? '（沿用既有命名）' : `（运行私有目录 ${RUN.runId}）`}｜运行身份来自：${RUN.from}`);
 
 // 预算估算
 const chSegs = CH_IDS.map((i) => {
@@ -639,7 +667,7 @@ for (const { i } of chSegs) {
   const header = md.slice(0, md.indexOf(chLine)) || '';
   const segList = segmentList(md);   // [{id:'P07', text:'[P07] …'}]——段号是稳定 ID
   const srcText = (k) => segList[k].text;
-  const outPath = join(OUT_BASE, ch, `原文_${TAG}_${DATE}${SUFFIX}.md`);
+  const outPath = R.any('正文', { chapter: ch });
   const existing = existsSync(outPath) ? readFileSync(outPath, 'utf-8') : null;
   const outSegs = existing ? (splitChapter(existing).body.match(/\[P\d+\][\s\S]*?(?=\[P\d+\]|$)/g) ?? []) : [];
   for (let k = 0; k < segList.length; k++) {
@@ -666,7 +694,7 @@ for (const { i } of chSegs) {
         // ★ 不可完成状态：不进正文、不进 done、写隔离目录、进失败清单
         //   正文里留一个 HTML 注释占位：人打开文件能看见缺口，QC 分句不会把它算成内容，
         //   且**保住后面段落的位置**（否则第 8 段的原句会对到第 7 段的改写上，风险队列全错）。
-        outSegs[k] = REVIEW_PLACEHOLDER(segList[k].id, `_待复核/${TAG}${SUFFIX}/`);
+        outSegs[k] = REVIEW_PLACEHOLDER(segList[k].id, REVIEW_DIR.replace(`${OUT_BASE}/`, ''));
         const rec = {
           chapter: ch, segIndex: k, segLabel: `${ch} 第${k + 1}段`, key,
           source: srcText(k).trim(), body, status,
@@ -675,9 +703,10 @@ for (const { i } of chSegs) {
           response: body.slice(0, 2000),
           annotation: verdict.annotation, words: verdict.words, target: verdict.target,
         };
+        const segLabel = `第${k + 1}段`;
         mkdirSync(REVIEW_DIR, { recursive: true });
-        writeFileSync(join(REVIEW_DIR, `${ch}_第${k + 1}段.md`), `[P${String(k + 1).padStart(2, '0')}] ${body.replace(/^\[P\d+\]\s*/, '')}\n`, 'utf-8');
-        writeFileSync(join(REVIEW_DIR, `${ch}_第${k + 1}段.json`), JSON.stringify(rec, null, 2), 'utf-8');
+        writeFileSync(R.any('待复核', { chapter: ch, segId: segLabel }), `[P${String(k + 1).padStart(2, '0')}] ${body.replace(/^\[P\d+\]\s*/, '')}\n`, 'utf-8');
+        writeFileSync(R.any('待复核', { chapter: ch, segId: segLabel, ext: 'json' }), JSON.stringify(rec, null, 2), 'utf-8');
         logLine({ t: 'review', key, rules: verdict.blockers.map((p) => p.ruleId), problems: verdict.blockers, inputHash, promptVersion: PROMPT_VERSION });
         reviews.push(rec);
         console.error(`\n✗ ${ch} 第${k + 1}段 复检未通过（${verdict.blockers.map((p) => p.ruleId).join('、')}）→ 已隔离，未写入正文`);
@@ -727,9 +756,21 @@ for (const { i } of chSegs) {
   }
 }
 
+/* 统一词典：**只写本运行的增量**，合并是显式的一步。
+ * 原先这里直接 appendDict（读整份→合并→写回整份）：第二位教师并行跑时，
+ * 后写的会把先写的整份盖掉——表现是"明明配过的词下次又问一遍"，且不报错。
+ * 现在增量落在运行私有目录（不共享、不可能撞），谁想合并谁显式调 --merge-dict。 */
 if (newDictEntries.length) {
-  SHARED.appendDict(newDictEntries, P.词典路径);
-  console.log(`\n词典新增 ${newDictEntries.length} 条释义 → ${P.词典路径}`);
+  const deltaPath = R.any('词典增量');
+  const total = writeDictDelta(deltaPath, newDictEntries, RUN.runId);
+  console.log(`\n词典增量：本运行新配 ${newDictEntries.length} 条 → ${deltaPath}（累计 ${total} 条，未直接改共享词典）`);
+  if (has('--merge-dict')) {
+    const r = await withLock(`${P.词典路径}.lock`, () => mergeDictIntoProject(P));
+    for (const line of r.report) console.log(`  ${line}`);
+    console.log(`  词典 → ${P.词典路径}`);
+  } else {
+    console.log('  （要并进共享词典：加 --merge-dict，或在管线里跑「词典合并」那一步）');
+  }
 }
 
 const hitRate = state.stats.in ? Math.round((state.stats.cached / state.stats.in) * 100) : 0;

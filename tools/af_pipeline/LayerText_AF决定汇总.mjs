@@ -12,6 +12,9 @@
  *   node LayerText_AF决定汇总.mjs --tier A --min-support 2
  *   node LayerText_AF决定汇总.mjs --apply 1,3           # 只把第 1、3 条提议落库（需人明确指定）
  *   node LayerText_AF决定汇总.mjs --dry                 # 不写文件，只看
+ *   node LayerText_AF决定汇总.mjs --about windmill      # 查询「某位教师对某词的所有决定」
+ *   node LayerText_AF决定汇总.mjs --about windmill --teacher wayne
+ *   node LayerText_AF决定汇总.mjs --by-rule             # 按规则看采纳/误报分布
  *
  * 决定日志（append-only JSONL，一行一条不可变事件）：
  *   调适工作区/_决定/<层>.jsonl
@@ -33,8 +36,12 @@ const has = (n) => argv.includes(n);
 
 const { buildProposals, parseDecisionLog, summarizeDecisions, contestedItems, PROPOSAL_LABEL } =
   await import(`${REPO}/dist/src/core/decision.js`);
+/** SQLite 决定索引：JSONL 仍是正本，索引随时可重建（报告 §四：查询"某位教师对某词的所有决定"）。
+ *  拿不到 node:sqlite 时自动降级为"不可用"，查询回落 JSONL 全扫。 */
+const { openDecisionStore } = await import(`${REPO}/dist/src/core/decisiondb.js`);
 
 const DECISION_DIR = join(P.调适工作区, '_决定');
+const INDEX_PATH = join(DECISION_DIR, '决定索引.db');
 const decisionFile = (tag) => join(DECISION_DIR, `${tag}.jsonl`);
 
 /* ────────────────────── 读取全部决定（跨层合并统计） ────────────────────── */
@@ -51,6 +58,48 @@ for (const t of TIERS) {
   allEvents.push(...r.events);
 }
 
+/** 把 JSONL 正本灌进索引（幂等）。日志永远优先——索引可以随时删掉重建。 */
+function refreshIndex(events) {
+  const store = openDecisionStore(INDEX_PATH);
+  if (!store.available) return null;
+  store.ingest(events);
+  return store;
+}
+
+/* ────────────────────── 查询模式（报告点名的那一句） ────────────────────── */
+const ABOUT = arg('--about', '');
+const BY_RULE = has('--by-rule');
+if (ABOUT || BY_RULE) {
+  const store = refreshIndex(allEvents);
+  if (!store) {
+    console.error('✗ 拿不到 node:sqlite（需要 Node 22.5+），索引不可用。');
+    console.error('  功能不缺席：用 --about 时脚本会回落到"JSONL 全扫"。');
+  }
+  console.log('════ AF 决定查询 ════');
+  console.log(`索引：${INDEX_PATH}${store ? '' : '（不可用，回落 JSONL 全扫）'}｜正本：${allEvents.length} 条事件`);
+  const who = arg('--teacher', '');
+  if (ABOUT) {
+    const rows = store ? store.decisionsAbout(ABOUT, who || undefined) : allEvents.filter((e) => (e.subject?.value ?? '').toLowerCase() === ABOUT.toLowerCase() && (!who || e.teacherId === who));
+    console.log(`\n「${ABOUT}」的全部决定${who ? `（教师 ${who}）` : ''}：${rows.length} 条`);
+    if (!rows.length) console.log('  （没有——这个词还没被决定过）');
+    for (const r of rows.slice(0, 50)) {
+      console.log(`  ${r.timestamp.slice(0, 16).replace('T', ' ')} ${r.teacherId} [${r.ruleIds}] ${r.decision}`);
+      console.log(`     ${r.before.slice(0, 70)} → ${r.after.slice(0, 70)}`);
+    }
+    const byWord = store ? store.decisionsAbout(ABOUT) : [];
+    const teachers = [...new Set((store ? byWord : allEvents).map((r) => r.teacherId))];
+    if (teachers.length > 1) console.log(`  （${teachers.length} 位教师对这个词做过决定：${teachers.join('、')}）`);
+  }
+  if (BY_RULE) {
+    const rows = store ? store.byRule() : [];
+    console.log('\n按规则：');
+    for (const r of rows) console.log(`  ${r.ruleId}：${r.total} 条，其中误报 ${r.falsePositive}（${r.total ? ((r.falsePositive / r.total) * 100).toFixed(0) : 0}%）`);
+    if (!rows.length) console.log('  （还没有决定）');
+  }
+  console.log('\n索引是派生视图：删掉它不影响任何事实，下次跑本脚本会自动重建。');
+  process.exit(0);
+}
+
 console.log('════ AF 决定汇总 ════');
 console.log(`项目：${P._meta?.名称 ?? '（未命名）'}｜书名：${P.书名}`);
 for (const [tag, s] of Object.entries(perTier)) {
@@ -63,6 +112,8 @@ if (!allEvents.length) {
 }
 
 const stat = summarizeDecisions(allEvents);
+const proposalStore = refreshIndex(allEvents);
+if (proposalStore) console.log(`决定索引已更新：${proposalStore.count()} 行 → ${INDEX_PATH}`);
 const proposals = buildProposals(allEvents, { minSupport: Number(arg('--min-support', '2')) });
 const contested = contestedItems(allEvents);
 

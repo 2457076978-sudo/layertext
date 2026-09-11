@@ -187,7 +187,15 @@ export interface RunManifest {
   warnings: { kind: string; message: string; at: string }[];
   /** 未完成（门禁未通过）的段数——清单的"能不能交付"由它决定 */
   pendingReview: number;
+  /** 路径布局（报告 §三：「引擎、管线、App 仍可保留，但都只能通过 manifest 解析路径」）：
+   *  · `legacy`（默认）= 沿用既有文件命名，教师已有的书与脚本一个字都不用改；
+   *  · `run` = 产物按运行 ID 分目录，第二本书/第二位教师/同书多层并行时**不可能互相覆盖**。
+   *  两种布局都只从 `resolvePath` 出来——脚本不再自己拼路径。 */
+  layout: Layout;
 }
+
+/** 路径布局 */
+export type Layout = 'legacy' | 'run';
 
 export interface NewManifestInput {
   book: string;
@@ -200,6 +208,7 @@ export interface NewManifestInput {
   inputs: SourceRef[];
   owner?: { pid?: number; host?: string };
   createdAt?: string;
+  layout?: Layout;
 }
 
 /** 造一份新清单。runId 由身份信息 + 输入哈希决定，因此"同样输入 = 同一个 runId"。 */
@@ -239,6 +248,7 @@ export function newManifest(input: NewManifestInput): RunManifest {
     steps: [],
     warnings: [],
     pendingReview: 0,
+    layout: input.layout ?? 'legacy',
   };
 }
 
@@ -387,4 +397,177 @@ export function summarizeManifest(m: RunManifest): ManifestSummary {
     deliverable: m.pendingReview === 0 && failedSteps.length === 0 && m.artifacts.every((a) => a.status === 'ok' || a.status === 'stale'),
     byCategory: {},
   };
+}
+
+
+/* ────────────────────── 路径解析：所有脚本唯一的产物路径来源 ────────────────────── */
+
+export type ArtifactPathKind =
+  | '正文'
+  | '会话日志'
+  | '待复核'
+  | '完成标记'
+  | '失败清单'
+  | '风险队列'
+  | '台账'
+  | '复核报告'
+  | '词典增量'
+  | '决定日志'
+  | '清单';
+
+export interface PathRequest {
+  kind: ArtifactPathKind;
+  /** 层级标签（如 `A层85`） */
+  tier?: string;
+  /** 章节名（如 `第一章`） */
+  chapter?: string;
+  /** 会话粒度（tier/chapter/segment），进会话日志文件名 */
+  scope?: string;
+  /** 词汇注入维度（full/lite），进会话日志文件名 */
+  vocab?: string;
+  /** 日期（正文默认文件名用） */
+  date?: string;
+  /** 试跑后缀（`_试跑` / `_exp1`） */
+  suffix?: string;
+  /** 段号（`待复核` 用，如 `P07`） */
+  segId?: string;
+  /** 覆盖扩展名 */
+  ext?: string;
+}
+
+/** 运行私有目录：`<产物目录>/_运行/<runId>`。`run` 布局下每类产物都收在这儿。 */
+export const privateDirOf = (outRoot: string, runId: string): string => `${outRoot}/_运行/${runId}`;
+
+/** 会话/决定日志的文件名尾（层级 + 粒度 + 词表维度 + 后缀），两种布局共用同一套规则 */
+const logTail = (req: PathRequest): string =>
+  `${req.tier ?? ''}${req.scope && req.scope !== 'tier' && req.scope !== 'book' ? '_' + req.scope : ''}` +
+  `${req.vocab && req.vocab !== 'full' ? '_' + req.vocab : ''}${req.suffix ?? ''}.jsonl`;
+
+/**
+ * **唯一的产物路径来源**。脚本不再自己拼字符串——拼字符串正是"文件命名约定与并发写入"
+ * 那个规模崩点的成因：第二本书、第二位教师、同一书多层并行时，输出路径/会话日志/
+ * 统一词典/标记文件会互相覆盖，而脚本照常报告成功。
+ *
+ * · `legacy` 布局**逐字符复现**既有命名——教师已有的书与下游脚本一个字都不用改；
+ * · `run` 布局把每类产物收进运行私有目录，跨运行不可能撞名。
+ */
+export function resolvePath(layout: Layout, roots: { out: string; work: string }, runId: string, req: PathRequest): string {
+  const { out, work } = roots;
+  const tier = req.tier ?? '';
+  const suffix = req.suffix ?? '';
+  const date = req.date ?? '';
+
+  // 会话日志与决定日志在调适工作区（不是产物目录）：两种布局只差根目录
+  if (req.kind === '会话日志' || req.kind === '决定日志') {
+    const tail = logTail(req);
+    if (layout === 'run') return `${privateDirOf(out, runId)}/${req.kind === '决定日志' ? '决定' : '会话'}/${tail}`;
+    return req.kind === '决定日志' ? `${work}/_决定/${tail}` : `${work}/_会话/${tail}`;
+  }
+
+  if (layout === 'run') {
+    const dir = privateDirOf(out, runId);
+    switch (req.kind) {
+      case '正文':
+        return `${dir}/正文/${req.chapter ?? ''}/原文_${tier}_${date}${suffix}.md`;
+      case '待复核':
+        return `${dir}/待复核/${req.chapter ?? ''}_${req.segId ?? '第N段'}.${req.ext ?? 'md'}`;
+      case '完成标记':
+        return `${dir}/完成.json`;
+      case '失败清单':
+        return `${dir}/待复核清单.json`;
+      case '风险队列':
+        return `${dir}/风险队列${suffix}.json`;
+      case '台账':
+        return `${dir}/台账_${tier}_${date}${suffix}.md`;
+      case '复核报告':
+        return `${dir}/复核_${tier}_${date}${suffix}.md`;
+      case '词典增量':
+        return `${dir}/词典增量.json`;
+      case '清单':
+        return `${out}/_运行/清单_${runId}.json`;
+      default:
+        return `${dir}/${req.kind}${suffix}`;
+    }
+  }
+
+  // legacy：与既有命名完全一致（这是"不破坏教师已有工作流"的硬约束）
+  switch (req.kind) {
+    case '正文':
+      return `${out}/${req.chapter ?? ''}/原文_${tier}_${date}${suffix}.md`;
+    case '待复核':
+      return `${out}/_待复核/${tier}${suffix}/${req.chapter ?? ''}_${req.segId ?? '第N段'}.${req.ext ?? 'md'}`;
+    case '完成标记':
+      return `${out}/_运行/${tier}${suffix}.完成.json`;
+    case '失败清单':
+      return `${out}/_运行/${tier}${suffix}.待复核.json`;
+    case '风险队列':
+      return `${out}/_运行/风险队列_${tier}${suffix}${req.ext ?? '.json'}`;
+    case '台账':
+      return `${out}/台账_${tier}_${date}${suffix}.md`;
+    case '复核报告':
+      return `${out}/复核_${tier}_${date}${suffix}.md`;
+    case '词典增量':
+      return `${out}/_运行/${tier}${suffix}.词典增量.json`;
+    case '清单':
+      return `${out}/_运行/清单_${runId}.json`;
+    default:
+      return `${out}/_运行/${tier}${suffix}${req.ext ?? '.json'}`;
+  }
+}
+
+/** 取所在目录（不给文件名，只给目录），供"写一类产物到一个目录"的场景用 */
+export const dirOfPath = (filePath: string): string => filePath.replace(/\/[^/]*$/, '');
+
+export interface PathResolver {
+  /** 按类型取路径（如 `r.any('正文', { chapter: '第一章' })`） */
+  any(kind: ArtifactPathKind, extra?: Partial<PathRequest>): string;
+  /** 取该类产物的目录 */
+  dir(kind: ArtifactPathKind, extra?: Partial<PathRequest>): string;
+  /** 会话日志（默认走调适工作区/_会话） */
+  session(extra?: Partial<PathRequest>): string;
+  /** 决定日志（默认走调适工作区/_决定） */
+  decision(extra?: Partial<PathRequest>): string;
+  layout: Layout;
+  runId: string;
+}
+
+/** 面向调用方的语法糖：一次给定身份，反复取路径。脚本里**只允许**通过它拿路径。 */
+export function makeResolver(
+  layout: Layout,
+  roots: { out: string; work: string },
+  id: { runId: string; tier?: string; date?: string; suffix?: string },
+): PathResolver {
+  const base: PathRequest = { kind: '正文', tier: id.tier, date: id.date, suffix: id.suffix };
+  return {
+    layout,
+    runId: id.runId,
+    any: (kind, extra) => resolvePath(layout, roots, id.runId, { ...base, kind, ...extra }),
+    dir: (kind, extra) => dirOfPath(resolvePath(layout, roots, id.runId, { ...base, kind, ...extra })),
+    session: (extra) => resolvePath(layout, roots, id.runId, { ...base, kind: '会话日志', ...extra }),
+    decision: (extra) => resolvePath(layout, roots, id.runId, { ...base, kind: '决定日志', ...extra }),
+  };
+}
+
+export interface CollisionReport {
+  ok: boolean;
+  /** 撞名的产物路径与涉及它的运行 */
+  collisions: { path: string; runs: string[] }[];
+}
+
+/**
+ * 跨运行撞名探测：把多份清单登记过的产物路径并起来，找出被两次以上运行写过的那些。
+ * 这是"第二本书/第二位教师/同书多层并行会互相覆盖"的**直接度量**——
+ * legacy 布局下它必然报出撞名，run 布局下必然为空。
+ */
+export function detectArtifactCollisions(manifests: { runId: string; artifacts: { path: string }[] }[]): CollisionReport {
+  const owners = new Map<string, Set<string>>();
+  for (const m of manifests) for (const a of m.artifacts) {
+    if (!owners.has(a.path)) owners.set(a.path, new Set());
+    owners.get(a.path)!.add(m.runId);
+  }
+  const collisions = [...owners]
+    .filter(([, runs]) => runs.size > 1)
+    .map(([path, runs]) => ({ path, runs: [...runs].sort() }))
+    .sort((a, b) => (a.path < b.path ? -1 : 1));
+  return { ok: collisions.length === 0, collisions };
 }
