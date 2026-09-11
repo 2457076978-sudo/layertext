@@ -22,7 +22,7 @@
  */
 
 import { parseAnnotations, type Annotation } from './annot.js';
-import { sentsOf } from './textpipe.js';
+import { sentsOf, suffixCandidates } from './textpipe.js';
 
 export const DOC_AST_VERSION = 1;
 
@@ -409,3 +409,95 @@ export function repairDoc(md: string): { md: string; changed: boolean; nested: n
 
 /** 段正文里的句子（与引擎分句同一口径，供核对面板用） */
 export const sentencesOfSegment = (seg: SegmentNode): string[] => sentsOf(seg.raw, false);
+
+/* ────────────────────── 按规则改稿（风险队列的"动作"落点） ────────────────────── */
+
+/** 把原文里的一个词形归一到与 `tokenizeTxt` 相同的键（小写、去首尾引号连字符、去所有格） */
+export const normalizeToken = (t: string): string =>
+  t.toLowerCase().replace(/^['-]+/, '').replace(/['-]+$/, '').replace(/'s$/, '');
+
+/** 两个词是否属于同一词形家族（与引擎 `hit` 同一套后缀还原，避免两边口径打架） */
+export function sameWordForm(a: string, b: string): boolean {
+  const x = normalizeToken(a);
+  const y = normalizeToken(b);
+  if (x === y) return true;
+  const cx = suffixCandidates(x);
+  const cy = suffixCandidates(y);
+  return cx.includes(y) || cy.includes(x);
+}
+
+/**
+ * 在指定段的**首次出现处**插入注释（`word（中文）`）。
+ *
+ * 这是 ANNO-01「补上注释」这个动作的落点。要说清三件事：
+ *   ① 找到的是**文中真实那个词形**（`Windmills`），而不是引擎报的词形（`windmill`）——
+ *      直接用正则拼引擎给的词，遇到屈折形就找不到，然后会静默地什么都不做；
+ *   ② 段里已经有这个词的注释就不插（幂等，重复点不会插两次）；
+ *   ③ 找不到就返回 false，**让调用方去写 rejected 事件**，不是假装改完了。
+ */
+export function insertAnnotation(ast: DocAst, segId: string, word: string, zh: string): boolean {
+  const seg = ast.segments.find((s) => s.id === segId);
+  if (!seg) return false;
+  if (parseAnnotations(seg.raw).list.some((a) => sameWordForm(a.word, word))) return false;
+  let at = -1;
+  let found = '';
+  for (const m of seg.raw.matchAll(/[A-Za-z][A-Za-z'-]*/g)) {
+    if (sameWordForm(m[0], word)) {
+      at = (m.index ?? 0) + m[0].length;
+      found = m[0];
+      break;
+    }
+  }
+  if (at < 0) return false;
+  seg.raw = seg.raw.slice(0, at) + `（${zh}）` + seg.raw.slice(at);
+  seg.spans = spansOf(seg.raw);
+  void found;
+  return true;
+}
+
+/**
+ * 删掉**重复**注释：保留首次那处，其余还原为裸词。
+ *
+ * 为什么不能用 `removeAnnotation`：那个删的是**第一次**匹配——
+ * 而 ANNO-02 的语义恰恰相反（首次是对的，重复的才该删）。
+ * 第一版就踩了这个：动作叫"删掉多余注释"，执行完却把正确的那处删了、留下错的那处。
+ *
+ * @param removeAll 跨段重复注用：这个词在**别的段**已经注过，本段这处就该整段去掉
+ * @returns 删掉了几处
+ */
+export function removeDuplicateAnnotations(ast: DocAst, segId: string, word: string, removeAll = false): number {
+  const seg = ast.segments.find((s) => s.id === segId);
+  if (!seg) return 0;
+  let removed = 0;
+  // 从右往左改，避免前面的改动让后面的下标漂移
+  for (let guard = 0; guard < 50; guard++) {
+    const hits = seg.spans.filter((s): s is AnnotationSpan => s.kind === 'annotation' && sameWordForm(s.word, word));
+    if (!hits.length) break;
+    if (!removeAll && hits.length === 1 && removed > 0) break;
+    if (!removeAll && hits.length === 1) break; // 只剩一处：那是"首次"，留着
+    const target = hits[hits.length - 1]!;
+    seg.raw = seg.raw.slice(0, target.start) + target.word + seg.raw.slice(target.end);
+    seg.spans = spansOf(seg.raw);
+    removed++;
+  }
+  if (removeAll) {
+    // 跨段重复：本段出现几处就去几处
+    for (let guard = 0; guard < 50; guard++) {
+      const hits = seg.spans.filter((s): s is AnnotationSpan => s.kind === 'annotation' && sameWordForm(s.word, word));
+      if (!hits.length) break;
+      const target = hits[hits.length - 1]!;
+      seg.raw = seg.raw.slice(0, target.start) + target.word + seg.raw.slice(target.end);
+      seg.spans = spansOf(seg.raw);
+      removed++;
+    }
+  }
+  return removed;
+}
+
+/** 段里该词的裸词形（不含注释），用于事件里的 before/after 片段 */
+export function occurrenceOf(seg: SegmentNode, word: string): { text: string; at: number } | null {
+  for (const m of seg.raw.matchAll(/[A-Za-z][A-Za-z'-]*/g)) {
+    if (sameWordForm(m[0], word)) return { text: m[0], at: m.index ?? 0 };
+  }
+  return null;
+}

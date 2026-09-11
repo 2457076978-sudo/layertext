@@ -24,12 +24,21 @@ import type { GateCategory } from './segmentgate.js';
 export const DECISION_SCHEMA_VERSION = 1;
 
 /** 教师在风险队列上能按的三个键 + 直改 */
-export type DecisionKind = 'accept' | 'reject' | 'false-positive' | 'edit';
+export type DecisionKind = 'accept' | 'reject' | 'false-positive' | 'edit' | 'rejected' | 'undo';
 export const DECISION_LABEL: Record<DecisionKind, string> = {
   accept: '采纳',
   reject: '退回重写',
   'false-positive': '标记误报',
   edit: '直改',
+  /** **动作没能执行**（稿件改过 / 找不到位置 / 写入失败）。
+   *  与教师的 `reject`（"我不同意这条"）完全是两回事：
+   *  这条是"系统没做成"，必须留痕、且**卡片不许消失**——
+   *  否则就成了"卡片没了、正文也没变"的两头空。 */
+  rejected: '执行失败（未改稿）',
+  /** **撤销**：把被指向的那条决定作废。
+   *  它是**新事件**，不是删历史——历史一条不删，`undoOf` 指回被撤销的那条。
+   *  作废之后的项**回到待办**（教师改主意是常态，界面得让他回得来）。 */
+  undo: '撤销',
 };
 
 /** 这条决策针对的东西——离线汇总器靠它决定"该提议进哪里" */
@@ -61,6 +70,9 @@ export interface DecisionEvent {
   subject?: DecisionSubject;
   /** 规则类别冗余一份：汇总器不必回查规则表也能分组（规则表改了也不影响历史事件的解读） */
   category?: GateCategory;
+  /** 撤销指针：这条 `undo` 事件作废的是哪一条（按 `itemId + timestamp` 定位）。
+   *  **撤销不删历史**——被撤销的那条仍然在日志里，只是不再算数。 */
+  undoOf?: string;
 }
 
 export interface MakeDecisionInput extends Omit<DecisionEvent, 'schemaVersion' | 'timestamp'> {

@@ -15,17 +15,20 @@ import {
   decisionLineFor,
   loadRunIdentity,
   loadRiskQueue,
+  decidedRows,
   panelStat,
   parseQueueFile,
   pendingItems,
+  latestDecisions,
   proposalPreview,
+  refOf,
   ruleLabel,
   setRiskIo,
   subjectOf,
   type RiskIo,
   type RiskQueueFile,
 } from '../app/src/risk.js';
-import { parseDecisionLog } from '../src/core/decision.js';
+import { makeDecisionEvent, parseDecisionLog } from '../src/core/decision.js';
 import type { RiskItem } from '../src/core/riskqueue.js';
 
 const item = (over: Partial<RiskItem> = {}): RiskItem => ({
@@ -239,4 +242,87 @@ test('清单指针指向的文件读不到 → 退回 legacy 而不是崩（坏�
   setRiskIo(memIo(files).io);
   const id = await loadRunIdentity({ outDir: '/out', workDir: '/work', sourceVersion: 's' });
   assert.equal(id.layout, 'legacy');
+});
+
+/* ────────────────── 执行失败 ≠ 处理完毕（v4 方向第 2 条） ────────────────── */
+
+test('★ rejected（动作没执行成）不算已处理：卡片必须留在待办里', () => {
+  const f = file([item(), item({ id: 'b', ruleId: 'ANNO-01', severity: 'blocker', category: '加注' })]);
+  const failed = decisionLineFor(f.队列[0]!, 'rejected', {
+    teacherId: 'wayne', sourceVersion: 's', reason: '找不到段落 P10', timestamp: '2026-09-11T10:00:00.000Z',
+  });
+  const left = pendingItems(f, [failed]);
+  assert.deepEqual(left.map((i) => i.id), ['第一章#2:FACT-01:1911', 'b'], '失败了就还得办，不能从待办消失');
+
+  const stat = panelStat(f, [failed]);
+  assert.equal(stat.pending, 2, '统计口径也要一致：失败的不算已决');
+  assert.equal(stat.decided, 0);
+
+  // 教师后来真的处理了，才算完
+  const done = decisionLineFor(f.队列[0]!, 'accept', {
+    teacherId: 'wayne', sourceVersion: 's', timestamp: '2026-09-11T10:05:00.000Z',
+  });
+  assert.deepEqual(pendingItems(f, [failed, done]).map((i) => i.id), ['b']);
+  assert.equal(panelStat(f, [failed, done]).decided, 1);
+});
+
+test('四种终态决定才算处理完（accept/reject/false-positive/edit）', () => {
+  const f = file();
+  for (const k of ['accept', 'reject', 'false-positive', 'edit'] as const) {
+    const e = decisionLineFor(f.队列[0]!, k, { teacherId: 'w', sourceVersion: 's', timestamp: '2026-09-11T10:00:00.000Z' });
+    assert.equal(pendingItems(f, [e]).length, 0, `${k} 应当算处理完`);
+  }
+});
+
+/* ────────────────── 撤销：新事件，不是删历史（v4 方向第 2 条） ────────────────── */
+
+test('撤销是**新事件**：历史一条不删，被撤销的项回到待办', () => {
+  const f = file();
+  const accept = decisionLineFor(f.队列[0]!, 'accept', {
+    teacherId: 'w', sourceVersion: 's', timestamp: '2026-09-11T10:00:00.000Z',
+  });
+  assert.equal(pendingItems(f, [accept]).length, 0, '先决了 → 不在待办');
+
+  const undo = makeDecisionEvent({
+    itemId: accept.itemId, decision: 'undo', before: accept.after, after: accept.before,
+    reason: '改主意了', ruleIds: accept.ruleIds, teacherId: 'w', sourceVersion: 's',
+    timestamp: '2026-09-11T10:05:00.000Z', undoOf: refOf(accept),
+  });
+  const events = [accept, undo];
+  assert.equal(events.length, 2, '撤销不删历史');
+  assert.deepEqual(pendingItems(f, events).map((i) => i.id), [accept.itemId], '撤销后回到待办');
+
+  const rows = decidedRows(f, events);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0]!.undone, true, '列表里标出来"已撤销"');
+  assert.equal(rows[0]!.ref, refOf(accept));
+});
+
+test('「看我判过的」按时间倒序，最近的先看到', () => {
+  const f = file([item(), item({ id: 'b', ruleId: 'ANNO-01', category: '加注', severity: 'blocker' })]);
+  const e1 = decisionLineFor(f.队列[0]!, 'accept', { teacherId: 'w', sourceVersion: 's', timestamp: '2026-09-11T10:00:00.000Z' });
+  const e2 = decisionLineFor(f.队列[1]!, 'false-positive', { teacherId: 'w', sourceVersion: 's', timestamp: '2026-09-11T11:00:00.000Z' });
+  const rows = decidedRows(f, [e1, e2]);
+  assert.deepEqual(rows.map((r) => r.item.id), ['b', '第一章#2:FACT-01:1911']);
+  assert.deepEqual(rows.map((r) => r.label), ['标记误报', '采纳']);
+});
+
+test('撤销是**单级**：撤销最新那条 = 整条作废、回到待办（不做多级回退）', () => {
+  const f = file();
+  const a = decisionLineFor(f.队列[0]!, 'reject', { teacherId: 'w', sourceVersion: 's', timestamp: '2026-09-11T10:00:00.000Z' });
+  const b = decisionLineFor(f.队列[0]!, 'accept', { teacherId: 'w', sourceVersion: 's', timestamp: '2026-09-11T11:00:00.000Z' });
+  const undoB = makeDecisionEvent({
+    itemId: b.itemId, decision: 'undo', before: b.after, after: b.before, reason: '', ruleIds: b.ruleIds,
+    teacherId: 'w', sourceVersion: 's', timestamp: '2026-09-11T12:00:00.000Z', undoOf: refOf(b),
+  });
+  const rows = decidedRows(f, [a, b, undoB]);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0]!.event.decision, 'accept', '列表显示的是"最新那条 + 已撤销"');
+  assert.equal(rows[0]!.undone, true);
+  // 单级撤销的语义：整条作废 → 回到待办（教师心里只有"点错了，撤销一下"）
+  assert.deepEqual(pendingItems(f, [a, b, undoB]).map((i) => i.id), [b.itemId]);
+  // 再判一次就又是一条新决定——历史仍然一条不删
+  const c = decisionLineFor(f.队列[0]!, 'false-positive', { teacherId: 'w', sourceVersion: 's', timestamp: '2026-09-11T13:00:00.000Z' });
+  assert.equal(pendingItems(f, [a, b, undoB, c]).length, 0);
+  assert.equal(latestDecisions([a, b, undoB, c]).get(b.itemId)!.decision, 'false-positive');
 });

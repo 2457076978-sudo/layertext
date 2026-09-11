@@ -333,10 +333,13 @@ async function openRiskPane(): Promise<void> {
     write: (p, c) => panelIo.write(p, c),
     listDir: (d) => panelIo.listDir(d),
   });
+  const dictPath = typeof (cfg['书级'] as Record<string, unknown> | undefined)?.['词典'] === 'string'
+    ? ((cfg['书级'] as Record<string, unknown>)['词典'] as string)
+    : undefined;
   await renderRiskPane({
     dom: document as unknown as Parameters<typeof renderRiskPane>[0]['dom'],
     tier: riskTier,
-    paths: { outDir, workDir, sourceVersion: RISK_TAGS[riskTier] ?? riskTier },
+    paths: { outDir, workDir, sourceVersion: RISK_TAGS[riskTier] ?? riskTier, dictPath },
     teacherId: (S.appConfig as { teacherId?: string }).teacherId ?? 'unknown',
   });
 }

@@ -98,6 +98,9 @@ console.log(`层级：${TIERS.join('/')}｜章节：${CH_IDS.join(',')}｜人工
 const allSegments = [];
 const unfinished = [];
 const unreadable = [];
+/** 章 → 产物绝对路径。**由生产者记下来**：App 面板要按它改稿，
+ *  而面板不知道产物命名里的日期/后缀，只能猜——猜错的后果是"改到了不存在的文件"或"改错文件"。 */
+const chapterArtifacts = {};
 
 for (const tier of TIERS) {
   const info = TIER_INFO[tier];
@@ -146,6 +149,7 @@ for (const tier of TIERS) {
       const target = Math.round(wc(s.text) * info.ratio);
       const oov = [...new Set([...oovOf(s.text), ...oovOf(rewritten)])];
       const v = gateSegment({ text: rewritten, source: s.text, target, maxLen: info.maxLen, oov, dict: DICT });
+      chapterArtifacts[ch] = outPath;
       allSegments.push({
         book: P.书名, tier, chapter: ch, segIndex: k,
         source: s.text, rewritten, problems: v.problems,
@@ -239,6 +243,7 @@ writeFileSync(
       摘要: queue.summary,
       一小时路径: { 预算: BUDGET, 超预算: plan.overBudget, 建议: plan.advice, 阶段: plan.phases.map((p) => ({ id: p.id, title: p.title, budget: p.budget, count: p.items.length, note: p.note })) },
       未完成段落: unfinished,
+      章节产物: chapterArtifacts,
       队列: queue.items,
     },
     null,

@@ -12,8 +12,12 @@
  * IO 注入与 datapanel 同一套路：纯逻辑（解析/排序/决定行）在 node 下可直接测，不必启动 App。
  */
 
-import { buildProposals, decisionIndex, makeDecisionEvent, parseDecisionLog, summarizeDecisions, toDecisionLine, type DecisionEvent, type DecisionKind } from '../../src/core/decision.js';
+import { buildProposals, makeDecisionEvent, parseDecisionLog, summarizeDecisions, toDecisionLine, type DecisionEvent, type DecisionKind } from '../../src/core/decision.js';
 import { makeResolver, type Layout } from '../../src/core/manifest.js';
+import { parseDictCsv } from '../../src/core/dictmerge.js';
+import { parseDoc } from '../../src/core/docast.js';
+import { DECISION_LABEL } from '../../src/core/decision.js';
+import { actionOf, applyAction, failureText, type RuleAction } from '../../src/core/riskaction.js';
 import { oneHourPlan, type RiskItem, type RiskQueue } from '../../src/core/riskqueue.js';
 import { GATE_RULES, type GateCategory } from '../../src/core/segmentgate.js';
 
@@ -22,6 +26,8 @@ export interface RiskIo {
   write(path: string, content: string): Promise<void>;
   listDir(dir: string): Promise<string[]>;
   exists?(path: string): Promise<boolean>;
+  /** 改稿前备份（可选）。给了就先备份再写——**不可逆的操作不该没有退路**。 */
+  backup?(path: string, content: string): Promise<void>;
 }
 
 let io: RiskIo | null = null;
@@ -43,6 +49,8 @@ export interface RiskQueueFile {
   摘要: RiskQueue['summary'];
   一小时路径?: { 预算: number; 超预算: boolean; 建议: string; 阶段: { id: string; title: string; budget: number; count: number; note: string }[] };
   未完成段落?: { tier: string; chapter: string; segId: string; segIndex: number; source: string }[];
+  /** 章 → 产物绝对路径（风险队列脚本写的）。面板按它改稿，**不猜命名** */
+  章节产物?: Record<string, string>;
   队列: RiskItem[];
 }
 
@@ -56,10 +64,87 @@ export function parseQueueFile(text: string): RiskQueueFile | null {
   }
 }
 
-/** 队列里还有哪些没被决定过（决定过的从待办里消失，但历史事件一条不删） */
+/**
+ * 哪些决定算"这条已经处理完了"。
+ *
+ * ⚠ `rejected`（**动作没执行成**）**不算**——它是"系统没做成"，不是"教师判过了"。
+ * 把它也算成已决，就会出现最坏的那种两头空：**卡片消失了、正文也没变**，
+ * 而教师以为这件事已经办完（v4 方向明确要求"失败时不得让卡片消失"）。
+ */
+export const TERMINAL_DECISIONS: DecisionKind[] = ['accept', 'reject', 'false-positive', 'edit'];
+
+/** 撤销指针：`itemId + '@' + timestamp`（同一个项可以被改主意多次，要指得准） */
+export const refOf = (e: DecisionEvent): string => `${e.itemId}@${e.timestamp}`;
+
+/** 已被撤销的引用集合（`undoOf` 指过的）。
+ *  被撤销的项**回到待办**——这是"撤销不是删历史"在判定上的落点。 */
+export function undoneRefs(events: DecisionEvent[]): Set<string> {
+  const out = new Set<string>();
+  for (const e of events) if (e.decision === 'undo' && e.undoOf) out.add(e.undoOf);
+  return out;
+}
+
+/**
+ * 一个项当前算不算"处理完了"。语义定死在这儿，界面与统计都从这儿取：
+ *
+ *   · 取**最新一条**决定（`undo` 本身不算决定，它只是把某条作废）；
+ *   · 它属于终态四类、**且没有被撤销** → 算处理完；
+ *   · **被撤销 = 整条作废，项回到待办**。
+ *
+ * 为什么不做"回退到更早的那条"：那要教师理解一个多级撤销栈，
+ * 而他心里只有"我刚才点错了，撤销一下"。界面上的撤销键也长在最新那条上——
+ * 单级撤销与界面一致，多级回退只会让"现在到底算什么状态"变得说不清。
+ */
+const isResolved = (d: DecisionEvent | undefined, undone?: Set<string>): boolean =>
+  d !== undefined && TERMINAL_DECISIONS.includes(d.decision) && !(undone?.has(refOf(d)) ?? false);
+
+/** 队列里还有哪些没被处理完（处理完的从待办里消失，但历史事件一条不删） */
+/** 每个项的最新一条**决定**（忽略 `undo`——它不是决定，是作废指令） */
+export function latestDecisions(events: DecisionEvent[]): Map<string, DecisionEvent> {
+  const m = new Map<string, DecisionEvent>();
+  for (const e of events) {
+    if (e.decision === 'undo') continue;
+    const prev = m.get(e.itemId);
+    if (!prev || prev.timestamp <= e.timestamp) m.set(e.itemId, e);
+  }
+  return m;
+}
+
 export function pendingItems(file: RiskQueueFile, events: DecisionEvent[]): RiskItem[] {
-  const decided = decisionIndex(events);
-  return file.队列.filter((it) => !decided.has(it.id));
+  const decided = latestDecisions(events);
+  const undone = undoneRefs(events);
+  return file.队列.filter((it) => !isResolved(decided.get(it.id), undone));
+}
+
+/** 「看我判过的」：按时间倒序的已处理项（含被撤销的），供教师回头改主意 */
+export interface DecidedRow {
+  item: RiskItem;
+  event: DecisionEvent;
+  label: string;
+  /** 已被撤销（回到待办） */
+  undone: boolean;
+  /** 撤销按钮要指的那条的引用 */
+  ref: string;
+}
+
+export function decidedRows(file: RiskQueueFile, events: DecisionEvent[]): DecidedRow[] {
+  // 「最新一条决定」要忽略 undo（撤销不是"又做了一个决定"，它只是把某条作废）
+  const decided = latestDecisions(events);
+  const undone = undoneRefs(events);
+  return file.队列
+    .map((item) => {
+      const event = decided.get(item.id);
+      if (!event || event.decision === 'undo') return null;
+      return {
+        item,
+        event,
+        label: DECISION_LABEL[event.decision] ?? event.decision,
+        undone: undone.has(refOf(event)),
+        ref: refOf(event),
+      };
+    })
+    .filter((x): x is DecidedRow => x !== null)
+    .sort((a, b) => (a.event.timestamp < b.event.timestamp ? 1 : -1));
 }
 
 /** 决定行：直接喂给 decision.ts 的事件工厂（字段与报告逐项对应） */
@@ -114,12 +199,12 @@ export interface PanelStat {
 }
 
 export function panelStat(file: RiskQueueFile, events: DecisionEvent[], budget = 60): PanelStat {
-  const decided = decisionIndex(events);
+  const decided = latestDecisions(events);
   const items = file.队列;
-  const pending = items.filter((it) => !decided.has(it.id) || decided.get(it.id)!.decision !== 'accept');
+  const pending = items.filter((it) => !isResolved(decided.get(it.id)));
   // 计时按"还没处理掉的"算：已经采纳的不该继续占用人工预算
   const remainingMinutes = pending
-    .filter((it) => !decided.has(it.id))
+    .filter((it) => !isResolved(decided.get(it.id)))
     .reduce((n, it) => n + (itemMinutes(it.ruleId) ?? 0.5), 0);
   const stat = summarizeDecisions(events);
   const plan = oneHourPlan({ items, summary: file.摘要 ?? { total: items.length, blockers: 0, byRule: {}, byCategory: {}, estimatedMinutes: remainingMinutes } }, budget);
@@ -168,6 +253,8 @@ export interface ProjectPaths {
   workDir: string;
   /** 源版本标识：产物哈希或日期，用来回答"这条决定是对着哪一版做的" */
   sourceVersion: string;
+  /** 调适项目的 书级.词典 绝对路径（改稿动作要用它取释义）。没有 = 补注动作会被拒，并说明原因 */
+  dictPath?: string;
 }
 
 /** 清单指针里的运行身份（App 也要按清单解析路径，否则 `--layout run` 一开面板就找不到文件） */
@@ -272,7 +359,11 @@ export interface RiskRenderInput {
  * 每张卡给：原句 / 改写句 / 上下文各一句 / 触发规则 / 位置，加三个决定按钮。
  * 按钮只写事件日志（不可变），不改书稿——改书稿仍走既有的标记/建议通道。
  */
-export async function renderRiskPane(input: RiskRenderInput): Promise<{ ok: boolean; message: string }> {
+export async function renderRiskPane(
+  input: RiskRenderInput,
+  /** 上一次动作失败留在页首的说明（`{itemId}` 用于把那张卡标红，让它看起来"还在待办里"） */
+  flash?: { itemId: string; text: string },
+): Promise<{ ok: boolean; message: string }> {
   const el = input.dom.getElementById('pane-risk');
   if (!el) return { ok: false, message: '缺 pane-risk 容器' };
   const { file, events, error, identity } = await loadRiskQueue(input.paths, input.tier);
@@ -283,6 +374,7 @@ export async function renderRiskPane(input: RiskRenderInput): Promise<{ ok: bool
   const budget = input.budget ?? 60;
   const stat = panelStat(file, events, budget);
   const left = pendingItems(file, events);
+  const done = decidedRows(file, events);
   const planned = oneHourPlan(
     { items: file.队列, summary: file.摘要 },
     budget,
@@ -299,6 +391,16 @@ export async function renderRiskPane(input: RiskRenderInput): Promise<{ ok: bool
       </div>
       <div class="rq-advice">${esc(stat.advice)}｜路径布局 <b>${esc(identity.layout)}</b>${identity.runId ? `（${esc(identity.runId)}）` : ''}</div>
       <div class="rq-plan">${planned.phases.map((p) => `<span class="rq-phase">${esc(p.title)} ${p.budget}′ / ${p.items.length} 条</span>`).join('')}</div>
+      ${done.length ? `<details class="rq-done"><summary>看我判过的（${done.length} 条，可撤销）</summary><div class="rq-done-list">${done
+        .map(
+          (r) => `<div class="rq-done-row${r.undone ? ' rq-done-undone' : ''}">
+            <span class="rq-done-label">${esc(r.label)}${r.undone ? '（已撤销）' : ''}</span>
+            <span class="rq-done-pos">${esc(r.item.segLabel)}</span>
+            <span class="rq-done-title">${esc(r.item.title)}</span>
+            ${r.undone ? '' : `<button class="rq-btn rq-undo" data-undo="${esc(r.ref)}">↩︎ 撤销</button>`}
+          </div>`,
+        )
+        .join('')}</div></details>` : ''}
     </div>`;
 
   if (!file.队列.length) {
@@ -310,10 +412,13 @@ export async function renderRiskPane(input: RiskRenderInput): Promise<{ ok: bool
     return { ok: true, message: '已全部处理' };
   }
 
+  const flashBar = flash
+    ? `<div class="rq-flash">⚠ ${esc(flash.text)} <span style="color:var(--muted)">（这一条仍在待办里，正文没有改动）</span></div>`
+    : '';
   const cards = left
     .map(
       (it, i) => `
-    <div class="rq-card" data-item="${esc(it.id)}">
+    <div class="rq-card${flash && flash.itemId === it.id ? ' rq-card-failed' : ''}" data-item="${esc(it.id)}">
       <div class="rq-card-head">
         <span class="rq-rank">${i + 1}</span>
         <span class="rq-rule" title="${esc(ruleLabel(it.ruleId))}">${esc(it.ruleId)}</span>
@@ -328,18 +433,19 @@ export async function renderRiskPane(input: RiskRenderInput): Promise<{ ok: bool
         <div class="rq-ctx"><span class="rq-lab">上下文</span>上「${esc(it.context.prev || '—')}」／下「${esc(it.context.next || '—')}」</div>
       </div>
       <div class="rq-actions">
-        <button class="rq-btn" data-decide="accept" data-id="${esc(it.id)}">✓ 采纳改写</button>
+        <button class="rq-btn rq-btn-main" data-act="${esc(actionOf(it.ruleId).kind)}" data-id="${esc(it.id)}"
+          title="${esc(actionOf(it.ruleId).effect)}">${esc(actionOf(it.ruleId).label)}</button>
         <button class="rq-btn" data-decide="reject" data-id="${esc(it.id)}">↺ 退回重写</button>
         <button class="rq-btn" data-decide="false-positive" data-id="${esc(it.id)}">⚑ 标记误报</button>
-        <span class="rq-hint">决定只记进事件日志（不可变），改书稿仍走正文里的标记/建议</span>
+        ${actionOf(it.ruleId).mutates ? '<span class="rq-hint">主键会**改正文**并同时记事件（可撤销）</span>' : '<span class="rq-hint">主键只记录决定，正文不变</span>'}
       </div>
     </div>`,
     )
     .join('');
 
-  el.innerHTML = `${head}<div class="rq-list">${cards}</div>`;
+  el.innerHTML = `${head}${flashBar}<div class="rq-list">${cards}</div>`;
 
-  // 点按钮 = 追加一条不可变事件 → 立刻重渲染（决定过的从待办里消失）
+  // 主键 = 规则特定动作（可能改正文）；其余键 = 只记决定。两者都写不可变事件。
   for (const btn of Array.from(input.dom.querySelectorAll('#pane-risk [data-decide]'))) {
     btn.addEventListener('click', (ev) => {
       const t = ev.currentTarget as HTMLElement;
@@ -357,5 +463,197 @@ export async function renderRiskPane(input: RiskRenderInput): Promise<{ ok: bool
       ).then(() => renderRiskPane(input));
     });
   }
+  // 撤销 = 写一条新的 undo 事件（**不删历史**），并（如果是改稿动作）把正文改回去
+  for (const btn of Array.from(input.dom.querySelectorAll('#pane-risk [data-undo]'))) {
+    btn.addEventListener('click', (ev) => {
+      const ref = (ev.currentTarget as HTMLElement).getAttribute('data-undo');
+      if (!ref) return;
+      (ev.currentTarget as HTMLElement).setAttribute('disabled', 'true');
+      void undoDecision(input, file, identity, ref).then((r) => {
+        if (r.ok) void renderRiskPane(input);
+        else void renderRiskPane(input, { itemId: '', text: r.message ?? '撤销未完成' });
+      });
+    });
+  }
+  for (const btn of Array.from(input.dom.querySelectorAll('#pane-risk [data-act]'))) {
+    btn.addEventListener('click', (ev) => {
+      const t = ev.currentTarget as HTMLElement;
+      const id = t.getAttribute('data-id');
+      if (!id) return;
+      const it = file.队列.find((x) => x.id === id);
+      if (!it) return;
+      t.setAttribute('disabled', 'true');
+      void runRiskAction(input, file, identity, it).then((r) => {
+        // 失败时**不**立刻重渲染队列：否则刚写上去的失败原因会被覆盖，
+        // 教师只看到"点了没反应、卡片还在"。卡片留在列表里 + 顶部一条失败说明。
+        if (r.ok) void renderRiskPane(input);
+        else void renderRiskPane(input, { itemId: it.id, text: r.message ?? '动作未执行' });
+      });
+    });
+  }
   return { ok: true, message: `待办 ${left.length} 条` };
+}
+
+/* ────────────────────── 动作 → 事务（改正文 + 记事件，一次做完） ────────────────────── */
+
+/** 该动作需要的"释义"从哪来：优先统一词典，退而取风险项 detail 里带的 */
+function glossFor(it: RiskItem, dict: Map<string, string>): string {
+  const d = it.detail ?? {};
+  const word = typeof d.word === 'string' ? d.word : '';
+  if (typeof d.expected === 'string' && d.expected) return d.expected;
+  if (word && dict.get(word.toLowerCase())) return dict.get(word.toLowerCase())!;
+  if (typeof d.zh === 'string' && d.zh) return d.zh;
+  return '';
+}
+
+/**
+ * 执行一个风险动作。
+ *
+ * 事务语义（v4 方向）：**先读最新正文 → 校验动作在当前位置仍然成立 → 改 → 一次写完正文与事件**。
+ * 任何一步不成立就只写一条 `rejected` 事件，**卡片留在队列里**——
+ * 绝不允许"卡片消失了、正文没变"这种两头空。
+ */
+async function runRiskAction(
+  input: RiskRenderInput,
+  file: RiskQueueFile,
+  identity: RunIdentity,
+  it: RiskItem,
+): Promise<{ ok: boolean; message?: string }> {
+  const action: RuleAction = actionOf(it.ruleId);
+  const d = it.detail ?? {};
+  const word = typeof d.word === 'string' ? d.word : typeof d.signal === 'string' ? d.signal : '';
+  const mkDecision = (kind: DecisionKind, extra: Partial<Parameters<typeof decisionLineFor>[2]> = {}): void => {
+    void appendDecision(
+      input.paths,
+      input.tier,
+      decisionLineFor(it, kind, { teacherId: input.teacherId, sourceVersion: input.paths.sourceVersion, ...extra }),
+      identity,
+    );
+  };
+  /** 失败了要留痕，而且**卡片不许消失**：写 rejected 事件（它不是"已处理完"），把原因交回调用方显示 */
+  const reject = (why: string): { ok: false; message: string } => {
+    mkDecision('rejected', { reason: why });
+    return { ok: false, message: why };
+  };
+
+  // 纯表态的动作：不改正文，直接记事件
+  if (!action.mutates) {
+    mkDecision('accept', { reason: action.effect });
+    return { ok: true };
+  }
+
+  const dict = await loadBookDict(input.paths);
+  // 优先用队列里记的真实路径；没有才退回解析器（并说明这次是推出来的）
+  const docPath = file.章节产物?.[it.chapter] ?? pathsFor(input.paths, identity, input.tier).any('正文', { chapter: it.chapter });
+  let doc: string;
+  try {
+    doc = await io!.read(docPath);
+  } catch {
+    return reject(`读不到正文（${docPath}）——产物可能被移动或删除了`);
+  }
+  const res = applyAction(action, {
+    doc,
+    segId: segIdOf(it),
+    word,
+    zh: glossFor(it, dict),
+    removeAll: it.detail?.crossSegment === true,
+  });
+  if (!res.ok) {
+    return reject(failureText(res));
+  }
+  // 先备份再写：改稿不可逆的操作不该没有退路
+  try {
+    if (io!.backup) await io!.backup(docPath, doc);
+    await io!.write(docPath, res.next);
+  } catch (e) {
+    return reject(`写入失败：${e instanceof Error ? e.message : String(e)}`);
+  }
+  mkDecision('accept', {
+    after: res.after,
+    reason: `${action.label}：${res.before} → ${res.after}`,
+  });
+  return { ok: true, message: `${action.label}：${res.before} → ${res.after}` };
+}
+
+/**
+ * 撤销一条决定。
+ *
+ * 两件事，一个事务：
+ *   ① 写一条 `undo` 事件（`undoOf` 指回被撤销的那条）——**历史一条都不删**；
+ *   ② 如果被撤销的是**改稿动作**，把正文按事件里记的 before/after 改回去
+ *      （`after` 必须仍在原处，否则报"稿件已改过"并**不写 undo 事件**——宁可撤销失败，也不留下假账）。
+ * 撤销成功后该项回到待办。
+ */
+async function undoDecision(
+  input: RiskRenderInput,
+  file: RiskQueueFile,
+  identity: RunIdentity,
+  ref: string,
+): Promise<{ ok: boolean; message?: string }> {
+  const all = (await loadRiskQueue(input.paths, input.tier, identity)).events;
+  const target = all.find((e) => refOf(e) === ref);
+  if (!target) return { ok: false, message: '找不到要撤销的那条决定（可能已被撤销过）' };
+  if (target.decision === 'undo') return { ok: false, message: '撤销事件本身不能再撤销' };
+
+  const it = file.队列.find((x) => x.id === target.itemId);
+  const action = it ? actionOf(it.ruleId) : null;
+  // 改稿动作：先把正文改回去
+  if (it && action?.mutates && target.after && target.after !== target.before) {
+    const docPath = file.章节产物?.[it.chapter] ?? pathsFor(input.paths, identity, input.tier).any('正文', { chapter: it.chapter });
+    let doc: string;
+    try {
+      doc = await io!.read(docPath);
+    } catch {
+      return { ok: false, message: `读不到正文（${docPath}），未撤销` };
+    }
+    const segId = segIdOf(it);
+    const ast = parseDoc(doc);
+    const seg = ast.segments.find((seg) => seg.id === segId);
+    if (!seg || !seg.raw.includes(target.after)) {
+      return { ok: false, message: `正文里已经找不到「${target.after}」了（稿件改过），未撤销` };
+    }
+    try {
+      if (io!.backup) await io!.backup(docPath, doc);
+      await io!.write(docPath, doc.replace(target.after, target.before));
+    } catch (e) {
+      return { ok: false, message: `撤销写入失败：${e instanceof Error ? e.message : String(e)}` };
+    }
+  }
+  await appendDecision(
+    input.paths,
+    input.tier,
+    makeDecisionEvent({
+      itemId: target.itemId,
+      decision: 'undo',
+      before: target.after,
+      after: target.before,
+      reason: `撤销 ${DECISION_LABEL[target.decision] ?? target.decision}（${target.timestamp}）`,
+      ruleIds: target.ruleIds,
+      teacherId: input.teacherId,
+      sourceVersion: input.paths.sourceVersion,
+      category: target.category,
+      subject: target.subject,
+      undoOf: ref,
+    }),
+    identity,
+  );
+  return { ok: true };
+}
+
+/** 风险项 → 段号（P07）。队列项 id 形如 `第一章#2:FACT-01:1911`，段序从 0 起。 */
+export function segIdOf(it: RiskItem): string {
+  const m = it.id.match(/#(\d+):/);
+  return m ? `P${String(Number(m[1]) + 1).padStart(2, '0')}` : 'P01';
+}
+
+/** 统一词典读取（面板用）：路径由调用方从 调适项目_*.json 解析好传进来（不在面板里再找一遍配置） */
+async function loadBookDict(paths: ProjectPaths): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  if (!io || !paths.dictPath) return out;
+  try {
+    for (const e of parseDictCsv(await io.read(paths.dictPath))) out.set(e.word, e.zh);
+  } catch {
+    /* 读不到 = 空词典；补注动作会因此被拒并说明原因，不静默 */
+  }
+  return out;
 }
