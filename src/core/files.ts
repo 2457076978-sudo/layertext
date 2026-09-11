@@ -51,7 +51,12 @@ export function findAssetPath(rel: string): string | null {
  *
  * 两个容易写错的细节：
  *   · 临时文件必须与目标**同目录**——跨文件系统的 `rename` 会退化成 copy+unlink，就不原子了；
- *   · 临时文件名带 pid 与随机串——两个进程写同一个目标时不会互相踩对方的临时文件。
+ *   · 临时文件名带 pid 与随机串——两个进程写同一个目标时不会互相踩对方的临时文件；
+ *   · 临时文件名以 **`.` 开头**——项目里有好几处"扫目录找产物"的地方
+ *     （`rewritegate.loadLedger` 的 `/^原文_.*\.md$/`、`datapanel.findProjectConfig` 的
+ *     `调适项目_*.json`、`清单.mjs` 扫 `_运行/`、`重制_预处理` 扫 `第.章`），
+ *     它们全都只认"正常文件名"。加上这个点，一次写到一半的正文不会被任何一处
+ *     当成产物捡走——**这也是一种原子性**：看不见半成品，不只是读不到半成品。
  */
 export function atomicWriteFileSync(path: string, content: string): void {
   const dir = dirname(path);
