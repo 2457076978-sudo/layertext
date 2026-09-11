@@ -20,7 +20,7 @@
  * 在成品里长得跟"这一段本来就没有"一模一样。
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 
 const SHARED = await import('./LayerText_AF词表与词典.mjs');
 const { distOf, chapterNames } = SHARED;

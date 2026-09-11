@@ -215,7 +215,11 @@ if (!has('--yes')) {
   process.exit(2);
 }
 
-const teacher = arg('--teacher', process.env.LAYERTEXT_TEACHER ?? process.env.USER ?? 'unknown');
+/* 统一词典那条纪律的兄弟：**身份也只能有一个写法**。
+ * 这里原来直接用命令行的原样字符串写进入库提议，于是 `Wayne` 与 `wayne`
+ * 在台账与提议里是两个人——"谁在何时做了哪条决定"就被拼写切成两半。
+ * 走 `resolveTeacher`：归一化 + 名录校验，与清单/指针/决定事件同源。 */
+const teacher = SHARED.resolveTeacher(P, arg('--teacher', process.env.LAYERTEXT_TEACHER ?? process.env.USER ?? 'unknown')).id;
 const applied = [];
 for (const i of picked) {
   const p = proposals[i - 1];

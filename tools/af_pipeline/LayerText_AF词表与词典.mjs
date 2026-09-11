@@ -26,6 +26,17 @@
  *   ③ **从没导入过的项目一字不变**：没有正本就照旧直读 CSV（legacy 路径，见
  *      `lexiconStoreState` / `decideLexiconSource` 的 `legacy` 分支），
  *      教师已有的书与脚本一个字都不用改。
+ *
+ * ── 教师身份（Teacher）：总计划阶段 3「四类实体有稳定 ID」的最后一块 ──────────────
+ * 写运行清单、算分片指针、写决定事件（`DecisionEvent.teacherId`）**都应该**先过
+ * `resolveTeacher(P, 命令行里的原样写法)`，用它的 `.id`。理由（完整版见 `src/core/teachers.ts`）：
+ * 教师原先是一个自由字符串，于是 `--teacher wayne` / `--teacher Wayne` / `--teacher 'wayne '`
+ * 是**三个人**——三个 runId、三份分片指针、三堆决定事件，而没有任何地方会说一句话。
+ *
+ * ★ 还有两处**尚未接上**（本轮改动范围之外，交接要点名）：
+ *   · `LayerText_AF决定汇总.mjs` 写台账与入库提议时用的是命令行原样写法（而不是 `RUN.teacher`）；
+ *   · App 侧 `app/src/main.ts` 的 `appConfig.teacherId`。
+ * 这两处不归一化，"谁在何时做了哪条决定"就仍然会被拼写差异切成两半。
  */
 import { closeSync, openSync, readFileSync, writeFileSync, writeSync, existsSync, readdirSync, mkdirSync, statSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
@@ -214,6 +225,11 @@ function engineModsFor(P, level = 'store') {
   const dirProblem = _engineDirProblem(P);
   if (dirProblem) return { mods: null, why: dirProblem };
   if (!mods.manifest) return { mods: null, why: _engineLoadErrors.manifest ?? '引擎模块未能预载' };
+  /* `files` 一档只要求 files.js（原子写）。教师名录要写盘，却不碰词表正本——
+   * 合成一档的后果是"没有正本的项目连名录都登记不了"，而这两件事本来无关。 */
+  if (level === 'files' && !mods.files) {
+    return { mods: null, why: `${_engineLoadErrors.files ?? 'src/core/files.js'}（引擎目录需要先 \`npx tsc -p tsconfig.json\`）` };
+  }
   if (level === 'store') {
     if (!mods.store || !mods.files) {
       const missing = [...(mods.store ? [] : [_engineLoadErrors.store ?? 'src/core/lexiconstore.js']), ...(mods.files ? [] : [_engineLoadErrors.files ?? 'src/core/files.js'])];
@@ -1002,6 +1018,233 @@ export async function recordLexiconDrift(P, { state, liveKnown } = {}) {
   return { path, payload };
 }
 
+/* ────────────────────── 教师身份：稳定 ID + 名录（阶段 3「Teacher 有稳定 ID」） ────────────────────── */
+
+/**
+ * 为什么"教师"这件事的**落盘部分**在这里、而不在引擎里：
+ * `src/core/teachers.ts` 只有纯逻辑（归一化、比对、造名录、算名册），它**不碰文件系统**——
+ * 与 `LexiconSnapshot`/`RunManifest` 的分工完全一样（引擎算，脚本读写）。
+ * "这个项目盘上有什么"是脚本的事，所以它和 `readRunIdentity` / `lexiconStoreState` 住在一起。
+ *
+ * 名录文件放在 `<产物目录>/_运行/教师名录.json`：
+ *   · 与清单、分片指针同处一地，随产物目录整体搬走；
+ *   · **按项目（产物目录）存放**——要回答的问题是"谁**在这本书**上干过活"；
+ *     建一份全局名录等于多造一个要对账的地方（本项目的教训：口径写两处，迟早不一致）。
+ */
+const TEACHER_REGISTRY_FILE = '教师名录.json';
+
+let _teacherMod = null;
+let _teacherModWhy = null;
+let _teacherModTried = false;
+/**
+ * 动态载入引擎的 `teachers.js`。**不进 `_engineMods` 预载**：老 dist 里没有这个文件，
+ * 预载会让每次启动都多记一条错误，而绝大多数命令根本用不到教师名录。
+ *
+ * 载不到时**退回归一化之前的行为**（原始字符串当 ID），并且**大声说明**：
+ * 静默降级正是本项目要消灭的那类东西；但也不该让"引擎还没重编"把一本书堵死，
+ * 所以是"降级 + 喊出来"，不是拒绝开工（拒绝留给真正读不出来的**名录文件**，见 `registerTeacher`）。
+ */
+async function teacherMods() {
+  if (_teacherModTried) return _teacherMod;
+  _teacherModTried = true;
+  try {
+    const m = await import(`${distOf(LTR)}/src/core/teachers.js`);
+    // 文件名口径必须与引擎一致（与 `STORE_FILE` 那条检查同一个理由：不一致就当场说，不靠自觉）
+    if (m.TEACHER_REGISTRY_FILE !== TEACHER_REGISTRY_FILE) {
+      _teacherModWhy = `引擎侧的名录文件名改成了「${m.TEACHER_REGISTRY_FILE}」，本模块还在找「${TEACHER_REGISTRY_FILE}」`;
+      return null;
+    }
+    _teacherMod = m;
+  } catch (e) {
+    // 只有"文件不在"才是可接受的（dist 还没编）；模块本身有语法错之类必须炸出来
+    if (e?.code !== 'ERR_MODULE_NOT_FOUND' && e?.code !== 'ERR_UNSUPPORTED_DIR_IMPORT') throw e;
+    _teacherModWhy = `${distOf(LTR)}/src/core/teachers.js 加载不了：${e?.message ?? e}`;
+  }
+  return _teacherMod;
+}
+
+/** 名录文件的绝对路径（纯拼接，不读盘）。 */
+export const teacherRegistryPath = (P) => join(P.产物目录, '_运行', TEACHER_REGISTRY_FILE);
+
+/**
+ * 读名录。**只读**——列名录、摘要、只读脚本都走它，绝不因为"看一眼"就写盘。
+ * 返回 `problems` 而不是抛：一份坏名录不该让整本书打不开，但**必须有人说话**，
+ * 由调用方决定是打印还是拒绝（`registerTeacher` 会拒绝在坏名录上登记）。
+ */
+export async function readTeacherRegistry(P) {
+  const mod = await teacherMods();
+  const path = teacherRegistryPath(P);
+  const exists = existsSync(path);
+  if (!mod) return { path, exists, registry: null, problems: [], available: false, why: _teacherModWhy };
+  const parsed = mod.parseTeacherRegistry(exists ? readFileSync(path, 'utf-8') : null);
+  return { path, exists, registry: parsed.registry, problems: parsed.problems, available: true, why: null };
+}
+
+/**
+ * 把一个教师名解析成稳定 ID（**只读**，不登记）。所有脚本、App、决定事件都该走它。
+ *
+ * 返回值里 `notes` 是"必须说出来的话"（归一化改过写法、名录里没有这个人、疑似拼错），
+ * `warnings` 是要**进清单的账**的那几条（`{kind,message}`，与 `RunManifest.warnings` 同形）。
+ * 两者分开：说明白的话打印出来就够，值得留档的（拼错嫌疑）必须落在清单上——
+ * 一行跑过去就没了的 stderr，三个月后没人记得。
+ */
+export async function resolveTeacher(P, raw, _opts = {}) {
+  const mod = await teacherMods();
+  if (!mod) {
+    const why = _teacherModWhy ?? '引擎里没有 teachers.js';
+    return {
+      available: false,
+      why,
+      resolution: null,
+      id: String(raw ?? 'unknown'),
+      notes: [`教师名未归一化：${why}。本次按**原样字符串**记（「Wayne」与「wayne」会被当成两个人）——跑一次 \`npx tsc -p tsconfig.json\` 重建引擎即可。`],
+      warnings: [],
+    };
+  }
+  const r = await readTeacherRegistry(P);
+  const resolution = mod.resolveTeacherName(raw, r.registry);
+  const notes = mod.describeTeacherResolution(resolution);
+  return { available: true, why: null, resolution, id: resolution.id, notes, warnings: mod.warningNoticesOf(resolution), registry: r };
+}
+
+/**
+ * 解析 **+ 按需登记**（`清单.mjs --new` 用）。登记是这个函数**唯一**的写盘点。
+ *
+ * 名录读不出来时**拒绝登记**（`ok:false` + `refusal`），而不是覆盖掉它：
+ * 名录是"谁在这本书上干过活"唯一的人工依据（别名、显示名只能由人写），
+ * 覆盖一份读不出来的名册 = 那些信息再也补不回来。这与词表正本"对不上就拒绝开工"同一条纪律。
+ *
+ * 名字为空 → 不登记（`unknown` 不是人），只把 warn 级说明交回去。
+ */
+export async function registerTeacher(P, raw, opts = {}) {
+  const mod = await teacherMods();
+  if (!mod) return { ok: false, registered: false, ...(await resolveTeacher(P, raw)) };
+  const r = await readTeacherRegistry(P);
+  if (r.exists && r.problems.length) {
+    return {
+      ok: false,
+      registered: false,
+      path: r.path,
+      refusal:
+        `教师名录本身读不出来（${r.problems.join('；')}）——**本次不登记、也不覆盖它**：` +
+        `名册里的别名与显示名是人工信息，覆盖掉就补不回来了。` +
+        `请修好或删掉 ${r.path} 再跑（删掉之后下一次 --new 会重建，旧运行照常可用）。`,
+    };
+  }
+  /* 先在**登记之前**解析：要在登记之前拿到"名录里已经有谁"，
+   * 那条"你是不是想写 wayne"的提示才说得出来（登记之后再算，新名字已经躺在名录里了）。 */
+  const before = mod.resolveTeacherName(raw, r.registry);
+  const out = mod.withTeacher(r.registry, { raw, now: opts.now, note: opts.note });
+  const resolution =
+    before.status === '未登记'
+      ? {
+          ...before,
+          status: '首次登记',
+          record: out.record,
+          notices: [
+            ...before.notices,
+            {
+              level: 'info',
+              kind: 'teacher-first',
+              message: `教师「${out.id}」已登记进名录（${r.path}）——从现在起，"谁在这本书上干过活"答得出这个名字了。确属拼错就改：删掉 ${TEACHER_REGISTRY_FILE} 里那一条，用正确的名字重跑 --new。`,
+            },
+          ],
+        }
+      : before;
+  if (!mod.isRealTeacher(out.id)) {
+    return {
+      ok: true,
+      registered: false,
+      created: false,
+      id: out.id,
+      path: r.path,
+      resolution,
+      notes: mod.describeTeacherResolution(resolution),
+      warnings: mod.warningNoticesOf(resolution),
+      droppedAliases: out.droppedAliases,
+    };
+  }
+  const { mods, why } = engineModsFor(P, 'files');
+  if (!mods) return { ok: false, registered: false, path: r.path, refusal: `登记教师需要引擎侧的原子写：${why}` };
+  mkdirSync(join(P.产物目录, '_运行'), { recursive: true });
+  mods.files.atomicWriteFileSync(r.path, mod.serializeTeacherRegistry(out.registry));
+  return {
+    ok: true,
+    registered: out.created,
+    created: out.created,
+    id: out.id,
+    path: r.path,
+    resolution,
+    notes: mod.describeTeacherResolution(resolution),
+    warnings: mod.warningNoticesOf(resolution),
+    droppedAliases: out.droppedAliases,
+  };
+}
+
+/** 列目录（读不到就给空数组：还没有 `_运行/` 是"还没跑过"，不是错误） */
+function listDirSafe(dir) {
+  try {
+    return readdirSync(dir).sort();
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * 盘上所有运行清单里的教师身份。**这才是事实源**——"谁跑过什么"只有清单说了算，
+ * 名录只回答"这个 ID 还有哪些写法"。所以名册（`listTeachers`）是把两边拼起来算的，
+ * 而不是把名录当成权威。
+ *
+ * 只认"像清单"的 JSON（有 `runId`/`teacher`/`book`）：`清单_最新.json` 与分片指针
+ * 也匹配 `清单_*.json`，但它们**不是**运行，按 runId 去重后它们本来也会被真正的清单盖掉，
+ * 这里直接跳过（指针没有 `book`）。
+ */
+function readRunRefs(P) {
+  const dir = join(P.产物目录, '_运行');
+  const runs = [];
+  const problems = [];
+  const seen = new Set();
+  for (const f of listDirSafe(dir)) {
+    if (!/^清单_.*\.json$/.test(f)) continue;
+    let m;
+    try {
+      m = JSON.parse(readFileSync(join(dir, f), 'utf-8'));
+    } catch {
+      problems.push(`清单文件读不出来（已跳过）：${f}`);
+      continue;
+    }
+    if (!m?.runId || !m?.teacher || !m?.book || seen.has(m.runId)) continue; // 只认"像清单"的：指针没有 `book`
+    seen.add(m.runId);
+    runs.push({
+      runId: m.runId,
+      teacher: m.teacher,
+      book: m.book,
+      version: m.version,
+      tiers: m.tiers,
+      layout: m.layout,
+      createdAt: m.createdAt,
+      updatedAt: m.updatedAt,
+    });
+  }
+  return { runs, problems };
+}
+
+/**
+ * 名册：名录 × 盘上的清单 —— 回答「谁在这本书上干过活」（总计划阶段 3「多教师」的第一问）。
+ * 两边的差异**两个方向都报**（名录里有、盘上一次没跑过；盘上有、名录里没有），
+ * 否则名录会先于事实被当成权威。只读。
+ */
+export async function listTeachers(P) {
+  const mod = await teacherMods();
+  const path = teacherRegistryPath(P);
+  if (!mod) return { available: false, entries: [], lines: [`✗ 列不出教师：${_teacherModWhy ?? '引擎里没有 teachers.js'}`], path, exists: existsSync(path), problems: [] };
+  const r = await readTeacherRegistry(P);
+  const { runs, problems } = readRunRefs(P);
+  const entries = mod.teacherRosterOf({ registry: r.registry, runs });
+  const lines = mod.formatTeacherRoster(entries, { registryExists: r.exists, registryProblems: [...r.problems, ...problems] });
+  return { available: true, entries, lines, path: r.path, exists: r.exists, problems: [...r.problems, ...problems], runs };
+}
+
 /* ────────────────────── 运行身份：**唯一**的解析入口 ────────────────────── */
 
 /**
@@ -1022,6 +1265,15 @@ export async function recordLexiconDrift(P, { state, liveKnown } = {}) {
  */
 export async function readRunIdentity(roots, want = {}, opts = {}) {
   const M = await import(`${distOf(LTR)}/src/core/manifest.js`);
+  /* 教师名先归一化成**稳定 ID**，再做三件事：算分片指针名、比对"最近一次"里的教师、
+   * 拼兜底 runId。不归一化的后果很具体：`--teacher Wayne` 会去找 `清单_Wayne_A层85.json`，
+   * 而 `wayne` 写的那份叫 `清单_wayne_A层85.json` ——**分片指针明明写了却读不到**，
+   * 于是静默退回"最近一次"（正是分片机制要根治的那件事），而且这本书上从此有两个教师身份。 */
+  const T = await teacherMods();
+  const norm = (t) => (T ? T.teacherIdOrUnknown(t) : String(t ?? 'unknown'));
+  const notes = [];
+  /** runId → 清单里**原样**记的教师名：用来在最后如实报告"这次用的身份，盘上写的不是这个写法" */
+  const recorded = new Map();
   const runDir = join(roots.out, '_运行');
   const readPtr = (name) => {
     try {
@@ -1030,11 +1282,15 @@ export async function readRunIdentity(roots, want = {}, opts = {}) {
       // 指针只记"指向谁"；layout/teacher/tier 以**清单本身**为准。
       // 清单读不到 → 整份指针视为读不到：坏指针不许半途生效，半生效比彻底失效更危险。
       const m = JSON.parse(readFileSync(raw.path, 'utf-8'));
+      const recTeacher = m.teacher ?? raw.teacher ?? 'unknown';
+      const runId = m.runId ?? raw.runId ?? '';
+      recorded.set(runId, String(recTeacher));
       return {
         path: raw.path,
-        runId: m.runId ?? raw.runId ?? '',
+        runId,
         layout: m.layout ?? raw.layout ?? 'legacy',
-        teacher: m.teacher ?? raw.teacher ?? 'unknown',
+        // 归一化之后再比对：`Wayne` 与 `wayne` 是同一个人，不该因为写法不同就判成"别人的运行"
+        teacher: norm(recTeacher),
         tier: m.tier ?? raw.tier,
         updatedAt: raw.updatedAt,
       };
@@ -1048,16 +1304,79 @@ export async function readRunIdentity(roots, want = {}, opts = {}) {
    * 表现是**分片指针明明写了却永远读不到**，于是静默退回"最近一次"，
    * 而这次修复的全部意义恰恰是不再依赖"最近一次"。 */
   const tierTag = want.tier ? M.tierTagOf(want.tier) : undefined;
-  const wantNorm = { ...want, tier: tierTag };
-  const fallbackRunId = `${tierTag ?? 'unknown'}-${want.teacher ?? process.env.USER ?? 'unknown'}`;
+  const wantId = norm(want.teacher);
+  const wantNorm = { ...want, tier: tierTag, teacher: wantId };
+  /** 没给教师名时，兜底 runId 保留**机器账号**这一层（`process.env.USER` 的既有口径）；
+   *  给了就用归一化后的 ID —— 它要进 runId 与路径，写法必须只有一个。 */
+  const fallbackRunId = `${tierTag ?? 'unknown'}-${want.teacher ? wantId : norm(process.env.USER ?? 'unknown')}`;
+
+  /* 分片指针：先按稳定 ID 找，再按**原样写法**找一个，最后**扫一遍 `_运行/`**
+   * ——第三种是"归一化之前建的运行必须照常读得出来"的兜底：
+   * 老指针是按**清单里当时记的那个字符串**命名的（`清单_Wayne_A层85.json`），
+   * 而这次要读的人可能写的是 `Wayne`、也可能写的是 `wayne`，两个候选名都可能对不上。
+   * 扫一遍之后，按"这位教师（归一化之后）"找到它，并且**说出来**——不静默。
+   *
+   * 为什么可以扫：`清单_*.json` 里只有**指针**才带 `path` 字段（清单自己不带），
+   * 所以 `readPtr` 天然只认指针；`清单_最新.json` 是全局索引，单独留给下面的 `latest` 分支。 */
+  let scoped = null;
+  if (want.teacher || tierTag) {
+    const nameOf = (t) => M.pointerNameOf({ teacher: t, tier: tierTag });
+    const candidates = [{ name: nameOf(wantId), label: wantId }];
+    const writtenTrim = String(want.teacher ?? '').trim();
+    if (writtenTrim && nameOf(writtenTrim) !== candidates[0].name) candidates.push({ name: nameOf(writtenTrim), label: writtenTrim });
+    for (const c of candidates) {
+      const p = readPtr(c.name);
+      if (!p) continue;
+      scoped = p;
+      if (c.label !== wantId) {
+        notes.push(`分片指针是**归一化之前**写下的（${c.name}）——已按同一位教师采用；下次 \`清单.mjs --new\` 会把它写成 ${candidates[0].name}。`);
+      }
+      break;
+    }
+    if (!scoped) {
+      /* 兜底扫描：文件名对不上，但**人**对得上（教师归一化之后是同一个 ID）。
+       *
+       * ★ 只认"按**归一化之前**的写法命名"的指针——也就是**今天这套命名规则产不出来**的文件名
+       *   （`清单_Wayne_A层85.json`、`清单_liu--ming_A层85.json`）。
+       *   这一条限制不是洁癖，它挡住的是另一类事故：如果扫描连"命名正确、只是层级不同"的指针
+       *   也认领，那么"没给层级"的调用方就会随便抓到某一层的运行——
+       *   而"没给层级时找不到分片指针、退回最近一次"是**既有且有意**的行为
+       *   （见 `发布包.mjs` 的用例：清单没了就必须拒绝发包，不许随手抓一份接着干）。 */
+      const hits = [];
+      for (const f of listDirSafe(runDir)) {
+        if (!/^清单_.*\.json$/.test(f) || f === M.LATEST_POINTER_NAME) continue;
+        if (tierTag && !f.endsWith(`_${tierTag}.json`)) continue; // 层级也要对得上，别把别的层的运行认领过来
+        const p = readPtr(f);
+        if (!p || p.teacher !== wantId) continue;
+        if (f === M.pointerNameOf({ teacher: wantId, tier: p.tier })) continue; // 命名是对的：那不是"老指针"，走正常那条路
+        hits.push({ name: f, p });
+      }
+      // 定序：新的在前，同刻按文件名——可复现（同一份盘，任何时候选到同一次运行）
+      hits.sort((a, b) => (b.p.updatedAt ?? '').localeCompare(a.p.updatedAt ?? '') || a.name.localeCompare(b.name));
+      if (hits.length) {
+        scoped = hits[0].p;
+        notes.push(
+          `这次用的是按**归一化之前**的写法命名的分片指针（${hits[0].name}）——它属于同一位教师（稳定 ID ${wantId}）。` +
+            `下次 \`清单.mjs --new\` 会写成 ${candidates[0].name}；两条并存时以本文件名为准的那份优先。`,
+        );
+      }
+    }
+  }
   const choice = M.chooseIdentity({
     want: wantNorm,
     explicitRunId: opts.runId ?? process.env.LAYERTEXT_RUN,
-    scoped: want.teacher || tierTag ? readPtr(M.pointerNameOf({ teacher: want.teacher ?? 'unknown', tier: tierTag })) : null,
+    scoped,
     latest: readPtr(M.LATEST_POINTER_NAME),
     fallbackRunId,
   });
-  return { ...choice.identity, source: choice.source, warning: choice.warning };
+  /* 归一化改过写法时**必须说出来**（读的那一份清单里记的是 `Wayne`）；
+   * 只在"最后真的采用了这份清单"时说，免得冤枉一份没被用上的指针。 */
+  const recTeacher = recorded.get(choice.identity.runId);
+  if (recTeacher && recTeacher !== choice.identity.teacher) {
+    notes.push(`这份清单里记的教师写作「${recTeacher}」，已按稳定 ID「${choice.identity.teacher}」采用（大小写/空白/全半角不算两个人的差别）。`);
+  }
+  const warning = [choice.warning, ...notes].filter(Boolean).join('\n⚠ ');
+  return { ...choice.identity, source: choice.source, ...(warning ? { warning } : {}), notes };
 }
 
 /* ────────────────────── 章节名：这本书有哪些章 ────────────────────── */

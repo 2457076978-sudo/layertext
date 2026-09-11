@@ -13,6 +13,7 @@
  * 用法：
  *   node LayerText_AF清单.mjs --new --tier A --teacher wayne     # 建清单（含词表快照 + **词表正本导入**）
  *   node LayerText_AF清单.mjs --reimport                        # 只重新导入词表正本（CSV 改过之后）
+ *   node LayerText_AF清单.mjs --teachers                        # **谁在这本书上干过活**（教师名录 × 盘上清单）
  *   node LayerText_AF清单.mjs --stamp --tier A --step 生成 --sec 12.3 --ok 1
  *   node LayerText_AF清单.mjs --verify --tier A                  # 校验；有硬问题非零退出
  *   node LayerText_AF清单.mjs                                   # 只打印当前清单摘要
@@ -91,7 +92,14 @@ const CH_IDS = arg('--chapters', '')
       .map((x) => Number(x.trim()))
       .filter((n) => n >= 1 && n <= 10)
   : CN.slice(0, Number(P.章数 ?? 10)).map((_, i) => i + 1);
-const TEACHER = arg('--teacher', process.env.LAYERTEXT_TEACHER ?? process.env.USER ?? 'unknown');
+/* 教师名**原样读进来，写下去之前一律归一成稳定 ID**（总计划阶段 3「Teacher 有稳定 ID」）。
+ *
+ * 原来这里就是一个自由字符串，于是 `--teacher wayne` / `--teacher Wayne` / `--teacher 'wayne '`
+ * 是**三个人**：三个 runId、三份分片指针、三堆决定事件，而没有任何地方会说一句话。
+ * 现在读的时候保留原样（要如实报告"你写的是什么"），写的时候只写 ID——
+ * 具体怎么归一化、名录在哪儿、拼错怎么办，全部在 `src/core/teachers.ts` 与共享模块里，
+ * 这一行只负责取原样的值。 */
+const teacherArg = () => arg('--teacher', process.env.LAYERTEXT_TEACHER ?? process.env.USER ?? 'unknown');
 const RUN_DIR = join(OUT_BASE, '_运行');
 const SNAP_POINTER = join(RUN_DIR, 'LexiconSnapshot.json');
 /* 指针**按 (教师, 层级) 分片**，另加一份"最近一次"作索引。
@@ -215,6 +223,27 @@ function scanArtifacts() {
       if (!existsSync(abs)) continue;
       const text = readFileSync(abs, 'utf-8');
       push({ path: rel, kind: '正文', tier: t, chapter: ch, status, reason, hash: contentHash(text), bytes: text.length, updatedAt: new Date().toISOString() });
+
+      /* ★ 学生版也要登记。它是发布包里**真正要交到学生手上**的那一件，
+       * 而在此之前扫描**只认正文**——于是"发布学生版"与"发布包"是断开的：
+       * 学生版生成得再对，也不会进清单、不会进包，而导出照常报成功。
+       * 状态跟着正文走：正文是 `needs-review`，学生版也不该被当成完成品
+       * （它本来就是从那份稿减出来的）。 */
+      const stuAbs = rr.any('学生版', { chapter: ch, tier: tag, date: DATE });
+      if (existsSync(stuAbs)) {
+        const stuText = readFileSync(stuAbs, 'utf-8');
+        push({
+          path: stuAbs.replace(`${OUT_BASE}/`, ''),
+          kind: '学生版',
+          tier: t,
+          chapter: ch,
+          status,
+          reason,
+          hash: contentHash(stuText),
+          bytes: stuText.length,
+          updatedAt: new Date().toISOString(),
+        });
+      }
     }
     /* 台账与人读的风险队列报告：两条也经解析器取路径。
      * 清单记的是**相对产物目录**的路径（`rel`），所以这里减掉前缀即可——
@@ -257,6 +286,17 @@ const pendingReviewOf = () => {
 
 /* ────────────────────── 建清单 ────────────────────── */
 if (has('--new')) {
+  /* 教师先过名录：`Wayne` / `wayne ` / `Ｗａｙｎｅ` 归一成同一个 ID，并**当场说出来**；
+   * 名录里没有的名字**登记**（否则"谁在这本书上干过活"永远答不出来），
+   * 同时把"疑似拼错"这类要留档的说明写进本次运行的 `warnings`——
+   * 一行 stderr 跑过去就没了，而清单会一直留着它（`--verify` 每次都会摆到眼前）。
+   * 名录本身读不出来时**拒绝开工**：那份名册里的别名与显示名是人工信息，覆盖掉就补不回来。 */
+  const tr = await SHARED.registerTeacher(P, teacherArg());
+  if (!tr.ok) {
+    console.error(`✗ 教师身份没定下来，本次不建清单：${tr.refusal ?? '（原因不明）'}`);
+    process.exit(2);
+  }
+  const TEACHER = tr.id;
   const { snapshot, sources } = buildSnapshot();
   const snapPath = writeSnapshot(snapshot);
   // 导入是 --new 的一部分：**"建清单"这件事的含义就是把这次的输入冻下来**。
@@ -271,6 +311,7 @@ if (has('--new')) {
     version: arg('--version', P.版本 ?? 'v1'),
     tiers: TIERS,
     chapters: CH_IDS,
+    // 记的是**稳定 ID**（不是命令行上那个原样写法）：runId 的哈希、指针文件名、决定事件三处同源
     teacher: TEACHER,
     model: { name: P.模型 ?? 'deepseek-chat', temperature: 0.3, promptVersion: arg('--prompt', 'session-v3-20260911') },
     // 版本仍是**快照版本**：既有运行的 --verify 不该因为这次改动凭空报一次漂移（假警报比没有警报更坏）
@@ -279,6 +320,10 @@ if (has('--new')) {
     owner: { pid: process.pid, host: hostname() },
     layout: LAYOUT,
   });
+  /* 教师身份这件事里"值得留档"的部分进清单的账（`verifyManifest` 会把它们逐条报出来）：
+   * 归一化改过写法、名录里没有这个名字、以及与名录里某个人**只差一两个字符**（疑似拼错）。
+   * 只打印不落账，等于把"这本书上悄悄出现了第二个教师"留到对不上账的那天。 */
+  for (const w of tr.warnings ?? []) m.warnings.push({ kind: w.kind, message: w.message, at: new Date().toISOString() });
   const existingPath = join(RUN_DIR, `清单_${m.runId}.json`);
   const existing = readIf(existingPath);
   if (existing) {
@@ -301,11 +346,18 @@ if (has('--new')) {
   const tierTags = m.tiers.map((t) => TAGS[t] ?? t);
   const pointer = JSON.stringify({ runId: m.runId, path: existingPath, teacher: m.teacher, tier: tierTags[0], layout: LAYOUT, updatedAt: new Date().toISOString() }, null, 2);
   // 每层各写一份，免得"跑 A 层的人"和"跑 M 层的人"抢同一份指针
+  /* ★ 这里的 `m.teacher` 是**稳定 ID**（上面 registerTeacher 归一化过的），指针名也因此按人分片：
+   * 之前 `teacher` 是一个自由字符串，于是 `Wayne` 与 `wayne` 各写各的指针——
+   * `readRunIdentity` 那套「按 (教师, 层级) 分片」实际是按**字符串**分片，
+   * 而"两位教师不会互相覆盖"这条保证就漏在了拼写上（拼错一个字母 = 多一个分片 = 多一个人）。 */
   for (const t of tierTags) writeFileSync(pointerOf(m.teacher, t), pointer, 'utf-8');
   writeFileSync(MANIFEST_POINTER, pointer, 'utf-8');
   console.log('════ AF 运行清单 · 新建 ════');
   console.log(` 运行 ID：${m.runId}`);
-  console.log(` 书名：${m.book}｜版本：${m.version}｜层：${m.tiers.join('/')}｜教师：${m.teacher}`);
+  console.log(` 书名：${m.book}｜版本：${m.version}｜层：${m.tiers.join('/')}｜教师：${m.teacher}（${tr.resolution?.status ?? '—'}）`);
+  for (const l of tr.notes ?? []) console.log(l);
+  for (const a of tr.droppedAliases ?? []) console.log(` · 别名「${a}」没有记进名录：它与 ID「${tr.id}」归一化之后相同（记了只会让人以为两者有区别）`);
+  console.log(` 教师名录：${tr.path}${tr.registered ? '（本次新登记）' : '（已在册）'}`);
   console.log(` 路径布局：${LAYOUT}${LAYOUT === 'legacy' ? '（沿用既有命名，教师已有工作流不受影响）' : '（产物收进 _运行/<运行 ID>/，跨运行不会互相覆盖）'}`);
   console.log(` 词表快照：${snapshot.version}（${snapshot.sources.length} 个来源）→ ${snapPath}`);
   for (const l of imported.lines) console.log(l);
@@ -328,6 +380,31 @@ if (has('--reimport')) {
   for (const l of r.lines) console.log(l);
   if (r.previous && r.previous.version !== r.store.version) {
     console.warn(' ⚠ 正本版本已变：已登记的运行仍记着旧快照版本，--verify 会把它们判为 blocked（它们确实是用旧口径跑出来的）');
+  }
+  process.exit(0);
+}
+
+/* ────────────────────── 谁在这本书上干过活 ──────────────────────
+ * 总计划阶段 3 的「多教师」要问的第一句话，也是这一轮 Teacher 稳定 ID 的**验收动作**：
+ * 「谁在这本书上干过活」原来答不出来——教师只是一个自由字符串，散在各自的运行里。
+ *
+ * 答案来自**两边**，谁也不取代谁：
+ *   · 名录（`_运行/教师名录.json`）：这个 ID 还有哪些写法（别名）、显示名叫什么；
+ *   · 盘上每一次运行的清单：谁**真的**跑过、跑了几次、哪一层。
+ * 名录里**刻意没有运行计数**——记了就会漂移（删掉一次运行，名录还记着 3 次）；
+ * 这里的次数是**当场**从清单数出来的，所以两个数字永远不会对不上。
+ *
+ * 只读：列名录绝不写盘（"看一眼"不该改盘上的东西）。
+ */
+if (has('--teachers') || has('--list-teachers')) {
+  const t = await SHARED.listTeachers(P);
+  console.log('════ 教师名录 · 谁在这本书上干过活 ════');
+  console.log(` 项目：${P.书名}｜产物目录：${OUT_BASE}`);
+  for (const l of t.lines) console.log(l);
+  console.log(` 名录文件：${t.path}${t.exists ? '' : '（还没有——跑一次 --new 会自动建立；旧运行照常可用，不需要迁移）'}`);
+  if (!t.available) {
+    console.error('✗ 列不出来：引擎里读不到 teachers.js（先 npx tsc -p tsconfig.json 重建引擎）。');
+    process.exit(1);
   }
   process.exit(0);
 }
@@ -406,6 +483,11 @@ if (has('--verify')) {
 
   console.log('════ AF 运行清单 · 校验 ════');
   console.log(` 运行 ID：${m.runId}｜书：${m.book} ${m.version}｜层：${m.tiers.join('/')}｜教师：${m.teacher}`);
+  /* 教师身份在**校验**里也要有一行：清单里记的可能是归一化之前的写法（`Wayne`），
+   * 而它算的是 `wayne`——不写清楚，同一本书上的同一个人会被当成两个人。
+   * 只读解析（不登记）：校验不该改盘上的东西。 */
+  const tinfo = await SHARED.resolveTeacher(P, m.teacher);
+  console.log(` 教师身份：${tinfo.id}（${tinfo.resolution?.status ?? tinfo.why}）${tinfo.id !== m.teacher ? `——清单里记的是「${m.teacher}」` : ''}`);
   console.log(` 词表快照：清单 ${m.lexicon.version}｜当前 ${snapshot.version}${drift.ok ? '（一致）' : '（**已变**）'}`);
   /* 撞名按**产物身份**报，所以"两位教师各写一份同一件产物、路径还不一样"也看得见（旧口径只比路径）。
    * 两种性质分开说：`覆盖` 是谁把谁盖掉了（最坏），`分叉` 是同一件产物有了两份副本（谁作数要人定）。 */
@@ -513,6 +595,12 @@ const s = summarizeManifest(m);
 console.log('════ AF 运行清单 ════');
 console.log(` 运行 ID：${m.runId}`);
 console.log(` ${m.book}｜版本 ${m.version}｜层 ${m.tiers.join('/')}｜章 ${m.chapters.join(',')}｜教师 ${m.teacher}`);
+/* 教师这一行要能回答"这个名字在名录里算谁"：
+ * 旧清单里可能记着**归一化之前**的写法（`Wayne`），而它算的是 `wayne`——
+ * 不说清楚，看报表的人会以为这本书上有两个教师。只读解析，不登记。 */
+const tinfo = await SHARED.resolveTeacher(P, m.teacher);
+console.log(` 教师身份：${tinfo.id}（${tinfo.resolution?.status ?? tinfo.why}）${tinfo.id !== m.teacher ? `——清单里记的是「${m.teacher}」，按稳定 ID 算作「${tinfo.id}」` : ''}`);
+if (!tinfo.available) console.warn(` ⚠ ${tinfo.notes?.[0] ?? '教师身份无法归一化'}`);
 console.log(` 模型 ${m.model.name}（温度 ${m.model.temperature}）｜提示词 ${m.model.promptVersion}`);
 console.log(` 词表快照 ${m.lexicon.version}｜输入 ${m.inputs.length} 项｜产物 ${s.artifactCount} 件｜待复核 ${s.pendingReview} 段`);
 console.log(` 词表正本：${describeStoreState(SHARED.lexiconStoreState(P), m)}`);

@@ -232,3 +232,57 @@ test('★ 端到端：干净产物给出学生版，落在「学生版」这个�
   assert.equal(readFileSync(w('产物', '第一章', '原文_A层85_2026-01-01.md'), 'utf-8').includes('[P01]'), true, '工作稿必须原样保留');
   rmSync(root, { recursive: true, force: true });
 });
+
+/* ────────────────────── ⑥ 学生版要真的进得了发布包 ────────────────────── */
+
+test('★ 学生版登记进清单、进得了发布包（否则"发布学生版"与"发布包"是断开的）', () => {
+  /* 这条用例的来由：学生版做出来之后，我回头看它**能不能进发布包**——
+   * 而 `清单.mjs` 的扫描**只认正文**。于是学生版生成了也**不会进清单、不会进包**，
+   * 而导出照常报成功。"发布学生版"与"发布包"之间那截线头就是这么断的。 */
+  const root = mkdtempSync(join(tmpdir(), 'lt-stu3-'));
+  const w = (...p: string[]): string => join(root, ...p);
+  mkdirSync(w('原文', '第一章'), { recursive: true });
+  mkdirSync(w('产物', '第一章'), { recursive: true });
+  writeFileSync(w('原文', '第一章', '原文_规范化.md'), '## Chapter One\n\n[P01] The boy ran to the red barn.\n', 'utf-8');
+  writeFileSync(w('产物', '第一章', '原文_A层85_2026-01-01.md'), '# 内部说明\n\n## Chapter One\n\n[P01] The boy ran to the red barn（谷仓）.\n', 'utf-8');
+  writeFileSync(w('词库.csv'), ['词,类型', ...['the', 'boy', 'ran', 'to', 'red', 'barn', 'and', 'saw', 'a', 'small', 'dog'].map((x) => `${x},单词`)].join('\n') + '\n', 'utf-8');
+  writeFileSync(w('专名表.txt'), '# 专名\n', 'utf-8');
+  writeFileSync(w('知识库.csv'), '类型,词,值,次数\n', 'utf-8');
+  writeFileSync(w('词典.csv'), '词,释义,来源\n', 'utf-8');
+  const json = w('调适项目_自测.json');
+  writeFileSync(
+    json,
+    JSON.stringify({ 书名: 'T', 工作区: root, 调适工作区: w('调适'), 原文目录: w('原文'), 产物目录: w('产物'), 词库: w('词库.csv'), 书级: { 专名表: w('专名表.txt'), 知识库: w('知识库.csv'), 词典: w('词典.csv') }, 日期: '2026-01-01', 章数: 1, 引擎目录: REPO }, null, 2),
+    'utf-8',
+  );
+  const env = { ...process.env, LAYERTEXT_PROJECT: json, LAYERTEXT_ENGINE: REPO };
+  const run = (script: string, args: string[]): { status: number | null; out: string } => {
+    const r = spawnSync(process.execPath, [join(REPO, 'tools', 'af_pipeline', script), ...args], { cwd: REPO, encoding: 'utf-8', env });
+    return { status: r.status, out: `${r.stdout ?? ''}${r.stderr ?? ''}` };
+  };
+
+  // ① 建清单（学生版还不存在；legacy 布局——上面的正文就是按 legacy 命名摆的）
+  assert.equal(run('LayerText_AF清单.mjs', ['--new', '--tier', 'A', '--chapters', '1', '--teacher', 'wayne']).status, 0);
+  // ② 生成学生版
+  const stu = run('LayerText_AF学生版.mjs', ['--tier', 'A', '--chapters', '1', '--title', 'Animal Farm · Chapter One']);
+  assert.equal(stu.status, 0, stu.out);
+  // ③ 刷状态 → 学生版必须被登记
+  const stamp = run('LayerText_AF清单.mjs', ['--stamp', '--step', '学生版']);
+  assert.equal(stamp.status, 0, stamp.out);
+  const summary = run('LayerText_AF清单.mjs', []);
+  const runId = /运行 ID：(\S+)/.exec(summary.out)?.[1] ?? '';
+  assert.ok(runId, `清单摘要里要能读到运行 ID：${summary.out}`);
+  const manifestPath = join(root, '产物', '_运行', `清单_${runId}.json`);
+  const m = JSON.parse(readFileSync(manifestPath, 'utf-8')) as { artifacts: { kind: string; path: string }[] };
+  const stuArtifacts = m.artifacts.filter((a) => a.kind === '学生版');
+  assert.equal(stuArtifacts.length, 1, `学生版要被登记进清单，实得 ${JSON.stringify(m.artifacts.map((a) => a.kind))}`);
+  assert.match(stuArtifacts[0]!.path, /学生版_A层85_2026-01-01\.md$/);
+
+  // ④ 导出发布包 → 学生版必须在里面（它是真正要交到学生手上的那一件）
+  const exp = run('LayerText_AF发布包.mjs', []);
+  assert.equal(exp.status, 0, exp.out);
+  const desc = JSON.parse(readFileSync(join(root, '产物', `发布包_${runId}`, '发布包.json'), 'utf-8')) as { entries: { kind: string; path: string }[] };
+  assert.equal(desc.entries.some((e) => e.kind === '学生版'), true, `发布包里要有学生版：${JSON.stringify(desc.entries.map((e) => e.kind))}`);
+
+  rmSync(root, { recursive: true, force: true });
+});
