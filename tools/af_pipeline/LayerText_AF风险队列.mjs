@@ -46,6 +46,7 @@ const has = (n) => argv.includes(n);
 const TIERS = (arg('--tier', 'A')).split(',').map((s) => s.trim().toUpperCase()).filter((t) => TIER_INFO[t]);
 const SUFFIX = arg('--out', '') ? '_' + arg('--out') : '';
 const BUDGET = Number(arg('--budget', '60'));
+const BASELINE = P.情节底线 ?? '调适工作区/规则与底线/全书情节底线_v0.1.md';
 const CH_IDS = arg('--chapters', '')
   ? arg('--chapters').split(',').map((x) => Number(x.trim())).filter((n) => n >= 1 && n <= 10)
   : CN.slice(0, Number(P.章数 ?? 10)).map((_, i) => i + 1);
@@ -54,6 +55,8 @@ if (!TIERS.length) { console.error('✗ --tier 只能是 A / M / B 的组合'); 
 
 const { gateSegment, GATE_RULES } = await import(`${REPO}/dist/src/core/segmentgate.js`);
 const { buildRiskQueue, oneHourPlan } = await import(`${REPO}/dist/src/core/riskqueue.js`);
+const { parsePlotBaseline, plotLine } = await import(`${REPO}/dist/src/core/plotweight.js`);
+const { actionOf } = await import(`${REPO}/dist/src/core/riskaction.js`);
 const { parseDoc } = await import(`${REPO}/dist/src/core/docast.js`);
 const { runQc } = await import(`${REPO}/dist/src/core/qc.js`);
 const LEX = await SHARED.loadLexicon(P);
@@ -158,7 +161,21 @@ for (const tier of TIERS) {
   }
 }
 
-const queue = buildRiskQueue(allSegments);
+/* 情节先验（审查报告 v4_方向）：**只做同风险档内的 tie-breaker，不能升级为 blocker**。
+ * 底线文件里的英文引用（教师写了"这几句必须原样保留"的那些）+ 专名表 = 可逐字对齐的素材；
+ * 教师还能在底线里写一行 `锚点：windmill、gun` 补上机器猜不到的东西（象征物通常不在专名表里）。 */
+const baselinePath = P.工作区 ? join(P.工作区, BASELINE) : '';
+let plot;
+if (baselinePath && existsSync(baselinePath)) {
+  const baseline = parsePlotBaseline(readFileSync(baselinePath, 'utf-8'), P.PROPER, baselinePath);
+  const segCounts = {};
+  for (const s of allSegments) segCounts[s.chapter] = Math.max(segCounts[s.chapter] ?? 0, s.segIndex + 1);
+  plot = { baseline, segCountOf: (ch) => segCounts[ch] ?? 1 };
+  console.log(`情节先验：底线锚点 ${baseline.anchors.length} 个、专名 ${baseline.names.length} 个（只做同风险档内的排序，不拦截）`);
+} else {
+  console.log('情节先验：未找到情节底线文件 —— 信号缺席（**没算**，不是低）');
+}
+const queue = buildRiskQueue(allSegments, plot);
 const plan = oneHourPlan(queue, BUDGET);
 
 /* ────────────────────── 人看的清单（Markdown） ────────────────────── */
@@ -213,7 +230,10 @@ for (const cat of CAT_ORDER) {
       `- 原文：${it.sourceSentence || '（未定位到原句）'}`,
       `- 改写：${it.rewrittenSentence || '（改写里找不到）'}`,
       `- 上下文：上「${it.context.prev || '—'}」／下「${it.context.next || '—'}」`,
-      `- 决策：☐ 采纳改写  ☐ 退回重写  ☐ 标记误报    理由：________________`,
+      `- ${plotLine(it.plot)}`,   // 情节先验：给等级也给依据（只影响排序，不拦任何东西）
+      // 决策栏的文案**跟着规则走**（报告 v4_方向第 2 条：十条规则不能共用三个统一键）
+      `- 决策：☐ ${actionOf(it.ruleId).label}  ☐ 退回重写  ☐ 标记误报    理由：________________`,
+      `  （${actionOf(it.ruleId).effect}）`,
       '',
     );
   }

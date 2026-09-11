@@ -63,7 +63,9 @@ function overLimit(md, maxLen) {
 
 const rows = [];
 for (const t of TIERS) {
-  let tot = { sw: 0, ow: 0, notes: 0, over: 0, over20: 0, sents: 0, nw: 0, al: 0, pa: 0, rc: 0, pp: 0, ann: 0, annt: 0, n: 0 };
+  // srcNw = **原文**的生词率（同一套词表口径）。定位那两条轴要"原文 → 产物"两个数，
+  // 只报产物一个数是算不出"阅读负荷下降"的。
+  let tot = { sw: 0, ow: 0, notes: 0, over: 0, over20: 0, sents: 0, nw: 0, srcNw: 0, al: 0, pa: 0, rc: 0, pp: 0, ann: 0, annt: 0, n: 0 };
   for (const ci of CHAPTER_IDS) {
     const ch = CH_NAME(ci);
     const src = readFileSync(join(SRC_BASE, ch, '原文_规范化.md'), 'utf-8');
@@ -73,18 +75,41 @@ for (const t of TIERS) {
     const ow = wc(md.split('## 词句卡')[0]);
     const notes = (md.match(ANN_RE) ?? []).length;
     const qc = runQc(md, LEX, { tier: t.key, fileName: p.split('/').pop() });
+    // 原文也过一遍 QC（同一词表口径）——"阅读负荷下降"要靠它对上产物
+    let srcQc = null;
+    try { srcQc = runQc(src, LEX, { tier: t.key, fileName: '原文' }); } catch { /* 原文不成型就算了 */ }
     const ol = overLimit(md, t.maxLen);
     rows.push({ t, ch, sw, ow, ratio: ow / sw, notes, qc, over: ol.over, sents: ol.total, maxLen: t.maxLen });
     tot.sw += sw; tot.ow += ow; tot.notes += notes; tot.over += ol.over; tot.over20 += qc.over20;
-    tot.sents += ol.total; tot.nw += qc.newWordRate; tot.al += qc.avgLenNarrRaw;
+    tot.sents += ol.total; tot.nw += qc.newWordRate; tot.srcNw += srcQc?.newWordRate ?? 0; tot.al += qc.avgLenNarrRaw;
     tot.ann += qc.annotated; tot.annt += qc.annotatable; tot.n += 1;
     tot.pa += qc.passive; tot.rc += qc.relcl; tot.pp += qc.pastperf;
   }
   rows.push({ tierTotal: t, tot });
 }
 
+/* 定位：两条轴分开说（《审查报告 v4_方向》）。
+ * 这个产品的核心机制是"难词就地加中文注释"——它降低的是**理解门槛**，不是**阅读负荷**。
+ * 合成一个"覆盖率 98%"去讲，买家会以为文本变简单了。所以抬头必须两个数、两个名字。 */
+const { positioningOf, POSITIONING_LINE } = await import(`${LTR}/dist/src/core/positioning.js`);
+
 const L = [];
 L.push('# AF 三档重制（85/75/60）· 汇总报告（复核版）', '');
+L.push('');
+L.push(`> **产品定位**：${POSITIONING_LINE}`);
+L.push('>');
+// 各层拿"原文 vs 产物"的生词率算负荷降幅；支架覆盖率取该层的加注覆盖率
+for (const r of rows) {
+  if (!r.tierTotal) continue;
+  const { tierTotal: t, tot } = r;
+  const pos = positioningOf(
+    // 两边都要除以章数：tot.nw / tot.srcNw 是**逐章相加**的累加值，直接拿去比会得到荒谬的比值
+    { newWordRate: (tot.srcNw ?? 0) / (tot.n || 1) },
+    { newWordRate: tot.nw / (tot.n || 1), annotationCoverage: tot.ann / (tot.annt || 1), annotated: tot.ann, annotatable: tot.annt },
+  );
+  L.push(`> · **${t.label}**：${pos.headline}`);
+}
+L.push('');
 L.push(`生成：${new Date().toLocaleString('zh-CN')}｜复核脚本：LayerText_AF三档复核.mjs`);
 L.push('');
 L.push('> **与旧表的差别**：旧表在精修前写出（篇幅偏小），且"超时句"沿用引擎硬编码的 `>20 词`，');

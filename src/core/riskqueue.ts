@@ -18,7 +18,8 @@
  */
 
 import { alignSentencePairs, numberWordOf, type AlignSentRef } from './align.js';
-import { GATE_RULES, stripMarkers, type GateCategory, type GateProblem, type GateSeverity } from './segmentgate.js';
+import { GATE_RULES, stripMarkers, wordCount, type GateCategory, type GateProblem, type GateSeverity } from './segmentgate.js';
+import { plotSignalOf, type PlotBaseline, type PlotSignal } from './plotweight.js';
 import { sentsOf } from './textpipe.js';
 
 /** 一段的门禁产出（脚本扫描产物时逐段收集） */
@@ -60,6 +61,11 @@ export interface RiskItem {
   /** 上下文各一句（改写侧；改写侧没有则退原文侧） */
   context: { prev: string; next: string };
   detail?: Record<string, unknown>;
+  /**
+   * 情节先验（`src/core/plotweight.ts`）：**只做排序 tie-breaker，不能升级为 blocker**。
+   * 缺省 = 没提供底线（"没算"，不是"低"）——没算与算出来是低是两件事。
+   */
+  plot?: PlotSignal;
 }
 
 export interface RiskQueue {
@@ -140,6 +146,11 @@ function expand(input: SegmentRiskInput, p: GateProblem): RiskItem[] {
   const make = (key: string, title: string, needle: string, pivot: Record<string, unknown>, curOverride?: string): RiskItem => {
     const si = needle ? findSentence(srcSents, needle) : -1;
     const ci = needle ? findSentence(curSents, needle) : -1;
+    /* 定位到的句子**太短就退回整段**：`sentsOf` 会按 `(?<=[.!?"] )` 切句，
+     * `Boxer said "I will work harder" in 1911.` 会被切成两半，
+     * 含数字的那半只剩 `in 1911.`——卡片上"原句：in 1911."对教师毫无用处。
+     * 先验可以按段打分（见上面），但**给人看的原句必须完整**。 */
+    const srcText = si >= 0 && wordCount(srcSents[si]!) >= 4 ? srcSents[si]! : stripMarkers(input.source).trim();
     const rewrittenSentence = curOverride ?? (ci >= 0 ? curSents[ci] : alignedRewrite(curSents, si, pairs));
     // 上下文优先给改写侧的邻居；改写里根本找不到这条（事实类丢信号）时退回原文侧，
     // 否则卡片上只有「—」，教师没有上下文可判断"到底是删了还是换了说法"。
@@ -149,7 +160,7 @@ function expand(input: SegmentRiskInput, p: GateProblem): RiskItem[] {
       detail: { ...p.detail, ...pivot },
       id: `${input.chapter}#${input.segIndex}:${p.ruleId}:${key}`,
       title,
-      sourceSentence: si >= 0 ? srcSents[si] : '',
+      sourceSentence: si >= 0 ? srcText : '',
       rewrittenSentence,
       context: ctx,
     };
@@ -191,9 +202,12 @@ function expand(input: SegmentRiskInput, p: GateProblem): RiskItem[] {
   }
 }
 
-/** 队列全部项的排序：risk 降序 → 事实类优先 → 章序/段序稳定 */
+/** 队列全部项的排序：risk 降序 → **情节先验（仅同档内）** → 事实类优先 → 章序/段序稳定。
+ *  情节分只在前者相等时起作用：它**不改变 risk**、也**不产生**任何拦截项（报告明文要求）。 */
 function compare(a: RiskItem, b: RiskItem): number {
   if (b.risk !== a.risk) return b.risk - a.risk;
+  const dp = (b.plot?.score ?? -1) - (a.plot?.score ?? -1);
+  if (dp !== 0) return dp;
   if (b.consequence !== a.consequence) return b.consequence - a.consequence;
   if (a.chapter !== b.chapter) return a.chapter < b.chapter ? -1 : 1;
   if (a.segIndex !== b.segIndex) return a.segIndex - b.segIndex;
@@ -201,9 +215,29 @@ function compare(a: RiskItem, b: RiskItem): number {
 }
 
 /** 逐段输入 → 风险队列（已排序、已汇总、已估算人工时长） */
-export function buildRiskQueue(segments: SegmentRiskInput[]): RiskQueue {
+export function buildRiskQueue(
+  segments: SegmentRiskInput[],
+  /** 情节先验：**可选**。不提供时每条 item 的 `plot` 缺席（显示"未提供底线"），不是给 0 分 */
+  plot?: { baseline: PlotBaseline; segCountOf?: (chapter: string) => number },
+): RiskQueue {
   const items: RiskItem[] = [];
-  for (const seg of segments) for (const p of seg.problems) items.push(...expand(seg, p));
+  for (const seg of segments) {
+    const segCount = plot?.segCountOf?.(seg.chapter);
+    /* 情节先验按**段**打分，不按句。
+     * 实测踩到的：句级打分会被引号切断——`Boxer said "I will work harder" in 1911.`
+     * 在 `sentsOf` 里按 `(?<=[.!?"] )` 切成两半，含"1911"的那半只剩 `in 1911.`，
+     * 于是全书最重要的那句口头禅拿到的情节分和路人甲一样。
+     * 而这项先验要回答的本来就是"**这一段**值不值得先看"——按段打分既避开碎片，也更贴教师的心智。 */
+    const plotOf = (): PlotSignal | undefined =>
+      plot ? plotSignalOf(seg.source, plot.baseline, { segIndex: seg.segIndex, segCount }) : undefined;
+    const segPlot = plotOf();
+    for (const p of seg.problems) {
+      for (const it of expand(seg, p)) {
+        it.plot = segPlot;
+        items.push(it);
+      }
+    }
+  }
   items.sort(compare);
   const byRule: Record<string, number> = {};
   const byCategory: Record<string, number> = {};

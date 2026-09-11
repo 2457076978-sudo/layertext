@@ -404,3 +404,30 @@ test('动作不统一的组不给批量入口（宁可少一个按钮，也不�
   assert.match(html, /同一个词：barn/, '还是归一组（同一个词）');
   assert.equal(html.includes('data-batch'), false, '但动作不同 → 不给"全部应用"');
 });
+
+test('卡片显示情节先验：等级 + 依据（只影响排序，不拦任何东西）', async () => {
+  const f: RiskQueueFile = {
+    schemaVersion: 1, 层级: ['A'], 章节: [1],
+    摘要: { total: 1, blockers: 1, byRule: {}, byCategory: {}, estimatedMinutes: 0.5 },
+    章节产物: { 第一章: '/out/第一章/原文_A层85_2026-09-10.md' },
+    队列: [
+      ANNO_ITEM({
+        plot: {
+          score: 0.72, level: '高',
+          hits: ['底线原文锚点：i will work harder', '角色/地名：boxer'],
+          parts: [],
+        },
+      }),
+    ],
+  };
+  const files: Record<string, string> = { [`/out/_运行/风险队列_${TAG}.json`]: JSON.stringify(f) };
+  actionSetup(files);
+  await renderRiskPane({
+    dom: win.document as never, tier: 'A',
+    paths: { outDir: '/out', workDir: '/work', sourceVersion: 's', dictPath: '/p/dict.csv' },
+    teacherId: 'wayne',
+  });
+  const html = win.document.getElementById('pane-risk')!.innerHTML;
+  assert.match(html, /情节估计：高｜命中 底线原文锚点：i will work harder/);
+  assert.match(html, /角色\/地名：boxer/);
+});

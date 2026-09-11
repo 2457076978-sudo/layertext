@@ -16,6 +16,8 @@ import { buildProposals, makeDecisionEvent, parseDecisionLog, summarizeDecisions
 import { makeResolver, type Layout } from '../../src/core/manifest.js';
 import { parseDictCsv } from '../../src/core/dictmerge.js';
 import { parseDoc } from '../../src/core/docast.js';
+import { plotLine } from '../../src/core/plotweight.js';
+import { POSITIONING_LINE } from '../../src/core/positioning.js';
 import { DECISION_LABEL } from '../../src/core/decision.js';
 import { productMetrics, sessionOpenEvent } from '../../src/core/productmetrics.js';
 import { actionOf, applyAction, failureText, type RuleAction } from '../../src/core/riskaction.js';
@@ -441,7 +443,7 @@ export async function renderRiskPane(
     </div>`;
 
   if (!file.队列.length) {
-    el.innerHTML = `${head}<div class="empty">队列为空——本层没有机器点得出来的风险，可直接抽样阅读。</div>`;
+    el.innerHTML = `${head}<div class="empty">队列为空——本层没有机器点得出来的风险，可直接抽样阅读。<br/><span style="font-size:12px">${esc(POSITIONING_LINE)}</span></div>`;
     return { ok: true, message: '队列为空' };
   }
   if (!left.length) {
@@ -461,6 +463,7 @@ export async function renderRiskPane(
           <span class="rq-pos">${esc(it.segLabel)}${it.tier ? `（${esc(it.tier)} 层）` : ''}</span>
         </div>
         <div class="rq-issue">${esc(it.title)}</div>
+        ${it.plot ? `<div class="rq-plot">${esc(plotLine(it.plot))}</div>` : ''}
         <div class="rq-pair">
           <div><span class="rq-lab">原句</span>${esc(it.sourceSentence || '（未定位到原句）')}</div>
           <div><span class="rq-lab">改写</span>${esc(it.rewrittenSentence || '（改写里找不到）')}</div>
