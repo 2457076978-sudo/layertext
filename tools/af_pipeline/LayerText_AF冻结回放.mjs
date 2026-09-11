@@ -543,7 +543,7 @@ if (探测.缺失.length) {
 
 mkdirSync(join(OUT_ROOT, '输入'), { recursive: true });
 const files = copyInputs(P, projectPath, chapters, tiers, OUT_ROOT);
-const 字节 = files.reduce((n, f) => n + readFileSync(join(OUT_ROOT, '输入', f)).length, 0) + Buffer.byteLength(JSON.stringify(files));
+const 字节 = files.reduce((n, f) => n + Buffer.byteLength(readFileSync(join(OUT_ROOT, '输入', f), 'utf-8')), 0);
 console.log(` 输入快照 ${files.length} 个文件 / ${(字节 / 1024).toFixed(0)}KB（**全份**，不做精简——精简会引入一个要永远重新验证的等价性问题）`);
 
 const { out, LEX } = await computeConclusions(join(OUT_ROOT, '输入'));
