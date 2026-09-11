@@ -11,6 +11,7 @@
  */
 
 import { chineseOutsideAnnotations, parseAnnotations } from './annot.js';
+import { annotatableOf } from './segmentgate.js';
 import { FAKE, HAD_ADVERBS, IRR, PASSIVE_IRR, PART_LIST, THAT_EXEMPT } from './irregular.js';
 import type { Lexicon } from './lexicon.js';
 import { extractParas, hit, pendHit, sentsOf, splitChapter, tokenizeTxt, cardGlossWords } from './textpipe.js';
@@ -175,7 +176,9 @@ export function runQc(md: string, lex: Lexicon, opts: QcOptions): QcResult {
   //  背景：2026-09-10 发现 A 层第 7/8/9 章加注覆盖率只有 2%（其余章 62-78%），
   //  而当时所有报表只统计"注了多少处"，没有"该注多少"，缺口因此完全隐形。
   //  专名不计（buildLexicon 已并入已知，不会进 oov）；两字母以内的词不计（a/an/it 之类）。
-  const annotable = [...new Set(oov)].filter((w) => w.length > 2);
+  //  应注词型的口径**只有一处**（`segmentgate.ANNOTATABLE_MIN_LEN`）——
+  //  这里以前自己写了一遍 `w.length > 2`，与 App 单句门禁的 `> 1` 不一致。
+  const annotable = annotatableOf(oov);
   //  2026-09-11（审查报告第③条）：不再用"字符串正则塞进一个 Set"——那会让
   //  大小写、词形、连字符、同形异义四类情况各自造成假通过/假失败。
   //  改为 token 级解析 + 词形/连字符成分归一（annot.ts），并单独统计：

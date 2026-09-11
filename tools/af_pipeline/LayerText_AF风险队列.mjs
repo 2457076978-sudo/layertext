@@ -63,6 +63,7 @@ const LEX = await SHARED.loadLexicon(P);
 const DICT = SHARED.loadDict(P.词典路径);
 const { segmentList } = SHARED;
 const { makeResolver, dirOfPath } = await import(`${REPO}/dist/src/core/manifest.js`);
+const { annotatableOf } = await import(`${REPO}/dist/src/core/segmentgate.js`);
 const wc = (t) => (t.match(/[A-Za-z][A-Za-z'-]*/g) ?? []).length;
 
 const warnings = [];
@@ -72,7 +73,7 @@ const warnings = [];
 const oovOf = (seg) => {
   const md = `## Chapter One\n\n${seg}\n`;
   try {
-    return [...new Set(runQc(md, LEX, { tier: 'M', fileName: 'seg.md', dict: DICT }).oov)].filter((w) => w.length > 2);
+    return annotatableOf(runQc(md, LEX, { tier: 'M', fileName: 'seg.md', dict: DICT }).oov);
   } catch (e) {
     warnings.push(`跳过一个切不出句子的段（${(e instanceof Error ? e.message : String(e)).slice(0, 40)}）：${seg.trim().slice(0, 60)}`);
     return [];

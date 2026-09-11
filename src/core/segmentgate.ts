@@ -135,6 +135,31 @@ export interface SegmentGateInput {
   scope?: 'segment' | 'sentence';
 }
 
+/**
+ * 「该注的词」的最小长度。**唯一口径**。
+ *
+ * 为什么要有这个常量：这条规则原来散在四处，而且**两两不同**——
+ *   · `qc.ts` 的 `annotable`：`w.length > 2`
+ *   · 管线（`会话改写.mjs`）喂给门禁前：`w.length > 2`
+ *   · 风险队列（`风险队列.mjs`）：`w.length > 2`
+ *   · **App 单句改写（`rewrite.ts` 的 `oovOfText`）：`t.length > 1`**
+ * 于是同一个 2 字母超纲词（`ox`、`so` 这类），在 App 里会被拦下要求加注，
+ * 而在管线与风险队列里根本不进分母。**同一个指标、两个答案**——
+ * 正是《工程优化总计划》「最关键的代码纪律」第 2 条点名的那件事：
+ * 「任何门禁字段只能由 `gateSegment` 生成；报告、风险队列和 App 不得重新计算同一指标。」
+ *
+ * 真项目实测（Animal Farm A/M 层第一章）恰好没有 2 字母超纲词，所以这个分歧一直是**潜在**的；
+ * 换一本书、换一份词库它就会浮出来——而那时没人会想到去比对两条路径的分母。
+ *
+ * 取 3（而不是 2）的理由沿用既有口径：两字母词是 a/an/it/of 这类功能词，
+ * 学生本来就认得，把它们算进"该注"只会制造噪音。
+ */
+export const ANNOTATABLE_MIN_LEN = 3;
+
+/** 应注词型的过滤（去重 + 归一大小写 + 长度阈值）。**所有路径都从这里过。** */
+export const annotatableOf = (words: Iterable<string>): string[] =>
+  [...new Set([...words].map((w) => String(w).toLowerCase()))].filter((w) => w.length >= ANNOTATABLE_MIN_LEN);
+
 /** 词数（与管线各处一致：字母起首的英文词） */
 export const wordCount = (t: string): number => (t.match(/[A-Za-z][A-Za-z'-]*/g) ?? []).length;
 
@@ -184,7 +209,12 @@ export function gateSegment(input: SegmentGateInput): SegmentVerdict {
   const overLenSentences = sents.filter((s) => wordCount(s) > input.maxLen);
 
   const idx = parseAnnotations(body, input.dict);
-  const oov = [...new Set(input.oov.map((w) => w.toLowerCase()))];
+  /* ★ 门禁**自己**过一遍应注词型的口径，而不是信任调用方已经过好了。
+   * 这条过滤以前只写在调用方（管线/风险队列各过一次，App 那次过错了），
+   * 于是"同一个词在两条路径上要不要注"有两个答案。
+   * 门禁是唯一口径的落点，所以它必须把这条规则**收进自己里面**：
+   * 调用方传全量也好、传切好的也好，判定结果都一样。 */
+  const oov = annotatableOf(input.oov);
   const missing = oov.filter((w) => !idx.covers(w));
   const annotation: AnnotationStat = {
     annotatable: oov.length,

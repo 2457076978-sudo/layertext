@@ -126,6 +126,7 @@ const { makeResolver } = await import(`${REPO}/dist/src/core/manifest.js`);
 const { splitChapter } = await import(`${REPO}/dist/src/core/textpipe.js`);
 const { runQc } = await import(`${REPO}/dist/src/core/qc.js`);
 const { atomicWriteFileSync: writeAtomic } = await import(`${REPO}/dist/src/core/files.js`);
+const { annotatableOf } = await import(`${REPO}/dist/src/core/segmentgate.js`);
 /* 正文与产物一律**原子写**（先写同目录临时文件再 rename）。
  * writeFileSync 的语义是「截断 → 写」，中途失败会留下**半份正文**——
  * 对教师唯一的一份稿，半份比没有更糟：没有你知道丢了，半份看起来像改坏了，
@@ -358,7 +359,7 @@ function fakeChat(messages, tools = null) {
     // 按目标词数回放原文，并把本段的超纲词**全部**加注——用来验证
     // 「跨章不重复注」与「本地去重」两条规则在真实路径上确实生效。
     const md = `## Chapter One\n\n${seg}\n`;
-    const oov = [...new Set(runQc(md, LEX, { tier: TIER, fileName: 'seg.md', dict: DICT }).oov)].filter((w) => w.length > 2);
+    const oov = annotatableOf(runQc(md, LEX, { tier: TIER, fileName: 'seg.md', dict: DICT }).oov);
     const words = (seg.match(/[A-Za-z][A-Za-z'-]*/g) ?? []).filter((w) => w !== 'P');
     const kept = words.slice(0, Math.max(1, target - 1)).join(' ').replace(
       /\b[A-Za-z][A-Za-z'-]*\b/g,
@@ -378,7 +379,7 @@ function fakeChat(messages, tools = null) {
       };
     }
     const md0 = `## Chapter One\n\n${seg}\n`;
-    const oov = [...new Set(runQc(md0, LEX, { tier: TIER, fileName: 'seg.md', dict: DICT }).oov)].filter((w) => w.length > 2);
+    const oov = annotatableOf(runQc(md0, LEX, { tier: TIER, fileName: 'seg.md', dict: DICT }).oov);
     const words = (seg.match(/[A-Za-z][A-Za-z'-]*/g) ?? []).filter((w) => w !== 'P');
     const body = words.slice(0, Math.max(1, target - 1)).join(' ')
       .replace(/\b[A-Za-z][A-Za-z'-]*\b/g, (w) => (oov.includes(w.toLowerCase()) ? `${w}（风车）` : w));
@@ -426,7 +427,7 @@ function segQc(seg) {
 /** 该段"必须加注"的词：不在已知集合里、长度>2 */
 function mustAnnotate(seg) {
   const q = segQc(seg);
-  return { oov: [...new Set(q.oov)].filter((w) => w.length > 2), q };
+  return { oov: annotatableOf(q.oov), q };
 }
 /** 回答模型的「查词」：本地词库 → 词典 → 知识库，三处都没有就交给小模型配一个并回写词典 */
 async function answerLookup(words) {

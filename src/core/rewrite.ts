@@ -29,7 +29,7 @@
  */
 
 import { makeCovers, parseAnnotations } from './annot.js';
-import { gateSegment, normalizeSegmentBody, stripLookup, type GateProblem, type SegmentVerdict } from './segmentgate.js';
+import { annotatableOf, gateSegment, normalizeSegmentBody, stripLookup, type GateProblem, type SegmentVerdict } from './segmentgate.js';
 import { hit, sentsOf, tokenizeTxt } from './textpipe.js';
 
 /** 改写的粒度：整段（管线）｜单句（App 点一句改一句） */
@@ -91,11 +91,18 @@ export interface RewriteResult {
 
 /* ────────────────────── 词表工具（与 runQc 同一口径，但不依赖 Lexicon 对象） ────────────────────── */
 
-/** 文本里的超纲词型（与 runQc 的 OOV 口径一致：分词 → 词形还原命中 → 去单字母） */
+/**
+ * 文本里的超纲词型（分词 → 词形还原命中 → 按**应注词型**的口径收口）。
+ *
+ * ★ 这里原来是 `t.length > 1`，而管线、风险队列、QC 报告用的都是 `> 2`——
+ * 于是同一个 2 字母超纲词（`ox`、`so` 这类）在 App 里会被拦下要求加注，
+ * 在别处却根本不进分母：**同一个指标两个答案**。
+ * 现在统一走 `annotatableOf`（口径定义在 `segmentgate.ts`，也就是门禁自己那里）。
+ */
 export function oovOfText(text: string, known: Iterable<string>): string[] {
   const knownSet = known instanceof Set ? (known as Set<string>) : new Set([...known].map((w) => String(w).toLowerCase()));
   const toks = tokenizeTxt(sentsOf(text, false).join(' '));
-  return [...new Set(toks.filter((t) => !hit(t, knownSet) && t.length > 1))];
+  return annotatableOf(toks.filter((t) => !hit(t, knownSet)));
 }
 
 /** 本书里已经注过的词（账本）：从一段或多段正文里解析 */
