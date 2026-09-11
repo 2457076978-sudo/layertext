@@ -53,7 +53,7 @@ export function experimentPlan(): CellSpec[] {
 
 /** 人民币估算（与生成脚本同一口径：空闲时段价，未命中 1 元/百万、命中 0.02、输出 4） */
 export function estimateCost(u: { in: number; out: number; cached: number }): number {
-  return (u.in - u.cached) / 1e6 + u.cached / 1e6 * 0.02 + u.out / 1e6 * 4;
+  return (u.in - u.cached) / 1e6 + (u.cached / 1e6) * 0.02 + (u.out / 1e6) * 4;
 }
 
 export interface CellSegment {
@@ -87,6 +87,15 @@ export interface CellMetric {
   session: SessionFactor;
   vocab: VocabFactor;
   segments: number;
+  /**
+   * **真正落盘的段数**（没过门禁的段不在内）。
+   *
+   * 为什么要单独留这个数：覆盖率的分母是"落盘产物"，一段都没落盘时分母为零——
+   * 那时 `finalCoverage` 会算成 100%（"没有该注的词"与"没有一个字"在比例上长得一样），
+   * 报告里就会出现"最终覆盖率 100%"，而事实是这一段交付都没有。
+   * 有了它，`experimentrun.metricValue` 才能在"没有分母"时拒绝出数。
+   */
+  finalSegments: number;
   /** 模型首轮就注出的比例（0-1） */
   genCoverage: number;
   /** 落盘产物的加注覆盖率（0-1） */
@@ -165,6 +174,7 @@ export function measureCell(input: CellInput): CellMetric {
     session: spec.session,
     vocab: spec.vocab,
     segments: segments.length,
+    finalSegments: finals.length,
     genCoverage,
     finalCoverage,
     coverageGain: Number(((finalCoverage - genCoverage) * 100).toFixed(1)),
@@ -187,39 +197,30 @@ export function compareCells(cells: CellMetric[]): string {
   if (!cells.length) return '（没有实验结果）';
   const base = cells[0];
   const rows = cells.map((c) => {
-    const d = (k: keyof CellMetric, fmt: (v: number) => string): string =>
-      c === base ? '—' : `${c[k] > base[k] ? '+' : ''}${fmt(Number(c[k]) - Number(base[k]))}`;
+    const d = (k: keyof CellMetric, fmt: (v: number) => string): string => (c === base ? '—' : `${c[k] > base[k] ? '+' : ''}${fmt(Number(c[k]) - Number(base[k]))}`);
+    // 一段都没落盘：覆盖率没有分母，表里印"—"而不是那个退化成 100% 的比例。
+    // "没交付"和"注全了"在表格里长得一样的话，读表的人一定会读错。
+    const noFinal = c.segments > 0 && c.finalSegments === 0;
+    const cov = (v: number): string => (noFinal ? '—（0 段落盘）' : pct(v));
+    const dCov = (k: keyof CellMetric): string => (noFinal || (base.segments > 0 && base.finalSegments === 0) ? '—' : d(k, (v) => `${(v * 100).toFixed(1)}pp`));
     return [
       c.label,
       c.segments,
-      pct(c.genCoverage),
-      pct(c.finalCoverage),
-      c.coverageGain > 0 ? `+${c.coverageGain}pp` : `${c.coverageGain}pp`,
-      pct(c.duplicateRate),
+      cov(c.genCoverage),
+      cov(c.finalCoverage),
+      noFinal ? '—' : c.coverageGain > 0 ? `+${c.coverageGain}pp` : `${c.coverageGain}pp`,
+      // 重复注释率的分母是"注释总处数"：没有落盘正文时它同样是零分母
+      noFinal ? '—' : pct(c.duplicateRate),
       pct(c.manualRate),
       String(c.calls),
       c.tokensIn.toLocaleString(),
       pct(c.cacheHit),
       `¥${c.cost.toFixed(3)}`,
-      d('genCoverage', (v) => `${(v * 100).toFixed(1)}pp`),
+      dCov('genCoverage'),
       d('cost', (v) => `¥${v.toFixed(3)}`),
     ].join(' | ');
   });
-  const head = [
-    '实验格',
-    '段数',
-    '生成覆盖率',
-    '最终覆盖率',
-    '提升',
-    '重复注释率',
-    '人工修订率',
-    '调用',
-    '输入 tokens',
-    '缓存命中',
-    '花费',
-    'vs 基准(生成)',
-    'vs 基准(花费)',
-  ].join(' | ');
+  const head = ['实验格', '段数', '生成覆盖率', '最终覆盖率', '提升', '重复注释率', '人工修订率', '调用', '输入 tokens', '缓存命中', '花费', 'vs 基准(生成)', 'vs 基准(花费)'].join(' | ');
   const sep = ['---', '---:', '---:', '---:', '---:', '---:', '---:', '---:', '---:', '---:', '---:', '---:', '---:'].join('|');
   return [`| ${head} |`, `|${sep}|`, ...rows.map((r) => `| ${r} |`)].join('\n');
 }
@@ -230,16 +231,23 @@ export function experimentVerdict(cells: CellMetric[]): string[] {
   const out: string[] = [];
   const fallback = cells.filter((c) => c.firstFallback > 0);
   if (fallback.length) {
-    out.push(
-      `⚠ ${fallback.map((c) => c.label).join('、')} 有段缺"首轮响应"（用最终正文顶替），` +
-        '生成覆盖率会被高估——结论里不要用这几格的生成覆盖率下判断。',
-    );
+    out.push(`⚠ ${fallback.map((c) => c.label).join('、')} 有段缺"首轮响应"（用最终正文顶替），` + '生成覆盖率会被高估——结论里不要用这几格的生成覆盖率下判断。');
+  }
+  // 一段都没落盘时不报覆盖率：分母为零的那个 100% 不是成绩，是"没交付"
+  const empty = cells.filter((c) => c.segments > 0 && c.finalSegments === 0);
+  if (empty.length) {
+    out.push(`⚠ ${empty.map((c) => c.label).join('、')} **一段都没落盘**（全部进人工队列）：` + '这几格的覆盖率没有分母，"最终覆盖率 100%"是假的——先看人工修订率，别引用覆盖率。');
   }
   const sessionGain = comparePair(cells, 'session');
   const vocabGain = comparePair(cells, 'vocab');
   for (const g of [sessionGain, vocabGain]) if (g) out.push(g);
   const best = [...cells].sort((a, b) => b.finalCoverage - a.finalCoverage || a.cost - b.cost)[0];
-  out.push(`最终覆盖率最高且花费更省的是「${best.label}」（最终覆盖率 ${pct(best.finalCoverage)}，¥${best.cost.toFixed(3)}）。`);
+  if (best.segments > 0 && best.finalSegments === 0) {
+    // 全都没落盘时**不做排名**：拿一个没有分母的比例排出来的第一名，只是噪声的排列
+    out.push('四格都没有落盘正文（全部进人工队列）：这里比不出"哪一格更好"——先看人工修订率与门禁规则，别拿覆盖率排名。');
+  } else {
+    out.push(`最终覆盖率最高且花费更省的是「${best.label}」（最终覆盖率 ${pct(best.finalCoverage)}，¥${best.cost.toFixed(3)}）。`);
+  }
   const worstManual = [...cells].sort((a, b) => b.manualRate - a.manualRate)[0];
   if (worstManual.manualRate > 0.2) {
     out.push(`⚠ 「${worstManual.label}」人工修订率 ${pct(worstManual.manualRate)} 偏高——先修规则或词库，别急着扩量。`);
