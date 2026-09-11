@@ -166,3 +166,30 @@ test('★ 冻结的结论里不许出现本机绝对路径（换台机器跑必�
     assert.equal(raw.includes(bad), false, `结论里混进了本机路径 ${bad}——换台机器就对不上了`);
   }
 });
+
+/* ────────────────────── ④ 文档里的数也要有人守 ────────────────────── */
+
+test('★ README 里报给用户的数，必须与可复现的冻样本一致', () => {
+  /* 这条用例是有来由的：README 原来写着"A 层阅读负荷下降 **30%**、理解支架覆盖率 **94%**；
+   * M 层 **43%** / **93%**"，而用当前代码在**当前产物**上重算，得到的是
+   * A 28% / 96%、M 45% / 98%——那三个数是 2026-09-10 词表口径修复**之前**留下的，
+   * 之后就再没人对过。README 是潜在用户和另一位老师最先看到的东西，
+   * 它上面写着一个复现不出来的性能数字，比不写更糟。
+   *
+   * 现在把它**绑到冻样本上**：想改 README 里的数，就得先重新冻结样本
+   * （也就是真的在真项目上重算一遍）。这比"写的时候仔细一点"可靠。 */
+  const f = frozen();
+  const readme = readFileSync(join(REPO, 'README.md'), 'utf-8');
+  for (const t of ['A', 'M', 'B'] as const) {
+    const a = f.结论.定位两条轴[t]!;
+    const 应含 = `${t} 层`;
+    assert.equal(readme.includes(应含), true, `README 里没提 ${t} 层`);
+    const line = `阅读负荷下降 ${a.阅读负荷下降}%、理解支架覆盖率 ${a.理解支架覆盖率}%`;
+    if (t === 'A') {
+      assert.equal(readme.includes(line), true, `README 的 A 层数字对不上可复现样本：应含「${line}」`);
+    } else {
+      assert.equal(readme.includes(`${a.阅读负荷下降}% / ${a.理解支架覆盖率}%`), true, `README 的 ${t} 层数字对不上：应为 ${a.阅读负荷下降}% / ${a.理解支架覆盖率}%`);
+    }
+  }
+  assert.equal(readme.includes('tests/fixtures/replay'), true, 'README 要说清这几个数**怎么复现**，否则读者只能选择相信');
+});
