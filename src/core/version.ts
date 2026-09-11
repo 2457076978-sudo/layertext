@@ -364,10 +364,20 @@ export interface ApplyChangeBatchArgs extends Omit<ApplyChangeArgs, 'target' | '
 
 /* ── 内部工具 ── */
 
+/**
+ * 读一个**可能还不存在**的文件。
+ *
+ * 有意兜底：这里返回 fallback 而不是把错误抛出去，理由是"文件不存在"在这个位置
+ * **就是正常状态**——账本是 append-only 的，第一次运行时它当然还没有。
+ * 区分"还没有账本"和"账本读不出来"要靠调用方对结果的解读，而不是靠这里抛不抛。
+ * （真正的读失败（权限、坏盘）会在后续写入时暴露，不会静默变成"这次没有改动"。）
+ */
 const readOr = async (io: TxIo, path: string, fallback: string): Promise<string> => {
   try {
     return await io.read(path);
   } catch {
+    // 有意兜底：账本第一次运行时本来就还不存在——"没有账本"是正常状态，不是错误。
+    // （真正的读失败（权限、坏盘）会在随后写入时暴露，不会静默变成"这次没有改动"。）
     return fallback;
   }
 };
