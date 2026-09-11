@@ -42,9 +42,10 @@ export interface GateRule {
 /** 规则总表：**唯一口径**。风险队列、报告、门禁都从这里取规则元数据，避免三处漂移。
  *
  *  risk = weight × probability 的排序结果（审查报告 §一 明确要求的优先级）：
- *    数字变化 13.2 ＞ 专名缺失 12.0 ＞ 正文混入中文 11.0 ＞ 超纲词漏注 10.0
- *    ＞ 超长句 8.0 ＞ 释义冲突 6.3 ＞ 篇幅偏离 6.0 ＞ 重复注释 4.5
- *  也就是：事实差异置顶 → 其次漏注与超长 → 最后低风险语言润色。 */
+ *    段标记错乱 14.4 ＞ 数字变化 13.2 ＞ 专名缺失 12.0 ＞ 正文混入中文 11.0 ＞ 超纲词漏注 10.0
+ *    ＞ 超长句 8.0 ＞ 同词多义 7.2 ＞ 释义冲突 6.3 ＞ 篇幅偏离 6.0 = 注释畸形 6.0 ＞ 重复注释 4.5
+ *  也就是：**先保证这一章的对照本身没被结构问题弄错**，其次事实差异置顶 → 漏注与超长
+ *  → 最后低风险语言润色。 */
 export const GATE_RULES: Record<string, GateRule> = {
   'LEN-01': { id: 'LEN-01', category: '语言', severity: 'blocker', weight: 6, probability: 1, label: '篇幅偏离目标' },
   'SENT-01': { id: 'SENT-01', category: '语言', severity: 'blocker', weight: 8, probability: 1, label: '超长句' },
@@ -54,6 +55,12 @@ export const GATE_RULES: Record<string, GateRule> = {
   'ANNO-03': { id: 'ANNO-03', category: '加注', severity: 'warn', weight: 9, probability: 0.7, label: '释义与统一词典冲突' },
   'FACT-01': { id: 'FACT-01', category: '事实', severity: 'warn', weight: 22, probability: 0.6, label: '数字变化/丢失' },
   'FACT-02': { id: 'FACT-02', category: '事实', severity: 'warn', weight: 20, probability: 0.6, label: '专名缺失' },
+  // ── 结构类（来自章节 AST src/core/docast.ts，报告 §四）：正则看不出来的那些 ──
+  //   段标记一旦缺失/重复/跳号，**这一章所有按标记配对的对照都是错的**，
+  //   所以它的后果权重最高——比任何单条事实差异都更该先看。
+  'AST-01': { id: 'AST-01', category: '格式', severity: 'warn', weight: 16, probability: 0.9, label: '段标记缺失/重复/跳号' },
+  'AST-02': { id: 'AST-02', category: '加注', severity: 'warn', weight: 9, probability: 0.8, label: '同词多义（一份产物里同词不同释义）' },
+  'AST-03': { id: 'AST-03', category: '加注', severity: 'warn', weight: 6, probability: 1, label: '注释畸形（嵌套/括号不配对）' },
 };
 
 export interface GateProblem {

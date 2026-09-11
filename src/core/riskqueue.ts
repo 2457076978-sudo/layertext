@@ -17,7 +17,7 @@
  * 风险队列回答"人先看哪一条"（warn 也在队列里，只是排在后面）。
  */
 
-import { alignSentencePairs, type AlignSentRef } from './align.js';
+import { alignSentencePairs, numberWordOf, type AlignSentRef } from './align.js';
 import { GATE_RULES, stripMarkers, type GateCategory, type GateProblem, type GateSeverity } from './segmentgate.js';
 import { sentsOf } from './textpipe.js';
 
@@ -159,8 +159,12 @@ function expand(input: SegmentRiskInput, p: GateProblem): RiskItem[] {
   switch (p.ruleId) {
     case 'FACT-01':
     case 'FACT-02':
-      // 每个数字/专名单独一条：教师是逐个核对"1911 有没有变成 1912"，不是整段看
-      return list(p.detail?.signals).map((s) => make(s, `原文的「${s}」在改写里找不到`, s, { signal: s }));
+      // 每个数字/专名单独一条：教师是逐个核对"1911 有没有变成 1912"，不是整段看。
+      // 数字信号是归一后的（two → 2），标题里把英文数词一并写出来，教师才看得懂。
+      return list(p.detail?.signals).map((s) => {
+        const w = /^\d/.test(s) ? numberWordOf(s) : null;
+        return make(s, `原文的「${s}」${w ? `（原文写的是 ${w}）` : ''}在改写里找不到`, s, { signal: s, numberWord: w });
+      });
     case 'ANNO-01':
       return list(p.detail?.missing).map((w) => make(w, `超纲词 ${w} 没有加注`, w, { word: w }));
     case 'ANNO-02':
@@ -174,6 +178,12 @@ function expand(input: SegmentRiskInput, p: GateProblem): RiskItem[] {
       return list(p.detail?.sentences).map((s, i) =>
         make(String(i), `改写句 ${s.trim().split(/\s+/).length} 词，超过本层上限 ${p.detail?.maxLen ?? ''} 词`, '', { sentence: s, index: i }, s),
       );
+    case 'AST-02':
+    case 'AST-03': {
+      // 结构类问题定位到词（同词多义）或整段（畸形注释），与其它规则同样是"一条问题一项"
+      const w = typeof p.detail?.word === 'string' ? p.detail.word : '';
+      return [make(w || '0', p.message, w, w ? { word: w } : {})];
+    }
     default:
       return [make('0', p.message, '', {})];
   }

@@ -193,7 +193,15 @@ export function loadDict(path) {
  *   风险队列会把第 8 段的原句配到第 7 段的改写上，人看到的对照全是错的。
  *   标记是段落的稳定 ID，按它对齐才对。 */
 export function segmentList(md) {
-  const body = String(md).split('## 词句卡')[0];
+  const text = String(md);
+  // ★ 必须先切掉 `## Chapter` 之前的前置说明区。
+  //   实测（Animal Farm 第一章）：前置块里写着一句「[P14] 为稳定锚，改写稿沿用同ID。」——
+  //   那是**在说**段号，不是段号本身。不切头部就会把它当成一个段落，
+  //   于是原文/产物各多出一个幽灵段，索引整体错位，而且"14"还会被当成数字事实信号，
+  //   让风险队列最前面几条全是假警报（教师看两条就会开始忽略整个队列）。
+  const hm = text.match(/## Chapter \w+[^\n]*/);
+  const after = hm ? text.slice((hm.index ?? 0) + hm[0].length) : text;
+  const body = after.split('## 词句卡')[0];
   return [...body.matchAll(/\[(P\d+)\][\s\S]*?(?=\[P\d+\]|$)/g)].map((m) => ({ id: m[1], text: m[0] }));
 }
 

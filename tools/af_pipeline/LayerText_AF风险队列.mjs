@@ -54,16 +54,25 @@ if (!TIERS.length) { console.error('✗ --tier 只能是 A / M / B 的组合'); 
 
 const { gateSegment, GATE_RULES } = await import(`${REPO}/dist/src/core/segmentgate.js`);
 const { buildRiskQueue, oneHourPlan } = await import(`${REPO}/dist/src/core/riskqueue.js`);
+const { parseDoc } = await import(`${REPO}/dist/src/core/docast.js`);
 const { runQc } = await import(`${REPO}/dist/src/core/qc.js`);
 const LEX = await SHARED.loadLexicon(P);
 const DICT = SHARED.loadDict(P.词典路径);
 const { segmentList } = SHARED;
 const wc = (t) => (t.match(/[A-Za-z][A-Za-z'-]*/g) ?? []).length;
 
-/** 该段应注的超纲词（与生成脚本同一口径：OOV 去重、去两字母词） */
+const warnings = [];
+/** 该段应注的超纲词（与生成脚本同一口径：OOV 去重、去两字母词）。
+ *  没有可切分句子的段（插图占位、纯符号行、门禁留下的占位注释）**不是错误**——
+ *  但也不能静默跳过：记一条 warning 并计数（审查报告 §三第②条：不许 catch{} 吞错）。 */
 const oovOf = (seg) => {
   const md = `## Chapter One\n\n${seg}\n`;
-  return [...new Set(runQc(md, LEX, { tier: 'M', fileName: 'seg.md', dict: DICT }).oov)].filter((w) => w.length > 2);
+  try {
+    return [...new Set(runQc(md, LEX, { tier: 'M', fileName: 'seg.md', dict: DICT }).oov)].filter((w) => w.length > 2);
+  } catch (e) {
+    warnings.push(`跳过一个切不出句子的段（${(e instanceof Error ? e.message : String(e)).slice(0, 40)}）：${seg.trim().slice(0, 60)}`);
+    return [];
+  }
 };
 
 console.log('════ AF 段级风险队列 ════');
@@ -84,7 +93,33 @@ for (const tier of TIERS) {
     if (!existsSync(srcPath)) { unreadable.push(`${ch}：缺规范化原文`); continue; }
     if (!existsSync(outPath)) { unreadable.push(`${ch}：缺 ${tag} 产物（先去生成）`); continue; }
     const srcSegs = segmentList(readFileSync(srcPath, 'utf-8'));
-    const outById = new Map(segmentList(readFileSync(outPath, 'utf-8')).map((s) => [s.id, s.text]));
+    const outMd = readFileSync(outPath, 'utf-8');
+    const outById = new Map(segmentList(outMd).map((s) => [s.id, s.text]));
+
+    /* 结构类检查（报告 §四：内部转 AST，避免正则在连字符/多义词/嵌套标记上失真）。
+     * 放在逐段门禁之前：段标记一旦缺失/重复/跳号，**这一章所有按标记配对的对照都是错的**，
+     * 先把它顶到队列最前面，人才不会拿着错位的对照白看一遍。 */
+    const ast = parseDoc(outMd);
+    const AST_RULE = { 'marker-missing': 'AST-01', 'marker-duplicate': 'AST-01', 'marker-gap': 'AST-01', 'sense-conflict': 'AST-02', 'annotation-unclosed': 'AST-03', 'annotation-nested': 'AST-03' };
+    for (const issue of ast.issues) {
+      const ruleId = AST_RULE[issue.kind];
+      if (!ruleId) continue;
+      const segIdx = Math.max(0, ast.segments.findIndex((x) => x.id === issue.segId));
+      allSegments.push({
+        book: P.书名, tier, chapter: ch, segIndex: segIdx,
+        source: ast.segments[segIdx]?.raw ?? '',
+        rewritten: ast.segments[segIdx]?.raw ?? '',
+        problems: [{
+          ruleId,
+          category: GATE_RULES[ruleId].category,
+          severity: GATE_RULES[ruleId].severity,
+          weight: GATE_RULES[ruleId].weight,
+          risk: Number((GATE_RULES[ruleId].weight * GATE_RULES[ruleId].probability).toFixed(2)),
+          message: issue.message,
+          detail: { ...(issue.detail ?? {}), kind: issue.kind, needsHuman: issue.needsHuman },
+        }],
+      });
+    }
     srcSegs.forEach((s, k) => {
       const rewritten = outById.get(s.id);
       // 产物里没有这一段 = 生成时门禁未通过、被隔离了。它不是"待判定"，是"未完成"。
@@ -193,6 +228,10 @@ writeFileSync(
   'utf-8',
 );
 
+if (warnings.length) {
+  console.warn(`\n⚠ ${warnings.length} 个段落切不出句子（已跳过，不计入覆盖率）：`);
+  for (const w of warnings.slice(0, 5)) console.warn(`   ${w}`);
+}
 console.log(`\n队列 ${queue.summary.total} 条（不可完成 ${queue.summary.blockers}）｜未完成段落 ${unfinished.length} 段｜估时 ${queue.summary.estimatedMinutes} 分钟`);
 if (queue.summary.total) {
   console.log('排在最前面的 5 条：');

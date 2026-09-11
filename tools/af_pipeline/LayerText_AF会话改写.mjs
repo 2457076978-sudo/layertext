@@ -381,10 +381,20 @@ async function callChat(messages, maxTokens = 3000, tools = null) {
 }
 
 /* ────────────────────── 本地体检（确定性、免费、瞬间） ────────────────────── */
-/** 把一段包成最小章节喂给引擎 QC，拿到这段的 OOV / 句长 / 加注情况 */
+/** 把一段包成最小章节喂给引擎 QC，拿到这段的 OOV / 句长 / 加注情况。
+ *  切不出句子的段（插图占位、纯符号行）**不是失败**：返回空 OOV，
+ *  但仍然记一条 warning —— 静默跳过和静默通过一样危险（审查报告 §三第②条）。 */
+let emptySegWarnings = 0;
 function segQc(seg) {
   const md = `## Chapter One\n\n${seg}\n`;
-  return runQc(md, LEX, { tier: TIER, fileName: 'seg.md', dict: DICT });
+  try {
+    return runQc(md, LEX, { tier: TIER, fileName: 'seg.md', dict: DICT });
+  } catch (e) {
+    emptySegWarnings++;
+    if (emptySegWarnings <= 3) console.warn(`⚠ 该段切不出句子（按无超纲词处理）：${seg.trim().slice(0, 50)}`);
+    void e;
+    return { oov: [] };
+  }
 }
 /** 该段"必须加注"的词：不在已知集合里、长度>2 */
 function mustAnnotate(seg) {
@@ -753,6 +763,7 @@ if (incomplete) {
   console.error('   未写完成标记。同一条命令加 --resume 即可从失败处继续（未通过的段不在 done 里，会被重跑）。');
   process.exit(1);
 }
+if (emptySegWarnings) warn('empty-segment', `${emptySegWarnings} 个段落切不出句子（按无超纲词处理，未做加注检查）`);
 if (state.warnings.length) console.warn(`\n⚠ 本轮有 ${state.warnings.length} 条 warning（详见运行清单与事件日志），不阻塞完成。`);
 writeFileSync(doneMarker(), JSON.stringify({ ...runSummary, 完成时间: new Date().toISOString() }, null, 2), 'utf-8');
 if (existsSync(reviewMarker())) rmSync(reviewMarker());

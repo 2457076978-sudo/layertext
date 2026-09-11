@@ -21,7 +21,7 @@ export interface AlignRow {
 }
 
 /** 英文数字词 → 数字串（three→3），让数字词与阿拉伯数字能互认 */
-const NUM_WORDS: Record<string, string> = {
+export const NUM_WORDS: Record<string, string> = {
   zero: '0',
   one: '1',
   two: '2',
@@ -211,6 +211,15 @@ export function signalsOf(t: string): string[] {
     if (/^[A-Z]/.test(w) && !SENT_STARTERS.has(lower)) out.push(w);
   }
   return out;
+}
+
+/** 数字词 → 数字的反查（`2` → `two`）。
+ *  事实信号把英文数词归一到数字（`two` → `2`），配对时更稳；
+ *  但**给人看的标题不能只有数字**——「原文的『2』在改写里找不到」在原文写的是
+ *  "two cart-horses" 时会让人一头雾水。 */
+export function numberWordOf(digit: string): string | null {
+  for (const [w, d] of Object.entries(NUM_WORDS)) if (d === digit) return w;
+  return null;
 }
 
 /** 基准句有、当前句没有的信号（"信息丢了"的机器核对口径） */

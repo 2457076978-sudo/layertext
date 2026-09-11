@@ -69,6 +69,23 @@ test('每项都带原句、改写句、触发规则与上下文两句话', () =>
   assert.match(proper.context.next, /listened quietly/);
 });
 
+test('数字信号渲染成人话：归一后的 2 要写出原文的 two（否则教师看不懂）', () => {
+  const q = buildRiskQueue([
+    {
+      chapter: '第四章',
+      segIndex: 0,
+      source: '[P01] Their most faithful disciples were the two cart-horses.',
+      rewritten: '[P01] Their best followers were the cart-horses.',
+      problems: [
+        { ruleId: 'FACT-01', category: '事实', severity: 'warn', weight: 22, risk: 13.2, message: '数字丢失', detail: { signals: ['2'] } },
+      ],
+    },
+  ]);
+  assert.equal(q.items[0].title, '原文的「2」（原文写的是 two）在改写里找不到');
+  assert.equal(q.items[0].detail?.numberWord, 'two');
+  assert.equal(q.items[0].id, '第四章#0:FACT-01:2', 'ID 仍用归一后的信号（稳定，不随措辞变）');
+});
+
 test('事实类是逐条展开的：两个数字就是两条待办，不是一条', () => {
   const q = buildRiskQueue([
     {

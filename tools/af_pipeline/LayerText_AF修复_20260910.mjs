@@ -64,13 +64,14 @@ const pOf = (ch, tag) => join(OUT_BASE, ch, `原文_${tag}_${DATE}.md`);
 /** 畸形嵌套注释：模型把释义又注了一遍，产生 `Mollie（莫丽（名字））`、
  *  `hoof（复数 hoofs（蹄子）/hooves（蹄））`。ANN_RE 的 `[^（）]` 会整段跳过它们，
  *  所以必须先摊平成单层再走正常流程。 */
-const NESTED_RE = /([A-Za-z][A-Za-z'-]*)（((?:[^（）]|（[^（）]*）)+)）/g;
+/** 嵌套注释的**判定与摊平**统一走引擎的 AST（src/core/docast.ts）。
+ *  原先这里自己写了一条 NESTED_RE：它只能处理一层嵌套，而且和引擎其它地方的
+ *  "什么算一条注释"口径不完全一致——又是一次口径漂移。
+ *  现在按括号深度扫描（能处理任意深度），并保留 `word（第一个中文串）` 的既有语义。 */
+const { flattenNestedAnnotations } = await import(`${P.引擎目录}/dist/src/core/docast.js`);
+
 function flattenNested(md) {
-  return md.replace(NESTED_RE, (full, word, gloss) => {
-    if (!gloss.includes('（')) return full;              // 单层正常注释，不动
-    const zh = gloss.match(/[\u4e00-\u9fff]{1,6}/g);     // 取第一个中文串作释义
-    return zh?.length ? `${word}（${zh[0]}）` : word;
-  });
+  return flattenNestedAnnotations(md).md;
 }
 
 /** 字面 `[P##]` 占位符残留：模型把提示词模板原样吐了出来，真标记丢了。
