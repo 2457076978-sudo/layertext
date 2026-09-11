@@ -1,5 +1,7 @@
 node_modules/
 dist/
+# 多人并行测试各自的 tsc 输出（tests 里用 LAYERTEXT_DIST 指定，不与共享 dist/ 互踩）
+dist-*/
 
 # Tauri 应用（app/）
 app/dist/
