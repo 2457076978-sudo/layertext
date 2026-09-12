@@ -41,6 +41,12 @@ export interface ScanCtx {
   glossary: Map<string, string>;
   /** 词汇复筛的差集基准：全章**原文**（对它取差，抓出管线任意一道引入的词表外词） */
   prevStageText?: string;
+  /** 加注配额（每段必注词上限，A2/M1/B3——层定义决定；不传=全量必注）。
+   *  配额外的超纲词是"挑战层保留项"，进 recap 开口问题交教师，不当场拦死——
+   *  否则门禁与层策略打架（2026-09-12 A 层第七章实跑：6 个残留 OOV 全量必注被拦 17 段）。 */
+  annoCap?: number;
+  /** 教师知识库必注词（配额内优先保它们） */
+  mustAnnotate?: Set<string>;
 }
 
 const WORD_RE = /[A-Za-z][A-Za-z'-]*/g;
@@ -55,7 +61,7 @@ export function oovOfSeg(seg: string, ctx: ScanCtx): string[] {
     if (m.length < 3 || proper.has(m)) continue;
     if (!knownWordHit(m, ctx.knownWords) && !out.includes(m)) out.push(m);
   }
-  return out.sort();
+  return out; // 出现序（加注按"首次出现处"，配额按出现序补足——字母序会丢这层信息）
 }
 
 /**
@@ -99,12 +105,24 @@ export function scanFor(stage: Stage, seg: ScanSeg, ctx: ScanCtx): string[] {
       return issues;
     }
 
+/** 加注工序的**必注清单**（配额口径唯一落点）：OOV 去已注账本，教师知识库必注词优先，
+ *  按文中出现序补足到层配额。扫描（写进 prompt）与门禁（ANNO-01 应注集）都从这里取，
+ *  两处清单天然一致。 */
     case 'annotation': {
-      /* 该注而未注：OOV 且不在全章已注账本里（一词一注，注过的不重复注） */
-      const need = oovOfSeg(seg.draft, ctx).filter((w) => !ctx.glossary.has(w));
-      return need.length ? [`待加注 ${need.length} 词：${need.slice(0, 12).join('、')}`] : [];
+      const { need, extra } = annotationTargets(seg.draft, ctx);
+      return need.length
+        ? [`待加注 ${need.length} 词：${need.slice(0, 12).join('、')}${extra > 0 ? `（另有 ${extra} 个超纲词按${ctx.tier}层策略保留为挑战项，本工序不注）` : ''}`]
+        : [];
     }
   }
+}
+
+export function annotationTargets(draft: string, ctx: ScanCtx): { need: string[]; extra: number } {
+  const pending = oovOfSeg(draft, ctx).filter((w) => !ctx.glossary.has(w));
+  const cap = ctx.annoCap ?? Infinity;
+  const must = ctx.mustAnnotate ?? new Set<string>();
+  const ordered = [...pending].sort((a, b) => (Number(must.has(b)) - Number(must.has(a))) || pending.indexOf(a) - pending.indexOf(b));
+  return { need: ordered.slice(0, cap), extra: ordered.length - Math.min(ordered.length, cap) };
 }
 
 /** 一份稿本的注释密度（处/百词，与两轮调适检查同尺）——加注工序的预算与收线用。

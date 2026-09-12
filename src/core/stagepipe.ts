@@ -21,8 +21,11 @@ import {
   Stage, STAGE_ORDER, STAGE_LABEL, StagePatchRequest,
   parseStagePatch, gatePatches, mergePatch, GateSegCtx,
 } from './stagepatch.js';
-import { ScanCtx, ScanSeg, scanFor, oovOfSeg } from './stagescan.js';
-import { annotatableOf, signalsOf, stripMarkers } from './segmentgate.js';
+import type { GatedPatches } from './stagepatch.js';
+/** 门禁拒绝条目（stagepatch 的结构，编排里只透传） */
+type GatedBlocked = GatedPatches['blocked'];
+import { ScanCtx, ScanSeg, scanFor, oovOfSeg, annotationTargets } from './stagescan.js';
+import { annotatableOf } from './segmentgate.js';
 
 /* ────────────────────── 工序指令（默认文案；管线可整体覆盖） ────────────────────── */
 
@@ -43,7 +46,8 @@ export function defaultInstructions(): StageInstructions {
       '数字、专名、否定、因果一个不能丢；不简化词汇、不拆并句子。只处理给出的问题段。',
     annotation:
       '给列出的待注词在本段首次出现处加注，格式 word（中文），释义用给出的建议释义；' +
-      '每个词只注一次；不改动英文内容本身。只处理给出的问题段。',
+      '每个词只注一次；不改动英文内容本身。text 里除 word（中文）注释外不得出现任何中文；' +
+      '说明与理由只能写在 reason 字段。只处理给出的问题段。',
   };
 }
 
@@ -96,6 +100,17 @@ export interface StagePipeOpts {
   instructions?: StageInstructions;
   /** 单段每道工序的最大尝试次数（默认 2：首次 + 带失败原因的重试） */
   maxStageTries?: number;
+  /** 每次请求的段数上限（默认 8：防一次请求的 patch 输出被 max_tokens 截断） */
+  chunkSize?: number;
+  /** 加注配额：每段必注词上限（A2/M1/B3，层定义决定；不传=全量必注） */
+  annoCapPerSeg?: number;
+  /** 教师知识库必注词（配额内优先） */
+  mustAnnotate?: Set<string>;
+  /** 注入的确定性加注器：本段文本 + 必注清单 → 注好释的段文本。给了它，
+   *  annotation 工序完全本地化（能本地确定性解决绝不引 AI——方案 §4.2）：
+   *  词典有释义就地插入；缺释义由注入方自己批量问模型**只要词义**，不让模型重写段落。
+   *  模型"返回插好注释的整段"实测随机漏注/混中文/顺手改写（2026-09-12 A7 五轮实跑），此路封死。 */
+  annotate?: (draft: string, targets: { need: string[]; extra: number }, segId: string) => Promise<string>;
   /** 释义建议（加注工序 prompt 用；词→中文），默认空——管线通常传统一词典命中部分 */
   glossHints?: Map<string, string>;
   onEvent?: (e: StagePipeEvent) => void;
@@ -140,6 +155,8 @@ export async function runStagePipeline(opts: StagePipeOpts): Promise<StagePipeRe
     const ctx: ScanCtx = {
       tier: opts.tier, knownWords: opts.knownWords, properNouns: opts.properNouns,
       glossary, prevStageText,
+      annoCap: stage === 'annotation' ? opts.annoCapPerSeg : undefined,
+      mustAnnotate: opts.mustAnnotate,
     };
     const active = opts.segs.filter((s) => !quarantinedIds.has(s.id));
     const candidates: PoolItem[] = active
@@ -153,70 +170,117 @@ export async function runStagePipeline(opts: StagePipeOpts): Promise<StagePipeRe
       continue;
     }
 
+    /* 加注工序的确定性路径：词典优先就地插入，不经 patch 协议（见 opts.annotate 注释） */
+    if (stage === 'annotation' && opts.annotate) {
+      const changedIds: string[] = [];
+      const problems: string[] = [];
+      for (const x of candidates) {
+        const before = text[x.seg.id];
+        let after = before;
+        try {
+          after = await opts.annotate(before, annotationTargets(before, ctx), x.seg.id);
+        } catch (e) {
+          problems.push(`${x.seg.id} 加注失败：${String(e).slice(0, 120)}`);
+          continue;
+        }
+        if (after !== before) {
+          text[x.seg.id] = after;
+          changedIds.push(x.seg.id);
+        }
+      }
+      if (changedIds.length) version++;
+      checkpoints.push({ stage, called: changedIds.length > 0, version, changedIds, blockedIds: [], problems, candidateIds: candidates.map((x) => x.seg.id) });
+      emit({ kind: changedIds.length ? 'stage-commit' : 'stage-fail', stage, detail: changedIds.length ? `v${version}：注 ${changedIds.length} 段（确定性插入）` : '加注零段落盘' });
+      continue;
+    }
+
     emit({ kind: 'stage-start', stage, detail: `${candidates.length}/${active.length} 段命中` });
     const problems: string[] = [];
     let pool: PoolItem[] = candidates;
     let attempt = 0;
     const changedAll = new Set<string>();
     let committed = false;
+    /* 候选段分批：一章几十段塞一个请求会被输出上限截断（截断的 JSON 只能整批作废）。
+     * 分批只影响调用形状，不影响协议——每批仍是独立请求+解析+门禁+合并。 */
+    const chunkSize = opts.chunkSize ?? 8;
+    const chunksOf = (items: PoolItem[]): PoolItem[][] => {
+      const out: PoolItem[][] = [];
+      for (let i = 0; i < items.length; i += chunkSize) out.push(items.slice(i, i + chunkSize));
+      return out;
+    };
 
     while (pool.length && attempt < maxTries) {
       attempt++;
-      const req: StagePatchRequest = {
-        stage,
-        baseVersion: `v${version}`,
-        segments: pool.map((x) => ({
+      const blockedThisAttempt: GatedBlocked = [];
+      let callFailed = false;
+
+      for (const chunk of chunksOf(pool)) {
+        const targetOf = (x: PoolItem): number => Math.round(segWords(x.seg.source) * opts.ratio);
+        const req: StagePatchRequest = {
+          stage,
+          baseVersion: `v${version}`,
+          segments: chunk.map((x) => ({
+            id: x.seg.id,
+            source: x.seg.source,
+            draft: text[x.seg.id],
+            issues: [
+              /* 每段目标词数给到所有改写工序：守恒从第一道就开始，别等终检才发现跑偏 */
+              `本段输出目标约 ${targetOf(x)} 词（±10%）`,
+              ...x.issues,
+              ...(x.rejectReason ? [`上一次尝试被拒绝的原因（必须解决）：${x.rejectReason}`] : []),
+            ],
+          })),
+          protectedFacts: [],
+          instruction: instructions[stage],
+        };
+        const gateCtx: GateSegCtx[] = chunk.map((x) => ({
           id: x.seg.id,
           source: x.seg.source,
-          draft: text[x.seg.id],
-          issues: x.rejectReason ? [...x.issues, `上一次尝试被拒绝的原因（必须解决）：${x.rejectReason}`] : x.issues,
-        })),
-        protectedFacts: [],
-        instruction: instructions[stage],
-      };
-      const gateCtx: GateSegCtx[] = pool.map((x) => ({
-        id: x.seg.id,
-        source: x.seg.source,
-        /* LEN-01 只在句法/加注两道生效（STAGE_BLOCK_RULES），目标 = 原文词数 × 层比例 */
-        target: stage === 'syntax' || stage === 'annotation' ? Math.round(segWords(x.seg.source) * opts.ratio) : 0,
-        maxLen: opts.maxLen,
-        /* ANNO-01 只在加注工序点生效：应注词型 = 当前稿本的未注 OOV（门禁自己会再过一遍口径） */
-        oov: stage === 'annotation' ? annotatableOf(oovOfSeg(text[x.seg.id], ctx)) : [],
-      }));
-      const protectedFacts: Record<string, string[]> = Object.fromEntries(
-        pool.map((x) => [x.seg.id, signalsOf(stripMarkers(x.seg.source))]),
-      );
+          /* LEN-01 只在句法/加注两道生效（STAGE_BLOCK_RULES），目标 = 原文词数 × 层比例 */
+          target: stage === 'syntax' || stage === 'annotation' ? Math.round(segWords(x.seg.source) * opts.ratio) : 0,
+          maxLen: opts.maxLen,
+          /* ANNO-01 只在加注工序点生效：应注集 = annotationTargets（教师知识库优先、
+           * 层配额封顶）——与写进 prompt 的是同一份清单（scanFor 也引它）。 */
+          oov: stage === 'annotation' ? annotatableOf(annotationTargets(text[x.seg.id], ctx).need) : [],
+        }));
+        /* 事实守卫不在这里自动抽取：signalsOf 的子串口径比 gateSegment 用的 lostSignals
+         * 粗糙（句首大写词、1st→first 都会被误判丢失——2026-09-12 A 层第七章实跑误杀 20 段）。
+         * 事实判定的唯一口径是 lostSignals（FACT-01/02，连贯性工序点拦截）；
+         * protectedFacts 留给调用方显式传入教师点名的保护词（方向二任务单）。 */
+        const protectedFacts: Record<string, string[]> = {};
 
-      let parsed: ReturnType<typeof parseStagePatch>;
-      try {
-        const raw = await opts.callStage(req);
-        parsed = parseStagePatch(raw, pool.map((x) => x.seg.id));
-      } catch (e) {
-        /* 调用层失败（网络/HTTP）：本尝试作废，段保持上一版；重试或如实记录，不伪造 patch */
-        problems.push(`第 ${attempt} 次调用失败：${String(e).slice(0, 160)}`);
-        break;
+        let parsed: ReturnType<typeof parseStagePatch>;
+        try {
+          const raw = await opts.callStage(req);
+          parsed = parseStagePatch(raw, chunk.map((x) => x.seg.id));
+        } catch (e) {
+          /* 调用层失败（网络/HTTP）：本批作废，段保持上一版；如实记录，不伪造 patch */
+          problems.push(`第 ${attempt} 次调用失败（${chunk.map((x) => x.seg.id).join(',')}）：${String(e).slice(0, 160)}`);
+          callFailed = true;
+          continue;
+        }
+        problems.push(...parsed.problems.map((p) => `[${STAGE_LABEL[stage]} 尝试${attempt}] ${p}`));
+        if (!parsed.ok || !parsed.result) continue;
+
+        const gated = gatePatches(parsed.result, gateCtx, { stage, protectedFacts });
+        const merged = mergePatch(text, { patches: gated.items, baseVersion: '' });
+        text = merged.text;
+        merged.changedIds.forEach((id) => changedAll.add(id));
+        committed = true;
+        blockedThisAttempt.push(...gated.blocked);
       }
-      problems.push(...parsed.problems.map((p) => `[${STAGE_LABEL[stage]} 尝试${attempt}] ${p}`));
-      if (!parsed.ok || !parsed.result) {
-        /* 解析失败重试一次（同池重发）；重试用尽则本道工序不落地，段保持上一版 */
-        continue;
-      }
 
-      const gated = gatePatches(parsed.result, gateCtx, { stage, protectedFacts });
-      const merged = mergePatch(text, { patches: gated.items, baseVersion: '' });
-      text = merged.text;
-      merged.changedIds.forEach((id) => changedAll.add(id));
-      committed = true;
-
-      const retryables = attempt < maxTries ? gated.blocked : [];
+      if (callFailed && attempt >= maxTries) break;
+      const retryables = attempt < maxTries ? blockedThisAttempt : [];
       if (retryables.length) {
         /* 只重试被拒的段，把拒绝原因带进 issues（第二次尝试的模型看得见自己错在哪） */
+        const rbMap = new Map(retryables.map((b) => [b.id, b.reason]));
         pool = pool
-          .filter((x) => retryables.some((rb) => rb.id === x.seg.id))
-          .map((x) => ({ ...x, rejectReason: gated.blocked.find((rb) => rb.id === x.seg.id)?.reason ?? '' }));
+          .filter((x) => rbMap.has(x.seg.id))
+          .map((x) => ({ ...x, rejectReason: rbMap.get(x.seg.id) ?? '' }));
         continue;
       }
-      for (const b of gated.blocked) {
+      for (const b of blockedThisAttempt) {
         quarantined.push({ stage, id: b.id, reason: b.reason, tries: attempt });
         quarantinedIds.add(b.id);
         emit({ kind: 'seg-quarantined', stage, detail: `${b.id}：${b.reason}` });

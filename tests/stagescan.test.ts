@@ -85,6 +85,17 @@ test('干净段五道工序全部零命中（零调用判定的事实依据）',
   }
 });
 
+test('加注配额：教师必注词优先、层配额封顶，超额部分如实提示', () => {
+  const seg = { id: 'P01', source: '[P01] s', draft: '[P01] alpha tyrannised beta grudge gamma hitherto.' };
+  const c = ctx({ annoCap: 2, mustAnnotate: new Set(['grudge']) });
+  const issues = scanFor('annotation', seg, c);
+  assert.ok(issues.length === 1);
+  const mainPart = issues[0]!.slice(0, issues[0]!.indexOf('（'));
+  assert.ok(mainPart.includes('grudge'), 'KB 必注词插队进配额');
+  assert.ok(issues[0]!.includes('挑战项'), '超额部分点名但不进必注清单');
+  assert.ok(!mainPart.includes('hitherto'), '配额外的词不进必注清单');
+});
+
 test('注释密度：处/百词口径，加注预算与检查同尺', () => {
   const d = annoDensityOf(['[P01] word word word word word', '[P02] a（一） b（二） word word']);
   assert.equal(d.annos, 2);
