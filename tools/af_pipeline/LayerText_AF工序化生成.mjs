@@ -40,6 +40,7 @@ const { makeResolver, dirOfPath } = await import(`${distOf(REPO)}/src/core/manif
 const { atomicWriteFileSync: writeAtomic } = await import(`${distOf(REPO)}/src/core/files.js`);
 const { runStagePipeline, buildChapterRecap, classifyQuarantine, defaultInstructions: DEFAULT_INSTRUCTIONS } = await import(`${distOf(REPO)}/src/core/stagepipe.js`);
 const { parseSenses, pickSense } = await import(`${distOf(REPO)}/src/core/sensematch.js`);
+const { expandForms } = await import(`${distOf(REPO)}/src/core/adaptcheck.js`);
 const { ANNO_DENSITY_LIMIT } = await import(`${distOf(REPO)}/src/core/adaptcheck.js`);
 const { STAGE_LABEL } = await import(`${distOf(REPO)}/src/core/stagepatch.js`);
 
@@ -132,8 +133,11 @@ function insertAnnotation(text, word, zh) {
 async function localGlosses(words, ctxOf) {
   const out = new Map();
   let entries;
+  /* 查询词表 = 表层形 + 词形还原基式（broke 是 break 的过去式——只查表层会命中
+   * 同形形容词词条「不名一文」；表层与基式两词条的义项并集一起进 Lesk 由语境裁决） */
+  const lookups = [...new Set(words.flatMap((w) => [w, ...expandForms(w)]).map((w) => w.toLowerCase()))];
   try {
-    const raw = execSync(`swift "${join(REPO, 'tools/af_pipeline/dict_senses.swift')}" ${words.map((w) => w.replace(/[^A-Za-z'-]/g, '')).join(',')}`, {
+    const raw = execSync(`swift "${join(REPO, 'tools/af_pipeline/dict_senses.swift')}" ${lookups.join(',')}`, {
       encoding: 'utf-8',
       timeout: 60_000,
       maxBuffer: 8 * 1024 * 1024,
@@ -144,7 +148,8 @@ async function localGlosses(words, ctxOf) {
     return out;
   }
   for (const w of words) {
-    const senses = parseSenses(entries[w.toLowerCase()] ?? '');
+    const forms = [...new Set([w, ...expandForms(w)].map((f) => f.toLowerCase()))];
+    const senses = forms.flatMap((f) => parseSenses(entries[f] ?? ''));
     if (!senses.length) continue;
     const pick = pickSense(ctxOf(w) ?? '', senses);
     if (pick.sense?.zh) {
