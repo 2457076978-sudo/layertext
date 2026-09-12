@@ -22,7 +22,7 @@ import type { GatedPatches } from './stagepatch.js';
 /** 门禁拒绝条目（stagepatch 的结构，编排里只透传） */
 type GatedBlocked = GatedPatches['blocked'];
 import { ScanCtx, ScanSeg, scanFor, annotationTargets, oovOfSeg } from './stagescan.js';
-import { burdenProfileOf } from './adaptcheck.js';
+import { burdenProfileOf, SENT_LEN_CHECK } from './adaptcheck.js';
 import { annotatableOf } from './segmentgate.js';
 
 /* ────────────────────── 工序指令（默认文案；管线可整体覆盖） ────────────────────── */
@@ -219,7 +219,10 @@ export async function runStagePipeline(opts: StagePipeOpts): Promise<StagePipeRe
           id: x.seg.id,
           source: x.seg.source,
           target: 0,
-          maxLen: opts.maxLen,
+          /* 门禁句长 = 检查线（SENT_LEN_CHECK，与扫描点名列句/质检报表同一把尺）；
+           * 生成上限（opts.maxLen，A17/M15/B14）只是提示词里的目标值，不作判定线——
+           * 2026-09-12 全书重制实跑：按 17 拦、点名却按 20 列，模型拆到 18-19 词达标仍被拒。 */
+          maxLen: SENT_LEN_CHECK[opts.tier] ?? opts.maxLen,
           oov: [],
         }));
         const protectedFacts: Record<string, string[]> = {};
@@ -327,7 +330,9 @@ export async function runStagePipeline(opts: StagePipeOpts): Promise<StagePipeRe
           source: x.seg.source,
           /* LEN-01 只在句法/加注两道生效（STAGE_BLOCK_RULES），目标 = 原文词数 × 层比例 */
           target: stage === 'syntax' || stage === 'annotation' ? Math.round(segWords(x.seg.source) * opts.ratio) : 0,
-          maxLen: opts.maxLen,
+          /* 句长判定线 = SENT_LEN_CHECK（与扫描点名列句、质检报表同一把尺）；
+           * 生成上限 opts.maxLen 只是目标值——两把尺拦人即缺陷（见上） */
+          maxLen: SENT_LEN_CHECK[opts.tier] ?? opts.maxLen,
           /* ANNO-01 只在加注工序点生效：应注集 = annotationTargets（教师知识库优先、
            * 层配额封顶）——与写进 prompt 的是同一份清单（scanFor 也引它）。 */
           oov: stage === 'annotation' ? annotatableOf(annotationTargets(text[x.seg.id], ctx).need) : [],
