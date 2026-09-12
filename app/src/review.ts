@@ -222,6 +222,7 @@ export function renderSidebar(
       <div class="side-h">终审门禁 ${gateDone ? '<span class="gate-ok">✅ 已通过</span>' : ''}</div>
       <ul class="gate-list">${gateHtml}</ul>
     </div>
+    ${adaptFeedbackBox(session)}
     <div class="side-sec">
       <div class="side-h">标记清单 <span class="cnt">${r.marks.length}</span></div>
       <div class="mlist">${listHtml}</div>
@@ -254,6 +255,52 @@ export function renderSidebar(
       const input = e.target as HTMLInputElement;
       if (input.value.trim()) handlers.onQuotaAdd(input.value.trim());
     }
+  });
+  bindAdaptFeedback(session);
+}
+
+/* ---------- 给第二轮调适的反馈（两轮制教师的入口：读完说一句，第二轮照它复写） ---------- */
+
+const ADAPT_NAME_RE = /原文_(A层85|M层75|B层60)_/;
+
+function adaptTargetOf(sourcePath: string | null): { tierKey: string; tag: string; chapDir: string; outRoot: string; feedbackPath: string } | null {
+  const m = sourcePath?.match(ADAPT_NAME_RE);
+  if (!m || !sourcePath) return null;
+  const dir = sourcePath.slice(0, sourcePath.lastIndexOf('/'));
+  const chapDir = dir.split('/').pop() ?? '';
+  const outRoot = dir.slice(0, dir.lastIndexOf('/'));
+  if (!chapDir || !outRoot) return null;
+  return { tierKey: m[1]![0], tag: m[1]!, chapDir, outRoot, feedbackPath: `${outRoot}/_运行/调适反馈_${m[1]}_${chapDir}.json` };
+}
+
+function adaptFeedbackBox(session: FileSession): string {
+  if (!adaptTargetOf(session.sourcePath)) return '';
+  return `
+    <div class="side-sec">
+      <div class="side-h">给第二轮调适的反馈</div>
+      <textarea id="adapt-fb" rows="3" style="width:100%;font-size:12px" placeholder="读完后用一句话告诉第二轮哪里难、大概超前多少。例：词汇大概超前一学期，句子有些绕，人物和情节可以。"></textarea>
+      <button id="adapt-fb-save" style="margin-top:4px">保存反馈（供两轮调适第二轮使用）</button>
+    </div>`;
+}
+
+function bindAdaptFeedback(session: FileSession): void {
+  const btn = document.getElementById('adapt-fb-save');
+  if (!btn) return;
+  btn.addEventListener('click', () => {
+    const ta = document.getElementById('adapt-fb') as HTMLTextAreaElement | null;
+    const text = (ta?.value ?? '').trim();
+    const target = adaptTargetOf(session.sourcePath);
+    if (!text || !target) return;
+    void invoke('write_text_file', { path: target.feedbackPath, content: JSON.stringify({ text, at: new Date().toISOString() }, null, 2) })
+      .then(() => {
+        ta!.value = '';
+        btn.textContent = '✓ 已保存';
+        setTimeout(() => (btn.textContent = '保存反馈（供两轮调适第二轮使用）'), 2000);
+      })
+      .catch((e: unknown) => {
+        btn.textContent = '保存失败：' + String(e).slice(0, 60);
+        setTimeout(() => (btn.textContent = '保存反馈（供两轮调适第二轮使用）'), 3500);
+      });
   });
 }
 
