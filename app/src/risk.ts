@@ -56,7 +56,7 @@ import {
 } from '../../src/core/workbench.js';
 import { batchImpact, batchPreview, groupQueue, sessionState, subjectOf, type RiskItem, type RiskQueue, type TaskGroup } from '../../src/core/riskqueue.js';
 import { oneHourPlan } from '../../src/core/riskqueue.js';
-import { GATE_RULES, type GateCategory } from '../../src/core/segmentgate.js';
+import type { GateCategory } from '../../src/core/segmentgate.js';
 import { itemMinutes, countByCategory, ruleLabel } from './risklogic.js';
 
 export interface RiskIo {
