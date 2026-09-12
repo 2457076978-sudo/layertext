@@ -2,7 +2,7 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { applyRewriteTo, findOriginalFlex, hasProseChinese, normalizeAndSplitChapters, normWs, normalizeZhNotes, parseAiJson, withRetry } from '../app/src/pure.js';
+import { applyRewriteTo, findOriginalFlex, hasProseChinese, normalizeAndSplitChapters, normWs, normalizeZhNotes, parseAiJson, stripWordAnnotations, withRetry } from '../app/src/pure.js';
 import { buildBookReportMd, planBatchChapters, filterTargets, mergeTargets, type BatchProgressFile, type BookReportRow, type ClassTarget } from '../app/src/bookpure.js';
 
 test('withRetry：网络错误自动重试后成功', async () => {
@@ -233,7 +233,6 @@ test('planCompaction：assistant.tool_calls 与其 tool 结果不被拆开（都
 });
 
 /* ---------- 全书批处理（O2） ---------- */
-
 
 test('planBatchChapters：进度文件里 done 的章标记已完成（续跑跳过），其余可跑', () => {
   const progress: BatchProgressFile = {
@@ -483,4 +482,17 @@ test('hasProseChinese：合法生词注释放行，成句中文说明拒收', ()
 test('normalizeZhNotes：半角括号注释统一为全角紧贴', () => {
   assert.equal(normalizeZhNotes('The cows lowed (哞哞叫), the sheep bleated (咩咩叫).'), 'The cows lowed（哞哞叫）, the sheep bleated（咩咩叫）.');
   assert.equal(normalizeZhNotes('see Chapter 3 (notes) and row (连续)'), 'see Chapter 3 (notes) and row（连续）');
+});
+
+test('stripWordAnnotations：剥全章该词标注、保留英文原词大小写、不误伤他词与半角括号', () => {
+  const md = '[P01] The greater（更大的） numbers came. Greater（更大的） still. horses（马） ran. See row (连续) here.';
+  const r = stripWordAnnotations(md, 'greater');
+  assert.equal(r.count, 2, '全章两处都剥');
+  assert.ok(r.md.includes('The greater numbers'));
+  assert.ok(r.md.includes('Greater still'), '句首大写按原文保留');
+  assert.ok(r.md.includes('horses（马）'), '他词标注不动');
+  assert.ok(r.md.includes('row (连续)'), '半角括号注释不误伤（口径=只剥全角 word（中文））');
+  const none = stripWordAnnotations(md, 'woke');
+  assert.equal(none.count, 0);
+  assert.equal(none.md, md);
 });

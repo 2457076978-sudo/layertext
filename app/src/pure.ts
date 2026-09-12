@@ -958,3 +958,18 @@ export function toggleParaBookmark(list: { pi: number; text: string; ts: number 
 
 export { alignSentencePairs, signalsOf, lostSignals } from '../../src/core/align.js';
 export type { AlignSentRef, AlignRow } from '../../src/core/align.js';
+
+/* ---------- 去除中文标注（教师复核生成注释的主动作；本地确定性，不过模型） ---------- */
+
+/** 剥掉某词全章的 word（中文） 标注，保留英文原词（大小写按原文保留）。
+ *  纯函数：只做正则替换并计数，落盘/撤销/日志由调用方管线负责。 */
+export function stripWordAnnotations(md: string, word: string): { md: string; count: number } {
+  const esc = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp(`\\b${esc}（[^）]*）`, 'gi');
+  let count = 0;
+  const out = md.replace(re, (m) => {
+    count++;
+    return m.slice(0, m.indexOf('（'));
+  });
+  return { md: out, count };
+}

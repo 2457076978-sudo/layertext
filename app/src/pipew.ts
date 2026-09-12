@@ -9,12 +9,13 @@ import { $, setStatus, toast, hidePop, showSummaryPop } from './uikit.js';
 import { switchSide } from './chat.js';
 import { activeSession, renderAll, runQcCurrent, persistEdit, markPathFor, readTextSmart, chatUntilJson, flashApplied } from './main.js';
 import { renderReader, sidebarHandlers, updateMarkBadge } from './reader.js';
-import { scheduleHeatRail } from './edit.js';
+import { scheduleHeatRail, applyMdSnapshot } from './edit.js';
 import { restoreAllMarkDom, renderSidebar, scheduleSave } from './review.js';
 import { CHANGELOG_HEADER, newMarkId, type FileSession, type Mark } from './types.js';
 import { S as _S } from './state.js';
 import {
   csvCell,
+  stripWordAnnotations,
   findOriginalFlex,
   glossLookup,
   hasAnyChinese,
@@ -752,4 +753,58 @@ export function showVocabEditor(): void {
   };
   render();
   (popEl.querySelector('#vq') as HTMLInputElement | null)?.focus();
+}
+
+/* ---------- 去除中文标注·记已会（词面板按钮；本地正则剥离 + 词库登记，零模型） ---------- */
+
+export async function removeZhAnnotation(s: FileSession, word: string): Promise<void> {
+  const { md, count } = stripWordAnnotations(s.md, word);
+  if (!count) {
+    toast(`没找到「${word}」的中文标注`);
+    return;
+  }
+  await applyMdSnapshot(s, md, `已去除「${word}」的 ${count} 处中文标注`);
+  hidePop();
+  const date = new Date().toLocaleDateString('sv-SE');
+  /* 变更日志 R16（与 R14 换词 / R15 手动修订同表同口径） */
+  const outDir = s.sourcePath ? s.sourcePath.slice(0, s.sourcePath.lastIndexOf('/')) : await invoke<string>('reports_dir');
+  const logPath = `${outDir}/变更日志_AI审核.csv`;
+  try {
+    let csv = '';
+    try {
+      csv = await invoke<string>('read_text_file', { path: logPath });
+    } catch {
+      /* 日志还不存在＝这张表第一次写（读缺失文件本来就是报错的），下面补表头。 */
+    }
+    if (!csv.trim()) csv = CHANGELOG_HEADER.join(',') + '\n';
+    csv += ['R1', date, `标准${simplifyMaxLen()}词`, '', '', `${word}（…）`, word, 'R16', '去除中文标注（教师认定已会，本地剥离不过模型）', '人工矫正-去标注'].map(csvCell).join(',') + '\n';
+    await invoke('write_text_file', { path: logPath, content: csv });
+  } catch {
+    /* 留痕失败不拦正文修改（applyMdSnapshot 已保存正文） */
+  }
+  /* 词库正本登记：从章节目录向上发现项目配置，upsert 一行「单词」进词库 CSV
+   * （AF 场景=知识文件/已知词汇库，管线下次生成直接生效）。面板没打开也能写。 */
+  let canonical = false;
+  try {
+    const { findProjectConfig, loadAll, upsertRow, save, DATA_KINDS, panelState } = await import('./datapanel.js');
+    const kind = DATA_KINDS.find((k) => k.id === 'vocab')!;
+    const dir = s.sourcePath ? s.sourcePath.replace(/\/[^/]*$/, '') : '';
+    const hit = dir ? await findProjectConfig(dir) : null;
+    if (hit) {
+      if (!panelState.tables[kind.id]?.text) await loadAll([kind], hit.config);
+      const cur = panelState.tables[kind.id]?.text ?? '';
+      const res = cur ? upsertRow(kind, cur, { 词: word, 类型: '单词', 来源册: '教师确认', 备注: `${date} 去除标注时登记` }) : { text: cur, error: '词库表未载入' };
+      if (!res.error) {
+        const r = await save(kind, hit.config, res.text, `去除标注登记：${word}`, { logDir: hit.dir });
+        canonical = r.ok;
+      }
+    }
+  } catch {
+    /* 项目未配/写正本失败：只落会话词表，不阻断（toast 里说清） */
+  }
+  /* 会话立即生效：S.vocabCsvText 追加该词并重跑质检——该词当场不再红 */
+  const base = S.vocabCsvText?.trim() ? S.vocabCsvText : '词,类型,词性,释义,来源册,来源单元,音标,备注\n';
+  S.vocabCsvText = `${base.replace(/\n$/, '')}\n${word},单词,,,教师确认,,,${date} 去除标注时登记\n`;
+  await runQcCurrent({ auto: true });
+  toast(`已去除「${word}」×${count} 处标注，${canonical ? '词库正本+会话均已登记' : '本会话词库已登记'}（↩︎ 可撤销；下次生成不再注它）`, 'ok');
 }

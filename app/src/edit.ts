@@ -27,7 +27,7 @@ export function scrollNow(): number {
 }
 
 /* ---- 撤销 / 重做 ---- */
-async function applyMdSnapshot(s: FileSession, md: string, label: string): Promise<void> {
+export async function applyMdSnapshot(s: FileSession, md: string, label: string): Promise<void> {
   await persistEdit(s, md);
   s.md = md;
   s.review.warns = []; // 快照级回退：所有句位置已变，复核角标整体失效清空
