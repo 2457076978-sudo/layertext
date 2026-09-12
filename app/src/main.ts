@@ -206,7 +206,18 @@ function renderFileTabs(): void {
     return;
   }
   el.innerHTML = S.sessions
-    .map((s, i) => `<span class="ftab ${i === S.activeIdx ? 'active' : ''}" data-ftab="${i}"><span class="ftab-label" title="${esc(s.sourcePath ?? s.fileName)}">${esc((s.sourcePath?.split('/').slice(0, -1).reverse().find((part) => /^第.+章$/.test(part)) ?? '') + ' · ' + s.fileName.replace(/_\d{4}-\d{2}-\d{2}/g, '').replace(/\.md$/i, ''))}</span><span class="x" data-ftab-close="${i}" title="关闭">×</span></span>`)
+    .map(
+      (s, i) =>
+        `<span class="ftab ${i === S.activeIdx ? 'active' : ''}" data-ftab="${i}"><span class="ftab-label" title="${esc(s.sourcePath ?? s.fileName)}">${esc(
+          (s.sourcePath
+            ?.split('/')
+            .slice(0, -1)
+            .reverse()
+            .find((part) => /^第.+章$/.test(part)) ?? '') +
+            ' · ' +
+            s.fileName.replace(/_\d{4}-\d{2}-\d{2}/g, '').replace(/\.md$/i, ''),
+        )}</span><span class="x" data-ftab-close="${i}" title="关闭">×</span></span>`,
+    )
     .join('');
   el.querySelectorAll('[data-ftab]').forEach((t) =>
     t.addEventListener('click', (e) => {
@@ -582,6 +593,31 @@ document.querySelector('header')?.addEventListener('dblclick', (e) => {
 $('btn-theme').addEventListener('click', stepTheme);
 $('tab-toc').addEventListener('click', toggleToc);
 $('btn-open').addEventListener('click', () => void openChapterFiles());
+// 工作台支持从 Finder 直接拖入文本/Markdown/EPUB；只在放下时读取，不触碰源文件。
+let dragDepth = 0;
+document.addEventListener('dragenter', (e) => {
+  if (e.dataTransfer?.types.includes('Files')) {
+    dragDepth++;
+    document.body.classList.add('drag-active');
+  }
+});
+document.addEventListener('dragleave', (e) => {
+  if (e.dataTransfer?.types.includes('Files') && --dragDepth <= 0) {
+    dragDepth = 0;
+    document.body.classList.remove('drag-active');
+  }
+});
+document.addEventListener('dragover', (e) => {
+  if (e.dataTransfer?.types.includes('Files')) e.preventDefault();
+});
+document.addEventListener('drop', (e) => {
+  if (!e.dataTransfer?.files.length) return;
+  e.preventDefault();
+  dragDepth = 0;
+  document.body.classList.remove('drag-active');
+  const paths = [...e.dataTransfer.files].map((f) => (f as File & { path?: string }).path).filter((p): p is string => !!p);
+  if (paths.length) void Promise.all(paths.map((p) => openPathIntoSession(p))).catch((err) => setStatus('拖入文件失败：' + err, 'err'));
+});
 $('btn-run').addEventListener('click', () => void runQcCurrent());
 $('btn-undo').addEventListener('click', () => void doUndo());
 $('btn-redo').addEventListener('click', () => void doRedo());
