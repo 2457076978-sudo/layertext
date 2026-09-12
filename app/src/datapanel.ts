@@ -651,14 +651,55 @@ export async function renderDataPane(bookDir: string): Promise<void> {
       ${rest > 0 ? `<div class="dp-more"><button id="dp-more">显示更多（还有 ${rest} 行）</button></div>` : ''}`;
   }
 
+  const namingMap = (project['产物命名'] ?? {}) as Record<string, string>;
+  const tierKeys = Object.keys(namingMap);
+  const treeRaw = (project['读者层级'] ?? {}) as Record<string, string[]>;
+  const parentOf = (k: string): string => tierKeys.find((p) => (treeRaw[p] ?? []).includes(k)) ?? '';
+  const treeCard = tierKeys.length
+    ? `<div class="dp-note" id="dp-tree"><b>读者层级</b>（上级做的<b>加注/去标注</b>决定自动传播到全部下级读者的文本；换词只记待办）<br>${tierKeys
+        .map(
+          (k) =>
+            `${esc(k)} 的上级：<select data-dp-parent="${esc(k)}">${['<option value="">（无·顶层）</option>']
+              .concat(tierKeys.filter((x) => x !== k).map((x) => `<option value="${esc(x)}"${parentOf(k) === x ? ' selected' : ''}>${esc(x)}</option>`))
+              .join('')}</select>（下级：${esc((treeRaw[k] ?? []).join('、') || '无')}）`,
+        )
+        .join('<br>')}<br><button id="dp-tree-save" class="dp-primary">保存层级</button> <span id="dp-tree-msg"></span></div>`
+    : '';
   el.innerHTML = `<div class="dp">
       <div class="dp-head"><b>数据</b><span class="dp-sub">${esc(cur.note)}</span></div>
+      ${treeCard}
       <div class="dp-tabs">${tabs}</div>
       ${st.errs.length ? `<div class="dp-note dp-err">⚠ ${st.errs.length} 个校验问题（不阻塞本次编辑，但不能引入新问题）：<br>${st.errs.slice(0, 5).map(esc).join('<br>')}${st.errs.length > 5 ? '<br>…' : ''}</div>` : '<div class="dp-note dp-ok">✓ 校验通过</div>'}
       ${body}
       ${panelState.log.length ? `<div class="dp-log"><b>本次改动</b><br>${panelState.log.slice(0, 5).map(esc).join('<br>')}</div>` : ''}
       ${panelState.projectDir ? `<div class="dp-note" style="margin-top:8px;opacity:.7">项目配置：<code>${esc(panelState.projectDir)}</code> ｜ 变更日志：<code>${esc(CHANGE_LOG_NAME)}</code></div>` : ''}
     </div>`;
+
+  el.querySelector('#dp-tree-save')?.addEventListener('click', async () => {
+    const selects = [...el.querySelectorAll<HTMLSelectElement>('[data-dp-parent]')];
+    const tree: Record<string, string[]> = {};
+    for (const sel of selects) {
+      const parent = sel.value;
+      if (!parent) continue;
+      (tree[parent] ??= []).push(sel.dataset.dpParent === parent ? '' : sel.dataset.dpParent!);
+      (tree[parent] as string[]) = (tree[parent] as string[]).filter(Boolean);
+    }
+    /* 读-改-写整个项目配置 json：只动 读者层级 字段 */
+    try {
+      const names = await io.listDir(panelState.projectDir ?? '');
+      const cfgName = names.find((x) => x.startsWith('调适项目_') && x.endsWith('.json'));
+      if (!cfgName) throw new Error('项目目录里没有 调适项目_*.json');
+      const cfgFile = `${panelState.projectDir}/${cfgName}`;
+      const raw = await io.read(cfgFile);
+      const cfg = JSON.parse(raw) as Record<string, unknown>;
+      cfg['读者层级'] = tree;
+      await io.write(cfgFile, JSON.stringify(cfg, null, 2));
+      const msg = el.querySelector('#dp-tree-msg');
+      if (msg) msg.textContent = '✓ 已保存——上级的加注/去标注决定将自动传播到全部下级';
+    } catch (e) {
+      alert('层级保存失败：' + String(e));
+    }
+  });
 
   el.querySelectorAll('[data-dp-tab]').forEach((b) =>
     b.addEventListener('click', () => {
