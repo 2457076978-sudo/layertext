@@ -25,9 +25,7 @@ const TAG = 'A层85';
 
 /** 建一个自检项目，并把它推到"已建清单 + 已产出 A 层第一章 + 已刷状态"的状态。
  *  tiers 传多层（如 `'A,M,B'`）时每层各写一份正文；台账与 stamp 仍走 A 层（发布只要求清单非空）。 */
-function makeProject(
-  tiers: string = 'A',
-): { root: string; json: string; runId: string; product: string; run: (script: string, args: string[]) => { status: number | null; out: string } } {
+function makeProject(tiers: string = 'A'): { root: string; json: string; runId: string; product: string; run: (script: string, args: string[]) => { status: number | null; out: string } } {
   const root = mkdtempSync(join(tmpdir(), 'lt-bun-'));
   const w = (...p: string[]): string => join(root, ...p);
   mkdirSync(w('原文', '第一章'), { recursive: true });
@@ -88,7 +86,7 @@ const runBundle = (json: string, args: string[]) => {
   const r = spawnSync(process.execPath, [join(AF, 'LayerText_AF发布包.mjs'), ...args], {
     cwd: REPO,
     encoding: 'utf-8',
-    env: { ...process.env, LAYERTEXT_PROJECT: json, LAYERTEXT_ENGINE: REPO },
+    env: { ...process.env, LAYERTEXT_PROJECT: json, LAYERTEXT_ENGINE: REPO, LAYERTEXT_TEACHER: 'wayne' } /* 钉教师：CI 的 USER=runner，不钉则运行身份对比清单（wayne）会错退 legacy */,
   });
   return { status: r.status, out: `${r.stdout ?? ''}${r.stderr ?? ''}` };
 };
@@ -233,7 +231,11 @@ test('★ 并发双教师：被串线的一方不带 --run 必须拒绝；带 --
   const ab = JSON.parse(readFileSync(join(root, '产物', '_运行', adaRun, `发布包_${adaRun}`, '发布包.json'), 'utf-8')) as { run: { runId: string }; teacher: string; entries: { kind: string }[] };
   assert.equal(ab.run.runId, adaRun);
   assert.equal(ab.teacher, 'ada');
-  assert.equal(ab.entries.some((e) => e.kind === '正文'), true, 'ada 的包里要有她自己的产物');
+  assert.equal(
+    ab.entries.some((e) => e.kind === '正文'),
+    true,
+    'ada 的包里要有她自己的产物',
+  );
 });
 
 test('★ 缺件即拒：清单登记的产物不在盘上 → 不写任何文件、exit 1、点名是哪一件（P0-③）', () => {
@@ -268,7 +270,17 @@ test('★ 决定条数：三层各一条决定 → decisionCount = 3，层键与
   const decisionDir = join(root, '产物', '_运行', runId, '决定');
   mkdirSync(decisionDir, { recursive: true });
   for (const t of ['A', 'M', 'B']) {
-    const ev = { schemaVersion: 1, itemId: `第一章#1:TEST-${t}`, decision: 'accept', before: 'x', after: 'y', reason: '第七轮验收用', ruleIds: [], teacherId: 'wayne', timestamp: '2026-01-01T00:00:00.000Z' };
+    const ev = {
+      schemaVersion: 1,
+      itemId: `第一章#1:TEST-${t}`,
+      decision: 'accept',
+      before: 'x',
+      after: 'y',
+      reason: '第七轮验收用',
+      ruleIds: [],
+      teacherId: 'wayne',
+      timestamp: '2026-01-01T00:00:00.000Z',
+    };
     writeFileSync(join(decisionDir, `${TIER_TAG[t]}.jsonl`), `${JSON.stringify(ev)}\n`, 'utf-8');
   }
 
@@ -296,5 +308,8 @@ test('★ partial 章的学生版默认拒发；--allow-partial 放行且包描�
   assert.equal(allowed.status, 0, allowed.out);
   const desc = JSON.parse(readFileSync(join(dir, '发布包.json'), 'utf-8')) as { run: { partialChapters?: number[] }; entries: { kind: string }[] };
   assert.deepEqual(desc.run.partialChapters, [1], '放行的 partial 章要写进包描述——收件人必须看得见');
-  assert.equal(desc.entries.some((e) => e.kind === '学生版'), true);
+  assert.equal(
+    desc.entries.some((e) => e.kind === '学生版'),
+    true,
+  );
 });
