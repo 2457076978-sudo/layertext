@@ -4,12 +4,11 @@
  * 产物：原地更新 重制三版/第X章/原文_{tag}_2026-09-10.md；精修台账落同目录
  */
 import { readFileSync } from 'node:fs';
-import { execSync } from 'node:child_process';
 import { join } from 'node:path';
 
 /* 共享模块要**最先**导入：下面这些引擎模块路径都经 `distOf()`，
  * 而 `distOf` 就在它里面——晚一行就是 TDZ，脚本一跑就 `ReferenceError`。 */
-const { distOf } = await import('./LayerText_AF词表与词典.mjs');
+const { keychainGet, distOf } = await import('./LayerText_AF词表与词典.mjs');
 
 const P = (await import('./LayerText_AF词表与词典.mjs')).loadProject();
 const REPO = P.引擎目录;
@@ -19,7 +18,7 @@ const DATE = P.日期;
 const MODEL = 'ecnu-plus'; // ChatECNU（2026-09-12 起 Wayne 指定；OpenAI 兼容端点，key 在钥匙串 layertext.ecnukey）
 
 const CFG = { baseUrl: 'https://chat.ecnu.edu.cn/open/api/v1' }; // 不读 ~/.layertext.json：那是 App 的 AI 设置，脚本管线与 App 各用各的
-const KEY = execSync('security find-generic-password -s layertext.ecnukey -w').toString().trim();
+const KEY = () => keychainGet('layertext.ecnukey'); /* 惰性：Linux/CI 无 security 命令，导入期不查钥匙串 */
 /* 调用台账（四方向 v2 批次 0a）：逐调用记 usage/finishReason，主力路径的 token 从此可解释 */
 const { openLedger } = await import('./LayerText_AF调用台账.mjs');
 const LEDGER = await openLedger(P, '三档精修');
@@ -60,18 +59,17 @@ const { atomicWriteFileSync: writeAtomic } = await import(`${distOf(REPO)}/src/c
  * 身份也走共享的那一个入口：两位教师并发时不再互相读到对方的 runId。 */
 /* 身份从命令行取。**刻意不复用各脚本自己的参数助手**：它们的定义位置各不相同
  * （有的还是 `args.includes` 风格），在这一段引用会在定义之前求值。 */
-const argRun = (n, d) => { const i = process.argv.indexOf(n); return i >= 0 ? process.argv[i + 1] : d; };
+const argRun = (n, d) => {
+  const i = process.argv.indexOf(n);
+  return i >= 0 ? process.argv[i + 1] : d;
+};
 const TEACHER = argRun('--teacher', process.env.LAYERTEXT_TEACHER ?? process.env.USER ?? 'unknown');
-const RUN = await (await import('./LayerText_AF词表与词典.mjs')).readRunIdentity(
-  { out: OUT_BASE, work: P.调适工作区 },
-  { teacher: TEACHER, tier: TAGS.A },
-  { runId: argRun('--run', undefined) },
-);
+const RUN = await (await import('./LayerText_AF词表与词典.mjs')).readRunIdentity({ out: OUT_BASE, work: P.调适工作区 }, { teacher: TEACHER, tier: TAGS.A }, { runId: argRun('--run', undefined) });
 if (RUN.warning) console.warn(`\n⚠ ${RUN.warning}`);
 /** 按层级标签取解析器（多层脚本与单层脚本共用同一种写法） */
 const RR = (tag) => makeResolver(RUN.layout, { out: OUT_BASE, work: P.调适工作区 }, { runId: RUN.runId, tier: tag, date: DATE });
 async function callChat(messages, maxTokens = 2500) {
-  const r = await LEDGER.call(messages, { baseUrl: CFG.baseUrl, key: KEY, model: MODEL, maxTokens, errSlice: 150 });
+  const r = await LEDGER.call(messages, { baseUrl: CFG.baseUrl, key: KEY(), model: MODEL, maxTokens, errSlice: 150 });
   return r.content ?? '';
 }
 
@@ -97,9 +95,7 @@ async function refineChapter(tk, tag, i) {
   //    根因备注：LEX 只吃词库 v0.6，其课标1600 子集仅落 1371/1677，pig/man/sheep/die 等课标词
   //    会被判成 OOV 而被加注（2026-09-10 报告问题之一）。用课标表补一道 isKnownForm 才能挡住。
   const qc0 = runQc(md, LEX, { tier: tk, fileName: path.split('/').pop() });
-  const oov = [...new Set(qc0.oov)].filter((w) =>
-    w.length > 2 && !PROPER.includes(w) && !NEVER_ANNOTATE.has(w)
-    && !isKnown(w) && !new RegExp(`${w}（`).test(md));
+  const oov = [...new Set(qc0.oov)].filter((w) => w.length > 2 && !PROPER.includes(w) && !NEVER_ANNOTATE.has(w) && !isKnown(w) && !new RegExp(`${w}（`).test(md));
   const glosses = new Map();
   const missing = [];
   for (const w of oov) {
@@ -121,7 +117,10 @@ async function refineChapter(tk, tag, i) {
         if (typeof zh === 'string' && /[\u4e00-\u9fff]/.test(zh)) glosses.set(w.toLowerCase(), zh);
       }
       // 新词回写词典：下次遇到同一词直接用既有释义，杜绝跨章一词多义
-      appendDict([...glosses].filter(([w]) => !DICT.has(w)), P.词典路径);
+      appendDict(
+        [...glosses].filter(([w]) => !DICT.has(w)),
+        P.词典路径,
+      );
     } catch {
       /* 注释失败不阻塞 */
     }
@@ -151,12 +150,20 @@ async function refineChapter(tk, tag, i) {
   for (const p of pairs) {
     const raw = await callChat(
       [
-        { role: 'system', content: '你是英文名著分层简化的审校助手。任务：改写句在简化时弄丢了原文里的数字或专名，请把它们自然融回改写句（可微调措辞，句长尽量不超限，保持词汇简单）。只输出修复后的完整英文句子，不要任何解释。' },
+        {
+          role: 'system',
+          content:
+            '你是英文名著分层简化的审校助手。任务：改写句在简化时弄丢了原文里的数字或专名，请把它们自然融回改写句（可微调措辞，句长尽量不超限，保持词汇简单）。只输出修复后的完整英文句子，不要任何解释。',
+        },
         { role: 'user', content: `原句：${p.base.text}\n改写句：${p.cur.text}\n丢失的信息：${(p.lostSignals ?? []).join('、')}\n请输出修复后的改写句：` },
       ],
       800,
     );
-    const fixed = raw.trim().replace(/^```[a-z]*\s*/i, '').replace(/```\s*$/, '').trim();
+    const fixed = raw
+      .trim()
+      .replace(/^```[a-z]*\s*/i, '')
+      .replace(/```\s*$/, '')
+      .trim();
     // 校验：修复句确实包含全部缺失信号，且与改写句差异不至于整句重写
     const ok = fixed.length > 20 && (p.lostSignals ?? []).every((s) => fixed.toLowerCase().includes(s.toLowerCase()));
     const at = md.indexOf(p.cur.text);
@@ -167,7 +174,10 @@ async function refineChapter(tk, tag, i) {
   }
 
   // ③ 排版收尾：注释右括号后补空格、清双空格（否则 "harness（挽具）and" 这类粘连会留给读者）
-  md = md.replace(/([）)])(?=[A-Za-z])/g, '$1 ').replace(/([A-Za-z])\s+（/g, '$1（').replace(/ {2,}/g, ' ');
+  md = md
+    .replace(/([）)])(?=[A-Za-z])/g, '$1 ')
+    .replace(/([A-Za-z])\s+（/g, '$1（')
+    .replace(/ {2,}/g, ' ');
 
   writeAtomic(path, md, 'utf-8');
   const qc = runQc(md, LEX, { tier: tk, fileName: path.split('/').pop() });

@@ -4,12 +4,11 @@
  * 与 App「AI 简化本章」同口径：逐段、前文衔接、段标记补回；另加段级守恒重试（App 第二十四批同款）。
  */
 import { readFileSync, writeFileSync } from 'node:fs';
-import { execSync } from 'node:child_process';
 import { join } from 'node:path';
 
 /* 共享模块要**最先**导入：下面这些引擎模块路径都经 `distOf()`，
  * 而 `distOf` 就在它里面——晚一行就是 TDZ，脚本一跑就 `ReferenceError`。 */
-const { distOf } = await import('./LayerText_AF词表与词典.mjs');
+const { keychainGet, distOf } = await import('./LayerText_AF词表与词典.mjs');
 
 const P = (await import('./LayerText_AF词表与词典.mjs')).loadProject();
 const REPO = P.引擎目录;
@@ -27,7 +26,7 @@ const SEG_KEEP = 0.85; // 段级守恒线：单段 < 原段 85% 触发重试
 
 const CFG = JSON.parse(readFileSync(`${process.env.HOME}/.layertext.json`, 'utf-8'));
 const MODEL = 'deepseek-chat'; // 非思考型（v4-flash 思考型在复杂指令下会把推理/续写混入正文——09-09 与本次第一章实跑双重实证）
-const KEY = execSync('security find-generic-password -s layertext.apikey -w').toString().trim();
+const KEY = () => keychainGet('layertext.apikey'); /* 惰性：Linux/CI 无 security 命令，导入期不查钥匙串 */
 /* 共享模块要**最先**导入：下面这些引擎模块路径都经 `distOf()`，
  * 而 `distOf` 就在它里面——晚一行就是 TDZ，脚本一跑就 `ReferenceError`。 */
 const SHARED = await import('./LayerText_AF词表与词典.mjs');
@@ -42,7 +41,6 @@ const LEX = buildLexicon({ vocabCsvTexts: [readFileSync(VOCAB, 'utf-8')] });
  * 最后那层逐字符复现旧行为，所以既没配置、也没有可扫目录的老项目结果不变。 */
 const CN = SHARED.chapterNames(P);
 const RULES = readFileSync(join(BASE, '校正规则_v1.md'), 'utf-8');
-
 
 /** AF 专名（人物/动物/地名/作品名）——QC 口径不计 OOV（与教师专名表机制同语义） */
 const PROPER = P.PROPER;
@@ -71,7 +69,10 @@ async function callChat(messages, maxTokens = 2500) {
 }
 
 const cleanSeg = (text, marker) => {
-  let t = text.trim().replace(/^```[a-z]*\s*/i, '').replace(/```\s*$/, '');
+  let t = text
+    .trim()
+    .replace(/^```[a-z]*\s*/i, '')
+    .replace(/```\s*$/, '');
   if (!t.includes('[P')) t = marker + ' ' + t;
   return t.trim();
 };
@@ -91,14 +92,20 @@ async function runChapter(i) {
     const prevTail = out.length ? out[out.length - 1].slice(-500) : '（本章开头）';
     const userMsg = `前文（已简化，供语气与指代衔接参考）：\n…${prevTail}\n\n请简化以下段落（本章原文 ${wc(md.split('## 词句卡')[0])} 词，全章产出不得少于其 50%）：\n${segs[k].trim()}\n${USER_TAIL}`;
     const marker = segs[k].match(/\[P\d+\]/)[0];
-    const content = await callChat([{ role: 'system', content: SYSTEM }, { role: 'user', content: userMsg }]);
+    const content = await callChat([
+      { role: 'system', content: SYSTEM },
+      { role: 'user', content: userMsg },
+    ]);
     let revised = cleanSeg(content, marker);
     if (srcW >= 20 && wc(revised) < srcW * SEG_KEEP) {
       const c2 = await callChat([
         { role: 'system', content: SYSTEM },
         { role: 'user', content: userMsg },
         { role: 'assistant', content },
-        { role: 'user', content: `你上一版只有 ${wc(revised)} 词，比原文（${srcW} 词）短了 ${Math.round((1 - wc(revised) / srcW) * 100)}%。同义转换不是压缩：保留全部细节、修饰与氛围，只换说法，重写这一段（词数与原文相当 ±15%）。${USER_TAIL}` },
+        {
+          role: 'user',
+          content: `你上一版只有 ${wc(revised)} 词，比原文（${srcW} 词）短了 ${Math.round((1 - wc(revised) / srcW) * 100)}%。同义转换不是压缩：保留全部细节、修饰与氛围，只换说法，重写这一段（词数与原文相当 ±15%）。${USER_TAIL}`,
+        },
       ]);
       const revised2 = cleanSeg(c2, marker);
       if (wc(revised2) > wc(revised)) revised = revised2;
@@ -165,9 +172,16 @@ for (const i of chapters) {
     console.error(`  ✗ ${e.message}`);
   }
 }
-const lines = ['# AF 原文重制 M 层（≥50% 篇幅）· 汇总报告', '', '| 章 | 原文词数 | 产物词数 | 保留 | 守恒重试段 | 加注 | 剩余OOV | 生词率 | 均长 | 被动/定从/过去完成/超长 |', '|---|---|---|---|---|---|---|---|---|---|'];
+const lines = [
+  '# AF 原文重制 M 层（≥50% 篇幅）· 汇总报告',
+  '',
+  '| 章 | 原文词数 | 产物词数 | 保留 | 守恒重试段 | 加注 | 剩余OOV | 生词率 | 均长 | 被动/定从/过去完成/超长 |',
+  '|---|---|---|---|---|---|---|---|---|---|',
+];
 for (const r of results) {
-  lines.push(`| ${r.ch} | ${r.srcWords} | ${r.outWords} | ${(r.ratio * 100).toFixed(0)}%${r.ratio < MIN_CHAPTER_RATIO ? ' ⚠低于50%' : ''} | ${r.retried}/${r.segs} | ${r.noted} | ${r.oovLeft} | ${(r.qc.newWordRate * 100).toFixed(1)}% | ${r.qc.avgLenNarrRaw.toFixed(1)} | ${r.qc.passive}/${r.qc.relcl}/${r.qc.pastperf}/${r.qc.over20} |`);
+  lines.push(
+    `| ${r.ch} | ${r.srcWords} | ${r.outWords} | ${(r.ratio * 100).toFixed(0)}%${r.ratio < MIN_CHAPTER_RATIO ? ' ⚠低于50%' : ''} | ${r.retried}/${r.segs} | ${r.noted} | ${r.oovLeft} | ${(r.qc.newWordRate * 100).toFixed(1)}% | ${r.qc.avgLenNarrRaw.toFixed(1)} | ${r.qc.passive}/${r.qc.relcl}/${r.qc.pastperf}/${r.qc.over20} |`,
+  );
 }
 const totS = results.reduce((n, r) => n + r.srcWords, 0);
 const totO = results.reduce((n, r) => n + r.outWords, 0);

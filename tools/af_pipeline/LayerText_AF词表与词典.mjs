@@ -40,6 +40,7 @@
  */
 import { closeSync, openSync, readFileSync, writeFileSync, writeSync, existsSync, readdirSync, mkdirSync, statSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
+import { execSync } from 'node:child_process';
 import { hostname } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -47,6 +48,16 @@ import { fileURLToPath } from 'node:url';
 /** 引擎目录：本文件在 <引擎>/tools/af_pipeline/ 下，由自身位置推出，不写死绝对路径。
  *  可用环境变量 LAYERTEXT_ENGINE 或项目配置的 `引擎目录` 覆盖。 */
 const HERE = dirname(fileURLToPath(import.meta.url));
+
+/** macOS 钥匙串读取（惰性容错；非 macOS/失败返回 ''——导入期查钥匙串会让脚本在 Linux/CI 启动即崩） */
+export function keychainGet(service) {
+  if (process.platform !== 'darwin') return '';
+  try {
+    return execSync(`security find-generic-password -s ${service} -w`).toString().trim();
+  } catch {
+    return '';
+  }
+}
 export let LTR = process.env.LAYERTEXT_ENGINE ?? join(HERE, '..', '..');
 
 /** 引擎的**编译产物**目录。默认 `<引擎>/dist`。

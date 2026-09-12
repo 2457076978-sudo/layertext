@@ -5,7 +5,6 @@
  * 知识库：知识文件/AF审校知识库_v1.csv（55 加注词对=学生不会的词须加注；36 换词倾向=优先避开/换简单说法）
  */
 import { readFileSync, mkdirSync, existsSync } from 'node:fs';
-import { execSync } from 'node:child_process';
 import { join } from 'node:path';
 
 const SHARED = await import('./LayerText_AF词表与词典.mjs');
@@ -20,7 +19,7 @@ const DATE = P.日期;
 
 const MODEL = 'ecnu-plus'; // ChatECNU（2026-09-12 起 Wayne 指定；OpenAI 兼容端点，key 在钥匙串 layertext.ecnukey）
 const CFG = { baseUrl: 'https://chat.ecnu.edu.cn/open/api/v1' }; // 不读 ~/.layertext.json：那是 App 的 AI 设置，脚本管线与 App 各用各的
-const KEY = execSync('security find-generic-password -s layertext.ecnukey -w').toString().trim();
+const KEY = () => SHARED.keychainGet('layertext.ecnukey'); /* 惰性：Linux/CI 无 security 命令，导入期不查钥匙串 */
 /* 调用台账（四方向 v2 批次 0a）：逐调用记 usage/finishReason，主力路径的 token 从此可解释 */
 const { openLedger } = await import('./LayerText_AF调用台账.mjs');
 const LEDGER = await openLedger(P, '三档生成');
@@ -59,13 +58,12 @@ const { atomicWriteFileSync: writeAtomic } = await import(`${distOf(REPO)}/src/c
  * 身份也走共享的那一个入口：两位教师并发时不再互相读到对方的 runId。 */
 /* 身份从命令行取。**刻意不复用各脚本自己的参数助手**：它们的定义位置各不相同
  * （有的还是 `args.includes` 风格），在这一段引用会在定义之前求值。 */
-const argRun = (n, d) => { const i = process.argv.indexOf(n); return i >= 0 ? process.argv[i + 1] : d; };
+const argRun = (n, d) => {
+  const i = process.argv.indexOf(n);
+  return i >= 0 ? process.argv[i + 1] : d;
+};
 const TEACHER = argRun('--teacher', process.env.LAYERTEXT_TEACHER ?? process.env.USER ?? 'unknown');
-const RUN = await SHARED.readRunIdentity(
-  { out: OUT_BASE, work: P.调适工作区 },
-  { teacher: TEACHER, tier: TIERS.A.clsTag },
-  { runId: argRun('--run', undefined) },
-);
+const RUN = await SHARED.readRunIdentity({ out: OUT_BASE, work: P.调适工作区 }, { teacher: TEACHER, tier: TIERS.A.clsTag }, { runId: argRun('--run', undefined) });
 if (RUN.warning) console.warn(`\n⚠ ${RUN.warning}`);
 /** 按层级标签取解析器（多层脚本与单层脚本共用同一种写法） */
 const RR = (tag) => makeResolver(RUN.layout, { out: OUT_BASE, work: P.调适工作区 }, { runId: RUN.runId, tier: tag, date: DATE });
@@ -74,7 +72,10 @@ const R = RR(TIERS.A.clsTag);
 const kbNotes = new Map(); // word → 释义（教师认可的加注对，过滤"复现"等非释义值）
 const kbSwaps = [];
 {
-  const rows = readFileSync(KB, 'utf-8').replace(/^\uFEFF/, '').split('\n').slice(1);
+  const rows = readFileSync(KB, 'utf-8')
+    .replace(/^\uFEFF/, '')
+    .split('\n')
+    .slice(1);
   for (const line of rows) {
     const [type, word, val, n] = line.split(',');
     if (!word) continue;
@@ -87,7 +88,10 @@ const NOTE_TABLE = [...kbNotes.entries()]
   .slice(0, 120) // system 预算：top 120（按出现频次）
   .map(([w, v]) => `${w}（${v.zh}）`)
   .join('、');
-const SWAP_TABLE = kbSwaps.slice(0, 36).map(([w]) => w).join('、');
+const SWAP_TABLE = kbSwaps
+  .slice(0, 36)
+  .map(([w]) => w)
+  .join('、');
 
 const PROPER = P.PROPER;
 
@@ -113,12 +117,15 @@ ${NOTE_TABLE}
 }
 
 async function callChat(messages, maxTokens = 2500) {
-  const r = await LEDGER.call(messages, { baseUrl: CFG.baseUrl, key: KEY, model: MODEL, maxTokens });
+  const r = await LEDGER.call(messages, { baseUrl: CFG.baseUrl, key: KEY(), model: MODEL, maxTokens });
   return r.content.trim();
 }
 
 const cleanSeg = (text, marker) => {
-  let t = text.trim().replace(/^```[a-z]*\s*/i, '').replace(/```\s*$/, '');
+  let t = text
+    .trim()
+    .replace(/^```[a-z]*\s*/i, '')
+    .replace(/```\s*$/, '');
   if (!t.includes('[P')) t = marker + ' ' + t;
   return t.trim();
 };
@@ -141,7 +148,10 @@ async function runChapter(i, t) {
     const prevTail = out.length ? out[out.length - 1].slice(-500) : '（本章开头）';
     const userMsg = `前文（已简化，供语气与指代衔接参考）：\n…${prevTail}\n\n请把以下段落改写为${t.label}版本（本段原文 ${srcW} 词，目标输出约 ${Math.round((srcW * t.ratio) / 5) * 5} 词，±10%）：\n${segs[k].trim()}\n输出：保持 [P##] 标记开头，直接输出改写文本。`;
     const marker = segs[k].match(/\[P\d+\]/)[0];
-    const content = await callChat([{ role: 'system', content: system }, { role: 'user', content: userMsg }]);
+    const content = await callChat([
+      { role: 'system', content: system },
+      { role: 'user', content: userMsg },
+    ]);
     let revised = cleanSeg(content, marker);
     // 修剪轮：改写模型有"删减阻抗"（实测三档全高于目标 12-20pp）——超标的段做一次纯删减任务
     const targetW = Math.round(srcW * t.ratio);
@@ -165,7 +175,10 @@ async function runChapter(i, t) {
         { role: 'system', content: system },
         { role: 'user', content: userMsg },
         { role: 'assistant', content },
-        { role: 'user', content: `你上一版只有 ${wc(revised)} 词，偏离目标（约 ${Math.round(srcW * t.ratio)} 词）太远。${t.key === 'B' ? '只删次要细节，情节因果必须完整' : '同义转换不是压缩，保留全部细节只换说法'}。重写这一段。输出：保持 [P##] 标记开头，直接输出改写文本。` },
+        {
+          role: 'user',
+          content: `你上一版只有 ${wc(revised)} 词，偏离目标（约 ${Math.round(srcW * t.ratio)} 词）太远。${t.key === 'B' ? '只删次要细节，情节因果必须完整' : '同义转换不是压缩，保留全部细节只换说法'}。重写这一段。输出：保持 [P##] 标记开头，直接输出改写文本。`,
+        },
       ]);
       const revised2 = cleanSeg(c2, marker);
       // 采纳离目标更近的一版
@@ -210,15 +223,24 @@ for (const tk of tiers) {
     }
   }
 }
-const lines = ['# AF 三档重制（85/75/60）· 汇总报告', '', `知识库：加注词 ${kbNotes.size} 对（top120 注入）/ 换词倾向 ${kbSwaps.length} 词`, '', '| 层 | 章 | 原文词数 | 产物词数 | 占比 | 目标 | 守恒重试 | 生词率 | 均长 | 被动/定从/过去完成/超长 |', '|---|---|---|---|---|---|---|---|---|---|'];
+const lines = [
+  '# AF 三档重制（85/75/60）· 汇总报告',
+  '',
+  `知识库：加注词 ${kbNotes.size} 对（top120 注入）/ 换词倾向 ${kbSwaps.length} 词`,
+  '',
+  '| 层 | 章 | 原文词数 | 产物词数 | 占比 | 目标 | 守恒重试 | 生词率 | 均长 | 被动/定从/过去完成/超长 |',
+  '|---|---|---|---|---|---|---|---|---|---|',
+];
 for (const r of results) {
   const target = TIERS[r.tier].ratio;
   const off = Math.abs(r.ratio - target) > 0.12 ? ' ⚠偏' : '';
-  lines.push(`| ${r.tier} | ${r.ch} | ${r.srcWords} | ${r.outWords} | ${(r.ratio * 100).toFixed(0)}%${off} | ${Math.round(target * 100)}% | ${r.retried}/${r.segs} | ${(r.qc.newWordRate * 100).toFixed(1)}% | ${r.qc.avgLenNarrRaw.toFixed(1)} | ${r.qc.passive}/${r.qc.relcl}/${r.qc.pastperf}/${r.qc.over20} |`);
+  lines.push(
+    `| ${r.tier} | ${r.ch} | ${r.srcWords} | ${r.outWords} | ${(r.ratio * 100).toFixed(0)}%${off} | ${Math.round(target * 100)}% | ${r.retried}/${r.segs} | ${(r.qc.newWordRate * 100).toFixed(1)}% | ${r.qc.avgLenNarrRaw.toFixed(1)} | ${r.qc.passive}/${r.qc.relcl}/${r.qc.pastperf}/${r.qc.over20} |`,
+  );
 }
 const byT = {};
 for (const r of results) {
-  (byT[r.tier] ??= { s: 0, o: 0 });
+  byT[r.tier] ??= { s: 0, o: 0 };
   byT[r.tier].s += r.srcWords;
   byT[r.tier].o += r.outWords;
 }
