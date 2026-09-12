@@ -973,3 +973,18 @@ export function stripWordAnnotations(md: string, word: string): { md: string; co
   });
   return { md: out, count };
 }
+
+/** 点中的词所属的**完整注释词头**：注释在 md 里形如 head（中文），head 可为连字符词
+ *  （great-looking）或空格短语（good looking）。点击落在 head 的任一部分时，去除与
+ *  登记都应对整个 head 做（只对点中片段做会留下残头/登记错词）。多个候选取最长
+ *  （最具体）；找不到退回原词。 */
+export function annotatedHeadOf(md: string, word: string): string {
+  const parts = word.toLowerCase().split(/[\s-]+/);
+  let best = '';
+  for (const m of md.matchAll(/([A-Za-z][A-Za-z'-]*(?:[ ][A-Za-z][A-Za-z'-]*)*)（[^）]*）/g)) {
+    const head = m[1]!;
+    const hp = head.toLowerCase().split(/[\s-]+/);
+    if (hp.some((x) => parts.includes(x)) && head.length > best.length) best = head;
+  }
+  return best || word;
+}

@@ -2,7 +2,18 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { applyRewriteTo, findOriginalFlex, hasProseChinese, normalizeAndSplitChapters, normWs, normalizeZhNotes, parseAiJson, stripWordAnnotations, withRetry } from '../app/src/pure.js';
+import {
+  annotatedHeadOf,
+  applyRewriteTo,
+  findOriginalFlex,
+  hasProseChinese,
+  normalizeAndSplitChapters,
+  normWs,
+  normalizeZhNotes,
+  parseAiJson,
+  stripWordAnnotations,
+  withRetry,
+} from '../app/src/pure.js';
 import { buildBookReportMd, planBatchChapters, filterTargets, mergeTargets, type BatchProgressFile, type BookReportRow, type ClassTarget } from '../app/src/bookpure.js';
 
 test('withRetry：网络错误自动重试后成功', async () => {
@@ -495,4 +506,12 @@ test('stripWordAnnotations：剥全章该词标注、保留英文原词大小写
   const none = stripWordAnnotations(md, 'woke');
   assert.equal(none.count, 0);
   assert.equal(none.md, md);
+});
+
+test('annotatedHeadOf：点中片段解析到完整注释词头（连字符/空格短语/大小写），无注释退回原词', () => {
+  const md = 'a great-looking（好看的） pig; good looking（好看的） too; greater（更大的） numbers';
+  assert.equal(annotatedHeadOf(md, 'looking'), 'great-looking', '连字符词头取最长候选');
+  assert.equal(annotatedHeadOf(md, 'good'), 'good looking', '空格短语词头');
+  assert.equal(annotatedHeadOf(md, 'greater'), 'greater');
+  assert.equal(annotatedHeadOf(md, 'woke'), 'woke', '无注释退回原词');
 });
