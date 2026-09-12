@@ -189,7 +189,7 @@ const cleanSeg = (text, marker) => {
 const RR = (tag) => makeResolver('legacy', { out: OUT_BASE, work: WORK }, { date: DATE, tier: tag });
 const r1PathOf = (t, ch) => RR(t.clsTag).any('正文', { chapter: ch, tier: t.clsTag, suffix: '_R1' });
 const finalPathOf = (t, ch) => RR(t.clsTag).any('正文', { chapter: ch, tier: t.clsTag });
-const reportPathOf = (t, ch) => RR(t.clsTag).any('汇总报告', { name: `调适报告_${t.clsTag}`, chapter: ch });
+const reportPathOf = (t, ch) => RR(t.clsTag).any('汇总报告', { name: `调适报告_${t.clsTag}_${ch}`, chapter: ch });
 const feedbackPathOf = (t, ch) => join(OUT_BASE, '_运行', `调适反馈_${t.clsTag}_${ch}.json`);
 const progressFile = (t, ch) => join(OUT_BASE, '_运行', `两轮调适进度_${t.clsTag}_${ch}.json`);
 
@@ -246,7 +246,7 @@ function localCheck(t, i) {
   const { profile, findings } = burdenFindings(r1Md, { tier: t.key, properNouns: (P.PROPER ?? []) });
   findings.push(...fidelityFindings(srcMd, r1Md));
   const introduced = introducedHardWords(srcMd, r1Md, (w) => !isKnownWord(w));
-  if (introduced.length) findings.push({ level: '难度', note: `引入了原文没有的超纲词 ${introduced.length} 个：${introduced.slice(0, 12).join(', ')}——第一轮换词时换进了新难词` });
+  if (introduced.length) findings.push({ level: '难度', note: `引入了原文没有的词表外词 ${introduced.length} 个：${introduced.slice(0, 12).join(', ')}——其中可能有词库漏收的课标词（blame 类）：在 App 报告页点「学生会（入库）」补录后自动消失；确属超纲的交第二轮换写` });
   /* 结构级：占位段/空段（阻止发布的那一类） */
   const r1Segs = r1Md.match(/\[P\d+\][\s\S]*?(?=\[P\d+\]|$)/g) ?? [];
   for (let k = 0; k < segs.length; k++) {
@@ -260,6 +260,17 @@ function localCheck(t, i) {
 /* ────────────────────── 第二轮：按教师反馈复写 ────────────────────── */
 async function round2(t, i, feedbackRaw) {
   const fb = parseTeacherFeedback(feedbackRaw);
+  /* 教师在正文里点的「要简化」标记（simpl）= 词级"太难"反馈，与文字反馈合并——
+   * 点名几个词，第二轮举一反三处理同类难度表达，不只换点名词。 */
+  try {
+    const markPath = `${r1PathOf(t, CN[i - 1]).replace(/\.md$/, '')}_审校标记.json`.replace(/_R1(?=[^/]*$)/, '');
+    if (existsSync(markPath)) {
+      const marks = JSON.parse(readFileSync(markPath, 'utf-8')).marks ?? [];
+      const simpl = marks.filter((m) => m.type === 'simpl' && m.word).map((m) => String(m.word).toLowerCase());
+      if (simpl.length) fb.tooHardWords.push(...simpl.filter((w) => !fb.tooHardWords.includes(w)));
+      if (simpl.length) fb.raw += `（正文标记太难：${[...new Set(simpl)].slice(0, 20).join(', ')}）`;
+    }
+  } catch { /* 标记文件读不了就只用文字反馈——如实，不阻断 */ }
   const c = localCheck(t, i);
   const { ch, segs, srcMd, r1Md, r1Segs } = c;
   const r1 = r1PathOf(t, ch);
@@ -276,7 +287,7 @@ async function round2(t, i, feedbackRaw) {
         const re = burdenFindings(finalMd, { tier: t.key, properNouns: (P.PROPER ?? []) });
         re.findings.push(...fidelityFindings(srcMd, finalMd));
         const intro = introducedHardWords(srcMd, finalMd, (w) => !isKnownWord(w));
-        if (intro.length) re.findings.push({ level: '难度', note: `终稿仍引入原文没有的超纲词 ${intro.length} 个：${intro.slice(0, 12).join(', ')}——剩余问题，交教师判断` });
+        if (intro.length) re.findings.push({ level: '难度', note: `终稿仍引入原文没有的词表外词 ${intro.length} 个：${intro.slice(0, 12).join(', ')}——先核对是否词库漏收（入库即消）；确属超纲的剩余项交教师换写` });
         return { ...c, profile: re.profile, findings: re.findings, changed: 0, fb, boundaryNote: j.boundaryNote ?? '', finalMd };
       }
     } catch { /* 进度文件坏了当没有：往下走正常流程 */ }
@@ -354,8 +365,10 @@ ${r1Segs[k].trim()}
     changedNotes.push(`${marker}（${wc(r1Segs[k])}→${wc(revised)} 词）`);
     process.stdout.write(`  ${ch} R2 段 ${targets.indexOf(k) + 1}/${targets.length}\r`);
   }
-  const header = r1Md.slice(0, r1Md.indexOf('## Chapter'));
-  const newMd = `${header}${out.join('\n\n')}\n`;
+  /* 终稿拼装：header + 章标题行本身 + 段落（slice 到 chLine 为止会把它丢掉——
+   * 终稿缺 `## Chapter` 会让 QC/对齐全线解析失败，2026-09-12 第七章实测踩过） */
+  const chLine = r1Md.match(/^## Chapter .*$/m)?.[0] ?? '';
+  const newMd = `${r1Md.slice(0, chLine ? r1Md.indexOf(chLine) : 0)}${chLine}${chLine ? '\n\n' : ''}${out.join('\n\n')}\n`;
   writeFileSync(dst, newMd, 'utf-8');
   writeFileSync(pf, JSON.stringify({ round: 2, done: [...Array(segs.length).keys()], feedback: fb.raw, boundaryNote, at: new Date().toISOString() }, null, 1), 'utf-8');
   console.log(`  ✓ 终稿：${dst}（复写 ${targets.length}/${segs.length} 段；初稿保留在 ${r1}）`);
@@ -364,7 +377,7 @@ ${r1Segs[k].trim()}
   const recheck = burdenFindings(newMd, { tier: t.key, properNouns: (P.PROPER ?? []) });
   recheck.findings.push(...fidelityFindings(srcMd, newMd));
   const intro2 = introducedHardWords(srcMd, newMd, (w) => !isKnownWord(w));
-  if (intro2.length) recheck.findings.push({ level: '难度', note: `终稿仍引入原文没有的超纲词 ${intro2.length} 个：${intro2.slice(0, 12).join(', ')}——剩余问题，交教师判断` });
+  if (intro2.length) recheck.findings.push({ level: '难度', note: `终稿仍引入原文没有的词表外词 ${intro2.length} 个：${intro2.slice(0, 12).join(', ')}——先核对是否词库漏收（入库即消）；确属超纲的剩余项交教师换写` });
   return { ...c, profile: recheck.profile, findings: recheck.findings, changed: targets.length, changedNotes, fb, boundaryNote, finalMd: newMd };
 }
 

@@ -9,6 +9,7 @@ import { open as openFileDialog, save as saveFileDialog } from '@tauri-apps/plug
 import { zipSync, strToU8 } from 'fflate';
 import { S, esc } from './state.js';
 import { $, setStatus } from './uikit.js';
+import { aiRewriteSentence } from './aiflow.js';
 import { activeSession, chatUntilJson, docxToText, openPathIntoSession, readTextSmart, renderAll } from './main.js';
 import { buildLexiconNow, mergedSelection, reinforceWordsNow } from './lexicon.js';
 import { addMark, sidebarHandlers } from './reader.js';
@@ -116,7 +117,7 @@ export function renderReportPane(s: FileSession): void {
       <td style="font-weight:600">${esc(w)}</td>
       <td>${freqCell}</td>
       <td>${marked ? '<span class="ok-badge">✓ 已标记简化</span>' : `<button data-oov-simpl="${esc(w)}">✓ 标记要简化</button>`}
-          ${learned ? '<span class="ok-badge">✓ 已学</span>' : `<button data-oov-learn="${esc(w)}">✓ 学生已学过</button>`}</td>
+          ${learned ? '<span class="ok-badge">✓ 词表内</span>' : `<button data-oov-learn="${esc(w)}" title="教师确认学生会这个词——记入词库，此后生成优先使用">✓ 学生会（入库）</button>`}</td>
     </tr>`;
     })
     .join('');
@@ -129,20 +130,21 @@ export function renderReportPane(s: FileSession): void {
       return `<tr>
       <td><span class="chip warn-chip">${r.badges.join('')}</span> <span class="dim">P${String(r.pi + 1).padStart(2, '0')}-S${r.si + 1}</span></td>
       <td title="${esc(r.sent)}">${esc(r.sent.slice(0, 70))}${r.sent.length > 70 ? '…' : ''}</td>
-      <td>${marked ? '<span class="ok-badge">✓ 已标记</span>' : `<button data-risk-pi="${r.pi}" data-risk-si="${r.si}">✓ 标记要改</button>`}</td>
+      <td>${marked ? '<span class="ok-badge">✓ 已标记</span>' : `<button data-risk-pi="${r.pi}" data-risk-si="${r.si}">✓ 标记要改</button>`} <button data-risk-ai="${r.pi}:${r.si}" title="让 AI 给这句一个更简单的说法（保留人物、事件、否定与因果），先在正文预览、点 ✓ 才生效">⚡ 更简单</button></td>
     </tr>`;
     })
     .join('');
 
   pane.innerHTML = `
     ${s.reportSavedPath ? `<div class="saved-path">报告已自动保存：${esc(s.reportSavedPath)} <button id="btn-reveal">在访达中显示</button></div>` : ''}
+    <div id="adapt-status" style="display:none;margin:8px 0;padding:8px 12px;border:1px solid var(--line);border-radius:8px;background:var(--surface-2);font-size:var(--fs-sm)"></div>
     <table class="report">
       ${rows.map(([k, v]) => `<tr><th>${esc(labelMap[k] ?? k)}</th><td>${Array.isArray(v) ? v.length + ' 个' : esc(String(v))}</td></tr>`).join('')}
       <tr><th>句法黑名单</th><td>${gatesNote}</td></tr>
       <tr><th>覆盖率参考带${sel.active && sel.coverageTarget ? `（本批目标 ≥${sel.coverageTarget}%）` : ''}</th><td class="dim">${sel.active && sel.coverageTarget ? `分层覆盖目标带 ≥${sel.coverageTarget}%（多目标取最严；个体化依据见 docs/文献对齐）` : '95% = 最低限度理解（Laufer 1989）；98% = 无辅助顺畅阅读（Hu & Nation 2000）——文献群体均值'}</td></tr>
     </table>
 
-    <div class="diag-h">① 生词清单（去重 ${oov.length} 词${suspects.length ? `，其中 <span style="color:#b45309">疑似漏收 ${suspects.length}</span>` : ''}）<span class="dim">——⚠ 疑似漏收 = zipf≥4 高频词但词库未收（bike/flood/onto 类漏词史），先勾「学生已学过」核对入库；低频词才是真·生词，勾「标记要简化」。勾一个动一个</span></div>
+    <div class="diag-h">① 生词清单（去重 ${oov.length} 词${suspects.length ? `，其中 <span style="color:#b45309">疑似漏收 ${suspects.length}</span>` : ''}）<span class="dim">——⚠ 疑似漏收 = zipf≥4 高频词但词库未收（bike/flood/onto 类漏词史），先点「学生会（入库）」核对（教师确认过才算掌握，词库收录≠学生已掌握）；低频词才是真·生词，勾「标记要简化」。勾一个动一个</span></div>
     ${
       oov.length
         ? `<table class="sgtable"><tr><th style="width:90px">词</th><th style="width:170px">词频先验</th><th>处理（你说了算）</th></tr>${oovRows}</table>
@@ -174,6 +176,37 @@ export function renderReportPane(s: FileSession): void {
   document.getElementById('btn-reveal')?.addEventListener('click', () => {
     if (s.reportSavedPath) void invoke('reveal_path', { path: s.reportSavedPath });
   });
+
+  /* 难度反馈直接定位到正文：这句太难 → 看更简单的候选（AI 改写本句，正文预览、点 ✓ 才生效） */
+  pane.querySelectorAll('[data-risk-ai]').forEach((btn) =>
+    btn.addEventListener('click', () => {
+      const [pi, si] = ((btn as HTMLElement).dataset.riskAi ?? '').split(':').map(Number);
+      if (Number.isInteger(pi) && Number.isInteger(si)) {
+        void aiRewriteSentence(pi, si, '这句对学生太难——给一个更简单直接的说法：拆短句、换熟词，保留人物、事件、数字、否定与因果，不删情节');
+      }
+    }),
+  );
+
+  /* 两轮调适状态（"待处理/可发布"可见可区分）：本章若有调适报告，头部显示状态与教师反馈 */
+  void (async () => {
+    const box = document.getElementById('adapt-status');
+    const m = s.sourcePath?.match(/原文_(A层85|M层75|B层60)_(\d{4}-\d{2}-\d{2})/);
+    if (!box || !m || !s.sourcePath) return;
+    const dir = s.sourcePath.slice(0, s.sourcePath.lastIndexOf('/'));
+    const chapDir = dir.split('/').pop() ?? '';
+    const outRoot = dir.slice(0, dir.lastIndexOf('/'));
+    const p = `${outRoot}/调适报告_${m[1]}_${chapDir}_${m[2]}.md`;
+    try {
+      const md = await invoke<string>('read_text_file', { path: p });
+      const status = /状态：\*\*(.+?)\*\*/.exec(md)?.[1] ?? '（未知）';
+      const fb = /反馈原话：「(.+?)」/.exec(md)?.[1] ?? '';
+      box.style.display = '';
+      box.innerHTML = `<b>两轮调适</b>：${esc(status)}${fb ? `｜第二轮反馈「${esc(fb.slice(0, 44))}${fb.length > 44 ? '…' : ''}」` : ''} <button id="adapt-reveal">查看报告</button>`;
+      document.getElementById('adapt-reveal')?.addEventListener('click', () => void invoke('reveal_path', { path: p }));
+    } catch {
+      /* 没有调适报告（老稿或未跑两轮制）——区块保持隐藏，不报错 */
+    }
+  })();
 
   pane.querySelectorAll('[data-oov-simpl]').forEach((btn) =>
     btn.addEventListener('click', () => {
@@ -207,7 +240,7 @@ export function renderReportPane(s: FileSession): void {
       S.vocabCsvText = (S.vocabCsvText ? S.vocabCsvText.replace(/\n+$/, '') + '\n' : '') + `${tok},单词,,,,,,`;
       S.currentKnown.add(tok);
       renderAll();
-      setStatus(`✓「${tok}」已计入已学词，正文立即不再标红——文件 → 保存为本书配置 后全书每章生效`, 'saved');
+      setStatus(`✓「${tok}」已入库（词表内），正文立即不再标红——文件 → 保存为本书配置 后全书每章生效`, 'saved');
     }),
   );
 

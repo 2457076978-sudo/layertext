@@ -41,12 +41,32 @@ const stripZh = (s: string): string => s.replace(/（[^）（]*）/gu, ' ');
 
 /* ── 词形家族容错（对照与超纲判定共用的粗版口径） ──
  * 原文有 action、产物写 actions：这是同一个词的变形，不是"引入新词"。
- * 双边都展开常见变形（s/es/ed/ing/双写/ies/所有格），命中任一形态即算同词。 */
+ * 双边都展开常见变形（s/es/ed/ing/双写/ies/所有格），命中任一形态即算同词。
+ * 高频不规则过去式/分词也并进来（chose↔choose、drank↔drink 类）——QC 引擎的
+ * 不规则表是它自己的口径（红线不动），这张小表只服务于"引入对照"，防止把
+ * choose 的过去式误报成新词。 */
+const IRREGULAR: Record<string, string> = {
+  chose: 'choose', drank: 'drink', froze: 'freeze', blew: 'blow', grew: 'grow', knew: 'know',
+  threw: 'throw', flew: 'fly', drew: 'draw', fell: 'fall', felt: 'feel', kept: 'keep', slept: 'sleep',
+  left: 'leave', lost: 'lose', built: 'build', sent: 'send', spent: 'spend', lent: 'lend',
+  burnt: 'burn', dreamt: 'dream', learnt: 'learn', sold: 'sell', told: 'tell', won: 'win',
+  beaten: 'beat', blown: 'blow', grown: 'grow', known: 'know', thrown: 'throw', shown: 'show',
+  drawn: 'draw', fallen: 'fall', given: 'give', taken: 'take', eaten: 'eat', broken: 'break',
+  stolen: 'steal', chosen: 'choose', frozen: 'freeze', driven: 'drive', ridden: 'ride', risen: 'rise',
+  gone: 'go', done: 'do', seen: 'see', been: 'be', had: 'have', made: 'make', said: 'say',
+  ran: 'run', came: 'come', began: 'begin', sang: 'sing', swam: 'swim', sat: 'sit', stood: 'stand',
+  understood: 'understand', hid: 'hide', spread: 'spread', shut: 'shut', cut: 'cut', hurt: 'hurt',
+};
+
 export const normalizeWord = (w: string): string => w.toLowerCase().replace(/['’]s$/, '');
 
 export function expandForms(w: string): string[] {
   const x = normalizeWord(w);
   const forms = new Set([x]);
+  const base = IRREGULAR[x];
+  if (base) forms.add(base);
+  /* 反向：原形展开也带上它的不规则变形（原文 choose → 产物 chose 不算引入） */
+  for (const [k, v] of Object.entries(IRREGULAR)) if (v === x) forms.add(k);
   if (x.endsWith('ies')) { forms.add(`${x.slice(0, -3)}y`); forms.add(`${x.slice(0, -3)}ye`); }
   else if (x.endsWith('es')) { forms.add(x.slice(0, -2)); forms.add(`${x.slice(0, -1)}es`.slice(0, -2) + 'e'); }
   else if (x.endsWith('s')) forms.add(x.slice(0, -1));

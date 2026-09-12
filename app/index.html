@@ -3175,6 +3175,12 @@
       }
     </style>
     <link rel="stylesheet" href="/src/styles/archive.css" />
+    <style>
+      /* 系统开启"减少动态效果"时停用全部动画/过渡——动效永不移动阅读中的正文 */
+      @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+      }
+    </style>
   </head>
   <body>
     <svg xmlns="http://www.w3.org/2000/svg" style="display: none" aria-hidden="true">
