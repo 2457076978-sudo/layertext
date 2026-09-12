@@ -445,7 +445,7 @@ if (has('--partial-chapter')) {
   writeFileSync(cur2.path, JSON.stringify(cur2.manifest, null, 2), 'utf-8');
   console.log('════ AF 运行清单 · partial 章声明 ════');
   console.log(` 运行 ID：${cur2.manifest.runId}`);
-  console.log(list.length ? ` partial 章：${list.map((n) => `第${CN[n - 1] ?? n}章`).join('、')}——仍登记、仍回放，不进全书分母；发布学生版默认拒绝` : ' 已清空 partial 声明（所有章按完成口径计）');
+  console.log(list.length ? ` partial 章：${list.map((n) => CN[n - 1] ?? `第${n}章`).join('、')}——仍登记、仍回放，不进全书分母；发布学生版默认拒绝` : ' 已清空 partial 声明（所有章按完成口径计）');
   console.log(` ✓ ${cur2.path}`);
   process.exit(0);
 }
@@ -643,7 +643,7 @@ const tinfo = await SHARED.resolveTeacher(P, m.teacher);
 console.log(` 教师身份：${tinfo.id}（${tinfo.resolution?.status ?? tinfo.why}）${tinfo.id !== m.teacher ? `——清单里记的是「${m.teacher}」，按稳定 ID 算作「${tinfo.id}」` : ''}`);
 if (!tinfo.available) console.warn(` ⚠ ${tinfo.notes?.[0] ?? '教师身份无法归一化'}`);
 console.log(` 模型 ${m.model.name}（温度 ${m.model.temperature}）｜提示词 ${m.model.promptVersion}`);
-if (m.partialChapters?.length) console.log(` ⚠ partial 章（未写完，不进全书分母，学生版默认拒发）：${m.partialChapters.map((n) => `第${CN[n - 1] ?? n}章`).join('、')}`);
+if (m.partialChapters?.length) console.log(` ⚠ partial 章（未写完，不进全书分母，学生版默认拒发）：${m.partialChapters.map((n) => CN[n - 1] ?? `第${n}章`).join('、')}`);
 console.log(` 词表快照 ${m.lexicon.version}｜输入 ${m.inputs.length} 项｜产物 ${s.artifactCount} 件｜待复核 ${s.pendingReview} 段`);
 console.log(` 词表正本：${describeStoreState(SHARED.lexiconStoreState(P), m)}`);
 console.log(` 步骤：${m.steps.map((x) => `${x.ok ? '✓' : '✗'}${x.id}`).join(' ') || '（还没跑）'}`);
