@@ -20,6 +20,7 @@ import { execSync } from 'node:child_process';
 import { join } from 'node:path';
 
 const SHARED = await import('./LayerText_AF词表与词典.mjs');
+import { keychainGet } from './keychain.mjs';
 const { distOf, loadProject, loadLexicon, loadDict, loadKbGloss, chapterNames } = SHARED;
 const P = loadProject();
 const REPO = P.引擎目录;
@@ -31,7 +32,7 @@ const wc = (t) => (t.match(/[A-Za-z][A-Za-z'-]*/g) ?? []).length;
 
 const MODEL = P.模型 || 'ecnu-plus'; // ChatECNU；模型随项目配置走（调适项目_AnimalFarm.json 模型字段，当前 ecnu-max）
 const CFG = { baseUrl: 'https://chat.ecnu.edu.cn/open/api/v1' };
-const KEY = () => SHARED.keychainGet('layertext.ecnukey'); /* 惰性：Linux/CI 无 security 命令，导入期不查钥匙串 */
+const KEY = () => keychainGet('layertext.ecnukey'); /* 惰性：Linux/CI 无 security 命令，导入期不查钥匙串 */
 const { openLedger } = await import('./LayerText_AF调用台账.mjs');
 const LEDGER = await openLedger(P, '工序化生成');
 

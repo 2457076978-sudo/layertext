@@ -8,7 +8,7 @@ import { join } from 'node:path';
 
 /* 共享模块要**最先**导入：下面这些引擎模块路径都经 `distOf()`，
  * 而 `distOf` 就在它里面——晚一行就是 TDZ，脚本一跑就 `ReferenceError`。 */
-const { keychainGet, distOf } = await import('./LayerText_AF词表与词典.mjs');
+const { distOf } = await import('./LayerText_AF词表与词典.mjs');
 
 const P = (await import('./LayerText_AF词表与词典.mjs')).loadProject();
 const REPO = P.引擎目录;
@@ -18,6 +18,7 @@ const DATE = P.日期;
 const MODEL = 'ecnu-plus'; // ChatECNU（2026-09-12 起 Wayne 指定；OpenAI 兼容端点，key 在钥匙串 layertext.ecnukey）
 
 const CFG = { baseUrl: 'https://chat.ecnu.edu.cn/open/api/v1' }; // 不读 ~/.layertext.json：那是 App 的 AI 设置，脚本管线与 App 各用各的
+import { keychainGet } from './keychain.mjs';
 const KEY = () => keychainGet('layertext.ecnukey'); /* 惰性：Linux/CI 无 security 命令，导入期不查钥匙串 */
 /* 调用台账（四方向 v2 批次 0a）：逐调用记 usage/finishReason，主力路径的 token 从此可解释 */
 const { openLedger } = await import('./LayerText_AF调用台账.mjs');

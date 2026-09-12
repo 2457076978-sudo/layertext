@@ -27,6 +27,7 @@
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 
 const SHARED = await import('./LayerText_AF词表与词典.mjs');
+import { keychainGet } from './keychain.mjs';
 const { distOf } = SHARED;
 const { loadProject, loadLexicon, loadDict, appendDict, loadKbGloss } = SHARED;
 const P = loadProject();
@@ -100,7 +101,7 @@ const wc = (t) => (t.match(/[A-Za-z][A-Za-z'-]*/g) ?? []).length;
  * 已切 ChatECNU 不一致（09-12 换源时漏了它）。本批不动供应商（换源是行为变更，另批处理），
  * 但调用已入台账：谁在用哪家、花多少，_运行/token台账.jsonl 里看得见。 */
 const CFG = JSON.parse(readFileSync(`${process.env.HOME}/.layertext.json`, 'utf-8'));
-const KEY = () => SHARED.keychainGet('layertext.apikey'); /* 惰性：Linux/CI 无 security 命令，导入期不查钥匙串 */
+const KEY = () => keychainGet('layertext.apikey'); /* 惰性：Linux/CI 无 security 命令，导入期不查钥匙串 */
 const { openLedger } = await import('./LayerText_AF调用台账.mjs');
 const LEDGER = await openLedger(P, '补注');
 

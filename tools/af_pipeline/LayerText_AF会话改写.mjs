@@ -162,7 +162,7 @@ const CFG = (() => {
     return { baseUrl: 'https://api.deepseek.com' };
   }
 })();
-const { keychainGet } = await import('./LayerText_AF词表与词典.mjs');
+import { keychainGet } from './keychain.mjs';
 /** API key 惰性读取：--dry、假模型、纯本地路径都不该碰钥匙串 */
 let _key = null;
 const apiKey = () => {

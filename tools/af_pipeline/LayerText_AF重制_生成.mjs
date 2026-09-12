@@ -8,7 +8,7 @@ import { join } from 'node:path';
 
 /* 共享模块要**最先**导入：下面这些引擎模块路径都经 `distOf()`，
  * 而 `distOf` 就在它里面——晚一行就是 TDZ，脚本一跑就 `ReferenceError`。 */
-const { keychainGet, distOf } = await import('./LayerText_AF词表与词典.mjs');
+const { distOf } = await import('./LayerText_AF词表与词典.mjs');
 
 const P = (await import('./LayerText_AF词表与词典.mjs')).loadProject();
 const REPO = P.引擎目录;
@@ -26,6 +26,7 @@ const SEG_KEEP = 0.85; // 段级守恒线：单段 < 原段 85% 触发重试
 
 const CFG = JSON.parse(readFileSync(`${process.env.HOME}/.layertext.json`, 'utf-8'));
 const MODEL = 'deepseek-chat'; // 非思考型（v4-flash 思考型在复杂指令下会把推理/续写混入正文——09-09 与本次第一章实跑双重实证）
+import { keychainGet } from './keychain.mjs';
 const KEY = () => keychainGet('layertext.apikey'); /* 惰性：Linux/CI 无 security 命令，导入期不查钥匙串 */
 /* 共享模块要**最先**导入：下面这些引擎模块路径都经 `distOf()`，
  * 而 `distOf` 就在它里面——晚一行就是 TDZ，脚本一跑就 `ReferenceError`。 */
