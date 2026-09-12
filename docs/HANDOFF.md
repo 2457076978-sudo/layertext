@@ -33,3 +33,7 @@ cd app && npm run build
 - `npm run verify:rust`：通过；Rust 5 项全部通过。系统词典测试在资源存在时校验释义，资源缺失时明确跳过。
 - `npm run build --prefix app`：通过。
 - 工作树干净；当前分支 `codex/total-optimization`，未 push、未 release、未打 tag。
+
+## 总优化补充：preflight 门禁
+
+新增 `tools/preflight.mjs` 并接入 `npm run verify`：对 24 个管线 `.mjs` 逐文件执行 Node 语法检查，扫描空 catch，并确认关键脚本保留非破坏性 dry/plan/check/where 入口。该门禁针对 `.mjs` TDZ 与静默吞错无法由 TypeScript 覆盖的问题。当前分支未 push。
