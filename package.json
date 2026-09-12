@@ -14,10 +14,11 @@
     "lint:fix": "eslint --fix app/src src tests tools",
     "format": "prettier --write app/src src tests tools",
     "typecheck": "tsc -p tsconfig.json && cd app && tsc --noEmit -p tsconfig.json",
-    "verify": "npm run typecheck && npm run lint && npm test",
+    "verify": "npm run preflight && npm run typecheck && npm run lint && npm test",
     "verify:rust": "cd app/src-tauri && cargo fmt --check && cargo clippy -- -D warnings && cargo test",
     "prepare": "husky",
-    "fidelity": "node tools/fidelity.mjs"
+    "fidelity": "node tools/fidelity.mjs",
+    "preflight": "node tools/preflight.mjs"
   },
   "lint-staged": {
     "*.{ts,mts,mjs}": [
