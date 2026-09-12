@@ -86,7 +86,7 @@ const {
 const SV = await import(`${SHARED.distOf(REPO)}/src/core/studentversion.js`);
 const PKG_VERSION = JSON.parse(readFileSync(join(REPO, 'package.json'), 'utf-8')).version;
 
-const TIERS = arg('--tier', 'A')
+let TIERS = arg('--tier', '')
   .split(',')
   .map((s) => s.trim().toUpperCase())
   .filter((t) => TAGS[t]);
@@ -304,6 +304,8 @@ const pendingReviewOf = () => {
 
 /* ────────────────────── 建清单 ────────────────────── */
 if (has('--new')) {
+  /* --new 必须有起点层（不给就 A）；能从清单继承范围的是后面那些动作（--stamp 等） */
+  if (!TIERS.length) TIERS = ['A'];
   /* 教师先过名录：`Wayne` / `wayne ` / `Ｗａｙｎｅ` 归一成同一个 ID，并**当场说出来**；
    * 名录里没有的名字**登记**（否则"谁在这本书上干过活"永远答不出来），
    * 同时把"疑似拼错"这类要留档的说明写进本次运行的 `warnings`——
@@ -467,6 +469,10 @@ if (!cur) {
   console.error('✗ 还没有运行清单。先建：node LayerText_AF清单.mjs --new --tier A --teacher <你>');
   process.exit(2);
 }
+/* 扫描范围：命令行 > **清单记的层** > A。清单明明记着 A/M/B 而 `--stamp` 不带 `--tier`
+ * 就只扫 A——"少扫两层还报成功"正是这套清单要防的那类错；范围的答案就在清单上
+ * （第五轮「删除缓存不影响从 manifest 重建」同一条纪律）。 */
+if (!TIERS.length) TIERS = [...new Set([...(cur.manifest.tiers ?? []), 'A'])].filter((t) => TAGS[t]);
 
 /* ────────────────────── 刷状态（每一步跑完调一次） ────────────────────── */
 if (has('--stamp')) {
