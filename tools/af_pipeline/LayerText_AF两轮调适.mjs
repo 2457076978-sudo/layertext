@@ -38,6 +38,9 @@ const wc = (t) => (t.match(/[A-Za-z][A-Za-z'-]*/g) ?? []).length;
 const MODEL = 'ecnu-plus';
 const CFG = { baseUrl: 'https://chat.ecnu.edu.cn/open/api/v1' };
 const KEY = execSync('security find-generic-password -s layertext.ecnukey -w').toString().trim();
+/* 调用台账（四方向 v2 批次 0a）：逐调用记 usage/finishReason，主力路径的 token 从此可解释 */
+const { openLedger } = await import('./LayerText_AF调用台账.mjs');
+const LEDGER = await openLedger(P, '两轮调适');
 
 const { splitChapter } = await import(`${distOf(REPO)}/src/core/textpipe.js`);
 const { makeResolver } = await import(`${distOf(REPO)}/src/core/manifest.js`);
@@ -170,14 +173,8 @@ function systemPrompt(t, { annoCap } = {}) {
 }
 
 async function callChat(messages, maxTokens = 3000) {
-  const resp = await fetch(`${CFG.baseUrl}/chat/completions`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${KEY}` },
-    body: JSON.stringify({ model: MODEL, max_tokens: maxTokens, messages }),
-  });
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${(await resp.text()).slice(0, 200)}`);
-  const data = await resp.json();
-  return (data.choices?.[0]?.message?.content ?? '').trim();
+  const r = await LEDGER.call(messages, { baseUrl: CFG.baseUrl, key: KEY, model: MODEL, maxTokens });
+  return r.content.trim();
 }
 const cleanSeg = (text, marker) => {
   let t = text.trim().replace(/^```[a-z]*\s*/i, '').replace(/```\s*$/, '');
@@ -206,6 +203,7 @@ const readSegs = (i) => {
 /* ────────────────────── 第一轮：初稿 ────────────────────── */
 async function round1(i, t) {
   const { ch, header, chLine, segs, srcMd } = readSegs(i);
+  LEDGER.scene = { tier: t.key, chapter: ch, tag: 'R1' };
   const dst = r1PathOf(t, ch);
   const pf = progressFile(t, ch);
   let done = [];
@@ -259,6 +257,7 @@ function localCheck(t, i) {
 
 /* ────────────────────── 第二轮：按教师反馈复写 ────────────────────── */
 async function round2(t, i, feedbackRaw) {
+  LEDGER.scene = { tier: t.key, chapter: CN[i - 1], tag: 'R2' };
   const fb = parseTeacherFeedback(feedbackRaw);
   /* 教师在正文里点的「要简化」标记（simpl）= 词级"太难"反馈，与文字反馈合并——
    * 点名几个词，第二轮举一反三处理同类难度表达，不只换点名词。 */
@@ -456,3 +455,5 @@ if (summary.length) {
   console.log('═══ 小结 ═══');
   for (const s of summary) console.log(` ${s.tier} ${s.ch}：${s.status}｜结构 ${s.structural}｜待确认 ${s.info}｜难度 ${s.hard}`);
 }
+const st = LEDGER.flush();
+if (st.calls) console.log(`台账：调用 ${st.calls}（成功 ${st.ok}）｜入 ${st.in}${st.cached ? `（缓存命中 ${st.cached}）` : ''}｜出 ${st.out} token —— _运行/token台账.jsonl`);

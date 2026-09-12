@@ -20,6 +20,9 @@ const MODEL = 'ecnu-plus'; // ChatECNU（2026-09-12 起 Wayne 指定；OpenAI �
 
 const CFG = { baseUrl: 'https://chat.ecnu.edu.cn/open/api/v1' }; // 不读 ~/.layertext.json：那是 App 的 AI 设置，脚本管线与 App 各用各的
 const KEY = execSync('security find-generic-password -s layertext.ecnukey -w').toString().trim();
+/* 调用台账（四方向 v2 批次 0a）：逐调用记 usage/finishReason，主力路径的 token 从此可解释 */
+const { openLedger } = await import('./LayerText_AF调用台账.mjs');
+const LEDGER = await openLedger(P, '三档精修');
 const { splitChapter, extractParas, sentsOf } = await import(`${distOf(REPO)}/src/core/textpipe.js`);
 const { runQc } = await import(`${distOf(REPO)}/src/core/qc.js`);
 const { alignSentencePairs } = await import(`${distOf(REPO)}/src/core/align.js`);
@@ -68,13 +71,8 @@ if (RUN.warning) console.warn(`\n⚠ ${RUN.warning}`);
 /** 按层级标签取解析器（多层脚本与单层脚本共用同一种写法） */
 const RR = (tag) => makeResolver(RUN.layout, { out: OUT_BASE, work: P.调适工作区 }, { runId: RUN.runId, tier: tag, date: DATE });
 async function callChat(messages, maxTokens = 2500) {
-  const resp = await fetch(`${CFG.baseUrl}/chat/completions`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${KEY}` },
-    body: JSON.stringify({ model: MODEL, max_tokens: maxTokens, messages }),
-  });
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${(await resp.text()).slice(0, 150)}`);
-  return (await resp.json()).choices?.[0]?.message?.content ?? '';
+  const r = await LEDGER.call(messages, { baseUrl: CFG.baseUrl, key: KEY, model: MODEL, maxTokens, errSlice: 150 });
+  return r.content ?? '';
 }
 
 const toRefs = (md) => {
@@ -87,6 +85,7 @@ const toRefs = (md) => {
 
 async function refineChapter(tk, tag, i) {
   const ch = CN[i - 1];
+  LEDGER.scene = { tier: tk, chapter: ch, tag: '注释轮' };
   const path = RR(tag).any('正文', { chapter: ch });
   let md = readFileSync(path, 'utf-8');
   const srcRefs = toRefs(readFileSync(join(SRC_BASE, ch, '原文_规范化.md'), 'utf-8'));
@@ -146,6 +145,7 @@ async function refineChapter(tk, tag, i) {
   }
 
   // ② 信号修复轮：逐句对齐找"数字/专名缺失"对 → AI 把缺失信号自然补回改写句 → 精确替换
+  LEDGER.scene.tag = '信号修复';
   const curRefs = toRefs(md);
   const pairs = alignSentencePairs(srcRefs, curRefs).filter((r) => r.kind === 'match' && r.lostSignals?.length && r.base && r.cur);
   for (const p of pairs) {
@@ -196,6 +196,8 @@ for (const tk of tiers) {
     }
   }
 }
+const st = LEDGER.flush();
+if (st.calls) console.log(`台账：调用 ${st.calls}（成功 ${st.ok}）｜入 ${st.in}${st.cached ? `（缓存命中 ${st.cached}）` : ''}｜出 ${st.out} token —— _运行/token台账.jsonl`);
 console.log('\n| 层 | 章 | 加注 | 信号修复 | 未果 | 生词率 |');
 for (const r of results) console.log(`| ${r.tk} | ${r.ch} | ${r.noted} | ${r.sigFixed} | ${r.sigFail} | ${r.oovRate}% |`);
 

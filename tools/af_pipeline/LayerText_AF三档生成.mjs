@@ -21,6 +21,9 @@ const DATE = P.日期;
 const MODEL = 'ecnu-plus'; // ChatECNU（2026-09-12 起 Wayne 指定；OpenAI 兼容端点，key 在钥匙串 layertext.ecnukey）
 const CFG = { baseUrl: 'https://chat.ecnu.edu.cn/open/api/v1' }; // 不读 ~/.layertext.json：那是 App 的 AI 设置，脚本管线与 App 各用各的
 const KEY = execSync('security find-generic-password -s layertext.ecnukey -w').toString().trim();
+/* 调用台账（四方向 v2 批次 0a）：逐调用记 usage/finishReason，主力路径的 token 从此可解释 */
+const { openLedger } = await import('./LayerText_AF调用台账.mjs');
+const LEDGER = await openLedger(P, '三档生成');
 const { splitChapter } = await import(`${distOf(REPO)}/src/core/textpipe.js`);
 const { runQc } = await import(`${distOf(REPO)}/src/core/qc.js`);
 // 词表 + 本书专名（专名不计 OOV）——2026-09-10：原先只喂词库，Napoleon 等被算成生词
@@ -110,15 +113,8 @@ ${NOTE_TABLE}
 }
 
 async function callChat(messages, maxTokens = 2500) {
-  const body = (extra) => JSON.stringify({ model: MODEL, max_tokens: maxTokens, messages, ...extra });
-  const resp = await fetch(`${CFG.baseUrl}/chat/completions`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${KEY}` },
-    body: body({}),
-  });
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${(await resp.text()).slice(0, 200)}`);
-  const data = await resp.json();
-  return (data.choices?.[0]?.message?.content ?? '').trim();
+  const r = await LEDGER.call(messages, { baseUrl: CFG.baseUrl, key: KEY, model: MODEL, maxTokens });
+  return r.content.trim();
 }
 
 const cleanSeg = (text, marker) => {
@@ -129,6 +125,7 @@ const cleanSeg = (text, marker) => {
 
 async function runChapter(i, t) {
   const ch = CN[i - 1];
+  LEDGER.scene = { tier: t.key, chapter: ch, tag: '改写' };
   const src = join(SRC_BASE, ch, '原文_规范化.md');
   if (!existsSync(src)) throw new Error(`${ch} 缺规范化原文`);
   const md = readFileSync(src, 'utf-8');
@@ -149,6 +146,7 @@ async function runChapter(i, t) {
     // 修剪轮：改写模型有"删减阻抗"（实测三档全高于目标 12-20pp）——超标的段做一次纯删减任务
     const targetW = Math.round(srcW * t.ratio);
     if (srcW >= 20 && wc(revised) > srcW * (t.ratio + 0.08)) {
+      LEDGER.scene.tag = '修剪轮';
       const c2 = await callChat([
         { role: 'system', content: system },
         {
@@ -162,6 +160,7 @@ async function runChapter(i, t) {
       retried++;
     }
     if (srcW >= 20 && wc(revised) < srcW * t.retryLine) {
+      LEDGER.scene.tag = '守恒重试';
       const c2 = await callChat([
         { role: 'system', content: system },
         { role: 'user', content: userMsg },
@@ -225,5 +224,9 @@ for (const r of results) {
 }
 lines.push('');
 for (const [k, v] of Object.entries(byT)) lines.push(`${k} 层合计：${v.s} → ${v.o}（${((v.o / v.s) * 100).toFixed(0)}%）`);
+const st = LEDGER.flush();
+if (st.calls) {
+  lines.push('', `台账：调用 ${st.calls}（成功 ${st.ok}）｜入 ${st.in}${st.cached ? `（缓存命中 ${st.cached}）` : ''}｜出 ${st.out} token —— _运行/token台账.jsonl`);
+}
 writeAtomic(R.any('汇总报告', { name: '三档汇总' }), lines.join('\n'), 'utf-8');
 console.log('\n' + lines.join('\n'));

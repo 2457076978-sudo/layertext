@@ -15,10 +15,14 @@
  *   node LayerText_AF补注.mjs                      # 三档全章，补到目标覆盖率
  *   node LayerText_AF补注.mjs --tier A --chapters 7,8,9
  *   node LayerText_AF补注.mjs --dry                # 只报告缺口，不调 API、不写文件
- *   node LayerText_AF补注.mjs --target A=85,M=82,B=80 --density 90
+ *   node LayerText_AF补注.mjs --target A=85,M=82,B=80
  *
  * 目标覆盖率：A 85% / M 82% / B 80%（分层不同：越难的层越要多注）
- * 密度上限：每千词最多注多少词型（默认 90），防止把正文注成花脸。
+ * 密度上限（2026-09-12 批次 0b 口径收敛）：与两轮调适检查**同一把尺**——
+ *   src/core/adaptcheck.ts 的 ANNO_DENSITY_LIMIT（A6/M4/B3，每百词显示注释处数）。
+ *   原先这里的"每千词 90 词型"是第二套口径：补注按它填、检查按 A6/M4/B3 抓，
+ *   同一份稿子两把尺互相打架。现在补注预算 = 全章密度线内还能容纳的注释处数，
+ *   补到线即停（达不到覆盖率目标时如实报"受密度限"，交教师取舍）。
  */
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { execSync } from 'node:child_process';
@@ -67,7 +71,6 @@ const chapters = arg('--chapters', '')
   ? arg('--chapters').split(',').map(Number)
   : [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 const DRY = has('--dry');
-const DENSITY = Number(arg('--density', '90')); // 每千词最多注多少个词型
 /** 候补缓冲：多取这么多个候选词，用来顶替“注不进去”的词 */
 const SKIP_BUFFER = 40;
 /** 目标覆盖率（已注词型 / 应注词型） */
@@ -83,23 +86,25 @@ const TARGET = (() => {
 })();
 
 const { runQc } = await import(`${distOf(REPO)}/src/core/qc.js`);
+/* 密度口径只此一家：与两轮调适检查共用 adaptcheck 的阈值（批次 0b，禁止第二套常数） */
+const { burdenProfileOf, ANNO_DENSITY_LIMIT } = await import(`${distOf(REPO)}/src/core/adaptcheck.js`);
 const LEX = await loadLexicon(P);
 const DICT = loadDict(P.词典路径);
 const KB = loadKbGloss(P.知识库路径);
 const NEVER_ANNOTATE = new Set(['chapter']);
 const wc = (t) => (t.match(/[A-Za-z][A-Za-z'-]*/g) ?? []).length;
 
+/* ⚠ 本脚本仍走 DeepSeek（读 App 的 AI 设置与 layertext.apikey）——与三档生成/精修/两轮调适
+ * 已切 ChatECNU 不一致（09-12 换源时漏了它）。本批不动供应商（换源是行为变更，另批处理），
+ * 但调用已入台账：谁在用哪家、花多少，_运行/token台账.jsonl 里看得见。 */
 const CFG = JSON.parse(readFileSync(`${process.env.HOME}/.layertext.json`, 'utf-8'));
 const KEY = execSync('security find-generic-password -s layertext.apikey -w').toString().trim();
+const { openLedger } = await import('./LayerText_AF调用台账.mjs');
+const LEDGER = await openLedger(P, '补注');
 
 async function callChat(messages, maxTokens = 2500) {
-  const resp = await fetch(`${CFG.baseUrl}/chat/completions`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${KEY}` },
-    body: JSON.stringify({ model: MODEL, max_tokens: maxTokens, messages }),
-  });
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}：${(await resp.text()).slice(0, 200)}`);
-  return (await resp.json()).choices?.[0]?.message?.content ?? '';
+  const r = await LEDGER.call(messages, { baseUrl: CFG.baseUrl, key: KEY, model: MODEL, maxTokens });
+  return r.content ?? '';
 }
 
 /** 问模型要释义；失败抛错（绝不静默跳过——2026-09-10 的教训） */
@@ -159,11 +164,16 @@ for (const tk of tiers) {
     try {
       if (!existsSync(path)) throw new Error(`缺产物文件：${path}`);
       let md = readFileSync(path, 'utf-8');
+      LEDGER.scene = { tier: tk, chapter: ch, tag: '释义询问' };
       const before = runQc(md, LEX, { tier: tk, fileName: path.split('/').pop() });
       const words = wc(md.split('## 词句卡')[0]);
-      const maxByDensity = Math.floor((words / 1000) * DENSITY);
+      /* 密度预算 = 同一把尺（ANNO_DENSITY_LIMIT，处/百词）内还能容纳的注释处数：
+       * burdenProfileOf 与两轮调适检查用同一实现，补注填到线即停，不再两把尺打架。 */
+      const prof = burdenProfileOf(md);
+      const densityLimit = ANNO_DENSITY_LIMIT[tk] ?? ANNO_DENSITY_LIMIT.M;
+      const maxByDensity = Math.floor((prof.words / 100) * densityLimit);
       const needForTarget = Math.ceil(before.annotatable * TARGET[tk]) - before.annotated;
-      const budget = Math.max(0, Math.min(needForTarget, maxByDensity - before.annotated));
+      const budget = Math.max(0, Math.min(needForTarget, maxByDensity - prof.annos));
 
       const freq = new Map();
       for (const w of before.oov) freq.set(w, (freq.get(w) ?? 0) + 1);
@@ -239,7 +249,8 @@ for (const r of results) {
 
 const low = results.filter((r) => r.after.annotationCoverage < TARGET[r.tk] - 0.02);
 if (low.length) {
-  console.log(`\n⚠ 仍有 ${low.length} 个章次未达目标（受密度上限 ${DENSITY}/千词 限制）：`);
+  const limits = Object.fromEntries(tiers.map((k) => [k, ANNO_DENSITY_LIMIT[k] ?? ANNO_DENSITY_LIMIT.M]));
+  console.log(`\n⚠ 仍有 ${low.length} 个章次未达目标（受密度上限 ${tiers.map((k) => `${k}${limits[k]}处/百词`).join('/')} 限制，与两轮调适检查同一把尺）：`);
   for (const r of low) console.log(`   ${r.tk} ${r.ch}：${(r.after.annotationCoverage * 100).toFixed(0)}% < ${(TARGET[r.tk] * 100).toFixed(0)}%`);
 }
 if (failures.length) {
@@ -247,4 +258,6 @@ if (failures.length) {
   for (const f of failures) console.error(`   ${f.tk} ${f.ch}：${f.msg}`);
   process.exit(1);
 }
+const st = LEDGER.flush();
+if (st.calls) console.log(`台账：调用 ${st.calls}（成功 ${st.ok}）｜入 ${st.in}${st.cached ? `（缓存命中 ${st.cached}）` : ''}｜出 ${st.out} token —— _运行/token台账.jsonl`);
 console.log(`\n✓ ${results.length} 个章次处理完成${DRY ? '（--dry，未写文件、未调 API）' : ''}`);
