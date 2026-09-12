@@ -204,7 +204,7 @@ export function renderReportPane(s: FileSession): void {
       box.innerHTML = `<b>两轮调适</b>：${esc(status)}${fb ? `｜第二轮反馈「${esc(fb.slice(0, 44))}${fb.length > 44 ? '…' : ''}」` : ''} <button id="adapt-reveal">查看报告</button>`;
       document.getElementById('adapt-reveal')?.addEventListener('click', () => void invoke('reveal_path', { path: p }));
     } catch {
-      /* 没有调适报告（老稿或未跑两轮制）——区块保持隐藏，不报错 */
+      /* 有意兜底：没有调适报告（老稿或未跑两轮制）——区块保持隐藏，不报错 */
     }
   })();
 

@@ -34,7 +34,7 @@ export async function loadWorkspaces(dir: string): Promise<void> {
         return;
       }
     } catch {
-      /* 这一层没有 _工作区.json 就再上一层（章目录 → 书稿根目录） */
+      /* 有意兜底：这一层没有 _工作区.json 就再上一层（章目录 → 书稿根目录） */
     }
     const up = d.slice(0, d.lastIndexOf('/'));
     if (up === d) break;
