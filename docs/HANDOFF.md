@@ -22,3 +22,7 @@ npm run verify
 npm run verify:rust
 cd app && npm run build
 ```
+
+## 本轮补丁
+
+将 Rust 系统词典测试改为：系统词典存在时校验 `boar` 中文释义；系统词典缺失时跳过该资源依赖测试。该测试验证的是外部 macOS 资源，不应把“机器未安装词典”误报成代码失败。
