@@ -120,6 +120,9 @@ export interface SegmentGateInput {
   dict?: Map<string, string>;
   /** 本段应有的段落编号（形如 P07）。模型漏写/写错段号时按它归一，保证段落对齐不错位 */
   markerId?: string;
+  /** 生成闸门作用域：豁免直接引语内长句的 SENT-01 计数（句法工序被禁止拆引语，
+   *  不该为改不了的句子否决整段）。报表/风险队列/回放不传 → 照常计数。 */
+  exemptQuoteLen?: boolean;
   /**
    * 调用方已判定"全篇别处注过、这里又注了"的词。
    * 门禁自己只看得到手里这一段的文本（`idx.duplicates` 是**段内**重复），
@@ -157,8 +160,7 @@ export interface SegmentGateInput {
 export const ANNOTATABLE_MIN_LEN = 3;
 
 /** 应注词型的过滤（去重 + 归一大小写 + 长度阈值）。**所有路径都从这里过。** */
-export const annotatableOf = (words: Iterable<string>): string[] =>
-  [...new Set([...words].map((w) => String(w).toLowerCase()))].filter((w) => w.length >= ANNOTATABLE_MIN_LEN);
+export const annotatableOf = (words: Iterable<string>): string[] => [...new Set([...words].map((w) => String(w).toLowerCase()))].filter((w) => w.length >= ANNOTATABLE_MIN_LEN);
 
 /** 词数（与管线各处一致：字母起首的英文词） */
 export const wordCount = (t: string): number => (t.match(/[A-Za-z][A-Za-z'-]*/g) ?? []).length;
@@ -198,6 +200,17 @@ export function normalizeSegmentBody(text: string, markerId?: string): string {
   return `[${markerId ?? 'P01'}] ${clean}`;
 }
 
+/** 直接引语跨度（双引号包起，直/弯两种）从超长句计量中剔除：句法指令同源要求
+ *  "直接引语只降词不降句式"（引语修辞属教学内容），门禁与指令必须同一口径——
+ *  否则引语密集段（演讲/歌词）在句法点数学上无解，只能反复重试后整段隔离
+ *  （2026-09-12 AF 第一章 ecnu-max 全书重制实跑：11/14 段因此隔离）。
+ *  **只作用于生成闸门**（exemptQuoteLen，由 stagepatch 的工序门禁传入）：学生读到的
+ *  引语长句仍是真实阅读难度，报表/风险队列/回放层照常计数——豁免是"句法工序
+ *  改不了引语、不该为它否决"的过程责任口径，不是测量口径。引号未闭合时不豁免。 */
+export function stripDirectQuotes(text: string): string {
+  return text.replace(/"[^"]*"|“[^”]*”/g, ' ');
+}
+
 /**
  * 段级门禁：把一段的客观测量变成 pass / needs-review。
  * 纯函数——同样的输入永远同样的判定，可单测、可回放、可解释。
@@ -206,7 +219,8 @@ export function gateSegment(input: SegmentGateInput): SegmentVerdict {
   const body = input.scope === 'sentence' ? stripLookup(input.text) : normalizeSegmentBody(input.text, input.markerId);
   const words = wordCount(body);
   const sents = segmentSentences(body);
-  const overLenSentences = sents.filter((s) => wordCount(s) > input.maxLen);
+  const lenBase = input.exemptQuoteLen ? stripDirectQuotes(body) : body;
+  const overLenSentences = segmentSentences(lenBase).filter((s) => wordCount(s) > input.maxLen);
 
   const idx = parseAnnotations(body, input.dict);
   /* ★ 门禁**自己**过一遍应注词型的口径，而不是信任调用方已经过好了。

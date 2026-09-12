@@ -38,18 +38,21 @@ export const STAGE_LABEL: Record<Stage, string> = {
 
 /* ────────────────────── 各工序生效的门禁规则 ──────────────────────
  * 同一段在不同工序点该守的规矩不同：词汇粗筛之后句子可能还长（句法工序没跑），
- * 此时 SENT-01 不该拦；注释之前 ANNO-01 必然全红；篇幅（LEN-01）在句法与加注
- * 两道拦截——句法点拦"改写期就跑偏"（此时还便宜可修），加注点作终稿兜底。
+ * 此时 SENT-01 不该拦；注释之前 ANNO-01 必然全红。
+ * 篇幅（LEN-01）不在任何工序点拦截（2026-09-12 移除）：两轮调适制已拍板"篇幅比例
+ *  退役为参考"（保留篇幅与阅读难度没有稳定对应关系，不为压篇幅删内容）——工序化若
+ *  继续按 原文×ratio±12% 硬拦，等于两套尺。目标词数仍作为 issue 软提示给模型，
+ *  篇幅数据进章 recap 供教师参考，LEN-01 本体保留在 GATE_RULES 供报表与单句改写路径。
  * 规则号全部来自 segmentgate 的
  * GATE_RULES（唯一口径），这里只声明"这道工序点上，哪些规则命中即拒绝合并"——
  * 不新造规则、不改权重。FACT-01/02 在门禁里是 warn（机器只能提示），但连贯性
  * 工序的职责就是保事实，所以在它那道上升为拒绝条件（方案表 2：结果须过事实对照）。 */
 export const STAGE_BLOCK_RULES: Record<Stage, readonly string[]> = {
   'vocab-primary': ['ZH-01'],
-  syntax: ['ZH-01', 'SENT-01', 'LEN-01'],
+  syntax: ['ZH-01', 'SENT-01'],
   'vocab-secondary': ['ZH-01'],
   coherence: ['ZH-01', 'FACT-01', 'FACT-02'],
-  annotation: ['ZH-01', 'SENT-01', 'LEN-01', 'ANNO-01'],
+  annotation: ['ZH-01', 'SENT-01', 'ANNO-01'],
 };
 
 /* ────────────────────── 协议结构 ────────────────────── */
@@ -92,7 +95,11 @@ const PATCH_STATUS = new Set(['changed', 'unchanged', 'blocked']);
  *  解析得出来但结构不对（未知段、多段混写）按条降级为 problems，不让半截结果混进合并。 */
 export function parseStagePatch(raw: string, expectedIds: readonly string[]): ParsedPatch {
   const problems: string[] = [];
-  const text = String(raw ?? '').trim().replace(/^```[a-z]*\s*/i, '').replace(/```\s*$/, '').trim();
+  const text = String(raw ?? '')
+    .trim()
+    .replace(/^```[a-z]*\s*/i, '')
+    .replace(/```\s*$/, '')
+    .trim();
   let data: unknown = null;
   try {
     data = JSON.parse(text);
@@ -185,11 +192,7 @@ export interface GatedPatches {
 /** changed 段先过门禁再合并：按 STAGE_BLOCK_RULES[stage] 过滤命中规则，
  *  外加显式 protectedFacts 守卫。blocked 的段在这里把 status 翻成 'blocked'
  *  （mergePatch 只合并 changed）——门禁是唯一翻状态的地方，别处不许再判一遍。 */
-export function gatePatches(
-  result: StagePatchResult,
-  segs: readonly GateSegCtx[],
-  opts: { stage: Stage; protectedFacts?: Record<string, string[]> },
-): GatedPatches {
+export function gatePatches(result: StagePatchResult, segs: readonly GateSegCtx[], opts: { stage: Stage; protectedFacts?: Record<string, string[]> }): GatedPatches {
   const byId = new Map(segs.map((s) => [s.id, s]));
   const rules = new Set(STAGE_BLOCK_RULES[opts.stage]);
   const items: StagePatchItem[] = [];
@@ -221,15 +224,15 @@ export function gatePatches(
       oov: seg.oov,
       dict: seg.dict,
       markerId: seg.id,
+      /* 工序门禁 = 生成闸门作用域：句法指令禁止拆直接引语，引语长句不该在此否决
+       * 整段（报表与风险队列不传此标志，照常计数——两套口径各有职责，见 segmentgate） */
+      exemptQuoteLen: true,
     });
     verdicts[item.id] = verdict;
     const hitRuleIds = verdict.problems.filter((p) => rules.has(p.ruleId)).map((p) => p.ruleId);
     const lostFacts = factGuard(item.text, opts.protectedFacts?.[item.id] ?? []);
     if (hitRuleIds.length || lostFacts.length) {
-      const reason = [
-        hitRuleIds.length ? `命中门禁 ${[...new Set(hitRuleIds)].join('、')}` : '',
-        lostFacts.length ? `受保护事实丢失：${lostFacts.join('、')}` : '',
-      ].filter(Boolean).join('；');
+      const reason = [hitRuleIds.length ? `命中门禁 ${[...new Set(hitRuleIds)].join('、')}` : '', lostFacts.length ? `受保护事实丢失：${lostFacts.join('、')}` : ''].filter(Boolean).join('；');
       blocked.push({ id: item.id, ruleIds: [...new Set(hitRuleIds)], lostFacts, reason });
       items.push({ ...item, status: 'blocked', reason });
     } else {

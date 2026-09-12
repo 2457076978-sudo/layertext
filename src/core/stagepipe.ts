@@ -17,10 +17,7 @@
  * 纯逻辑：不读文件、不调网络、不写盘。进度落盘与隔离目录由管线（tools/）管。
  */
 
-import {
-  Stage, STAGE_ORDER, STAGE_LABEL, StagePatchRequest,
-  parseStagePatch, gatePatches, mergePatch, GateSegCtx,
-} from './stagepatch.js';
+import { Stage, STAGE_ORDER, STAGE_LABEL, StagePatchRequest, parseStagePatch, gatePatches, mergePatch, GateSegCtx } from './stagepatch.js';
 import type { GatedPatches } from './stagepatch.js';
 /** 门禁拒绝条目（stagepatch 的结构，编排里只透传） */
 type GatedBlocked = GatedPatches['blocked'];
@@ -36,15 +33,14 @@ export function defaultInstructions(): StageInstructions {
   return {
     'vocab-primary':
       '把该段里学生词库外的实词换成学生已学的说法（同义转换，不是删减）；句式保持不动；' +
-      '专名、数字、否定、因果一个不能丢；此刻不要加任何中文注释。只处理给出的问题段。',
+      '专名、数字、否定、因果一个不能丢；此刻不要加任何中文注释。' +
+      '点名的词表外实词必须逐词处理：能换就换成已学说法，确实换不出更简单说法的在 reason 里逐词说明；' +
+      '不得以段落长度已达标、词多为已学词等理由整段跳过。只处理给出的问题段。',
     syntax:
       '只处理句子结构：把超长句拆成短句、被动改主动、定语从句拆开、过去完成改成一般过去时并用 before/after 明示先后；' +
       '不改变词汇难度（上一道换好的词保持）；直接引语只降词不降句式；情节零丢失。只处理给出的问题段。',
-    'vocab-secondary':
-      '上一道工序可能引入了新的词表外词：把它们再换成学生已学的说法；其余内容保持不动。只处理给出的问题段。',
-    coherence:
-      '按给出的具体问题处理衔接与指代：把指代不明处补出人物名字、把断掉的因果关系接清；' +
-      '数字、专名、否定、因果一个不能丢；不简化词汇、不拆并句子。只处理给出的问题段。',
+    'vocab-secondary': '上一道工序可能引入了新的词表外词：把它们再换成学生已学的说法；其余内容保持不动。只处理给出的问题段。',
+    coherence: '按给出的具体问题处理衔接与指代：把指代不明处补出人物名字、把断掉的因果关系接清；' + '数字、专名、否定、因果一个不能丢；不简化词汇、不拆并句子。只处理给出的问题段。',
     annotation:
       '给列出的待注词在本段首次出现处加注，格式 word（中文），释义用给出的建议释义；' +
       '每个词只注一次；不改动英文内容本身。text 里除 word（中文）注释外不得出现任何中文；' +
@@ -173,15 +169,16 @@ export async function runStagePipeline(opts: StagePipeOpts): Promise<StagePipeRe
 
   for (const stage of STAGE_ORDER) {
     const ctx: ScanCtx = {
-      tier: opts.tier, knownWords: opts.knownWords, properNouns: opts.properNouns,
-      glossary, prevStageText,
+      tier: opts.tier,
+      knownWords: opts.knownWords,
+      properNouns: opts.properNouns,
+      glossary,
+      prevStageText,
       annoCap: stage === 'annotation' ? opts.annoCapPerSeg : undefined,
       mustAnnotate: opts.mustAnnotate,
     };
     const active = opts.segs.filter((s) => !quarantinedIds.has(s.id));
-    const candidates: PoolItem[] = active
-      .map((s) => ({ seg: s, issues: scanFor(stage, { ...s, draft: text[s.id] }, ctx) }))
-      .filter((x) => x.issues.length > 0);
+    const candidates: PoolItem[] = active.map((s) => ({ seg: s, issues: scanFor(stage, { ...s, draft: text[s.id] }, ctx) })).filter((x) => x.issues.length > 0);
     scans[stage] = candidates.map((x) => x.seg.id);
 
     if (!candidates.length) {
@@ -219,12 +216,19 @@ export async function runStagePipeline(opts: StagePipeOpts): Promise<StagePipeRe
           instruction: instructions['vocab-primary'],
         };
         const gateCtx: GateSegCtx[] = overCap.map((x) => ({
-          id: x.seg.id, source: x.seg.source, target: 0, maxLen: opts.maxLen, oov: [],
+          id: x.seg.id,
+          source: x.seg.source,
+          target: 0,
+          maxLen: opts.maxLen,
+          oov: [],
         }));
         const protectedFacts: Record<string, string[]> = {};
         try {
           const raw = await opts.callStage(req);
-          const parsed = parseStagePatch(raw, overCap.map((x) => x.seg.id));
+          const parsed = parseStagePatch(
+            raw,
+            overCap.map((x) => x.seg.id),
+          );
           problems.push(...parsed.problems.map((p2) => `[配额返工] ${p2}`));
           if (parsed.ok && parsed.result) {
             const gated = gatePatches(parsed.result, gateCtx, { stage: 'vocab-primary', protectedFacts });
@@ -263,10 +267,19 @@ export async function runStagePipeline(opts: StagePipeOpts): Promise<StagePipeRe
       if (changedIds.length) version++;
       lastUnsupportedGaps = unsupportedGaps;
       checkpoints.push({
-        stage, called: changedIds.length > 0, version, changedIds: [...new Set(changedIds)], blockedIds: [],
-        problems, candidateIds: candidates.map((x) => x.seg.id),
+        stage,
+        called: changedIds.length > 0,
+        version,
+        changedIds: [...new Set(changedIds)],
+        blockedIds: [],
+        problems,
+        candidateIds: candidates.map((x) => x.seg.id),
       });
-      emit({ kind: changedIds.length ? 'stage-commit' : 'stage-fail', stage, detail: `v${version}：注/改 ${new Set(changedIds).size} 段${unsupportedGaps.length ? `，未支持缺口 ${unsupportedGaps.reduce((n, g) => n + g.words.length, 0)} 词` : ''}` });
+      emit({
+        kind: changedIds.length ? 'stage-commit' : 'stage-fail',
+        stage,
+        detail: `v${version}：注/改 ${new Set(changedIds).size} 段${unsupportedGaps.length ? `，未支持缺口 ${unsupportedGaps.reduce((n, g) => n + g.words.length, 0)} 词` : ''}`,
+      });
       continue;
     }
 
@@ -328,7 +341,10 @@ export async function runStagePipeline(opts: StagePipeOpts): Promise<StagePipeRe
         let parsed: ReturnType<typeof parseStagePatch>;
         try {
           const raw = await opts.callStage(req);
-          parsed = parseStagePatch(raw, chunk.map((x) => x.seg.id));
+          parsed = parseStagePatch(
+            raw,
+            chunk.map((x) => x.seg.id),
+          );
         } catch (e) {
           /* 调用层失败（网络/HTTP）：本批作废，段保持上一版；如实记录，不伪造 patch */
           problems.push(`第 ${attempt} 次调用失败（${chunk.map((x) => x.seg.id).join(',')}）：${String(e).slice(0, 160)}`);
@@ -337,6 +353,25 @@ export async function runStagePipeline(opts: StagePipeOpts): Promise<StagePipeRe
         }
         problems.push(...parsed.problems.map((p) => `[${STAGE_LABEL[stage]} 尝试${attempt}] ${p}`));
         if (!parsed.ok || !parsed.result) continue;
+
+        /* 声明-实效一致性守卫（2026-09-12 全书重制实跑根因之一）：模型把整段原样返回
+         * 却标记 changed（实测 ecnu-max 以"关键实词多为已学词/目标词数范围内"为由整段
+         * 不改），协议不能按声明记账——按被拒处理并把"必须实际处理点名问题"带进重试；
+         * 重试仍原样返回才隔离（此时隔离原因是"模型拒不执行"，归难度残留待人工）。 */
+        const normSeg = (t: string) =>
+          t
+            .replace(/\[P\d+\]/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+        for (const p of parsed.result.patches) {
+          if (p.status !== 'changed' || !p.text) continue;
+          if (text[p.id] === undefined) continue;
+          if (normSeg(p.text) !== normSeg(text[p.id])) continue; /* 确有实际改动，放行 */
+          p.status = 'blocked';
+          p.reason = '上一轮把该段原样返回却声明 changed：点名词表外词/句法问题一个都没处理；不得以长度达标或词多为已学词为由跳过，必须逐条实际处理';
+          blockedThisAttempt.push({ id: p.id, ruleIds: [], lostFacts: [], reason: '声明 changed 但整段原样返回（未做任何修改）' });
+          problems.push(`[${STAGE_LABEL[stage]} 尝试${attempt}] ${p.id} 声明 changed 但原样返回，按被拒处理`);
+        }
 
         const gated = gatePatches(parsed.result, gateCtx, { stage, protectedFacts });
         const merged = mergePatch(text, { patches: gated.items, baseVersion: '' });
@@ -351,9 +386,7 @@ export async function runStagePipeline(opts: StagePipeOpts): Promise<StagePipeRe
       if (retryables.length) {
         /* 只重试被拒的段，把拒绝原因带进 issues（第二次尝试的模型看得见自己错在哪） */
         const rbMap = new Map(retryables.map((b) => [b.id, b.reason]));
-        pool = pool
-          .filter((x) => rbMap.has(x.seg.id))
-          .map((x) => ({ ...x, rejectReason: rbMap.get(x.seg.id) ?? '' }));
+        pool = pool.filter((x) => rbMap.has(x.seg.id)).map((x) => ({ ...x, rejectReason: rbMap.get(x.seg.id) ?? '' }));
         continue;
       }
       for (const b of blockedThisAttempt) {
@@ -366,10 +399,13 @@ export async function runStagePipeline(opts: StagePipeOpts): Promise<StagePipeRe
 
     if (committed) version++;
     checkpoints.push({
-      stage, called: committed, version,
+      stage,
+      called: committed,
+      version,
       changedIds: [...changedAll],
       blockedIds: quarantined.filter((q) => q.stage === stage).map((q) => q.id),
-      problems, candidateIds: candidates.map((x) => x.seg.id),
+      problems,
+      candidateIds: candidates.map((x) => x.seg.id),
     });
     if (committed) emit({ kind: 'stage-commit', stage, detail: `v${version}：改 ${changedAll.size} 段` });
     else if (problems.length) emit({ kind: 'stage-fail', stage, detail: problems[0] });
@@ -434,7 +470,10 @@ export function buildChapterRecap(opts: StagePipeOpts, run: StagePipeResult): Ch
    * supported = 其中在终稿加注账本里的（账本由终稿回填，注了才有）；
    * unsupported = 剩下的——这就是"配额缺口"与"漏注"的总账，必须摊开。 */
   const scanCtx: ScanCtx = {
-    tier: opts.tier, knownWords: opts.knownWords, properNouns: opts.properNouns, glossary: run.glossary,
+    tier: opts.tier,
+    knownWords: opts.knownWords,
+    properNouns: opts.properNouns,
+    glossary: run.glossary,
   };
   const keptHard = new Set<string>();
   for (const seg of opts.segs) {
@@ -451,7 +490,11 @@ export function buildChapterRecap(opts: StagePipeOpts, run: StagePipeResult): Ch
     sourceVersion: opts.sourceVersion,
     draftVersion: `v${run.finalVersion}`,
     stageResults: run.checkpoints.map((c) => ({
-      stage: c.stage, version: c.version, changed: c.changedIds.length, blocked: c.blockedIds.length, called: c.called,
+      stage: c.stage,
+      version: c.version,
+      changed: c.changedIds.length,
+      blocked: c.blockedIds.length,
+      called: c.called,
     })),
     acceptedTerms,
     openIssues: [
