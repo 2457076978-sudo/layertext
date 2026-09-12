@@ -64,6 +64,7 @@ const RR = (tag) => makeResolver(RUN.layout, { out: OUT_BASE, work: P.调适工�
 const argv = process.argv.slice(2);
 const dry = argv.includes('--dry');
 let tiers = argv.filter((a) => /^[AMB]$/.test(a));
+if (argv.includes('ALL')) tiers = ['A', 'M', 'B']; /* ALL 曾是空实现（过滤后落入默认 ['A']，批量只跑了 A 层——2026-09-12 夜实跑教训） */
 if (!tiers.length) tiers = ['A'];
 let chapters = argv.filter((a) => /^\d/.test(a)).flatMap((a) => a.split(',').map(Number));
 if (!chapters.length) chapters = [7];
@@ -164,17 +165,22 @@ async function localGlosses(words, ctxOf) {
 
 /** 确定性加注器（注入 stagepipe，annotation 工序的本地路径）：
  *  词典/知识库有释义就地插入；缺的批量问一次模型只要词义；插不进（词不在段里）如实计数。 */
+const annotatedDone = new Set(); /* 本章已注词（跨段一词一注：platform（舞台）在两段各注一次的实跑教训——段内幂等管不到跨段） */
 const annotate = async (draft, targets) => {
   let md = draft;
   const missing = [];
   for (const w of targets.need) {
+    if (annotatedDone.has(w)) continue;
     const zh = glossHints.get(w) ?? askedGloss.get(w);
     if (!zh) {
       missing.push(w);
       continue;
     }
     const r = insertAnnotation(md, w, zh);
-    if (r.ok) md = r.text;
+    if (r.ok) {
+      md = r.text;
+      annotatedDone.add(w);
+    }
   }
   if (missing.length) {
     const sentOf = (w) => md.split(/(?<=[.!?])\s+/).find((sn) => new RegExp(`\\b${w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(sn));
@@ -184,7 +190,10 @@ const annotate = async (draft, targets) => {
       if (!zh) continue;
       askedGloss.set(w, zh);
       const r = insertAnnotation(md, w, zh);
-      if (r.ok) md = r.text;
+      if (r.ok) {
+        md = r.text;
+        annotatedDone.add(w);
+      }
     }
   }
   return md;
