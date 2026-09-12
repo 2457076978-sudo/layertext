@@ -223,3 +223,10 @@ test('expandForms：不规则补录 woke/woken/better/best', () => {
   const known = new Set(['wake', 'good']);
   for (const w of ['woke', 'woken', 'better', 'best']) assert.ok(knownWordHit(w, known), `${w} 应命中原形`);
 });
+
+test('expandForms：常用过去式补录（forgot/horses 类不再被注）', () => {
+  const known = new Set(['forget', 'break', 'take', 'give', 'see', 'go', 'think', 'bring', 'teach', 'hold']);
+  for (const w of ['forgot', 'broke', 'took', 'gave', 'saw', 'went', 'thought', 'brought', 'taught', 'held']) {
+    assert.ok(knownWordHit(w, known), `${w} 应命中不规则原形`);
+  }
+});
