@@ -37,3 +37,9 @@ cd app && npm run build
 ## 总优化补充：preflight 门禁
 
 新增 `tools/preflight.mjs` 并接入 `npm run verify`：对 24 个管线 `.mjs` 逐文件执行 Node 语法检查，扫描空 catch，并确认关键脚本保留非破坏性 dry/plan/check/where 入口。该门禁针对 `.mjs` TDZ 与静默吞错无法由 TypeScript 覆盖的问题。当前分支未 push。
+
+## 性能与结构优化补充
+
+新增 `tools/perf_bench.mjs` 与 `npm run perf:bench`：使用固定 250 段/4750 词输入，在 dist 上重复 30 次测量核心 QC 热路径，并设置默认 250ms 回归门槛。本机实测平均 1.66ms/次。该基准不调用 API、不读真实教学资产，适合 CI 做趋势门禁。
+
+本轮对结构的实际收敛点是把性能基准与 preflight 作为独立工程边界接入 `package.json`；大规模前端拆分尚未安全实施，原因是当前模块间循环依赖较多，贸然拆分会改变运行时初始化顺序。后续应以纯函数边界（risk 分组、会话状态、报告格式化）为单位逐步迁移，并每次保留兼容导出。
