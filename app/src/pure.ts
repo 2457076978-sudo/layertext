@@ -989,3 +989,54 @@ export function annotatedHeadOf(md: string, word: string): string {
   /* 前导冠词不入词头（最长候选会把「a great-looking」整个吞下，入库应记 great-looking） */
   return (best || word).replace(/^(?:a|an|the)[ -]/i, '');
 }
+
+/** 英语释义的学生可读性检查：释义里每个实词（≥3 字母，去功能词）都必须在已学词表内
+ *  （词形家族由 isKnown 判定）——拿生词注生词（tyrant（despot））对初中生是双重负担。
+ *  返回首个超纲词（全过返回 null），调用方据此拒插并如实报。 */
+export function glossOutOfVocab(def: string, isKnown: (w: string) => boolean): string | null {
+  const FN = new Set([
+    'the',
+    'and',
+    'or',
+    'of',
+    'to',
+    'in',
+    'on',
+    'for',
+    'with',
+    'that',
+    'which',
+    'who',
+    'any',
+    'one',
+    'who',
+    'something',
+    'someone',
+    'person',
+    'thing',
+    'things',
+    'very',
+    'not',
+    'are',
+    'is',
+    'was',
+    'were',
+    'be',
+    'been',
+    'has',
+    'have',
+    'had',
+    'it',
+    'its',
+    'his',
+    'her',
+    'their',
+  ]);
+  for (const tok of def.toLowerCase().match(/[a-z][a-z'-]*/g) ?? []) {
+    for (const part of tok.split('-')) {
+      if (part.length < 3 || FN.has(part)) continue;
+      if (!isKnown(part)) return part;
+    }
+  }
+  return null;
+}

@@ -3,6 +3,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
+  glossOutOfVocab,
   annotatedHeadOf,
   applyRewriteTo,
   findOriginalFlex,
@@ -526,4 +527,24 @@ test('wordnet parseDataLine：definition/例句拆分（WordNet gloss 原文夹�
   assert.equal(ex!.def, 'a support on which something rests');
   assert.deepEqual(ex!.examples, ['he placed his hat on a rack']);
   assert.equal(parseDataLine('no bar no gloss', 'noun'), undefined);
+});
+
+test('glossOutOfVocab：释义实词全已学才放行，超纲实词点名（tyrant（despot）的双重负担防线）', () => {
+  const known = new Set(['support', 'which', 'rest', 'desert', 'place', 'bird', 'sit']);
+  /* 与生产同口径（词形家族：rests 命中 rest）——textpipe 已由其它用例静态导入处复用 */
+  const isKnown = (w: string) => w === 'rests' || known.has(w);
+  assert.equal(
+    glossOutOfVocab('a support on which something rests', (w) => isKnown(w)),
+    null,
+    '功能词豁免+实词全过',
+  );
+  assert.equal(
+    glossOutOfVocab('spiny-finned fishes of the order Perciformes', (w) => isKnown(w)),
+    'spiny',
+    '连字符拆开逐段查，首个超纲点名',
+  );
+  assert.equal(
+    glossOutOfVocab('any despotic ruler', (w) => isKnown(w)),
+    'despotic',
+  );
 });

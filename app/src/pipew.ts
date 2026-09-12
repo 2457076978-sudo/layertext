@@ -15,6 +15,7 @@ import { CHANGELOG_HEADER, newMarkId, type FileSession, type Mark } from './type
 import { S as _S } from './state.js';
 import {
   annotatedHeadOf,
+  glossOutOfVocab,
   csvCell,
   stripWordAnnotations,
   findOriginalFlex,
@@ -29,7 +30,7 @@ import {
   syncMarksToMd,
   type SyncPlan,
 } from './pure.js';
-import { extractParas, sentsOf, splitChapter } from '../../src/core/textpipe.js';
+import { extractParas, hit, sentsOf, splitChapter } from '../../src/core/textpipe.js';
 import { sentenceRisks } from '../../src/core/risks.js';
 import { simplifyMaxLen } from './ai.js';
 
@@ -845,6 +846,13 @@ export async function applyEnDefinitions(s: FileSession, marks: Mark[]): Promise
       continue;
     }
     const def = pick.sense.en;
+    /* 释义词汇门槛（2026-09-13 Wayne：英语释义只许用学过的词）——释义里有超纲实词=拒插，
+     * 如实报给教师手写；不拿第二个义项的"更简单释义"顶替（语境义项是选定义的第一原则） */
+    const oovInGloss = glossOutOfVocab(def, (x) => hit(x, S.currentKnown));
+    if (oovInGloss) {
+      missed.push(`${w}（释义含超纲词 ${oovInGloss}）`);
+      continue;
+    }
     const gloss = def.length > 64 ? `${def.slice(0, 58).replace(/\s+\S*$/, '')}…` : def;
     const esc = w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const re = new RegExp(`\\b${esc}\\b`, 'i');
