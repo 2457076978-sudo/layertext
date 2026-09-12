@@ -10,6 +10,7 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import { WORD_TYPES, SENT_TYPES, GATES, typeLabel, type FileSession, type Mark } from './types.js';
+import { planRevisionTask, revisionTaskPreview } from '../../src/core/adaptcheck.js';
 
 const SAVE_DEBOUNCE_MS = 600;
 
@@ -263,14 +264,18 @@ export function renderSidebar(
 
 const ADAPT_NAME_RE = /原文_(A层85|M层75|B层60)_/;
 
-function adaptTargetOf(sourcePath: string | null): { tierKey: string; tag: string; chapDir: string; outRoot: string; feedbackPath: string } | null {
+function adaptTargetOf(sourcePath: string | null): { tierKey: string; tag: string; chapDir: string; outRoot: string; feedbackPath: string; taskPath: string } | null {
   const m = sourcePath?.match(ADAPT_NAME_RE);
   if (!m || !sourcePath) return null;
   const dir = sourcePath.slice(0, sourcePath.lastIndexOf('/'));
   const chapDir = dir.split('/').pop() ?? '';
   const outRoot = dir.slice(0, dir.lastIndexOf('/'));
   if (!chapDir || !outRoot) return null;
-  return { tierKey: m[1]![0], tag: m[1]!, chapDir, outRoot, feedbackPath: `${outRoot}/_运行/调适反馈_${m[1]}_${chapDir}.json` };
+  return {
+    tierKey: m[1]![0], tag: m[1]!, chapDir, outRoot,
+    feedbackPath: `${outRoot}/_运行/调适反馈_${m[1]}_${chapDir}.json`,
+    taskPath: `${outRoot}/_运行/调适任务单_${m[1]}_${chapDir}.json`,
+  };
 }
 
 function adaptFeedbackBox(session: FileSession): string {
@@ -279,27 +284,78 @@ function adaptFeedbackBox(session: FileSession): string {
     <div class="side-sec">
       <div class="side-h">给第二轮调适的反馈</div>
       <textarea id="adapt-fb" rows="3" style="width:100%;font-size:12px" placeholder="读完后用一句话告诉第二轮哪里难、大概超前多少。例：词汇大概超前一学期，句子有些绕，人物和情节可以。"></textarea>
-      <button id="adapt-fb-save" style="margin-top:4px">保存反馈（供两轮调适第二轮使用）</button>
+      <button id="adapt-fb-save" style="margin-top:4px">保存反馈并生成修订任务单</button>
+      <div id="adapt-task-preview" style="display:none;margin-top:6px;padding:6px 8px;border:1px solid var(--glass-line,#ddd);border-radius:8px;font-size:12px;line-height:1.7"></div>
     </div>`;
+}
+
+interface AdaptTaskFile { task: ReturnType<typeof planRevisionTask>; confirmed: boolean; confirmedAt?: string }
+
+/** 任务单预览：教师先看「系统准备怎么改」，点开始修订才落 confirmed——先确认后执行 */
+function renderAdaptTaskPreview(target: { taskPath: string }, taskFile: AdaptTaskFile): void {
+  const box = document.getElementById('adapt-task-preview');
+  if (!box) return;
+  const lines = revisionTaskPreview(taskFile.task)
+    .map((l) => `<div>${esc(l)}</div>`)
+    .join('');
+  const state = taskFile.confirmed
+    ? '<div style="color:var(--ok,#2e7d32);margin-top:4px">✓ 已确认——可在终端跑第二轮（--round2）</div>'
+    : `<button id="adapt-task-go" style="margin:6px 4px 0 0">开始修订</button><button id="adapt-task-edit" style="margin-top:6px">修改反馈</button>`;
+  box.innerHTML = `<div style="font-weight:600;margin-bottom:2px">修订任务单（先确认，后执行）</div>${lines}${state}`;
+  box.style.display = 'block';
+  const go = document.getElementById('adapt-task-go');
+  if (go) {
+    go.addEventListener('click', () => {
+      taskFile.confirmed = true;
+      taskFile.confirmedAt = new Date().toISOString();
+      void invoke('write_text_file', { path: target.taskPath, content: JSON.stringify(taskFile, null, 2) })
+        .then(() => renderAdaptTaskPreview(target, taskFile))
+        .catch((e: unknown) => { go.textContent = '确认失败：' + String(e).slice(0, 50); });
+    });
+  }
+  const edit = document.getElementById('adapt-task-edit');
+  if (edit) {
+    edit.addEventListener('click', () => {
+      const ta = document.getElementById('adapt-fb') as HTMLTextAreaElement | null;
+      if (ta) {
+        ta.value = taskFile.task.rawFeedback;
+        ta.focus();
+      }
+    });
+  }
 }
 
 function bindAdaptFeedback(session: FileSession): void {
   const btn = document.getElementById('adapt-fb-save');
   if (!btn) return;
+  /* 已有任务单（含已确认态）时先渲染，教师能看见上次的确认结果 */
+  const target = adaptTargetOf(session.sourcePath);
+  if (target) {
+    void invoke<string>('read_text_file', { path: target.taskPath })
+      .then((json) => renderAdaptTaskPreview(target, JSON.parse(json) as AdaptTaskFile))
+      .catch(() => { /* 有意兜底：任务单文件还不存在=教师没写过反馈的正常初始态，预览区不显示 */ });
+  }
   btn.addEventListener('click', () => {
     const ta = document.getElementById('adapt-fb') as HTMLTextAreaElement | null;
     const text = (ta?.value ?? '').trim();
-    const target = adaptTargetOf(session.sourcePath);
-    if (!text || !target) return;
-    void invoke('write_text_file', { path: target.feedbackPath, content: JSON.stringify({ text, at: new Date().toISOString() }, null, 2) })
+    const tgt = adaptTargetOf(session.sourcePath);
+    if (!text || !tgt) return;
+    /* 反馈与任务单同一份解析（core.planRevisionTask），App 与 CLI --plan 渲染一致 */
+    const taskFile: AdaptTaskFile = {
+      task: planRevisionTask(tgt.chapDir, 'R1', text),
+      confirmed: false,
+    };
+    void invoke('write_text_file', { path: tgt.feedbackPath, content: JSON.stringify({ text, at: new Date().toISOString() }, null, 2) })
+      .then(() => invoke('write_text_file', { path: tgt.taskPath, content: JSON.stringify({ ...taskFile, createdAt: new Date().toISOString() }, null, 2) }))
       .then(() => {
         ta!.value = '';
-        btn.textContent = '✓ 已保存';
-        setTimeout(() => (btn.textContent = '保存反馈（供两轮调适第二轮使用）'), 2000);
+        renderAdaptTaskPreview(tgt, taskFile);
+        btn.textContent = '✓ 已生成任务单';
+        setTimeout(() => (btn.textContent = '保存反馈并生成修订任务单'), 2000);
       })
       .catch((e: unknown) => {
         btn.textContent = '保存失败：' + String(e).slice(0, 60);
-        setTimeout(() => (btn.textContent = '保存反馈（供两轮调适第二轮使用）'), 3500);
+        setTimeout(() => (btn.textContent = '保存反馈并生成修订任务单'), 3500);
       });
   });
 }

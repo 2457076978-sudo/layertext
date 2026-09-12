@@ -7,8 +7,10 @@
  * 用法：
  *   node LayerText_AF两轮调适.mjs <A|M|B> [章号|1,2] [--dry]                 # 第一轮：初稿（_R1）
  *   node LayerText_AF两轮调适.mjs <A|M|B> [章号] --check                     # 本地检查（独立可跑）
- *   node LayerText_AF两轮调适.mjs <A|M|B> [章号] --round2 --feedback "词汇超前一学期，句子偏长，情节可以"
- *                                                                             # 第二轮：按教师反馈复写 → 终稿+调适报告
+ *   node LayerText_AF两轮调适.mjs <A|M|B> [章号] --plan [--feedback "…"]        # 生成修订任务单+预览（零 AI 调用）
+ *   node LayerText_AF两轮调适.mjs <A|M|B> [章号] --confirm                      # 教师确认任务单（或 App 里点「开始修订」）
+ *   node LayerText_AF两轮调适.mjs <A|M|B> [章号] --round2 [--feedback "…"]      # 第二轮：App 反馈须先过任务单确认；CLI --feedback=终端显式确认
+ *                                                                             # 产出终稿+调适报告
  *   node LayerText_AF两轮调适.mjs --progress 九上U5                           # 设置教材进度（档位锚点，持久进项目配置）
  *
  * 两轮语义（不许偏）：
@@ -44,7 +46,8 @@ const LEDGER = await openLedger(P, '两轮调适');
 
 const { splitChapter } = await import(`${distOf(REPO)}/src/core/textpipe.js`);
 const { makeResolver } = await import(`${distOf(REPO)}/src/core/manifest.js`);
-const { burdenFindings, fidelityFindings, introducedHardWords, parseTeacherFeedback, MAGNITUDE_UNITS } = await import(`${distOf(REPO)}/src/core/adaptcheck.js`);
+const { burdenFindings, fidelityFindings, introducedHardWords, parseTeacherFeedback, MAGNITUDE_UNITS,
+  planRevisionTask, planRevisionStages, revisionTaskPreview } = await import(`${distOf(REPO)}/src/core/adaptcheck.js`);
 
 /* ────────────────────── 层级定义（三维目标矩阵，2026-09-12 定稿） ──────────────────────
  * 篇幅比例不再主导生成：保留篇幅与阅读难度没有稳定的一一对应关系，弱生可能需要更多解释。
@@ -189,6 +192,32 @@ const finalPathOf = (t, ch) => RR(t.clsTag).any('正文', { chapter: ch, tier: t
 const reportPathOf = (t, ch) => RR(t.clsTag).any('汇总报告', { name: `调适报告_${t.clsTag}_${ch}`, chapter: ch });
 const feedbackPathOf = (t, ch) => join(OUT_BASE, '_运行', `调适反馈_${t.clsTag}_${ch}.json`);
 const progressFile = (t, ch) => join(OUT_BASE, '_运行', `两轮调适进度_${t.clsTag}_${ch}.json`);
+const taskPathOf = (t, ch) => join(OUT_BASE, '_运行', `调适任务单_${t.clsTag}_${ch}.json`);
+/** 读教师反馈的统一入口：CLI --feedback 优先，否则读 App 反馈框落盘文件；顺带合并正文 simpl 标记 */
+function readFeedback(t, ch, cliFeedback) {
+  const raw = cliFeedback ?? (() => {
+    const fp = feedbackPathOf(t, ch);
+    return existsSync(fp) ? (JSON.parse(readFileSync(fp, 'utf-8')).text ?? null) : null;
+  })();
+  if (!raw) return null;
+  let marked = [];
+  try {
+    const markPath = `${r1PathOf(t, ch).replace(/\.md$/, '')}_审校标记.json`.replace(/_R1(?=[^/]*$)/, '');
+    if (existsSync(markPath)) {
+      marked = (JSON.parse(readFileSync(markPath, 'utf-8')).marks ?? [])
+        .filter((m) => m.type === 'simpl' && m.word).map((m) => String(m.word).toLowerCase());
+    }
+  } catch { /* 标记文件读不了就只用文字反馈——如实，不阻断 */ }
+  return { raw, marked };
+}
+/** 把"保护维度"翻译进第二轮 prompt 的硬约束（facts 恒在，不再单列） */
+const DIM_WORD = { plot: '情节顺序与事件', characters: '人物关系与称谓', syntax: '句式结构', vocabulary: '已定稿的词汇选择', coherence: '已清楚的衔接与指代', background: '背景交代', support: '注释安排' };
+const protectionLineOf = (task) => {
+  const dims = task.protectedDimensions.filter((d) => d !== 'facts');
+  return dims.length
+    ? `教师明确认可的方面（本轮禁改）：${dims.map((d) => DIM_WORD[d] ?? d).join('、')}。数字、否定与因果关系任何情况下不得改变。`
+    : '数字、否定与因果关系任何情况下不得改变。';
+};
 
 const readSegs = (i) => {
   const ch = CN[i - 1];
@@ -256,7 +285,7 @@ function localCheck(t, i) {
 }
 
 /* ────────────────────── 第二轮：按教师反馈复写 ────────────────────── */
-async function round2(t, i, feedbackRaw) {
+async function round2(t, i, feedbackRaw, task = null) {
   LEDGER.scene = { tier: t.key, chapter: CN[i - 1], tag: 'R2' };
   const fb = parseTeacherFeedback(feedbackRaw);
   /* 教师在正文里点的「要简化」标记（simpl）= 词级"太难"反馈，与文字反馈合并——
@@ -354,7 +383,7 @@ async function round2(t, i, feedbackRaw) {
     const user = `教师读了第一轮稿后反馈（原话）：「${fb.raw}」
 ${boundaryNote ? `词汇边界调整：${boundaryNote}。` : ''}${removedByLadder.size ? `\n以下 ${removedByLadder.size} 个词本轮按"未学"处理（教材回退），换成熟词或用简单英文解释：${[...removedByLadder].slice(0, 40).join(', ')}${removedByLadder.size > 40 ? ' …' : ''}` : ''}
 本段的具体问题：${reasons.length ? reasons.join('；') : '（按反馈维度整体处理）'}
-请复写下面这一段，要求：优先替换非必要难词；拆清动作和关系；保留人物、事件、数字、否定与因果（${segs[k].includes(' not ') || /never|no /i.test(segs[k]) ? '本段含否定表达，方向不能反' : ''}）；不得只删中文注释而英文不变容易；从教师点名的词举一反三，同类难度的表达一并处理。
+请复写下面这一段，要求：优先替换非必要难词；拆清动作和关系；${task ? protectionLineOf(task) : '保留人物、事件、数字、否定与因果'}（${segs[k].includes(' not ') || /never|no /i.test(segs[k]) ? '本段含否定表达，方向不能反' : ''}）；不得只删中文注释而英文不变容易；从教师点名的词举一反三，同类难度的表达一并处理。
 第一轮稿（待复写）：
 ${r1Segs[k].trim()}
 输出：保持 ${marker} 标记开头，直接输出复写文本。`;
@@ -426,19 +455,85 @@ for (const tk of tiers) {
   for (const i of chapters) {
     console.log(`▶ ${t.label} ${CN[i - 1]}`);
     try {
-      if (has('--round2')) {
-        let fbRaw = arg('--feedback', null);
-        if (!fbRaw) {
-          const fp = feedbackPathOf(t, CN[i - 1]);
-          if (existsSync(fp)) fbRaw = JSON.parse(readFileSync(fp, 'utf-8')).text ?? null;
+      const chName = CN[i - 1];
+      if (has('--plan')) {
+        /* 任务单模式：解析反馈 → 本地检查圈定预计范围 → 落任务单 → 预览 → 退出（零 AI 调用） */
+        const fbInfo = readFeedback(t, chName, arg('--feedback', null));
+        if (!fbInfo) {
+          console.error(`✗ ${chName} 没有教师反馈（--feedback "…" 或 App 反馈框落盘）——任务单无从谈起。`);
+          process.exit(2);
         }
-        if (!fbRaw) {
+        const task = planRevisionTask(chName, 'R1', fbInfo.raw, { markedTooHard: fbInfo.marked });
+        let expected = null;
+        try {
+          const c = localCheck(t, i);
+          const fb = parseTeacherFeedback(fbInfo.raw);
+          const whole = fb.dims.length >= 4 || /整体|全部|全篇/.test(fb.raw);
+          const target = new Set();
+          if (whole) c.segs.forEach((_, k) => target.add(k));
+          else for (let k = 0; k < c.r1Segs.length; k++) {
+            const seg = c.r1Segs[k];
+            const segId = seg.match(/\[P\d+\]/)?.[0] ?? '';
+            if (c.findings.some((f) => f.level === '难度' && (f.segId === segId || f.note.includes('注释拥挤') || f.note.includes('最长句') || f.note.startsWith('归因')))) target.add(k);
+            if (fb.dims.includes('词汇')) {
+              const hard = [...seg.matchAll(/[A-Za-z][A-Za-z'-]*/g)].map((m) => m[0].toLowerCase()).filter((w) => !isKnownWord(w));
+              if (hard.length >= 2) target.add(k);
+            }
+          }
+          for (let k = 0; k < c.r1Segs.length; k++) {
+            if (fb.tooHardWords.some((w) => c.r1Segs[k].toLowerCase().includes(w))) target.add(k);
+          }
+          expected = target.size;
+        } catch (e) {
+          console.log(`  ⚠ 预计范围算不出（${String(e).slice(0, 80)}）——任务单照写，执行时按检查结果圈定`);
+        }
+        const tp = taskPathOf(t, chName);
+        mkdirSync(dirname(tp), { recursive: true });
+        writeFileSync(tp, JSON.stringify({ task, expectedSegments: expected, confirmed: false, createdAt: new Date().toISOString() }, null, 2), 'utf-8');
+        console.log(`  ✓ 任务单：${tp}`);
+        for (const line of revisionTaskPreview(task)) console.log(`  · ${line}`);
+        if (expected !== null) console.log(`  · 预计影响：${expected} 个段落（本地检查圈定，执行时复核）`);
+        console.log(`  下一步：教师确认（--confirm 或 App 任务单预览的「开始修订」）后才执行 --round2。`);
+      } else if (has('--confirm')) {
+        const tp = taskPathOf(t, chName);
+        if (!existsSync(tp)) {
+          console.error(`✗ ${chName} 没有任务单（先跑 --plan）。`);
+          process.exit(2);
+        }
+        const j = JSON.parse(readFileSync(tp, 'utf-8'));
+        j.confirmed = true;
+        j.confirmedAt = new Date().toISOString();
+        writeFileSync(tp, JSON.stringify(j, null, 2), 'utf-8');
+        console.log(`  ✓ ${chName} 任务单已确认（${planRevisionStages(j.task).map((x) => x).join(' → ') || '无工序'}）——可跑 --round2`);
+      } else if (has('--round2')) {
+        const cliFb = arg('--feedback', null);
+        const fbInfo = readFeedback(t, chName, cliFb);
+        if (!fbInfo) {
           console.error('✗ 第二轮必须先有教师反馈（--feedback "…" 或 App 反馈框落盘）。不得跳过教师反馈自行进入第二轮。');
           process.exit(2);
         }
-        const r = await round2(t, i, fbRaw);
+        let task = null;
+        if (cliFb) {
+          /* CLI 直接给反馈 = 教师在终端的显式确认，自动生成已确认任务单（留痕） */
+          task = planRevisionTask(chName, 'R1', fbInfo.raw, { markedTooHard: fbInfo.marked });
+          const tp = taskPathOf(t, chName);
+          mkdirSync(dirname(tp), { recursive: true });
+          writeFileSync(tp, JSON.stringify({ task, expectedSegments: null, confirmed: true, confirmedAt: new Date().toISOString(), via: 'CLI --feedback（终端显式确认）' }, null, 2), 'utf-8');
+        } else {
+          const tp = taskPathOf(t, chName);
+          if (!existsSync(tp) || !JSON.parse(readFileSync(tp, 'utf-8')).confirmed) {
+            console.error(`✗ ${chName} 的反馈还没有经教师确认的任务单（先跑 --plan 生成预览，再 --confirm 或在 App 里点「开始修订」）。不得跳过确认自行进入第二轮。`);
+            process.exit(2);
+          }
+          task = JSON.parse(readFileSync(tp, 'utf-8')).task;
+        }
+        if (task?.needsHuman?.length) {
+          for (const n of task.needsHuman) console.error(`✗ ${n}`);
+          process.exit(2);
+        }
+        const r = await round2(t, i, fbInfo.raw, task);
         const rep = writeReport(t, r);
-        summary.push({ tier: tk, ch: CN[i - 1], ...rep });
+        summary.push({ tier: tk, ch: chName, ...rep });
       } else if (has('--check')) {
         const c = localCheck(t, i);
         const rep = writeReport(t, c);

@@ -125,3 +125,56 @@ test('教师反馈解析：维度+保留维度+幅度档位+点名词（自然�
   const h = parseTeacherFeedback('稍微容易一点点就行');
   assert.equal(h.magnitude, '轻度');
 });
+
+/* ────────────────────── 修订任务单（v2 §5.2：先确认后执行） ────────────────────── */
+
+import { planRevisionTask, planRevisionStages, revisionTaskPreview, FEEDBACK_STAGE_MAP } from '../src/core/adaptcheck.js';
+
+test('任务单：词汇偏难+情节可以 → 只跑词汇线，plot 进保护维度', () => {
+  const task = planRevisionTask('第七章', 'v1', '词汇超前一学期，情节和人物可以');
+  const stages = planRevisionStages(task);
+  assert.deepEqual(stages, ['vocab-primary', 'vocab-secondary', 'annotation'], '表 2：词汇偏难→粗筛→复筛→加注，不碰句法');
+  assert.ok(task.protectedDimensions.includes('plot'), '情节可以 → plot 受保护');
+  assert.ok(task.protectedDimensions.includes('characters'), '人物可以 → characters 受保护');
+  assert.ok(task.protectedDimensions.includes('facts'), 'facts 恒在保护集（数字/否定/因果基线）');
+  assert.equal(task.magnitude, '明显', '一学期 → 明显档（2 单元回退）');
+  assert.equal(task.needsHuman.length, 0);
+});
+
+test('任务单：句子偏长 → 只跑句法+复筛，词汇难度不动', () => {
+  const stages = planRevisionStages(planRevisionTask('第七章', 'v1', '句子偏长'));
+  assert.deepEqual(stages, ['syntax', 'vocab-secondary']);
+});
+
+test('任务单：注释太密 → 只重排加注；情节有疑问 → 转人工不跑 AI', () => {
+  const anno = planRevisionStages(planRevisionTask('第七章', 'v1', '注释太密'));
+  assert.deepEqual(anno, ['annotation']);
+  const plot = planRevisionTask('第七章', 'v1', '这段情节是不是改错了');
+  assert.equal(planRevisionStages(plot).length, 0, '情节疑问不进任何工序');
+  assert.ok(plot.needsHuman.length > 0, '必须显式提示人工确认');
+});
+
+test('任务单：点名词举一反三；整章反馈圈全章；标记词合并', () => {
+  const task = planRevisionTask('第七章', 'v1', 'tyrannised 和 emboldened 太难', { markedTooHard: ['tyrannised', 'grudge'] });
+  assert.ok(task.stages.some((s) => s.stage === 'vocab-primary' && s.scope === 'terms'), '点名词走 terms 范围');
+  assert.deepEqual([...new Set(task.seedWords)].sort(), ['emboldened', 'grudge', 'tyrannised'], '正文标记与点名合并去重');
+
+  const whole = planRevisionTask('第七章', 'v1', '整体还是太难了，超前一学年');
+  assert.ok(whole.stages.every((s) => s.scope === 'chapter'), '整体反馈 → 全章范围');
+  assert.equal(whole.magnitude, '大幅');
+});
+
+test('任务单：解析不出维度时预览必须显式停下（不许默默执行）', () => {
+  const task = planRevisionTask('第七章', 'v1', '嗯，还行吧');
+  const preview = revisionTaskPreview(task);
+  assert.equal(task.stages.length, 0);
+  assert.ok(preview.some((l) => l.includes('未解析出可执行的维度')), preview.join(' / '));
+});
+
+test('预览渲染：将修改/保留/幅度三行齐全，App 与 CLI 同一份', () => {
+  const preview = revisionTaskPreview(planRevisionTask('第七章', 'v1', '词汇偏难一个学期，人物关系可以'));
+  assert.ok(preview[0]!.startsWith('将修改：词汇粗筛'), preview[0]);
+  assert.ok(preview[1]!.includes('characters'));
+  assert.ok(preview[2]!.includes('明显'));
+  assert.ok(FEEDBACK_STAGE_MAP.词汇.includes('annotation'));
+});

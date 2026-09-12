@@ -122,12 +122,11 @@ async function askGlosses(words) {
 const annotate = async (draft, targets) => {
   let md = draft;
   const missing = [];
-  let inserted = 0;
   for (const w of targets.need) {
     const zh = glossHints.get(w) ?? askedGloss.get(w);
     if (!zh) { missing.push(w); continue; }
     const r = insertAnnotation(md, w, zh);
-    if (r.ok) { md = r.text; inserted++; }
+    if (r.ok) md = r.text;
   }
   if (missing.length) {
     const got = await askGlosses(missing);
@@ -136,7 +135,7 @@ const annotate = async (draft, targets) => {
       if (!zh) continue;
       askedGloss.set(w, zh);
       const r = insertAnnotation(md, w, zh);
-      if (r.ok) { md = r.text; inserted++; }
+      if (r.ok) md = r.text;
     }
   }
   return md;

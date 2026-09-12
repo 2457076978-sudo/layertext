@@ -24,7 +24,7 @@ import {
 import type { GatedPatches } from './stagepatch.js';
 /** 门禁拒绝条目（stagepatch 的结构，编排里只透传） */
 type GatedBlocked = GatedPatches['blocked'];
-import { ScanCtx, ScanSeg, scanFor, oovOfSeg, annotationTargets } from './stagescan.js';
+import { ScanCtx, ScanSeg, scanFor, annotationTargets } from './stagescan.js';
 import { annotatableOf } from './segmentgate.js';
 
 /* ────────────────────── 工序指令（默认文案；管线可整体覆盖） ────────────────────── */
@@ -176,7 +176,7 @@ export async function runStagePipeline(opts: StagePipeOpts): Promise<StagePipeRe
       const problems: string[] = [];
       for (const x of candidates) {
         const before = text[x.seg.id];
-        let after = before;
+        let after: string;
         try {
           after = await opts.annotate(before, annotationTargets(before, ctx), x.seg.id);
         } catch (e) {

@@ -336,12 +336,138 @@ export function parseTeacherFeedback(text: string): TeacherFeedback {
     if (!keep.includes(dim)) keep.push(dim);
   }
   let magnitude: FeedbackMagnitude | null = null;
-  if (/一学年|整个学年|一整年|差一年|大幅/.test(t)) magnitude = '大幅';
-  else if (/一学期|半学年|半学期|明显/.test(t)) magnitude = '明显';
+  if (/一(个)?学年|整个学年|一整年|差一年|大幅/.test(t)) magnitude = '大幅';
+  else if (/一(个)?学期|半学年|半学期|明显/.test(t)) magnitude = '明显';
   else if (/两个月|一个月|几周|稍微|略|一点|轻度/.test(t)) magnitude = '轻度';
   if (/整体|全都|整体太|还是太/.test(t) && magnitude) {
     for (const [dim] of DIM_PATTERNS) if (!dims.includes(dim)) dims.push(dim);
   }
   const tooHardWords = [...new Set((t.match(/\b[A-Za-z][A-Za-z'-]{2,}\b/g) ?? []).map((w) => w.toLowerCase()))];
   return { dims, keep, magnitude, tooHardWords, raw: t };
+}
+
+/* ────────────────────── 修订任务单（四方向方案 v2 §5.2，先确认后执行） ────────────────────── */
+
+import { Stage, STAGE_ORDER, STAGE_LABEL } from './stagepatch.js';
+
+/** 反馈维度 → 重跑工序（方案表 2 的唯一代码化；测试锁行为） */
+export const FEEDBACK_STAGE_MAP: Record<string, readonly Stage[]> = {
+  词汇: ['vocab-primary', 'vocab-secondary', 'annotation'],
+  句法: ['syntax', 'vocab-secondary'],
+  理解: ['coherence'],
+  背景: ['coherence'],
+  支架: ['annotation'],
+};
+
+/** keep 维度（解析出的"这些方面可以"）→ 结构化保护维度 */
+const KEEP_DIM_MAP: Record<string, ProtectedDimension> = {
+  情节: 'plot', 人物: 'characters', 词汇: 'vocabulary', 句子: 'syntax', 句法: 'syntax',
+  理解: 'coherence', 背景: 'background', 注释: 'support',
+};
+
+export type ProtectedDimension = 'plot' | 'characters' | 'facts' | 'syntax' | 'vocabulary' | 'coherence' | 'background' | 'support';
+
+export interface RevisionTask {
+  chapterId: string;
+  /** 基于哪一版稿（R1 版本；协议只透传） */
+  baseVersion: string;
+  /** 重跑工序与范围；情节有疑问 → 空（转人工，不跑 AI） */
+  stages: Array<{ stage: Stage; scope: 'chapter' | 'segments' | 'terms' }>;
+  magnitude: FeedbackMagnitude | null;
+  protectedDimensions: ProtectedDimension[];
+  /** 教师点名保留的词（「这几个词不用换」类显式保留；解析不出就空，预览不虚报） */
+  protectedTerms: string[];
+  /** 教师点名的难词（举一反三的种子——是要换掉的，不是要保留的，别拿反） */
+  seedWords: string[];
+  /** 需要人工确认的疑问（情节类反馈不猜） */
+  needsHuman: string[];
+  rawFeedback: string;
+  /** 解析明细（预览展示与报告留痕用） */
+  parsed: TeacherFeedback;
+}
+
+/**
+ * 把教师反馈解析成结构化任务单。这是「先确认后执行」的数据基础：App 与管线
+ * 都从这一份解析出"将修改/将保留"，教师点开始修订才进第二轮。
+ * 解析不出的部分留在 parsed.raw 与 needsHuman——预览页必须停在那里等教师，不许默默执行。
+ */
+export function planRevisionTask(
+  chapterId: string,
+  baseVersion: string,
+  feedbackRaw: string,
+  opts: { markedTooHard?: string[] } = {},
+): RevisionTask {
+  const fb = parseTeacherFeedback(feedbackRaw);
+  const tooHardWords = [...new Set([...fb.tooHardWords, ...(opts.markedTooHard ?? []).map((w) => w.toLowerCase())])];
+
+  const stages: RevisionTask['stages'] = [];
+  const whole = fb.dims.length >= 4 || /整体|全部|全篇/.test(fb.raw);
+  for (const dim of fb.dims) {
+    for (const stage of FEEDBACK_STAGE_MAP[dim] ?? []) {
+      if (!stages.some((s) => s.stage === stage)) stages.push({ stage, scope: whole ? 'chapter' : 'segments' });
+    }
+  }
+  if (tooHardWords.length && !stages.some((s) => s.stage === 'vocab-primary')) {
+    stages.push({ stage: 'vocab-primary', scope: 'terms' });
+  }
+
+  /* 逐维度独立扫描而不是用 fb.keep：KEEP_RE 的全局匹配会把「情节和人物可以」
+   * 整段吃掉只留下「情节」，人物保护悄悄丢——保护维度是第二轮的硬约束，逐词各查一遍。 */
+  const protectedDimensions = new Set<ProtectedDimension>(['facts']);
+  for (const [word, dim] of Object.entries(KEEP_DIM_MAP)) {
+    if (new RegExp(`${word}[^，。；,;]{0,6}(可以|没问题|合适|保留|不用动|还行|挺好)`).test(feedbackRaw)) {
+      protectedDimensions.add(dim);
+    }
+  }
+  for (const k of fb.keep) {
+    const d = KEEP_DIM_MAP[k];
+    if (d) protectedDimensions.add(d);
+  }
+
+  /* 情节类反馈不猜：未被认可的情节（不在保护维度里）不进任何工序，转人工确认（表 2 第 5 行）。
+   * 判保护看 protectedDimensions（逐词独立扫描的结果），不看 fb.keep——
+   * KEEP_RE 全局匹配会把「人物和情节可以」整段吃掉只留一个词（实测）。 */
+  const needsHuman: string[] = [];
+  if (/情节|剧情|故事线/.test(fb.raw) && !protectedDimensions.has('plot')) {
+    needsHuman.push('反馈提到情节且未被认可为「可以」——系统不猜测情节，请人工处理后再执行');
+  }
+
+  return {
+    chapterId,
+    baseVersion,
+    stages,
+    magnitude: fb.magnitude,
+    protectedDimensions: [...protectedDimensions],
+    protectedTerms: [],
+    seedWords: tooHardWords,
+    needsHuman,
+    rawFeedback: feedbackRaw,
+    parsed: fb,
+  };
+}
+
+/** 任务单 → 实际重跑的工序序列（固定顺序，去重） */
+export function planRevisionStages(task: RevisionTask): Stage[] {
+  const wanted = new Set(task.stages.map((s) => s.stage));
+  return STAGE_ORDER.filter((s) => wanted.has(s));
+}
+
+/** 任务单 → 预览文本（App 与 CLI --plan 共用同一份渲染，两处不长两种样子） */
+export function revisionTaskPreview(task: RevisionTask): string[] {
+  const lines: string[] = [];
+  const scopeOf = new Map(task.stages.map((s) => [s.stage, s.scope]));
+  const modify = task.stages.length
+    ? planRevisionStages(task)
+        .map((s) => `${STAGE_LABEL[s]}${scopeOf.get(s) === 'chapter' ? '（全章）' : scopeOf.get(s) === 'terms' ? '（点名词举一反三）' : ''}`)
+        .join(' → ')
+    : '（无）';
+  lines.push(`将修改：${modify}`);
+  lines.push(`保留（不改这些方面）：${task.protectedDimensions.join('、')}${task.protectedTerms.length ? `；点名保留的词：${task.protectedTerms.slice(0, 8).join('、')}` : ''}`);
+  if (task.seedWords.length) lines.push(`点名难词（举一反三处理同类）：${task.seedWords.slice(0, 8).join('、')}${task.seedWords.length > 8 ? '…' : ''}`);
+  lines.push(`幅度：${task.magnitude ?? '（未识别——按维度整体处理，不猜档位）'}`);
+  for (const n of task.needsHuman) lines.push(`⚠ 待人工确认：${n}`);
+  if (!task.parsed.dims.length && !task.protectedTerms.length) {
+    lines.push('⚠ 反馈未解析出可执行的维度——请换一句话说明（例：词汇偏难一个学期，P3 和 P8 句子太长，人物关系不用动）');
+  }
+  return lines;
 }
