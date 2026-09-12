@@ -96,6 +96,8 @@ interface Group {
   events: DecisionEvent[];
   undos: number;
   tierActions: Partial<Record<'A' | 'M' | 'B', { after: string }>>;
+  /** 独立位置集合（证据去重的账本） */
+  positions: Set<string>;
 }
 
 /** 一条事件是否已被后续 undo 作废（undoOf 指回 itemId+timestamp） */
@@ -106,18 +108,27 @@ const undoneIds = (events: readonly DecisionEvent[]): Set<string> =>
       .map((e) => e.undoOf!),
   );
 
-/** 证据分布 → 默认最小有效范围（方案证据表的代码化） */
+/** 证据分布 → 默认最小有效范围（方案证据表的代码化）。
+ *  2026-09-12 Wayne 审查修正：跨书证据**默认不升班级级**——"次数"是策略不是证明，
+ *  跨书必须先确认是同一班级、同一词义、同类用途，那只能由教师显式 promote 到
+ *  class；自动推导封顶本书（crossBook 已在候选上标记给教师看）。 */
 export function defaultScopeFor(dist: { chapters: string[]; books: string[]; tiers: string[]; count: number }, kind: AssetKind): CandidateScope {
   let scope: CandidateScope;
-  if (dist.books.length > 1) scope = 'class';               // 跨书=班级级（且只消费已批准）
+  if (dist.books.length > 1) scope = 'book';
   else if (dist.chapters.length > 1) scope = dist.tiers.length > 1 ? 'book' : 'book-tier';
-  else if (dist.count >= 2) scope = 'chapter';              // 同章同类≥2
+  else if (dist.count >= 2) scope = 'chapter';              // 同章同类≥2（独立位置去重后）
   else scope = 'sentence';                                  // 一次局部替换停在当前句
   if (BOOK_CAPPED.has(kind) && scopeRank(scope) > scopeRank('book')) scope = 'book';
   return scope;
 }
 
-/** 聚合决定事件 → 候选资产。撤销不算正证据（confidence 里扣）。
+/** 一条事件的独立位置键：同一段被重复处理会产生多条事件，但那是**一个位置**的
+ *  证据（2026-09-12 Wayne 审查：同章改两次可能只是同一句被处理两遍——次数是
+ *  策略不是证据）。有 segIndex 用 (书|章|段位)，没有则退 itemId。 */
+const positionKeyOf = (e: DecisionEvent): string =>
+  e.segIndex != null ? `${e.book ?? ''}|${e.chapter ?? ''}|${e.segIndex}` : `${e.book ?? ''}|${e.chapter ?? ''}|${e.itemId}`;
+
+/** 聚合决定事件 → 候选资产。证据按**独立位置**去重；撤销不算正证据（confidence 里扣）。
  *  与 buildProposals 的分工：提议管"入库那一步"（教师确认即写），
  *  候选管"复用那一程"（范围晋级、跨层变换、下一章注入什么）。 */
 export function candidatesFromEvents(events: readonly DecisionEvent[]): LearningCandidate[] {
@@ -126,7 +137,7 @@ export function candidatesFromEvents(events: readonly DecisionEvent[]): Learning
 
   const add = (kind: AssetKind, key: string, e: DecisionEvent): void => {
     const id = `${kind}:${key}`;
-    if (!groups.has(id)) groups.set(id, { kind, key, events: [], undos: 0, tierActions: {} });
+    if (!groups.has(id)) groups.set(id, { kind, key, events: [], undos: 0, tierActions: {}, positions: new Set() });
     const g = groups.get(id)!;
     if (e.tier === 'A' || e.tier === 'M' || e.tier === 'B') {
       g.tierActions[e.tier] = { after: e.after }; // 同层多证据取最新
@@ -135,6 +146,9 @@ export function candidatesFromEvents(events: readonly DecisionEvent[]): Learning
       g.undos++;
       return;
     }
+    const pos = positionKeyOf(e);
+    if (g.positions.has(pos)) return; // 同一位置的重复处理不重复计证据（次数是策略不是证据）
+    g.positions.add(pos);
     g.events.push(e);
   };
 
@@ -156,6 +170,7 @@ export function candidatesFromEvents(events: readonly DecisionEvent[]): Learning
     const books = [...new Set(g.events.map((e) => e.book ?? '').filter(Boolean))];
     const tiers = [...new Set(g.events.map((e) => e.tier ?? '').filter(Boolean))];
     const total = g.events.length + g.undos;
+    const crossBook = books.length > 1;
     const latest = g.events[g.events.length - 1]!;
     out.push({
       id: `cand-${g.kind}-${g.key}`.replace(/\s+/g, '_').slice(0, 80),
@@ -172,6 +187,7 @@ export function candidatesFromEvents(events: readonly DecisionEvent[]): Learning
       evidenceBooks: books,
       evidenceTiers: tiers,
       tierActions: Object.keys(g.tierActions).length ? g.tierActions : undefined,
+      note: crossBook ? '跨书证据已出现：升班级级须教师显式确认（同班/同词义/同类用途三查）' : undefined,
     });
   }
   return out.sort((a, b) => b.evidenceCount - a.evidenceCount || a.id.localeCompare(b.id));

@@ -12,7 +12,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { runStagePipeline, buildChapterRecap, isChapterRecap, type StagePipeOpts, type StagePipeSeg } from '../src/core/stagepipe.js';
+import { runStagePipeline, buildChapterRecap, isChapterRecap, classifyQuarantine, type StagePipeOpts, type StagePipeSeg } from '../src/core/stagepipe.js';
 import type { StagePatchRequest } from '../src/core/stagepatch.js';
 
 const KNOWN = new Set(['the', 'run', 'work', 'hard', 'day', 'animal', 'farm', 'was', 'big', 'they', 'and', 'came', 'home', 'all', 'unfairly', 'made', 'up', 'stories']);
@@ -154,4 +154,66 @@ test('ChapterRecap：本地构建（含加注对、隔离段、逐工序结果�
   const bad = isChapterRecap({ chapter: 'x', tier: 'Z', stageResults: 'no' });
   assert.equal(bad.ok, false);
   assert.ok(bad.problems.length >= 2, 'tier 与 stageResults 都被点名');
+});
+
+
+/* ────────────── 2026-09-12 Wayne 审查整改：配额返工 / 缺口报告 / 隔离分类 ────────────── */
+
+test('配额纪律：超额难词触发词汇返工，返工不掉的进未支持缺口（不许静默不注）', async () => {
+  const requests: StagePatchRequest[] = [];
+  const r = await runStagePipeline(optsWith(async (req) => {
+    requests.push(req);
+    if (req.stage === 'vocab-primary' && req.segments[0]!.issues[0]!.includes('超出本层注释配额')) {
+      /* 返工：只换掉一个（tyrannised），grudge 换不掉 */
+      return JSON.stringify({ patches: [{ id: req.segments[0]!.id, status: 'changed', text: '[P02] The animals ruled the farm unfairly, grudge remained.' }] });
+    }
+    return '{"patches":[]}';
+  }, {
+    segs: [{ id: 'P02', source: '[P02] The animals tyrannised the farm and kept a grudge.', draft: '[P02] The animals tyrannised the farm and kept a grudge.' }],
+    knownWords: KNOWN, // tyrannised/grudge 均词表外
+    annoCapPerSeg: 1,
+    maxStageTries: 1,
+    annotate: async (draft, targets) => {
+      /* 确定性加注器：只注 need（配额内） */
+      let md = draft;
+      for (const w of targets.need) md = md.replace(new RegExp(`\\b${w}\\b`, 'i'), (m) => `${m}（测试）`);
+      return md;
+    },
+  }));
+
+  const rework = requests.find((q) => q.stage === 'vocab-primary' && q.segments[0]!.issues.some((i) => i.includes('超出本层注释配额')));
+  assert.ok(rework, '超额词必须触发词汇返工（配额不授权静默放弃）');
+  assert.ok(rework!.segments[0]!.issues[0]!.includes('grudge'), '超额词逐个点名（配额内的 tyrannised 不在返工清单——它会被注）');
+  assert.ok(r.unsupportedGaps.length === 1 && r.unsupportedGaps[0]!.words.includes('grudge'), '返工不掉的词进未支持缺口');
+  assert.ok(!r.unsupportedGaps[0]!.words.includes('tyrannised'), '被返工换掉的词不算缺口');
+  const cp = r.checkpoints.find((c) => c.stage === 'annotation')!;
+  assert.ok(cp.problems.some((x) => x.includes('未支持难词')), '缺口写进检查点留痕');
+});
+
+test('负担报告四项：仍保留/已支持/未支持/最密窗口（密度下降不能靠少注冒充变容易）', async () => {
+  /* 短文本不足成窗（<50 词无最密窗口）：补足词数让窗口报告有值 */
+  const filler = 'They came home and worked hard all day on the farm with the animals big and small. '.repeat(3);
+  const r = await runStagePipeline(optsWith(async () => '{"patches":[]}', {
+    segs: [{ id: 'P01', source: `[P01] ${filler}They kept a grudge.`, draft: `[P01] ${filler}They kept a grudge.` }],
+    knownWords: new Set([...KNOWN]),
+    annotate: async (draft, targets) => {
+      let md = draft;
+      for (const w of targets.need) md = md.replace(new RegExp(`\\b${w}\\b`, 'i'), (m) => `${m}（怨恨）`);
+      return md;
+    },
+  }));
+  const recap = buildChapterRecap(optsWith(async () => '{"patches":[]}'), r);
+  assert.ok(recap.burdenReport, '负担报告必须存在');
+  assert.ok(recap.burdenReport!.keptHardWords.includes('grudge'), '仍保留难词点名（不管注没注）');
+  assert.ok(recap.burdenReport!.supportedWords.includes('grudge'), '注了的进已支持');
+  assert.equal(recap.burdenReport!.unsupportedWords.includes('grudge'), false);
+  assert.ok(typeof recap.burdenReport!.worstWindowDensity === 'number', '最密窗口密度在报告里');
+});
+
+test('隔离分类：事实疑点/结构损坏/难度残留三列，不混成一个失败率', () => {
+  assert.equal(classifyQuarantine({ ruleIds: ['FACT-01', 'SENT-01'] }), '事实疑点', '事实优先归类');
+  assert.equal(classifyQuarantine({ ruleIds: ['ZH-01'] }), '结构损坏');
+  assert.equal(classifyQuarantine({ ruleIds: ['WHOLE-CHAPTER'] }), '结构损坏');
+  assert.equal(classifyQuarantine({ ruleIds: ['SENT-01', 'LEN-01'] }), '难度残留');
+  assert.equal(classifyQuarantine({ ruleIds: ['ANNO-01'] }), '难度残留');
 });

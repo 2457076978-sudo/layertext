@@ -42,7 +42,7 @@ test('最小有效范围：证据分布决定默认档位', () => {
   assert.equal(defaultScopeFor({ chapters: ['第一章'], books: ['AF'], tiers: ['A'], count: 2 }, 'gloss-entry'), 'chapter', '同章同类两次=本章');
   assert.equal(defaultScopeFor({ chapters: ['第一章', '第三章'], books: ['AF'], tiers: ['A'], count: 3 }, 'gloss-entry'), 'book-tier', '同书同层=本书同层');
   assert.equal(defaultScopeFor({ chapters: ['第一章', '第三章'], books: ['AF'], tiers: ['A', 'M'], count: 4 }, 'gloss-entry'), 'book', '同书跨层=本书');
-  assert.equal(defaultScopeFor({ chapters: ['c1', 'c2'], books: ['AF', 'Alice'], tiers: ['A'], count: 3 }, 'gloss-entry'), 'class', '跨书=本班');
+  assert.equal(defaultScopeFor({ chapters: ['c1', 'c2'], books: ['AF', 'Alice'], tiers: ['A'], count: 3 }, 'gloss-entry'), 'book', '跨书默认也只到本书——升班级必须教师显式确认（同班/同词义/同类用途）');
 });
 
 test('人物/情节类资产自动范围封顶本书——永不自动跨书', () => {
@@ -107,6 +107,22 @@ test('策略族：只有出过证据的层有动作，其余层留白（跨层=�
   assert.equal(f.byTier.A?.action, 'gloss');
   assert.equal(f.byTier.B?.action, 'rewrite');
   assert.equal(f.byTier.M, undefined, 'M 层没出过证据=留白，不自动复制 A/B');
+});
+
+test('证据按独立位置去重：同一段处理两遍只算一个证据（次数是策略不是证据）', () => {
+  const cands = candidatesFromEvents([
+    ev({ decision: 'accept', after: '统治', chapter: '第一章', book: 'AF', tier: 'A', segIndex: 3, itemId: 'i-a' }),
+    ev({ decision: 'accept', after: '统治', chapter: '第一章', book: 'AF', tier: 'A', segIndex: 3, itemId: 'i-b' }),
+  ]);
+  const gloss = cands.find((c) => c.key === 'tyrannise')!;
+  assert.equal(gloss.evidenceCount, 1, '同一 (章,段位) 的两条事件=一个独立位置');
+  assert.equal(gloss.proposedScope, 'sentence', '去重后不足两处独立证据，不升本章');
+
+  const cands2 = candidatesFromEvents([
+    ev({ decision: 'accept', after: '统治', chapter: '第一章', book: 'AF', tier: 'A', segIndex: 3, itemId: 'i-a' }),
+    ev({ decision: 'accept', after: '统治', chapter: '第五章', book: 'AF', tier: 'A', segIndex: 1, itemId: 'i-c' }),
+  ]);
+  assert.equal(cands2.find((c) => c.key === 'tyrannise')!.evidenceCount, 2, '两个不同位置才算两条证据');
 });
 
 test('回流红线：撤销与执行失败不产生正证据', () => {

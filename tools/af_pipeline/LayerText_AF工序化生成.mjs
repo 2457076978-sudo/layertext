@@ -38,7 +38,8 @@ const LEDGER = await openLedger(P, '工序化生成');
 const { splitChapter } = await import(`${distOf(REPO)}/src/core/textpipe.js`);
 const { makeResolver, dirOfPath } = await import(`${distOf(REPO)}/src/core/manifest.js`);
 const { atomicWriteFileSync: writeAtomic } = await import(`${distOf(REPO)}/src/core/files.js`);
-const { runStagePipeline, buildChapterRecap, defaultInstructions: DEFAULT_INSTRUCTIONS } = await import(`${distOf(REPO)}/src/core/stagepipe.js`);
+const { runStagePipeline, buildChapterRecap, classifyQuarantine, defaultInstructions: DEFAULT_INSTRUCTIONS } = await import(`${distOf(REPO)}/src/core/stagepipe.js`);
+const { ANNO_DENSITY_LIMIT } = await import(`${distOf(REPO)}/src/core/adaptcheck.js`);
 const { STAGE_LABEL } = await import(`${distOf(REPO)}/src/core/stagepatch.js`);
 
 /* 层定义沿用两轮调适的难度下移口径（A17/M15/B14 为生成上限；检查线 A20/M17/B14 由
@@ -279,30 +280,59 @@ for (const tk of tiers) {
       writeFileSync(recapPath, JSON.stringify(recap, null, 1), 'utf-8');
       const progress = join(OUT_BASE, '_运行', `工序化进度_${t.clsTag}_${ch}.json`);
       writeFileSync(progress, JSON.stringify({ done: true, finalVersion: run.finalVersion, checkpoints: run.checkpoints, quarantined: run.quarantined, at: new Date().toISOString() }, null, 1), 'utf-8');
-      if (run.quarantined.length) {
+      /* 待人工报告（2026-09-12 Wayne 审查整改）：隔离按类分列 + 配额缺口点名 +
+       * 四项负担统计——密度下降不能靠少注冒充变容易，人工量不混成一个失败率。 */
+      const burden = recap.burdenReport;
+      if (run.quarantined.length || run.unsupportedGaps.length || burden) {
         const qDir = join(OUT_BASE, ch, '_待复核');
         mkdirSync(qDir, { recursive: true });
-        writeFileSync(join(qDir, `工序化隔离_${t.clsTag}_${DATE}.md`),
-          ['# 工序化隔离段（重试用尽，交教师处置；正文保留该段上一版）',
-            ...run.quarantined.map((q) => `- ${q.id}（${STAGE_LABEL[q.stage]}，尝试 ${q.tries} 次）：${q.reason}`)].join('\n') + '\n', 'utf-8');
+        const byClass = (cls) => run.quarantined.filter((q) => classifyQuarantine(q) === cls);
+        const L = [`# 工序化待人工 · ${t.label} ${ch}`, '',
+          `总段数 ${segs.length}｜自动完成 ${segs.length - run.quarantined.length}｜隔离 ${run.quarantined.length}（事实疑点 ${byClass('事实疑点').length}｜结构损坏 ${byClass('结构损坏').length}｜难度残留 ${byClass('难度残留').length}）`, ''];
+        L.push('## 隔离段（重试用尽；正文保留该段上一版，没有被省掉）');
+        for (const cls of ['事实疑点', '结构损坏', '难度残留']) {
+          const list = byClass(cls);
+          if (!list.length) continue;
+          L.push('', `### ${cls}（${list.length}）`);
+          for (const q of list) L.push(`- ${q.id}（${STAGE_LABEL[q.stage]}，尝试 ${q.tries} 次，规则 ${q.ruleIds.join('/')}）：${q.reason}`);
+        }
+        if (run.unsupportedGaps.length) {
+          L.push('', '## 未支持难词（配额返工后仍超——换写 / 补注 / 说明保留，三选一）');
+          for (const g of run.unsupportedGaps) L.push(`- ${g.segId}：${g.words.join('、')}`);
+        }
+        if (burden) {
+          L.push('', '## 负担报告（文本是否变容易，不是注释是否变少）',
+            `- 仍保留的词表外实词：${burden.keptHardWords.length} 个`,
+            `- 其中已提供注释支持：${burden.supportedWords.length} 个${burden.supportedWords.length ? `（${burden.supportedWords.slice(0, 20).join('、')}）` : ''}`,
+            `- **未提供支持：${burden.unsupportedWords.length} 个**${burden.unsupportedWords.length ? `（${burden.unsupportedWords.slice(0, 20).join('、')}${burden.unsupportedWords.length > 20 ? '…' : ''}）` : '（无缺口）'}`,
+            `- 注释最密窗口：每百词 ${burden.worstWindowDensity ?? '—'} 处（试运行阈值 ${ANNO_DENSITY_LIMIT[tk]}）`);
+        }
+        writeFileSync(join(qDir, `工序化待人工_${t.clsTag}_${DATE}.md`), L.join('\n') + '\n', 'utf-8');
       }
 
       const srcW = wc(md.split('## 词句卡')[0]);
       const outW = wc(outMd.split('## 词句卡')[0]);
       const stageLine = run.checkpoints.map((c) => `${STAGE_LABEL[c.stage]}${c.called ? `改${c.changedIds.length}` : '跳'}`).join('｜');
-      results.push({ tk, ch, srcW, outW, ratio: outW / Math.max(1, srcW), quarantined: run.quarantined.length, stageLine, dst });
+      const cls = (name) => run.quarantined.filter((q) => classifyQuarantine(q) === name).length;
+      results.push({ tk, ch, srcW, outW, ratio: outW / Math.max(1, srcW), total: segs.length,
+        quarantined: run.quarantined.length, qFact: cls('事实疑点'), qStruct: cls('结构损坏'), qHard: cls('难度残留'),
+        gaps: run.unsupportedGaps.reduce((n, g) => n + g.words.length, 0),
+        kept: burden?.keptHardWords.length ?? 0, supported: burden?.supportedWords.length ?? 0, unsupported: burden?.unsupportedWords.length ?? 0,
+        window: burden?.worstWindowDensity ?? null, stageLine, dst });
       console.log(`  ✓ 产物：${dst}（${srcW}→${outW} 词，${(outW / Math.max(1, srcW) * 100).toFixed(0)}%）`);
-      console.log(`  · 工序：${stageLine}${run.quarantined.length ? `｜隔离 ${run.quarantined.length} 段` : ''}`);
+      console.log(`  · ${segs.length} 段：自动完成 ${segs.length - run.quarantined.length}｜隔离 ${run.quarantined.length}（事实 ${cls('事实疑点')}｜结构 ${cls('结构损坏')}｜难度 ${cls('难度残留')}）`);
+      console.log(`  · 工序：${stageLine}`);
+      if (burden) console.log(`  · 负担：仍保留难词 ${burden.keptHardWords.length}｜已支持 ${burden.supportedWords.length}｜未支持 ${burden.unsupportedWords.length}｜最密窗口 ${burden.worstWindowDensity ?? '—'}处/百词（阈 ${ANNO_DENSITY_LIMIT[tk]}）`);
     } catch (e) {
       console.error(`  ✗ ${ch} 失败：${String(e).slice(0, 200)}`);
     }
   }
 }
 
-console.log('\n| 层 | 章 | 原文词数 | 产物词数 | 占比 | 工序（改N=改动段数/跳=零调用） | 隔离 |');
-console.log('|---|---|---|---|---|---|---|');
+console.log('\n| 层 | 章 | 总段 | 自动完成 | 隔离(事实/结构/难度) | 未支持词 | 仍保留难词 | 已支持 | 未支持 | 最密窗口 | 占比 |');
+console.log('|---|---|---|---|---|---|---|---|---|---|---|');
 for (const r of results) {
-  console.log(`| ${r.tk} | ${r.ch} | ${r.srcW} | ${r.outW} | ${(r.ratio * 100).toFixed(0)}% | ${r.stageLine} | ${r.quarantined} |`);
+  console.log(`| ${r.tk} | ${r.ch} | ${r.total} | ${r.total - r.quarantined} | ${r.quarantined}(${r.qFact}/${r.qStruct}/${r.qHard}) | ${r.gaps} | ${r.kept} | ${r.supported} | ${r.unsupported} | ${r.window ?? '—'} | ${(r.ratio * 100).toFixed(0)}% |`);
 }
 const st = LEDGER.flush();
 if (st.calls) console.log(`台账：调用 ${st.calls}（成功 ${st.ok}）｜入 ${st.in}${st.cached ? `（缓存命中 ${st.cached}）` : ''}｜出 ${st.out} token —— _运行/token台账.jsonl`);

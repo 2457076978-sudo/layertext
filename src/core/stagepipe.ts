@@ -24,7 +24,8 @@ import {
 import type { GatedPatches } from './stagepatch.js';
 /** 门禁拒绝条目（stagepatch 的结构，编排里只透传） */
 type GatedBlocked = GatedPatches['blocked'];
-import { ScanCtx, ScanSeg, scanFor, annotationTargets } from './stagescan.js';
+import { ScanCtx, ScanSeg, scanFor, annotationTargets, oovOfSeg } from './stagescan.js';
+import { burdenProfileOf } from './adaptcheck.js';
 import { annotatableOf } from './segmentgate.js';
 
 /* ────────────────────── 工序指令（默认文案；管线可整体覆盖） ────────────────────── */
@@ -73,6 +74,19 @@ export interface QuarantinedSeg {
   id: string;
   reason: string;
   tries: number;
+  /** 触发拒绝的门禁规则号（分类报告按它分列，不混成一个失败率） */
+  ruleIds: string[];
+}
+
+/** 隔离分类：三类失败的人工处理方式完全不同，不许混报
+ *  （2026-09-12 Wayne 审查：事实疑点/结构损坏/难度残留要分开数）。 */
+export type QuarantineClass = '事实疑点' | '结构损坏' | '难度残留';
+
+export function classifyQuarantine(q: Pick<QuarantinedSeg, 'ruleIds'>): QuarantineClass {
+  const rules = q.ruleIds ?? [];
+  if (rules.some((r) => r.startsWith('FACT'))) return '事实疑点';
+  if (rules.some((r) => r === 'ZH-01' || r === 'WHOLE-CHAPTER' || r.startsWith('AST'))) return '结构损坏';
+  return '难度残留'; // SENT-01 / LEN-01 / ANNO-01（含受保护事实丢失）
 }
 
 export interface StagePipeEvent {
@@ -110,7 +124,7 @@ export interface StagePipeOpts {
    *  annotation 工序完全本地化（能本地确定性解决绝不引 AI——方案 §4.2）：
    *  词典有释义就地插入；缺释义由注入方自己批量问模型**只要词义**，不让模型重写段落。
    *  模型"返回插好注释的整段"实测随机漏注/混中文/顺手改写（2026-09-12 A7 五轮实跑），此路封死。 */
-  annotate?: (draft: string, targets: { need: string[]; extra: number }, segId: string) => Promise<string>;
+  annotate?: (draft: string, targets: { need: string[]; extra: string[] }, segId: string) => Promise<string>;
   /** 释义建议（加注工序 prompt 用；词→中文），默认空——管线通常传统一词典命中部分 */
   glossHints?: Map<string, string>;
   onEvent?: (e: StagePipeEvent) => void;
@@ -123,6 +137,10 @@ export interface StagePipeResult {
   /** 每道工序的候选段（验收：无风险段零调用的事实依据） */
   scans: Record<string, string[]>;
   finalVersion: number;
+  /** 终稿加注账本（word→释义，从终稿回填）：负担报告与下一章一词一注的种子 */
+  glossary: Map<string, string>;
+  /** 加注工序的未支持缺口（配额返工后仍超的难词，逐段点名） */
+  unsupportedGaps: Array<{ segId: string; words: string[] }>;
 }
 
 const SEG_WORD_RE = /[A-Za-z][A-Za-z'-]*/g;
@@ -147,6 +165,8 @@ export async function runStagePipeline(opts: StagePipeOpts): Promise<StagePipeRe
   const quarantined: QuarantinedSeg[] = [];
   const quarantinedIds = new Set<string>();
   const scans: Record<string, string[]> = {};
+  /* 加注工序产出的"未支持缺口"（配额返工后仍超的难词）——进 recap 负担报告 */
+  let lastUnsupportedGaps: Array<{ segId: string; words: string[] }> = [];
   /* 词汇复筛的差集基准 = 原文全章（与 adaptcheck 引入词口径一致：对原文取差，
    * 不是对上一道产稿取差——产稿自己引入的词在产稿里，差集恒空）。 */
   const prevStageText: string | undefined = opts.segs.map((s) => s.source).join('\n\n');
@@ -170,10 +190,55 @@ export async function runStagePipeline(opts: StagePipeOpts): Promise<StagePipeRe
       continue;
     }
 
-    /* 加注工序的确定性路径：词典优先就地插入，不经 patch 协议（见 opts.annotate 注释） */
+    /* 加注工序的确定性路径：词典优先就地插入，不经 patch 协议（见 opts.annotate 注释）。
+     *  配额纪律（2026-09-12 Wayne 审查落地）：超配额的难词**不许可注了就算过**——
+     *  先触发一轮词汇返工（点名替换），返工后仍超的如实进"未支持缺口"（checkpoint
+     *  problems + recap.burdenReport），交教师决定，绝不静默吞掉。 */
     if (stage === 'annotation' && opts.annotate) {
       const changedIds: string[] = [];
       const problems: string[] = [];
+      const unsupportedGaps: Array<{ segId: string; words: string[] }> = [];
+
+      /* ① 超配额返工：这些词必须换成已学说法（词汇工序又欠的账，加注工序不背） */
+      const overCap = candidates.filter((x) => annotationTargets(text[x.seg.id], ctx).extra.length > 0);
+      if (overCap.length) {
+        emit({ kind: 'stage-start', stage, detail: `${overCap.length} 段超注释配额，触发词汇返工` });
+        const req: StagePatchRequest = {
+          stage: 'vocab-primary',
+          baseVersion: `v${version}`,
+          segments: overCap.map((x) => {
+            const t = annotationTargets(text[x.seg.id], ctx);
+            return {
+              id: x.seg.id,
+              source: x.seg.source,
+              draft: text[x.seg.id],
+              issues: [`以下 ${t.extra.length} 个词超出本层注释配额（本段最多注 ${ctx.annoCap ?? '∞'} 个），必须替换为学生已学的说法（专名除外）：${t.extra.join('、')}`],
+            };
+          }),
+          protectedFacts: [],
+          instruction: instructions['vocab-primary'],
+        };
+        const gateCtx: GateSegCtx[] = overCap.map((x) => ({
+          id: x.seg.id, source: x.seg.source, target: 0, maxLen: opts.maxLen, oov: [],
+        }));
+        const protectedFacts: Record<string, string[]> = {};
+        try {
+          const raw = await opts.callStage(req);
+          const parsed = parseStagePatch(raw, overCap.map((x) => x.seg.id));
+          problems.push(...parsed.problems.map((p2) => `[配额返工] ${p2}`));
+          if (parsed.ok && parsed.result) {
+            const gated = gatePatches(parsed.result, gateCtx, { stage: 'vocab-primary', protectedFacts });
+            const merged = mergePatch(text, { patches: gated.items, baseVersion: '' });
+            text = merged.text;
+            merged.changedIds.forEach((id) => changedIds.push(id));
+            for (const b of gated.blocked) problems.push(`${b.id} 配额返工被拒：${b.reason}`);
+          }
+        } catch (e) {
+          problems.push(`配额返工调用失败：${String(e).slice(0, 140)}`);
+        }
+      }
+
+      /* ② 确定性加注：配额内必注词就地插入 */
       for (const x of candidates) {
         const before = text[x.seg.id];
         let after: string;
@@ -187,10 +252,21 @@ export async function runStagePipeline(opts: StagePipeOpts): Promise<StagePipeRe
           text[x.seg.id] = after;
           changedIds.push(x.seg.id);
         }
+        /* ③ 返工后仍超配额 = 真实缺口：记录在案，教师处置（不是"通过"） */
+        const still = annotationTargets(text[x.seg.id], ctx).extra;
+        if (still.length) {
+          unsupportedGaps.push({ segId: x.seg.id, words: still });
+          problems.push(`${x.seg.id} 未支持难词 ${still.length} 个（配额 ${ctx.annoCap ?? '∞'}，返工后仍在）：${still.slice(0, 8).join('、')}——交教师：换写/加注/说明保留三选一`);
+        }
       }
+
       if (changedIds.length) version++;
-      checkpoints.push({ stage, called: changedIds.length > 0, version, changedIds, blockedIds: [], problems, candidateIds: candidates.map((x) => x.seg.id) });
-      emit({ kind: changedIds.length ? 'stage-commit' : 'stage-fail', stage, detail: changedIds.length ? `v${version}：注 ${changedIds.length} 段（确定性插入）` : '加注零段落盘' });
+      lastUnsupportedGaps = unsupportedGaps;
+      checkpoints.push({
+        stage, called: changedIds.length > 0, version, changedIds: [...new Set(changedIds)], blockedIds: [],
+        problems, candidateIds: candidates.map((x) => x.seg.id),
+      });
+      emit({ kind: changedIds.length ? 'stage-commit' : 'stage-fail', stage, detail: `v${version}：注/改 ${new Set(changedIds).size} 段${unsupportedGaps.length ? `，未支持缺口 ${unsupportedGaps.reduce((n, g) => n + g.words.length, 0)} 词` : ''}` });
       continue;
     }
 
@@ -281,7 +357,7 @@ export async function runStagePipeline(opts: StagePipeOpts): Promise<StagePipeRe
         continue;
       }
       for (const b of blockedThisAttempt) {
-        quarantined.push({ stage, id: b.id, reason: b.reason, tries: attempt });
+        quarantined.push({ stage, id: b.id, reason: b.reason, tries: attempt, ruleIds: b.ruleIds });
         quarantinedIds.add(b.id);
         emit({ kind: 'seg-quarantined', stage, detail: `${b.id}：${b.reason}` });
       }
@@ -307,7 +383,7 @@ export async function runStagePipeline(opts: StagePipeOpts): Promise<StagePipeRe
     }
   }
 
-  return { text, checkpoints, quarantined, scans, finalVersion: version };
+  return { text, checkpoints, quarantined, scans, finalVersion: version, glossary, unsupportedGaps: lastUnsupportedGaps };
 }
 
 /* ────────────────────── ChapterRecap（批次 3 · 本地确定性构建） ────────────────────── */
@@ -328,7 +404,18 @@ export interface ChapterRecap {
   acceptedTerms: Array<{ word: string; action: string; gloss?: string }>;
   /** 未解决的开口问题：隔离段（终稿复扫的注释缺口由管线追加） */
   openIssues: Array<{ segment: string; kind: string }>;
-  quarantined: Array<{ segment: string; stage: Stage; reason: string }>;
+  quarantined: Array<{ segment: string; stage: Stage; reason: string; class: QuarantineClass }>;
+  /** 负担报告（2026-09-12 Wayne 审查四问）：密度下降不能靠少注冒充变容易 */
+  burdenReport?: {
+    /** 终稿仍保留的词表外实词（文本本身是否变容易——不管注没注） */
+    keptHardWords: string[];
+    /** 其中已提供注释支持的（该保留的词是否得到帮助） */
+    supportedWords: string[];
+    /** 未提供支持的（配额或漏注造成的缺口——必须可见） */
+    unsupportedWords: string[];
+    /** 最密窗口每百词注释处数（阅读打断频率） */
+    worstWindowDensity: number | null;
+  };
 }
 
 export function buildChapterRecap(opts: StagePipeOpts, run: StagePipeResult): ChapterRecap {
@@ -343,6 +430,21 @@ export function buildChapterRecap(opts: StagePipeOpts, run: StagePipeResult): Ch
       }
     }
   }
+  /* 负担报告：keptHard = 终稿逐段 OOV 扫描（文本事实，与注释无关）；
+   * supported = 其中在终稿加注账本里的（账本由终稿回填，注了才有）；
+   * unsupported = 剩下的——这就是"配额缺口"与"漏注"的总账，必须摊开。 */
+  const scanCtx: ScanCtx = {
+    tier: opts.tier, knownWords: opts.knownWords, properNouns: opts.properNouns, glossary: run.glossary,
+  };
+  const keptHard = new Set<string>();
+  for (const seg of opts.segs) {
+    for (const w of oovOfSeg(run.text[seg.id] ?? '', scanCtx)) keptHard.add(w);
+  }
+  const keptHardWords = [...keptHard].sort();
+  const supportedWords = keptHardWords.filter((w) => run.glossary.has(w));
+  const unsupportedWords = keptHardWords.filter((w) => !run.glossary.has(w));
+  const md = opts.segs.map((s2) => run.text[s2.id] ?? '').join('\n\n');
+  const profile = burdenProfileOf(md);
   return {
     chapter: opts.chapter,
     tier: opts.tier,
@@ -352,8 +454,12 @@ export function buildChapterRecap(opts: StagePipeOpts, run: StagePipeResult): Ch
       stage: c.stage, version: c.version, changed: c.changedIds.length, blocked: c.blockedIds.length, called: c.called,
     })),
     acceptedTerms,
-    openIssues: run.quarantined.map((q) => ({ segment: q.id, kind: `quarantined@${q.stage}` })),
-    quarantined: run.quarantined.map((q) => ({ segment: q.id, stage: q.stage, reason: q.reason })),
+    openIssues: [
+      ...run.quarantined.map((q) => ({ segment: q.id, kind: `quarantined@${q.stage}` })),
+      ...run.unsupportedGaps.flatMap((g) => g.words.map((w) => ({ segment: g.segId, kind: `annotation-gap:${w}` }))),
+    ],
+    quarantined: run.quarantined.map((q) => ({ segment: q.id, stage: q.stage, reason: q.reason, class: classifyQuarantine(q) })),
+    burdenReport: { keptHardWords, supportedWords, unsupportedWords, worstWindowDensity: profile.worstWindow?.density ?? null },
   };
 }
 

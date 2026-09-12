@@ -110,19 +110,28 @@ export function scanFor(stage: Stage, seg: ScanSeg, ctx: ScanCtx): string[] {
  *  两处清单天然一致。 */
     case 'annotation': {
       const { need, extra } = annotationTargets(seg.draft, ctx);
-      return need.length
-        ? [`待加注 ${need.length} 词：${need.slice(0, 12).join('、')}${extra > 0 ? `（另有 ${extra} 个超纲词按${ctx.tier}层策略保留为挑战项，本工序不注）` : ''}`]
-        : [];
+      const lines: string[] = [];
+      if (need.length) lines.push(`待加注 ${need.length} 词：${need.slice(0, 12).join('、')}`);
+      if (extra.length) lines.push(`另有 ${extra.length} 个超纲词超出本层注释配额：${extra.slice(0, 8).join('、')}——须返工替换（除非专名），替换不掉的如实报缺口`);
+      return lines;
     }
   }
 }
 
-export function annotationTargets(draft: string, ctx: ScanCtx): { need: string[]; extra: number } {
+export interface AnnotationPlan {
+  /** 配额内必注（进加注工序） */
+  need: string[];
+  /** 超出配额的难词——**不是"可以不注"，是必须返工替换或作为缺口上报**
+   *  （2026-09-12 Wayne 审查：配额不授权静默放弃；密度下降不能靠少注来实现） */
+  extra: string[];
+}
+
+export function annotationTargets(draft: string, ctx: ScanCtx): AnnotationPlan {
   const pending = oovOfSeg(draft, ctx).filter((w) => !ctx.glossary.has(w));
   const cap = ctx.annoCap ?? Infinity;
   const must = ctx.mustAnnotate ?? new Set<string>();
   const ordered = [...pending].sort((a, b) => (Number(must.has(b)) - Number(must.has(a))) || pending.indexOf(a) - pending.indexOf(b));
-  return { need: ordered.slice(0, cap), extra: ordered.length - Math.min(ordered.length, cap) };
+  return { need: ordered.slice(0, cap), extra: ordered.slice(cap) };
 }
 
 /** 一份稿本的注释密度（处/百词，与两轮调适检查同尺）——加注工序的预算与收线用。

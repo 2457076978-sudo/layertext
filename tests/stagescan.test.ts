@@ -85,15 +85,15 @@ test('干净段五道工序全部零命中（零调用判定的事实依据）',
   }
 });
 
-test('加注配额：教师必注词优先、层配额封顶，超额部分如实提示', () => {
+test('加注配额：教师必注词优先、层配额封顶；超额必须点名返工而非静默', () => {
   const seg = { id: 'P01', source: '[P01] s', draft: '[P01] alpha tyrannised beta grudge gamma hitherto.' };
   const c = ctx({ annoCap: 2, mustAnnotate: new Set(['grudge']) });
   const issues = scanFor('annotation', seg, c);
-  assert.ok(issues.length === 1);
-  const mainPart = issues[0]!.slice(0, issues[0]!.indexOf('（'));
-  assert.ok(mainPart.includes('grudge'), 'KB 必注词插队进配额');
-  assert.ok(issues[0]!.includes('挑战项'), '超额部分点名但不进必注清单');
-  assert.ok(!mainPart.includes('hitherto'), '配额外的词不进必注清单');
+  assert.equal(issues.length, 2, '配额行 + 超额行分开说');
+  assert.ok(issues[0]!.includes('grudge'), 'KB 必注词插队进配额');
+  assert.ok(issues[1]!.includes('超出本层注释配额') && issues[1]!.includes('返工替换'), '超额词点名且必须返工（不许静默不注）');
+  assert.ok(issues[1]!.includes('hitherto'), '配额外的词在超额清单里可见');
+  assert.ok(!issues[0]!.slice(0, issues[0]!.indexOf('：', 6)).includes('hitherto'), '配额行不含超额词');
 });
 
 test('注释密度：处/百词口径，加注预算与检查同尺', () => {
