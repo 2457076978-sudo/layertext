@@ -1,0 +1,312 @@
+{
+  "generatedAt": "2026-09-12T09:59:01.558Z",
+  "lexicon": "v0.7 ∪ 课标1600存档",
+  "pairs": [
+    {
+      "chapter": "第三章",
+      "tier": "A层85",
+      "src": {
+        "tokens": 2165,
+        "oovTypes": 162,
+        "density": 6.3,
+        "passive": 13,
+        "relcl": 9
+      },
+      "r1": {
+        "tokens": 2403,
+        "oovTypes": 141,
+        "avgLen": 10.3,
+        "annotated": 0,
+        "coverage": 0,
+        "passive": 4,
+        "relcl": 3,
+        "pastperf": 6,
+        "density": 0,
+        "worstWindow": 0,
+        "longest": 27
+      },
+      "r2": {
+        "tokens": 2330,
+        "oovTypes": 98,
+        "avgLen": 8.4,
+        "annotated": 0,
+        "coverage": 0,
+        "passive": 2,
+        "relcl": 5,
+        "pastperf": 6,
+        "density": 0,
+        "worstWindow": 0,
+        "longest": 26
+      },
+      "align": {
+        "match": 174,
+        "lost": 60,
+        "added": 105,
+        "lostWords": 664,
+        "sigNum": 12,
+        "sigName": 21
+      },
+      "attribution": {
+        "oovDrop": 43,
+        "byRewrite": 29,
+        "byDeletedSent": 22,
+        "byRewriteWords": ["cutter", "mouthful", "major", "hind", "supervise", "cutters", "humblest", "clockwork", "grudging", "chaff", "cockeral", "failure"],
+        "byDeletedSentWords": ["wastage", "drawback", "assume", "leadership", "rakes", "wisp", "unwillingness", "stormy"],
+        "keptAnnotated": 0,
+        "keptUnannotated": 98,
+        "introduced": 19,
+        "introducedWords": ["anymore", "argued", "expected", "foot", "heads", "held", "larger", "neat", "pattern", "rules"]
+      },
+      "sampleLost": ["when the horses needed to go forward. ", "when they stopped. ", "There was no wastage at all. "]
+    },
+    {
+      "chapter": "第三章",
+      "tier": "A层85",
+      "kind": "staged",
+      "staged": {
+        "tokens": 2174,
+        "oovTypes": 81,
+        "annotated": 10,
+        "coverage": 0.12,
+        "density": 0.5,
+        "worstWindow": 3,
+        "keptAnnotated": 10,
+        "keptUnannotated": 71
+      }
+    },
+    {
+      "chapter": "第七章",
+      "tier": "A层85",
+      "src": {
+        "tokens": 3503,
+        "oovTypes": 258,
+        "density": 6.8,
+        "passive": 27,
+        "relcl": 11
+      },
+      "r1": {
+        "tokens": 3667,
+        "oovTypes": 219,
+        "avgLen": 10,
+        "annotated": 0,
+        "coverage": 0,
+        "passive": 24,
+        "relcl": 12,
+        "pastperf": 38,
+        "density": 0,
+        "worstWindow": 0,
+        "longest": 40
+      },
+      "r2": {
+        "tokens": 3552,
+        "oovTypes": 129,
+        "avgLen": 8.2,
+        "annotated": 0,
+        "coverage": 0,
+        "passive": 15,
+        "relcl": 6,
+        "pastperf": 34,
+        "density": 0,
+        "worstWindow": 0,
+        "longest": 27
+      },
+      "align": {
+        "match": 272,
+        "lost": 96,
+        "added": 163,
+        "lostWords": 1053,
+        "sigNum": 7,
+        "sigName": 64
+      },
+      "attribution": {
+        "oovDrop": 90,
+        "byRewrite": 49,
+        "byDeletedSent": 49,
+        "byRewriteWords": ["rejoice", "extra", "damaged", "color", "chaff", "mangels", "casual", "portions", "formally", "sacrifice", "clutches", "rafters"],
+        "byDeletedSentWords": ["hopeful", "amount", "clamps", "starvation", "severe", "mostly", "violent", "rebellion"],
+        "keptAnnotated": 0,
+        "keptUnannotated": 129,
+        "introduced": 27,
+        "introducedWords": ["answered", "blamed", "checked", "chose", "coldly", "conflict", "drove", "evidence", "extremely", "footprints"]
+      },
+      "sampleLost": [
+        "Storms brought sleet and snow, followed by a hard frost that lasted until mid February. ",
+        "That meant they had to collect much more stone. ",
+        "The animals did not feel as hopeful as before. "
+      ]
+    },
+    {
+      "chapter": "第七章",
+      "tier": "A层85",
+      "kind": "staged",
+      "staged": {
+        "tokens": 3605,
+        "oovTypes": 159,
+        "annotated": 24,
+        "coverage": 0.15,
+        "density": 0.8,
+        "worstWindow": 4,
+        "keptAnnotated": 21,
+        "keptUnannotated": 138
+      }
+    },
+    {
+      "chapter": "第七章",
+      "tier": "M层75",
+      "src": {
+        "tokens": 3158,
+        "oovTypes": 165,
+        "density": 4,
+        "passive": 16,
+        "relcl": 4
+      },
+      "r1": {
+        "tokens": 3630,
+        "oovTypes": 167,
+        "avgLen": 9.6,
+        "annotated": 0,
+        "coverage": 0,
+        "passive": 20,
+        "relcl": 5,
+        "pastperf": 39,
+        "density": 0,
+        "worstWindow": 0,
+        "longest": 40
+      },
+      "r2": {
+        "tokens": 3568,
+        "oovTypes": 104,
+        "avgLen": 8,
+        "annotated": 0,
+        "coverage": 0,
+        "passive": 18,
+        "relcl": 7,
+        "pastperf": 20,
+        "density": 0,
+        "worstWindow": 0,
+        "longest": 26
+      },
+      "align": {
+        "match": 276,
+        "lost": 102,
+        "added": 170,
+        "lostWords": 1105,
+        "sigNum": 5,
+        "sigName": 69
+      },
+      "attribution": {
+        "oovDrop": 63,
+        "byRewrite": 28,
+        "byDeletedSent": 42,
+        "byRewriteWords": ["hopeful", "dignity", "constant", "claimed", "instructed", "meanwhile", "neighboring", "secretly", "creeping", "crept", "league", "investigation"],
+        "byDeletedSentWords": ["stormy", "frost", "casual", "pretext", "deceived", "surrounded", "invisible", "puzzled"],
+        "keptAnnotated": 0,
+        "keptUnannotated": 104,
+        "introduced": 24,
+        "introducedWords": ["answered", "baaed", "betrayed", "blew", "cancelled", "crawled", "england'", "fooled", "importantly", "increased"]
+      },
+      "sampleLost": ["It was a bitter winter. ", "After the stormy weather came wet snow, and then a hard frost. ", "The frost did not break until late February. "]
+    },
+    {
+      "chapter": "第七章",
+      "tier": "B层60",
+      "src": {
+        "tokens": 2642,
+        "oovTypes": 116,
+        "density": 2.9,
+        "passive": 13,
+        "relcl": 1
+      },
+      "r1": {
+        "tokens": 3825,
+        "oovTypes": 143,
+        "avgLen": 8.1,
+        "annotated": 0,
+        "coverage": 0,
+        "passive": 10,
+        "relcl": 3,
+        "pastperf": 9,
+        "density": 0,
+        "worstWindow": 0,
+        "longest": 23
+      },
+      "r2": {
+        "tokens": 3879,
+        "oovTypes": 78,
+        "avgLen": 7.2,
+        "annotated": 0,
+        "coverage": 0,
+        "passive": 5,
+        "relcl": 3,
+        "pastperf": 4,
+        "density": 0,
+        "worstWindow": 0,
+        "longest": 17
+      },
+      "align": {
+        "match": 334,
+        "lost": 137,
+        "added": 205,
+        "lostWords": 1097,
+        "sigNum": 8,
+        "sigName": 65
+      },
+      "attribution": {
+        "oovDrop": 65,
+        "byRewrite": 34,
+        "byDeletedSent": 32,
+        "byRewriteWords": ["spite", "hopeful", "labor", "encouragement", "constant", "starvation", "sickness", "claimed", "rebel", "smashed", "resisted", "scary"],
+        "byDeletedSentWords": ["envious", "rejoice", "storage", "color", "starving", "rations", "ceremonial", "announcement"],
+        "keptAnnotated": 0,
+        "keptUnannotated": 78,
+        "introduced": 19,
+        "introducedWords": ["agreed", "babies", "banned", "cheered", "hay", "peed", "picked", "pond", "promised", "punished"]
+      },
+      "sampleLost": ["Storms came first, followed by sleet and snow. ", "They also knew that the human beings were jealous. ", "They would celebrate. "]
+    }
+  ],
+  "feedbacks": [
+    {
+      "chapter": "第三章",
+      "tier": "A层85",
+      "feedback": "词汇偏难一个学期，还引入了原文没有的新难词 beasts 和 behavior；有几句到 27 词太长；注释一个都没有；情节和人物可以",
+      "round": 2,
+      "boundaryNote": "未设置教材进度——\"超前明显\"按注释限额收紧处理（跑 --progress 九上U5 可获得精确的单元回退）"
+    },
+    {
+      "chapter": "第七章",
+      "tier": "A层85",
+      "feedback": "词汇大概超前一学期，句子有些绕，人物和情节可以。",
+      "round": 2,
+      "boundaryNote": ""
+    },
+    {
+      "chapter": "第七章",
+      "tier": "M层75",
+      "feedback": "词汇大概超前一学期，句子有些绕，人物和情节可以。",
+      "round": 2,
+      "boundaryNote": "未设置教材进度——\"超前明显\"按注释限额收紧处理（跑 --progress 九上U5 可获得精确的单元回退）"
+    },
+    {
+      "chapter": "第七章",
+      "tier": "B层60",
+      "feedback": "整体还是太难，大概超前一个学年。",
+      "round": 2,
+      "boundaryNote": ""
+    }
+  ],
+  "tasks": [
+    {
+      "file": "调适任务单_A层85_第三章.json",
+      "stages": ["vocab-primary", "vocab-secondary", "annotation", "syntax", "coherence"],
+      "magnitude": "明显",
+      "dims": ["词汇", "句法", "支架", "理解", "背景"],
+      "keep": ["情节"],
+      "tooHard": ["beasts", "behavior"],
+      "seedWords": ["beasts", "behavior"],
+      "needsHuman": [],
+      "confirmed": true
+    }
+  ],
+  "decisionsFiles": 0
+}
