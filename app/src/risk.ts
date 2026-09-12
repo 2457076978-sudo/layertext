@@ -57,6 +57,7 @@ import {
 import { batchImpact, batchPreview, groupQueue, sessionState, subjectOf, type RiskItem, type RiskQueue, type TaskGroup } from '../../src/core/riskqueue.js';
 import { oneHourPlan } from '../../src/core/riskqueue.js';
 import { GATE_RULES, type GateCategory } from '../../src/core/segmentgate.js';
+import { itemMinutes, countByCategory, ruleLabel } from './risklogic.js';
 
 export interface RiskIo {
   read(path: string): Promise<string>;
@@ -253,16 +254,7 @@ export function panelStat(file: RiskQueueFile, events: DecisionEvent[], budget =
 }
 
 /** 与 riskqueue.MINUTES_PER_ITEM 同一口径（面板不该另写一份计时表） */
-const itemMinutes = (ruleId: string): number => ({ 'FACT-01': 2, 'FACT-02': 2, 'ANNO-01': 0.5, 'ANNO-03': 0.7, 'ANNO-02': 0.3, 'SENT-01': 0.5, 'LEN-01': 0.5, 'ZH-01': 1 })[ruleId] ?? 0.5;
-
-function countByCategory(items: RiskItem[]): Partial<Record<GateCategory, number>> {
-  const m: Partial<Record<GateCategory, number>> = {};
-  for (const it of items) m[it.category] = (m[it.category] ?? 0) + 1;
-  return m;
-}
-
 /** 规则人话标签（面板与文档共用同一张表） */
-export const ruleLabel = (ruleId: string): string => GATE_RULES[ruleId]?.label ?? ruleId;
 
 /** 提议预览：面板上直接告诉教师"你现在这些决定，汇总器会提议什么" */
 export function proposalPreview(events: DecisionEvent[]): { kind: string; key: string; value: string; count: number }[] {
