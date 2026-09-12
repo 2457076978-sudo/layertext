@@ -676,7 +676,9 @@ export function saveLastSession(): void {
   if (cur) cur.scrollTop = scrollNow();
   const dir = S.sessions.find((x) => x.sourcePath)?.sourcePath;
   S.appConfig.lastSession = {
-    bookDir: dir ? dir.slice(0, dir.lastIndexOf('/')) : undefined,
+    /* 书根锚定（书架注册目录）：hero"继续上次编辑"按 bookDir===书.目录 匹配，
+     * 写章目录会导致匹配永远失败（章目录在书根下多层）；无书上下文时退回文件父目录 */
+    bookDir: S.currentBookDir ?? (dir ? dir.slice(0, dir.lastIndexOf('/')) : undefined),
     workspace: S.activeWorkspace ?? undefined,
     files: S.sessions.filter((x) => x.sourcePath).map((x) => ({ path: x.sourcePath!, scroll: x.scrollTop ?? 0 })),
     activeIdx: S.activeIdx,
