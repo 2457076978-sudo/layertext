@@ -206,7 +206,7 @@ function renderFileTabs(): void {
     return;
   }
   el.innerHTML = S.sessions
-    .map((s, i) => `<span class="ftab ${i === S.activeIdx ? 'active' : ''}" data-ftab="${i}">${esc(s.fileName)}<span class="x" data-ftab-close="${i}" title="关闭">×</span></span>`)
+    .map((s, i) => `<span class="ftab ${i === S.activeIdx ? 'active' : ''}" data-ftab="${i}"><span class="ftab-label" title="${esc(s.sourcePath ?? s.fileName)}">${esc((s.sourcePath?.split('/').slice(0, -1).reverse().find((part) => /^第.+章$/.test(part)) ?? '') + ' · ' + s.fileName.replace(/_\d{4}-\d{2}-\d{2}/g, '').replace(/\.md$/i, ''))}</span><span class="x" data-ftab-close="${i}" title="关闭">×</span></span>`)
     .join('');
   el.querySelectorAll('[data-ftab]').forEach((t) =>
     t.addEventListener('click', (e) => {

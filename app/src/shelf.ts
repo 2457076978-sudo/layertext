@@ -659,17 +659,13 @@ export function renderWorkspaceBar(): void {
       .map((w) => `<span class="ftab ws ${w.名 === S.activeWorkspace ? 'active' : ''}" data-ws="${esc(w.名)}" title="${w.定制目标 ? `绑定定制口径 ${w.定制目标}` : ''}">${esc(w.名)}</span>`)
       .join('') +
     (active
-      ? `<span class="ws-files">${active.文件.map((f) => `<span class="wschip ${f === cur ? 'cur' : ''}" data-wsfile="${esc(f)}" title="${esc(f)}">${esc(workspaceChipName(f))}</span>`).join('')}</span>`
+      ? `<label class="ws-files">章节 <select aria-label="切换工作区章节" data-ws-select>${active.文件.map((f, i) => `<option value="${esc(f)}" ${f === cur ? 'selected' : ''}>${esc(f.split('/').slice(0, -1).reverse().find((part) => /^第.+章$/.test(part)) ?? `章节 ${i + 1}`)}</option>`).join('')}</select></label>`
       : '');
   el.querySelectorAll('[data-ws]').forEach((t) => t.addEventListener('click', () => switchWorkspace((t as HTMLElement).dataset.ws!)));
-  el.querySelectorAll('[data-wsfile]').forEach((c) =>
-    c.addEventListener('click', () => {
-      const f = (c as HTMLElement).dataset.wsfile!;
-      openPathIntoSession(f)
-        .then(() => setStatus(`已打开：${workspaceChipName(f)}（工作区【${S.activeWorkspace}】口径）`, 'saved'))
-        .catch((e) => setStatus('打开失败：' + e, 'err'));
-    }),
-  );
+  el.querySelector<HTMLSelectElement>('[data-ws-select]')?.addEventListener('change', (event) => {
+    const f = (event.currentTarget as HTMLSelectElement).value;
+    void openPathIntoSession(f).catch((e) => setStatus('打开失败：' + e, 'err'));
+  });
 }
 
 /* ---- 会话恢复：回到上次编辑 ---- */

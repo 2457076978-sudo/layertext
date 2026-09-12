@@ -40,9 +40,8 @@ const CFG = { baseUrl: 'https://chat.ecnu.edu.cn/open/api/v1' };
 const KEY = execSync('security find-generic-password -s layertext.ecnukey -w').toString().trim();
 
 const { splitChapter } = await import(`${distOf(REPO)}/src/core/textpipe.js`);
-const { runQc } = await import(`${distOf(REPO)}/src/core/qc.js`);
-const { makeResolver, dirOfPath } = await import(`${distOf(REPO)}/src/core/manifest.js`);
-const { burdenFindings, fidelityFindings, introducedHardWords, parseTeacherFeedback, MAGNITUDE_UNITS, knownWordHit } = await import(`${distOf(REPO)}/src/core/adaptcheck.js`);
+const { makeResolver } = await import(`${distOf(REPO)}/src/core/manifest.js`);
+const { burdenFindings, fidelityFindings, introducedHardWords, parseTeacherFeedback, MAGNITUDE_UNITS } = await import(`${distOf(REPO)}/src/core/adaptcheck.js`);
 
 /* ────────────────────── 层级定义（三维目标矩阵，2026-09-12 定稿） ──────────────────────
  * 篇幅比例不再主导生成：保留篇幅与阅读难度没有稳定的一一对应关系，弱生可能需要更多解释。

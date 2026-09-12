@@ -126,15 +126,11 @@ export function burdenProfileOf(md: string): BurdenProfile {
       if (n >= 2) crowded.push({ text: s.slice(0, 120), segId, annos: n, words: w });
     }
     /* 词序列展开（注释英文词保留在流里，其位置挂注释标记） */
-    const consumed = new Set<number>();
-    const re = new RegExp(ANNO_RE.source, 'gu');
-    for (let m = re.exec(body); m; m = re.exec(body)) consumed.add(m.index);
     const wr = new RegExp(WORD_RE.source, 'g');
-    let inAnno = false;
     for (let m = wr.exec(body); m; m = wr.exec(body)) {
-      /* 该词是否落在某个注释的英文词上：用区间近似——词起点在 ANNO_RE 命中区间内 */
-      inAnno = false;
+      /* 该词是否落在某个注释的英文词上：词起点在 ANNO_RE 命中区间内 */
       const re2 = new RegExp(ANNO_RE.source, 'gu');
+      let inAnno = false;
       for (let a = re2.exec(body); a; a = re2.exec(body)) {
         if (m.index >= a.index && m.index < a.index + a[0].length) {
           inAnno = true;
