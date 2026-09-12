@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /** LayerText 发布前门禁：静态语法不足以发现 .mjs 的 TDZ，必须逐脚本启动 smoke。 */
 import { spawnSync } from 'node:child_process';
-import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 const root = process.cwd();
 const dirs = ['tools/af_pipeline'];
 const files = dirs.flatMap((d) =>
