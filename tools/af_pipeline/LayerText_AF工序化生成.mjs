@@ -225,6 +225,18 @@ for (const tk of tiers) {
         return { id: `P${id}`, source: raw.trim(), draft: raw.trim() };
       });
 
+      /* 原文结构守卫（2026-09-12 ch1 实跑：坏头幽灵段+重复段ID+中文元注释直通产物——
+       * 本地扫描零命中的段零调用原样放行，脏段就这样进了学生稿）。脏原文当场拒绝：
+       * 段 ID 必须唯一、非空、正文不得有注释外中文。 */
+      const idCount = new Map();
+      for (const s of segs) idCount.set(s.id, (idCount.get(s.id) ?? 0) + 1);
+      const dupIds = [...idCount].filter(([, n]) => n > 1).map(([k]) => k);
+      const emptyIds = segs.filter((s) => wc(s.source) === 0).map((s) => s.id);
+      const zhSegs = segs.filter((s) => /[\u4e00-\u9fff]/.test(s.source.replace(/[A-Za-z-]+（[^）]*）/g, ''))).map((s) => s.id);
+      if (dupIds.length || emptyIds.length || zhSegs.length) {
+        throw new Error(`原文结构异常，拒绝生成（重复段ID：${dupIds.join(',') || '无'}；空段：${emptyIds.join(',') || '无'}；含注释外中文：${zhSegs.join(',') || '无'}）——先修 ${srcPath}`);
+      }
+
       const dst = RR(t.clsTag).any('正文', { chapter: ch, tier: t.clsTag, suffix: '_工序化' });
       if (existsSync(dst)) {
         console.log(`  已存在（产物在 ${dst}），跳过；重跑请先删该文件`);
