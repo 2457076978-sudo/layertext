@@ -45,7 +45,10 @@ test('最拥挤一句：一句 3 处注释必须被点名（全文平均合格�
   assert.ok(r.profile.worstSentence, '最拥挤一句要被找出');
   assert.equal(r.profile.worstSentence!.annos, 3);
   assert.equal(r.profile.worstSentence!.segId, 'P09', '段号要继承（定位用）');
-  assert.ok(r.findings.some((f) => f.note.includes('一句 3 处注释') && f.segId === 'P09'), '必须产生点名 finding');
+  assert.ok(
+    r.findings.some((f) => f.note.includes('一句 3 处注释') && f.segId === 'P09'),
+    '必须产生点名 finding',
+  );
 });
 
 test('最拥挤窗口：局部拥挤不被全文平均掩盖（滑窗按词序列，短段并入相邻窗）', () => {
@@ -67,15 +70,24 @@ test('密度超线触发难度级 finding；必要概念过半时给归因说明
   /* 每句 2 注、约 12 词/句 → 密度远超 B 线 3；注释词全是必要概念 */
   const md = Array.from({ length: 8 }, () => '[P01] Napoleon（拿破仑） and Snowball（雪球） argued about the windmill（风车） and the plan（计划） again.').join('\n');
   const r = burdenFindings(md, { tier: 'B', mustKeep: ['napoleon', 'snowball', 'windmill', 'plan'] });
-  assert.ok(r.findings.some((f) => f.level === '难度' && f.note.startsWith('注释拥挤')), '密度超线要报');
-  assert.ok(r.findings.some((f) => f.note.startsWith('归因') && f.note.includes('必要概念')), '必要概念造成的拥挤要有归因说明');
+  assert.ok(
+    r.findings.some((f) => f.level === '难度' && f.note.startsWith('注释拥挤')),
+    '密度超线要报',
+  );
+  assert.ok(
+    r.findings.some((f) => f.note.startsWith('归因') && f.note.includes('必要概念')),
+    '必要概念造成的拥挤要有归因说明',
+  );
 });
 
 test('最长句超线触发检查（A 层 20 词线）', () => {
   const long = `Major stood on the platform and looked at all the animals who had come into the barn that night and he told them about his dream of a world where animals were free.`;
   assert.ok((long.match(/[A-Za-z][A-Za-z'-]*/g) ?? []).length > 20, '用例前提：这句确实超 20 词');
   const r = burdenFindings(`[P01] ${long}`, { tier: 'A' });
-  assert.ok(r.findings.some((f) => f.note.startsWith('最长句')), '超线要报');
+  assert.ok(
+    r.findings.some((f) => f.note.startsWith('最长句')),
+    '超线要报',
+  );
 });
 
 test('情节保真：否定整类消失触发信息变化级；正常改写不误报', () => {
@@ -85,7 +97,10 @@ test('情节保真：否定整类消失触发信息变化级；正常改写不�
 
   const flipped = Array.from({ length: 6 }, (_, i) => `Rule ${i + 1}: animals may sleep in a bed and any animal can drink alcohol if they want.`).join('\n');
   const findings = fidelityFindings(src, flipped);
-  assert.ok(findings.some((f) => f.level === '信息变化' && f.note.includes('否定表达明显减少')), '"不得→可以"式反向必须被抓为待确认');
+  assert.ok(
+    findings.some((f) => f.level === '信息变化' && f.note.includes('否定表达明显减少')),
+    '"不得→可以"式反向必须被抓为待确认',
+  );
   assert.ok(fidelityCountsOf(src).negations >= 3, '用例前提：原文否定数足够');
 });
 
@@ -112,7 +127,10 @@ test('负担剖面跳过标题与引用元数据行（header 的英文不是学�
 test('教师反馈解析：维度+保留维度+幅度档位+点名词（自然语言一句话进，结构化出）', () => {
   const f = parseTeacherFeedback('词汇大概超前一学期，句子有些绕，人物和情节可以。这个 barn 他们也不会，同类的一起降一下。');
   assert.deepEqual(f.dims.sort(), ['句法', '词汇']);
-  assert.ok(f.keep.some((k) => /理解|情节|人物/.test(k)), '"人物和情节可以"要被识别为保留维度');
+  assert.ok(
+    f.keep.some((k) => /理解|情节|人物/.test(k)),
+    '"人物和情节可以"要被识别为保留维度',
+  );
   assert.equal(f.magnitude, '明显', '一学期 → 明显（回退 2 单元）');
   assert.ok(f.tooHardWords.includes('barn'), '点名的英文词要被抽出（举一反三的种子）');
   assert.equal(MAGNITUDE_UNITS[f.magnitude!], 2);
@@ -156,11 +174,17 @@ test('任务单：注释太密 → 只重排加注；情节有疑问 → 转人�
 
 test('任务单：点名词举一反三；整章反馈圈全章；标记词合并', () => {
   const task = planRevisionTask('第七章', 'v1', 'tyrannised 和 emboldened 太难', { markedTooHard: ['tyrannised', 'grudge'] });
-  assert.ok(task.stages.some((s) => s.stage === 'vocab-primary' && s.scope === 'terms'), '点名词走 terms 范围');
+  assert.ok(
+    task.stages.some((s) => s.stage === 'vocab-primary' && s.scope === 'terms'),
+    '点名词走 terms 范围',
+  );
   assert.deepEqual([...new Set(task.seedWords)].sort(), ['emboldened', 'grudge', 'tyrannised'], '正文标记与点名合并去重');
 
   const whole = planRevisionTask('第七章', 'v1', '整体还是太难了，超前一学年');
-  assert.ok(whole.stages.every((s) => s.scope === 'chapter'), '整体反馈 → 全章范围');
+  assert.ok(
+    whole.stages.every((s) => s.scope === 'chapter'),
+    '整体反馈 → 全章范围',
+  );
   assert.equal(whole.magnitude, '大幅');
 });
 
@@ -168,7 +192,10 @@ test('任务单：解析不出维度时预览必须显式停下（不许默默�
   const task = planRevisionTask('第七章', 'v1', '嗯，还行吧');
   const preview = revisionTaskPreview(task);
   assert.equal(task.stages.length, 0);
-  assert.ok(preview.some((l) => l.includes('未解析出可执行的维度')), preview.join(' / '));
+  assert.ok(
+    preview.some((l) => l.includes('未解析出可执行的维度')),
+    preview.join(' / '),
+  );
 });
 
 test('预览渲染：将修改/保留/幅度三行齐全，App 与 CLI 同一份', () => {
@@ -177,4 +204,22 @@ test('预览渲染：将修改/保留/幅度三行齐全，App 与 CLI 同一份
   assert.ok(preview[1]!.includes('characters'));
   assert.ok(preview[2]!.includes('明显'));
   assert.ok(FEEDBACK_STAGE_MAP.词汇.includes('annotation'));
+});
+
+/* ────────────── 2026-09-12 词形家族缺口（greater 被注「更大的」实跑暴露） ────────────── */
+
+test('expandForms：复数普通 -s 不被 -es 分支吞掉（horses/edges 曾全被当生词）', () => {
+  const known = new Set(['horse', 'edge', 'watch', 'box', 'glass']);
+  for (const w of ['horses', 'edges', 'watches', 'boxes', 'glasses']) assert.ok(knownWordHit(w, known), `${w} 应命中原形`);
+});
+
+test('expandForms：比较级 -er/-ier 命中原形；west/forest/modest 不因 -est 假命中', () => {
+  const known = new Set(['great', 'nice', 'happy', 'work', 'we', 'for', 'mode']);
+  for (const w of ['greater', 'nicer', 'happier', 'worker']) assert.ok(knownWordHit(w, known), `${w} 应命中原形`);
+  for (const w of ['west', 'forest', 'modest']) assert.ok(!knownWordHit(w, known), `${w} 不得经 -est 剥离假命中`);
+});
+
+test('expandForms：不规则补录 woke/woken/better/best', () => {
+  const known = new Set(['wake', 'good']);
+  for (const w of ['woke', 'woken', 'better', 'best']) assert.ok(knownWordHit(w, known), `${w} 应命中原形`);
 });
