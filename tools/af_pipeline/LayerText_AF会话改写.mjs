@@ -112,6 +112,29 @@ const QC_ROUNDS = Number(arg('--qc-rounds', '2')); // 本地复检回流上限
  *  注意力稀释、截断和恢复困难；而原实现只在章末追加 5 行摘要，**却没有实际删除历史**。
  *  报告给的建议粒度是"按章或 20–40 段"，所以默认 30 段。 */
 const WINDOW = Number(arg('--window', '30'));
+/** 模型上下文窗口（token）：阈值按**最近一次请求的 prompt_tokens** 占比触发——
+ *  40% 主动压缩（等同超窗滚动）、60% 警戒（warning 进日志）、70% 强制新会话
+ *  （重置对话但保留结转状态）。百分比随模型配置，不写死 token 数（v2 方向四）。 */
+const CTX_TOKENS = Number(arg('--ctx', '65536')); // deepseek-chat 默认按 64K 有效窗口估
+const CTX_SOFT = 0.4, CTX_WARN = 0.6, CTX_HARD = 0.7;
+let ctxWarned = false; // 警戒只提醒一次（每轮重置后重置）
+
+/** 最近一次请求的上下文占用检查（prompt_tokens 是"现在对话有多胖"的唯一事实） */
+function contextPressure(usage) {
+  if (!CTX_TOKENS || !usage?.in) return;
+  const ratio = usage.in / CTX_TOKENS;
+  if (ratio >= CTX_HARD) {
+    resetConversation(`上下文占用 ${(ratio * 100).toFixed(0)}% ≥ 70% 硬阈值（prompt ${usage.in}/${CTX_TOKENS}）`);
+    ctxWarned = false;
+  } else if (ratio >= CTX_WARN) {
+    if (!ctxWarned) {
+      ctxWarned = true;
+      warn('ctx-pressure', `上下文占用 ${(ratio * 100).toFixed(0)}% 达到 60% 警戒线（prompt ${usage.in}/${CTX_TOKENS}）——接下来随时可能硬重置`, { ratio: Number(ratio.toFixed(2)) });
+    }
+  } else if (ratio >= CTX_SOFT) {
+    rollWindow(true); // 软阈值=主动压缩，不等段数窗口
+  }
+}
 const BASELINE = P.情节底线 ?? '调适工作区/规则与底线/全书情节底线_v0.1.md';
 /** 自检用假模型：long=永远超长（必不过）｜exact=按目标词数精确回放原文（必过）｜其他=字面返回。
  *  有了它，"门禁真的拦得住"这件事才能被自动化断言，而不靠人肉试。 */
@@ -395,11 +418,11 @@ function carryState() {
     .filter(Boolean)
     .join('\n');
 }
-/** 超窗就把开场之后的历史整段换掉。开场（system）**一个字节都不动** —— 它是缓存命中的前缀。 */
-function rollWindow() {
-  if (!WINDOW || messages.length <= 1) return;
+/** 超窗（或 token 软阈值）就把开场之后的历史整段换掉。开场（system）**一个字节都不动** —— 它是缓存命中的前缀。 */
+function rollWindow(force = false) {
+  if (messages.length <= 1) return;
   const nonSystem = messages.length - 1;
-  if (nonSystem <= WINDOW * 2) return;
+  if (!force && (!WINDOW || nonSystem <= WINDOW * 2)) return;
   const carry = carryState();
   messages.splice(1, messages.length - 1);
   pendingCarry = carry;
@@ -838,6 +861,8 @@ for (const { i } of chSegs) {
       state.stats.out += u.out;
       state.stats.cached += u.cached;
       logLine({ t: 'stats', v: state.stats });
+      /* 上下文压力：以本段最后一次调用的 prompt_tokens 为准（多轮重试里最后最大） */
+      contextPressure(usage[usage.length - 1]);
 
       if (status === 'needs-review') {
         // ★ 不可完成状态：不进正文、不进 done、写隔离目录、进失败清单
@@ -926,18 +951,41 @@ for (const { i } of chSegs) {
       console.error(`\n✗ ${msg}`);
     }
   }
-  // 章末压缩：让模型留 5 行本章要点，作为后续上下文的锚（也写进会话日志）
+  // 章末压缩：固定 JSON schema + 本地校验（v2 方向四：章末摘要不再是自由文本）。
+  //  校验不过重试一次，仍不过=降级回 5 行自由文本并 warning——锚要紧，但不许静默。
   try {
-    pushMsg(messages, 'user', `本章（${ch}）已处理完。请用 5 行以内总结：本章人物如何称呼、你采用了哪些简化手法、以及需要后续保持一致的地方。只输出这 5 行摘要。`);
-    const r = await callChat(messages, 400);
+    const askRecap = (retry) => pushMsg(messages, 'user',
+      `本章（${ch}）已处理完。请输出一个 JSON 对象作为章末摘要：{"chapter":"${ch}","addressing":["本章人物如何称呼", …],"methods":["本章用过的简化手法", …],"consistency":["后续章节需保持一致的地方", …]}。每类 1-3 条、每条一句话。${retry ? '上一次不是合法 JSON，这次**只输出 JSON 对象**，不要任何其他文字。' : '只输出 JSON 对象。'}`);
+    const validRecap = (raw) => {
+      try {
+        const o = JSON.parse(raw.replace(/^[^{]*/, '').replace(/[^}]*$/, ''));
+        if (typeof o.chapter !== 'string' || !Array.isArray(o.addressing) || !Array.isArray(o.methods) || !Array.isArray(o.consistency)) return null;
+        return { chapter: o.chapter, addressing: o.addressing.slice(0, 3), methods: o.methods.slice(0, 3), consistency: o.consistency.slice(0, 3) };
+      } catch { return null; }
+    };
+    askRecap(false);
+    let r = await callChat(messages, 500);
+    let recap = validRecap(r.text);
+    if (!recap) {
+      askRecap(true);
+      r = await callChat(messages, 500);
+      recap = validRecap(r.text);
+    }
     pushMsg(messages, 'assistant', r.text);
-    state.carry.章摘要.push([ch, r.text.replace(/\n/g, ' ')]);
+    if (recap) {
+      state.carry.章摘要.push([ch, JSON.stringify(recap)]);
+      logLine({ t: 'chapter-recap', chapter: ch, recap, schema: 'v1' });
+      console.log(`\n📌 ${ch} 摘要（schema）：人物 ${recap.addressing.length} 条｜手法 ${recap.methods.length} 条｜一致性 ${recap.consistency.length} 条`);
+    } else {
+      /* 降级：锚不能没有。自由文本仍进结转，但 schema 失败必须留痕（warning） */
+      state.carry.章摘要.push([ch, r.text.replace(/\n/g, ' ')]);
+      warn('chapter-recap', `${ch} 章末摘要两次都未通过 schema 校验——已降级为自由文本锚（一致性跟踪变弱）`, { chapter: ch, head: r.text.slice(0, 80) });
+    }
     state.carry.last = `${ch} 已处理完`;
-    state.stats.calls++;
+    state.stats.calls += 1;
     state.stats.in += r.usage.in;
     state.stats.out += r.usage.out;
     state.stats.cached += r.usage.cached;
-    console.log(`\n📌 ${ch} 摘要：${r.text.replace(/\n/g, ' / ').slice(0, 100)}…`);
   } catch (e) {
     // 原来这里是 catch {}：摘要失败会让后续一致性下降却显示成功。降级为 warning 并计数。
     warn('chapter-summary', `${ch} 章末摘要失败（后续上下文锚缺失，一致性可能下降）：${e instanceof Error ? e.message : String(e)}`, { chapter: ch });
