@@ -43,3 +43,11 @@ cd app && npm run build
 新增 `tools/perf_bench.mjs` 与 `npm run perf:bench`：使用固定 250 段/4750 词输入，在 dist 上重复 30 次测量核心 QC 热路径，并设置默认 250ms 回归门槛。本机实测平均 1.66ms/次。该基准不调用 API、不读真实教学资产，适合 CI 做趋势门禁。
 
 本轮对结构的实际收敛点是把性能基准与 preflight 作为独立工程边界接入 `package.json`；大规模前端拆分尚未安全实施，原因是当前模块间循环依赖较多，贸然拆分会改变运行时初始化顺序。后续应以纯函数边界（risk 分组、会话状态、报告格式化）为单位逐步迁移，并每次保留兼容导出。
+
+## 本轮拆分与风险验收
+
+- 依赖图与拆分边界见 `docs/DEPENDENCY_GRAPH.md`；`risk.ts` 已抽出纯函数至 `app/src/risklogic.ts`，并通过 re-export 保持调用方兼容。
+- 清单指针歧义/并发双教师：`tests/bundle_cli.test.ts`（并发双教师）与 `tests/runidentity.test.ts` 锁定“无 run 拒绝、有 run 正确导出”。
+- partial 发布声明：`tests/bundle_cli.test.ts` 锁定默认拒发、`--allow-partial` 放行且包描述保留声明。
+- `.mjs` TDZ/静默 catch：`tools/preflight.mjs` 已接入 `npm run verify`，逐检 24 个脚本；本轮 preflight 通过。
+- 多教师并发：使用 `tests/bundle_cli.test.ts` 的真实子进程临时目录场景验证，双教师包身份与哈希不串线。
