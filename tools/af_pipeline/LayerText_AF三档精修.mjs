@@ -16,10 +16,10 @@ const REPO = P.引擎目录;
 const SRC_BASE = P.原文目录;
 const OUT_BASE = P.产物目录;
 const DATE = P.日期;
-const MODEL = 'deepseek-chat';
+const MODEL = 'ecnu-plus'; // ChatECNU（2026-09-12 起 Wayne 指定；OpenAI 兼容端点，key 在钥匙串 layertext.ecnukey）
 
-const CFG = JSON.parse(readFileSync(`${process.env.HOME}/.layertext.json`, 'utf-8'));
-const KEY = execSync('security find-generic-password -s layertext.apikey -w').toString().trim();
+const CFG = { baseUrl: 'https://chat.ecnu.edu.cn/open/api/v1' }; // 不读 ~/.layertext.json：那是 App 的 AI 设置，脚本管线与 App 各用各的
+const KEY = execSync('security find-generic-password -s layertext.ecnukey -w').toString().trim();
 const { splitChapter, extractParas, sentsOf } = await import(`${distOf(REPO)}/src/core/textpipe.js`);
 const { runQc } = await import(`${distOf(REPO)}/src/core/qc.js`);
 const { alignSentencePairs } = await import(`${distOf(REPO)}/src/core/align.js`);

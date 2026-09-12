@@ -18,9 +18,9 @@ const OUT_BASE = P.产物目录;
 const KB = P.知识库路径;
 const DATE = P.日期;
 
-const MODEL = 'deepseek-chat'; // 非思考型（v4-flash 思考型复杂指令失控两次实证）
-const CFG = JSON.parse(readFileSync(`${process.env.HOME}/.layertext.json`, 'utf-8'));
-const KEY = execSync('security find-generic-password -s layertext.apikey -w').toString().trim();
+const MODEL = 'ecnu-plus'; // ChatECNU（2026-09-12 起 Wayne 指定；OpenAI 兼容端点，key 在钥匙串 layertext.ecnukey）
+const CFG = { baseUrl: 'https://chat.ecnu.edu.cn/open/api/v1' }; // 不读 ~/.layertext.json：那是 App 的 AI 设置，脚本管线与 App 各用各的
+const KEY = execSync('security find-generic-password -s layertext.ecnukey -w').toString().trim();
 const { splitChapter } = await import(`${distOf(REPO)}/src/core/textpipe.js`);
 const { runQc } = await import(`${distOf(REPO)}/src/core/qc.js`);
 // 词表 + 本书专名（专名不计 OOV）——2026-09-10：原先只喂词库，Napoleon 等被算成生词
@@ -33,10 +33,10 @@ const LEX = await loadLexicon(P);
 const CN = SHARED.chapterNames(P);
 const wc = (t) => (t.match(/[A-Za-z][A-Za-z'-]*/g) ?? []).length;
 
-/** 三档：比例=占原文词数百分比；maxLen=分层句长（A20/M16/B14 定稿口径）；retryLine=段级重试线 */
+/** 三档：比例=占原文词数百分比；maxLen=分层句长（2026-09-12 Wayne"学生没有预想的强"难度下移：A20→17、M16→15）；retryLine=段级重试线 */
 const TIERS = {
-  A: { key: 'A', label: 'A层（挑战）', ratio: 0.85, maxLen: 20, retryLine: 0.73, clsTag: 'A层85' },
-  M: { key: 'M', label: 'M层（中层）', ratio: 0.75, maxLen: 16, retryLine: 0.63, clsTag: 'M层75' },
+  A: { key: 'A', label: 'A层（挑战）', ratio: 0.85, maxLen: 17, retryLine: 0.73, clsTag: 'A层85' },
+  M: { key: 'M', label: 'M层（中层）', ratio: 0.75, maxLen: 15, retryLine: 0.63, clsTag: 'M层75' },
   B: { key: 'B', label: 'B层（基础）', ratio: 0.6, maxLen: 14, retryLine: 0.48, clsTag: 'B层60' },
 };
 
@@ -92,7 +92,7 @@ function systemPrompt(t) {
   return `你是初中英语原著分层简化的审校助手（${t.label}）。词汇边界：优先用《义务教育英语课程标准》三级（约1600词）；专有名词不变。
 
 【篇幅守恒（本次任务核心）】改写=同义转换，不是压缩删减：细节、修饰、氛围描写一律保留转述，只换学生能懂的说法。本档目标：全篇词数约为原文的 ${Math.round(t.ratio * 100)}%——每段输出词数应约为该段原文的 ${Math.round(t.ratio * 100)}%（允差 ±10 个百分点）。
-${t.key === 'B' ? '- B 档允许适度删减次要细节与重复描写（情节与因果零丢失），词汇换成最基础的说法，优先压低生词率。\n' : ''}${t.key === 'A' ? '- A 档最贴原文：保留较多原表达，只处理真正的难词难句。\n' : ''}
+${t.key === 'B' ? '- B 档允许适度删减次要细节与重复描写（情节与因果零丢失），词汇换成最基础的说法，优先压低生词率。\n' : ''}${t.key === 'A' ? '- A 档贴原文**转述**（篇幅与情节贴原文），但词汇向课标换写：超出课标的实词**优先换成课标词或常见说法**，只在换掉会损失关键语义时才保留并加注，且每段保留的加注词不超过 2 个。（2026-09-12 定：学生没有预想的强，A 档不再是"保留难词靠注释"。）\n' : ''}${t.key === 'M' ? '- M 档词汇**全部落在课标内**（专有名词除外）：超纲实词一律换写；确属无法替换的关键词才保留并加注，每段最多 1 个。\n' : ''}
 【句法黑名单（引语内原话除外）】被动→主动；定语从句→拆短句或形容词前置；过去完成→一般过去时+before/after 明示先后。直接引语只降词不降句式（引号原样保留）。情节零丢失。
 
 【教师审校知识库（历史成果，必须遵守）】
