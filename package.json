@@ -18,7 +18,8 @@
     "verify:rust": "cd app/src-tauri && cargo fmt --check && cargo clippy -- -D warnings && cargo test",
     "prepare": "husky",
     "fidelity": "node tools/fidelity.mjs",
-    "preflight": "node tools/preflight.mjs"
+    "preflight": "node tools/preflight.mjs",
+    "perf:bench": "npm run build && node tools/perf_bench.mjs"
   },
   "lint-staged": {
     "*.{ts,mts,mjs}": [
