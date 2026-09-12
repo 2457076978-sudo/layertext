@@ -850,7 +850,9 @@ mod dict_tests {
     fn local_dict_returns_zh_gloss() {
         // 系统（牛津英汉）词典：boar 的首个中文义项含"猪"
         // CI/新机器可能没有系统词典；缺少外部资源不是实现失败，跳过而不是伪造释义。
-        let Some(zh) = crate::dict::lookup_zh("boar") else { return };
+        let Some(zh) = crate::dict::lookup_zh("boar") else {
+            return;
+        };
         assert!(zh.contains('猪'), "boar 释义应含 猪，实得 {zh}");
     }
 }
