@@ -50,6 +50,7 @@ import {
   scheduleSaveLastSession,
   saveLastSession,
   loadWorkspaces,
+  alignWorkspaceToSession,
 } from './shelf.js';
 import { renderReader, updateMarkBadge, sidebarHandlers, showWordPanel, showSentPanel, showPhrasePanel } from './reader.js';
 import { restoreChat, chatRender, hideGatePop, gatePop } from './chat.js';
@@ -184,6 +185,7 @@ export function renderAll(): void {
     return;
   }
   renderReader(s);
+  alignWorkspaceToSession(); // 正文属于哪个工作区，目录/班级口径就跟着哪个（切标签/恢复会话后重新对齐）
   attachInlineSuggestions();
   renderReportPane(s);
   renderSidebar(s, sidebarHandlers);

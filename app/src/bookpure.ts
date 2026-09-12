@@ -199,6 +199,30 @@ export function workspaceChipName(path: string): string {
   return file || path;
 }
 
+/**
+ * 目录条目显示名：章节目录名 + 文件名在**同清单内**剥掉公共前后缀后的差异段。
+ *
+ * 三档产物的十个章节文件名长得一模一样（`原文_A层85_2026-09-10.md` × 10）——只显示文件名
+ * 时目录十条无法区分（2026-09-12 真机反馈）。剥掉清单内公共前后缀后：十条同名 → 差异段为空
+ * → 只显示章名（教师找一章认的正是这个锚）；一章里有"原文/学生版"多份 → 显示"第一章 · 原文"。
+ */
+export function tocItemName(paths: string[], path: string): string {
+  const base = (p: string): string => p.slice(p.lastIndexOf('/') + 1).replace(/\.(md|txt|markdown|docx)$/i, '');
+  const dir = path.slice(0, path.lastIndexOf('/')).split('/').pop() ?? '';
+  const chapterish = /^第.{1,4}章$/.test(dir) || /^Chapter\s*\d+/i.test(dir);
+  const name = base(path);
+  if (!chapterish) return name || path;
+  const names = paths.map(base);
+  let prefix = names[0] ?? '';
+  for (const n of names) while (prefix && !n.startsWith(prefix)) prefix = prefix.slice(0, -1);
+  const cores = names.map((n) => n.slice(prefix.length));
+  let suffix = cores[0] ?? '';
+  for (const c of cores) while (suffix && !c.endsWith(suffix)) suffix = suffix.slice(1);
+  const core = cores[paths.indexOf(path)] ?? '';
+  const diff = suffix ? core.slice(0, core.length - suffix.length) : core;
+  return diff ? `${dir} · ${diff}` : dir;
+}
+
 /* ---------- 书架书封（2026-09-08 Wayne：正常书比例 + 书名当封面字号自适应 + 两级导航） ---------- */
 
 /** 书名视觉宽度（CJK 全角=1、其余≈0.55），用于封面字号分档 */

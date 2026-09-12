@@ -14,13 +14,17 @@ import { scrollEl, scrollNow } from './edit.js';
 import { saveConfig } from './ai.js';
 import { jumpToBookmark } from './review.js';
 import {} from './pure.js';
-import { buildVersionCards, coverTitlePx, filterShelfBooks, parseWorkspaces, progressPct, shelfGroupsOf, workspaceChipName } from './bookpure.js';
+import { buildVersionCards, coverTitlePx, filterShelfBooks, parseWorkspaces, progressPct, shelfGroupsOf, tocItemName, workspaceChipName } from './bookpure.js';
 
 /* ---------- 工作区（书目录 _工作区.json：3 层次=3 工作区，浏览器标签式切换） ---------- */
 
 export async function loadWorkspaces(dir: string): Promise<void> {
-  for (const d of [dir, dir.slice(0, dir.lastIndexOf('/'))]) {
-    // 先章目录，再书稿根目录
+  /* 章目录在 书根/重制三版/第X章/ 这么深——`_工作区.json` 却在书根。
+   * 只向上找一层的话，打开正文章节会"找不到"并**清空**刚载入的工作区（2026-09-12 真机复现：
+   * 恢复上次会话时 README 先载入了工作区、随后第一章把它清掉，目录退化成只列 README）。
+   * 与 findProjectFile 同款：最多向上 5 层。 */
+  let d = dir;
+  for (let i = 0; i < 5 && d && d !== '/'; i++) {
     try {
       const raw = await invoke<string>('read_text_file', { path: `${d}/_工作区.json` });
       const ws = parseWorkspaces(raw);
@@ -30,9 +34,11 @@ export async function loadWorkspaces(dir: string): Promise<void> {
         return;
       }
     } catch {
-      /* 有意兜底：这一层没有 _工作区.json 就试上一层（章目录 → 书稿根目录），
-       * 两层都没有＝单版本书，S.workspaces 留空，书架按单版本显示。 */
+      /* 这一层没有 _工作区.json 就再上一层（章目录 → 书稿根目录） */
     }
+    const up = d.slice(0, d.lastIndexOf('/'));
+    if (up === d) break;
+    d = up;
   }
   S.workspaces = [];
   S.activeWorkspace = null;
@@ -52,6 +58,26 @@ async function activateWorkspace(name: string): Promise<void> {
       setStatus(`工作区【${name}】绑定的口径 ${w.定制目标} 在分组文件里没找到（<svg class="ico"><use href="#i-users"/></svg>班级定制里可查目录位置）`, 'dirty');
     }
   }
+}
+
+/** 当前文件属于哪个工作区（反查 `_工作区.json` 的文件清单；不属于任何工作区返回 null） */
+export function workspaceOfFile(path: string | null | undefined): { 名: string; 定制目标?: string; 文件: string[] } | null {
+  if (!path) return null;
+  return S.workspaces.find((w) => w.文件.includes(path)) ?? null;
+}
+
+/**
+ * 把工作区上下文对齐到**当前会话**：正文属于哪个工作区，目录/班级口径就跟着哪个。
+ *
+ * 为什么必须有这一步（2026-09-12 真机复现）：`activeWorkspace` 此前只在**显式点工作区条/⌘1-3**
+ * 时设置；切换文件标签、启动恢复会话都只改 `activeIdx`——于是"明明在读 A 层第一章，
+ * activeWorkspace 却是空"：目录退化成扫描书根目录（那里只有一个 README），看起来就是
+ * "目录不能切换其他章节"；班级口径也会跟着上一个工作区走错。上下文从当前文件**派生**，
+ * 而不是指望每个入口都记得维护它——`renderAll` 每次渲染都会经过这里，切到哪章对齐到哪章。
+ */
+export function alignWorkspaceToSession(): void {
+  const w = workspaceOfFile(activeSession()?.sourcePath);
+  if (w && S.activeWorkspace !== w.名) void activateWorkspace(w.名);
 }
 
 /** 切工作区的完整闭环（工作区条点击与 ⌘1-3 共用）：绑定口径 → 当前正文属于该版本则就地切换，否则翻开该版本第一章 */
@@ -563,7 +589,7 @@ export async function refreshToc(): Promise<void> {
     list.innerHTML = chapters
       .map(
         (f) =>
-          `<div class="toc-item ${f === cur ? 'cur' : ''}" data-tocf="${esc(f)}" title="${esc(f)}"><span class="t" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(workspaceChipName(f))}</span><span class="toc-badge" data-badge="${esc(f)}">…</span></div>`,
+          `<div class="toc-item ${f === cur ? 'cur' : ''}" data-tocf="${esc(f)}" title="${esc(f)}"><span class="t" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(tocItemName(chapters, f))}</span><span class="toc-badge" data-badge="${esc(f)}">…</span></div>`,
       )
       .join('');
     list.querySelectorAll('[data-tocf]').forEach((item) =>
@@ -571,7 +597,7 @@ export async function refreshToc(): Promise<void> {
         const f = (item as HTMLElement).dataset.tocf!;
         closeToc();
         openPathIntoSession(f)
-          .then(() => setStatus(`已打开：${workspaceChipName(f)}（工作区【${S.activeWorkspace ?? '—'}】口径）`, 'saved'))
+          .then(() => setStatus(`已打开：${tocItemName(chapters, f)}（工作区【${S.activeWorkspace ?? '—'}】口径）`, 'saved'))
           .catch((e) => setStatus('打开失败：' + e, 'err'));
       }),
     );

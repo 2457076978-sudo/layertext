@@ -3,7 +3,20 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { toggleParaBookmark } from '../app/src/pure.js';
-import { buildVersionCards, coverTitlePx, coverVisualWidth, filterShelfBooks, progressPct, shelfGroupsOf } from '../app/src/bookpure.js';
+import { buildVersionCards, coverTitlePx, coverVisualWidth, filterShelfBooks, progressPct, shelfGroupsOf, tocItemName } from '../app/src/bookpure.js';
+
+test('tocItemName：十个同名章节文件 → 条目显示章名；一章多份 → 章名·差异段（2026-09-12 目录十条同名反馈）', () => {
+  const ch = (n: number, tier = 'A层85'): string => `/书/第${'一二三四五六七八九十'[n - 1]}章/原文_${tier}_2026-09-10.md`;
+  const ten = Array.from({ length: 10 }, (_, i) => ch(i + 1));
+  assert.equal(tocItemName(ten, ch(1)), '第一章', '十条同名文件：只显示章名（差异段为空）');
+  assert.equal(tocItemName(ten, ch(10)), '第十章');
+  // 一章里两份产物：公共前后缀剥掉后剩下"原文/学生版"
+  const mixed = ['/书/第一章/原文_A层85_2026-09-10.md', '/书/第一章/学生版_A层85_2026-09-10.md'];
+  assert.equal(tocItemName(mixed, mixed[0]!), '第一章 · 原文');
+  assert.equal(tocItemName(mixed, mixed[1]!), '第一章 · 学生版');
+  // 非章节目录：维持文件名（不误把普通目录名当章名）
+  assert.equal(tocItemName(['/tmp/a/笔记.md'], '/tmp/a/笔记.md'), '笔记');
+});
 
 test('coverVisualWidth：中文全角=1、ASCII≈0.55', () => {
   assert.equal(coverVisualWidth('动物农场'), 4);
