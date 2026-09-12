@@ -29,7 +29,7 @@ const DATE = P.日期;
 const CN = chapterNames(P);
 const wc = (t) => (t.match(/[A-Za-z][A-Za-z'-]*/g) ?? []).length;
 
-const MODEL = 'ecnu-plus'; // ChatECNU（与三档生成/两轮调适同源）
+const MODEL = P.模型 || 'ecnu-plus'; // ChatECNU；模型随项目配置走（调适项目_AnimalFarm.json 模型字段，当前 ecnu-max）
 const CFG = { baseUrl: 'https://chat.ecnu.edu.cn/open/api/v1' };
 const KEY = execSync('security find-generic-password -s layertext.ecnukey -w').toString().trim();
 const { openLedger } = await import('./LayerText_AF调用台账.mjs');
@@ -50,13 +50,12 @@ const TIERS = {
   B: { key: 'B', label: 'B层（基础）', ratio: 0.6, maxLen: 14, clsTag: 'B层60' },
 };
 
-const argRun = (n, d) => { const i = process.argv.indexOf(n); return i >= 0 ? process.argv[i + 1] : d; };
+const argRun = (n, d) => {
+  const i = process.argv.indexOf(n);
+  return i >= 0 ? process.argv[i + 1] : d;
+};
 const TEACHER = argRun('--teacher', process.env.LAYERTEXT_TEACHER ?? process.env.USER ?? 'unknown');
-const RUN = await SHARED.readRunIdentity(
-  { out: OUT_BASE, work: P.调适工作区 },
-  { teacher: TEACHER, tier: TIERS.A.clsTag },
-  { runId: argRun('--run', undefined) },
-);
+const RUN = await SHARED.readRunIdentity({ out: OUT_BASE, work: P.调适工作区 }, { teacher: TEACHER, tier: TIERS.A.clsTag }, { runId: argRun('--run', undefined) });
 if (RUN.warning) console.warn(`\n⚠ ${RUN.warning}`);
 const RR = (tag) => makeResolver(RUN.layout, { out: OUT_BASE, work: P.调适工作区 }, { runId: RUN.runId, tier: tag, date: DATE });
 
@@ -102,7 +101,9 @@ try {
 } catch (e) {
   console.warn(`⚠ 回流候选台账读不了（按无资产继续，不阻断生成）：${String(e).slice(0, 100)}`);
 }
-function chapterNameNow() { return CN[Number(process.argv.find((a) => /^\d+$/.test(a)) ?? 7) - 1] ?? ''; }
+function chapterNameNow() {
+  return CN[Number(process.argv.find((a) => /^\d+$/.test(a)) ?? 7) - 1] ?? '';
+}
 /* 已问过的释义缓存（跨段共享：一词一释，问过不再问） */
 const askedGloss = new Map();
 
@@ -148,7 +149,10 @@ const annotate = async (draft, targets) => {
   const missing = [];
   for (const w of targets.need) {
     const zh = glossHints.get(w) ?? askedGloss.get(w);
-    if (!zh) { missing.push(w); continue; }
+    if (!zh) {
+      missing.push(w);
+      continue;
+    }
     const r = insertAnnotation(md, w, zh);
     if (r.ok) md = r.text;
   }
@@ -180,7 +184,7 @@ function systemPrefix(t, proper) {
 function userBody(req, glossHintsLocal) {
   const lines = [`工序：${STAGE_LABEL[req.stage]}`, `本章版本：${req.baseVersion}`, '', req.instruction, ''];
   if (req.stage === 'annotation') {
-    const hints = [...new Set(req.segments.flatMap((s) => (s.issues.join(' ').match(/[a-z]{3,}/g) ?? [])))]
+    const hints = [...new Set(req.segments.flatMap((s) => s.issues.join(' ').match(/[a-z]{3,}/g) ?? []))]
       .map((w) => [w, glossHintsLocal.get(w)].filter(Boolean).join('：'))
       .filter((x) => x.includes('：'));
     if (hints.length) lines.push(`释义建议（优先采用）：${hints.slice(0, 30).join('；')}`, '');
@@ -243,7 +247,13 @@ for (const tk of tiers) {
         annoCapPerSeg: { A: 2, M: 1, B: 3 }[tk],
         /* 教师批准的改写偏好进词汇粗筛指令（批准资产消费的第二类） */
         instructions: approvedRewrites.length
-          ? { ...DEFAULT_INSTRUCTIONS(), 'vocab-primary': `${DEFAULT_INSTRUCTIONS()['vocab-primary']}\n【教师批准的改写偏好（必须遵守）】${approvedRewrites.slice(0, 8).map((c) => c.after).join('；')}。` }
+          ? {
+              ...DEFAULT_INSTRUCTIONS(),
+              'vocab-primary': `${DEFAULT_INSTRUCTIONS()['vocab-primary']}\n【教师批准的改写偏好（必须遵守）】${approvedRewrites
+                .slice(0, 8)
+                .map((c) => c.after)
+                .join('；')}。`,
+            }
           : undefined,
         onEvent: (e) => {
           if (e.kind === 'stage-skip') console.log(`  · ${STAGE_LABEL[e.stage]}：本地扫描无命中，零调用`);
@@ -274,12 +284,19 @@ for (const tk of tiers) {
       const outMd = `${header}${chLine}${chLine ? '\n\n' : ''}${segs.map((s) => run.text[s.id]).join('\n\n')}\n`;
       mkdirSync(dirOfPath(dst), { recursive: true });
       writeAtomic(dst, outMd, 'utf-8');
-      const recap = buildChapterRecap({ chapter: ch, tier: tk, sourceVersion: `${ch}-src-${DATE}`, segs, knownWords: LEX.known, properNouns: PROPER, maxLen: t.maxLen, ratio: t.ratio, callStage: async () => '' }, run);
+      const recap = buildChapterRecap(
+        { chapter: ch, tier: tk, sourceVersion: `${ch}-src-${DATE}`, segs, knownWords: LEX.known, properNouns: PROPER, maxLen: t.maxLen, ratio: t.ratio, callStage: async () => '' },
+        run,
+      );
       const recapPath = join(OUT_BASE, '_运行', `章recap_${t.clsTag}_${ch}.json`);
       mkdirSync(join(OUT_BASE, '_运行'), { recursive: true });
       writeFileSync(recapPath, JSON.stringify(recap, null, 1), 'utf-8');
       const progress = join(OUT_BASE, '_运行', `工序化进度_${t.clsTag}_${ch}.json`);
-      writeFileSync(progress, JSON.stringify({ done: true, finalVersion: run.finalVersion, checkpoints: run.checkpoints, quarantined: run.quarantined, at: new Date().toISOString() }, null, 1), 'utf-8');
+      writeFileSync(
+        progress,
+        JSON.stringify({ done: true, finalVersion: run.finalVersion, checkpoints: run.checkpoints, quarantined: run.quarantined, at: new Date().toISOString() }, null, 1),
+        'utf-8',
+      );
       /* 待人工报告（2026-09-12 Wayne 审查整改）：隔离按类分列 + 配额缺口点名 +
        * 四项负担统计——密度下降不能靠少注冒充变容易，人工量不混成一个失败率。 */
       const burden = recap.burdenReport;
@@ -287,8 +304,12 @@ for (const tk of tiers) {
         const qDir = join(OUT_BASE, ch, '_待复核');
         mkdirSync(qDir, { recursive: true });
         const byClass = (cls) => run.quarantined.filter((q) => classifyQuarantine(q) === cls);
-        const L = [`# 工序化待人工 · ${t.label} ${ch}`, '',
-          `总段数 ${segs.length}｜自动完成 ${segs.length - run.quarantined.length}｜隔离 ${run.quarantined.length}（事实疑点 ${byClass('事实疑点').length}｜结构损坏 ${byClass('结构损坏').length}｜难度残留 ${byClass('难度残留').length}）`, ''];
+        const L = [
+          `# 工序化待人工 · ${t.label} ${ch}`,
+          '',
+          `总段数 ${segs.length}｜自动完成 ${segs.length - run.quarantined.length}｜隔离 ${run.quarantined.length}（事实疑点 ${byClass('事实疑点').length}｜结构损坏 ${byClass('结构损坏').length}｜难度残留 ${byClass('难度残留').length}）`,
+          '',
+        ];
         L.push('## 隔离段（重试用尽；正文保留该段上一版，没有被省掉）');
         for (const cls of ['事实疑点', '结构损坏', '难度残留']) {
           const list = byClass(cls);
@@ -301,11 +322,14 @@ for (const tk of tiers) {
           for (const g of run.unsupportedGaps) L.push(`- ${g.segId}：${g.words.join('、')}`);
         }
         if (burden) {
-          L.push('', '## 负担报告（文本是否变容易，不是注释是否变少）',
+          L.push(
+            '',
+            '## 负担报告（文本是否变容易，不是注释是否变少）',
             `- 仍保留的词表外实词：${burden.keptHardWords.length} 个`,
             `- 其中已提供注释支持：${burden.supportedWords.length} 个${burden.supportedWords.length ? `（${burden.supportedWords.slice(0, 20).join('、')}）` : ''}`,
             `- **未提供支持：${burden.unsupportedWords.length} 个**${burden.unsupportedWords.length ? `（${burden.unsupportedWords.slice(0, 20).join('、')}${burden.unsupportedWords.length > 20 ? '…' : ''}）` : '（无缺口）'}`,
-            `- 注释最密窗口：每百词 ${burden.worstWindowDensity ?? '—'} 处（试运行阈值 ${ANNO_DENSITY_LIMIT[tk]}）`);
+            `- 注释最密窗口：每百词 ${burden.worstWindowDensity ?? '—'} 处（试运行阈值 ${ANNO_DENSITY_LIMIT[tk]}）`,
+          );
         }
         writeFileSync(join(qDir, `工序化待人工_${t.clsTag}_${DATE}.md`), L.join('\n') + '\n', 'utf-8');
       }
@@ -314,15 +338,34 @@ for (const tk of tiers) {
       const outW = wc(outMd.split('## 词句卡')[0]);
       const stageLine = run.checkpoints.map((c) => `${STAGE_LABEL[c.stage]}${c.called ? `改${c.changedIds.length}` : '跳'}`).join('｜');
       const cls = (name) => run.quarantined.filter((q) => classifyQuarantine(q) === name).length;
-      results.push({ tk, ch, srcW, outW, ratio: outW / Math.max(1, srcW), total: segs.length,
-        quarantined: run.quarantined.length, qFact: cls('事实疑点'), qStruct: cls('结构损坏'), qHard: cls('难度残留'),
+      results.push({
+        tk,
+        ch,
+        srcW,
+        outW,
+        ratio: outW / Math.max(1, srcW),
+        total: segs.length,
+        quarantined: run.quarantined.length,
+        qFact: cls('事实疑点'),
+        qStruct: cls('结构损坏'),
+        qHard: cls('难度残留'),
         gaps: run.unsupportedGaps.reduce((n, g) => n + g.words.length, 0),
-        kept: burden?.keptHardWords.length ?? 0, supported: burden?.supportedWords.length ?? 0, unsupported: burden?.unsupportedWords.length ?? 0,
-        window: burden?.worstWindowDensity ?? null, stageLine, dst });
-      console.log(`  ✓ 产物：${dst}（${srcW}→${outW} 词，${(outW / Math.max(1, srcW) * 100).toFixed(0)}%）`);
-      console.log(`  · ${segs.length} 段：自动完成 ${segs.length - run.quarantined.length}｜隔离 ${run.quarantined.length}（事实 ${cls('事实疑点')}｜结构 ${cls('结构损坏')}｜难度 ${cls('难度残留')}）`);
+        kept: burden?.keptHardWords.length ?? 0,
+        supported: burden?.supportedWords.length ?? 0,
+        unsupported: burden?.unsupportedWords.length ?? 0,
+        window: burden?.worstWindowDensity ?? null,
+        stageLine,
+        dst,
+      });
+      console.log(`  ✓ 产物：${dst}（${srcW}→${outW} 词，${((outW / Math.max(1, srcW)) * 100).toFixed(0)}%）`);
+      console.log(
+        `  · ${segs.length} 段：自动完成 ${segs.length - run.quarantined.length}｜隔离 ${run.quarantined.length}（事实 ${cls('事实疑点')}｜结构 ${cls('结构损坏')}｜难度 ${cls('难度残留')}）`,
+      );
       console.log(`  · 工序：${stageLine}`);
-      if (burden) console.log(`  · 负担：仍保留难词 ${burden.keptHardWords.length}｜已支持 ${burden.supportedWords.length}｜未支持 ${burden.unsupportedWords.length}｜最密窗口 ${burden.worstWindowDensity ?? '—'}处/百词（阈 ${ANNO_DENSITY_LIMIT[tk]}）`);
+      if (burden)
+        console.log(
+          `  · 负担：仍保留难词 ${burden.keptHardWords.length}｜已支持 ${burden.supportedWords.length}｜未支持 ${burden.unsupportedWords.length}｜最密窗口 ${burden.worstWindowDensity ?? '—'}处/百词（阈 ${ANNO_DENSITY_LIMIT[tk]}）`,
+        );
     } catch (e) {
       console.error(`  ✗ ${ch} 失败：${String(e).slice(0, 200)}`);
     }
@@ -332,7 +375,9 @@ for (const tk of tiers) {
 console.log('\n| 层 | 章 | 总段 | 自动完成 | 隔离(事实/结构/难度) | 未支持词 | 仍保留难词 | 已支持 | 未支持 | 最密窗口 | 占比 |');
 console.log('|---|---|---|---|---|---|---|---|---|---|---|');
 for (const r of results) {
-  console.log(`| ${r.tk} | ${r.ch} | ${r.total} | ${r.total - r.quarantined} | ${r.quarantined}(${r.qFact}/${r.qStruct}/${r.qHard}) | ${r.gaps} | ${r.kept} | ${r.supported} | ${r.unsupported} | ${r.window ?? '—'} | ${(r.ratio * 100).toFixed(0)}% |`);
+  console.log(
+    `| ${r.tk} | ${r.ch} | ${r.total} | ${r.total - r.quarantined} | ${r.quarantined}(${r.qFact}/${r.qStruct}/${r.qHard}) | ${r.gaps} | ${r.kept} | ${r.supported} | ${r.unsupported} | ${r.window ?? '—'} | ${(r.ratio * 100).toFixed(0)}% |`,
+  );
 }
 const st = LEDGER.flush();
 if (st.calls) console.log(`台账：调用 ${st.calls}（成功 ${st.ok}）｜入 ${st.in}${st.cached ? `（缓存命中 ${st.cached}）` : ''}｜出 ${st.out} token —— _运行/token台账.jsonl`);
