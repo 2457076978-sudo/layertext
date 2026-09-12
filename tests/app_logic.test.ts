@@ -515,3 +515,15 @@ test('annotatedHeadOf：点中片段解析到完整注释词头（连字符/空�
   assert.equal(annotatedHeadOf(md, 'greater'), 'greater');
   assert.equal(annotatedHeadOf(md, 'woke'), 'woke', '无注释退回原词');
 });
+
+test('wordnet parseDataLine：definition/例句拆分（WordNet gloss 原文夹具）', async () => {
+  const { parseDataLine } = await import('../src/core/wordnet.js');
+  const s = parseDataLine('02558494 05 n 01 perch 2 002 @ 02557361 n 0000 | any of numerous spiny-finned fishes of various families of the order Perciformes', 'noun');
+  assert.ok(s);
+  assert.equal(s!.pos, 'n');
+  assert.equal(s!.def, 'any of numerous spiny-finned fishes of various families of the order Perciformes');
+  const ex = parseDataLine('03921038 05 n 02 roost 0 perch 2 002 @ 09426286 n 0000 | a support on which something rests; "he placed his hat on a rack" ', 'noun');
+  assert.equal(ex!.def, 'a support on which something rests');
+  assert.deepEqual(ex!.examples, ['he placed his hat on a rack']);
+  assert.equal(parseDataLine('no bar no gloss', 'noun'), undefined);
+});

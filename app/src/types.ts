@@ -2,7 +2,7 @@
 
 import type { QcResult } from '../../src/core/qc.js';
 
-export type WordMarkType = 'simpl' | 'zh' | 'oov' | 'hard' | 'factw' | 'goodw' | 'anchor' | 'otherw';
+export type WordMarkType = 'simpl' | 'zh' | 'en' | 'oov' | 'hard' | 'factw' | 'goodw' | 'anchor' | 'otherw';
 export type SentMarkType = 'syntax' | 'long' | 'ref' | 'cohesion' | 'fact' | 'stiff' | 'paraphrase' | 'cut' | 'goods' | 'others';
 export type MarkType = WordMarkType | SentMarkType;
 /** 标记粒度三级（选区即范围）：word=点词 / phrase=拖选短语（下划线，类型色沿用词级色板）/ sent=整句 */
@@ -83,6 +83,7 @@ export const DEFAULT_MAX_LEN = 16;
 export const WORD_TYPES: { key: WordMarkType; label: string; badge: string; cls: string }[] = [
   { key: 'simpl', label: '词汇简化', badge: '简', cls: 'mk-simpl' },
   { key: 'zh', label: '加中文标注', badge: '注', cls: 'mk-zh' },
+  { key: 'en', label: '加英语释义', badge: '英', cls: 'mk-zh' },
   { key: 'oov', label: '超纲', badge: '纲', cls: 'mk-oov' },
   { key: 'hard', label: '太难', badge: '难', cls: 'mk-hard' },
   { key: 'factw', label: '事实用词存疑', badge: '疑', cls: 'mk-factw' },

@@ -986,5 +986,6 @@ export function annotatedHeadOf(md: string, word: string): string {
     const hp = head.toLowerCase().split(/[\s-]+/);
     if (hp.some((x) => parts.includes(x)) && head.length > best.length) best = head;
   }
-  return best || word;
+  /* 前导冠词不入词头（最长候选会把「a great-looking」整个吞下，入库应记 great-looking） */
+  return (best || word).replace(/^(?:a|an|the)[ -]/i, '');
 }

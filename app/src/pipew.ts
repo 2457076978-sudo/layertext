@@ -810,3 +810,100 @@ export async function removeZhAnnotation(s: FileSession, word: string): Promise<
   await runQcCurrent({ auto: true });
   toast(`已去除「${head}」×${count} 处标注，${canonical ? '词库正本+会话均已登记' : '本会话词库已登记'}（↩︎ 可撤销；下次生成不再注它）`, 'ok');
 }
+
+/* ---------- 加英语释义（词面板「英」；内置 WordNet 3.1 + Lesk 语境选义，零 AI 零网络） ---------- */
+
+export async function applyEnDefinitions(s: FileSession, marks: Mark[]): Promise<number> {
+  const { wordnetSenses } = await import('../../src/core/wordnet.js');
+  const { pickSense } = await import('../../src/core/sensematch.js');
+  const { expandForms } = await import('../../src/core/adaptcheck.js');
+  const paras = extractParas(splitChapter(s.md).body);
+  const done: string[] = [];
+  const missed: string[] = [];
+  let ambiguous: string[] = [];
+  for (const m of marks) {
+    const w = (m.word ?? '').trim();
+    if (!w) continue;
+    const forms = [...new Set([w, ...expandForms(w)])].map((f) => f.toLowerCase());
+    let senses;
+    try {
+      senses = await wordnetSenses(forms);
+    } catch (e) {
+      setStatus('内置 WordNet 词典加载失败：' + e, 'err');
+      return 0;
+    }
+    if (!senses.length) {
+      missed.push(w);
+      continue;
+    }
+    /* 语境句 = 标记所在句（Lesk 选义原料；释义出自词典、选义出自重叠计算——零 AI） */
+    const sent = sentsOf(paras[m.pi] ?? '', false)[m.si] ?? '';
+    const dictSenses = senses.map((x) => ({ pos: x.pos, marker: '', zh: '', en: x.def, examples: x.examples, raw: x.raw }));
+    const pick = pickSense(sent, dictSenses);
+    if (!pick.sense) {
+      ambiguous.push(w);
+      continue;
+    }
+    const def = pick.sense.en;
+    const gloss = def.length > 64 ? `${def.slice(0, 58).replace(/\s+\S*$/, '')}…` : def;
+    const esc = w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp(`\\b${esc}\\b`, 'i');
+    let at = -1;
+    let matched = '';
+    const para = paras[m.pi] ?? '';
+    const hit = re.exec(para);
+    if (hit) {
+      const pAt = s.md.indexOf(para);
+      if (pAt >= 0) {
+        at = pAt + hit.index;
+        matched = s.md.slice(at, at + hit[0].length);
+      }
+    }
+    if (at < 0) {
+      const h2 = re.exec(s.md);
+      if (h2) {
+        at = h2.index;
+        matched = h2[0];
+      }
+    }
+    if (at < 0) continue;
+    const after = s.md.slice(at + matched.length, at + matched.length + 1);
+    if (after === '（') continue; // 已带注释（中英皆算），跳过
+    s.md = s.md.slice(0, at + matched.length) + `（${gloss}）` + s.md.slice(at + matched.length);
+    s.review.marks = s.review.marks.filter((x) => x.id !== m.id);
+    remapMarks(s.review.marks, s.md);
+    s.review.warns = remapWarns(s.review.warns, s.md);
+    done.push(`${matched}（${gloss}）`);
+  }
+  ambiguous = ambiguous.filter((w) => !done.includes(w));
+  if (!done.length) {
+    setStatus(
+      `没有可插入的英语释义：${missed.length ? `WordNet 未收 ${missed.length} 个（${missed.slice(0, 4).join('、')}）` : ''}${ambiguous.length ? `；多义项语境不决 ${ambiguous.length} 个（${ambiguous.slice(0, 4).join('、')}，可换用「加中文标注」）` : ''}`,
+      'dirty',
+    );
+    return 0;
+  }
+  scheduleSave(s, () => undefined);
+  renderReader(s);
+  renderSidebar(s, sidebarHandlers);
+  updateMarkBadge();
+  const date = new Date().toLocaleDateString('sv-SE');
+  const outDir = s.sourcePath ? s.sourcePath.slice(0, s.sourcePath.lastIndexOf('/')) : await invoke<string>('reports_dir');
+  const logPath = `${outDir}/变更日志_AI审核.csv`;
+  try {
+    let csv = '';
+    try {
+      csv = await invoke<string>('read_text_file', { path: logPath });
+    } catch {
+      /* 首次写表补表头 */
+    }
+    if (!csv.trim()) csv = CHANGELOG_HEADER.join(',') + '\n';
+    for (const d of done)
+      csv += ['R1', date, `标准${simplifyMaxLen()}词`, '', '', d, d, 'R17', '加英语释义（内置 WordNet 词典机器插入，语境选义零 AI）', 'AI直改-英语释义'].map(csvCell).join(',') + '\n';
+    await invoke('write_text_file', { path: logPath, content: csv });
+  } catch {
+    /* 正文已改；日志失败与加中文标注同口径（那里会再报一次） */
+  }
+  setStatus(`已加英语释义 ${done.length} 个${missed.length ? `；未收 ${missed.length} 个` : ''}${ambiguous.length ? `；语境不决 ${ambiguous.length} 个` : ''}`, 'saved');
+  return done.length;
+}

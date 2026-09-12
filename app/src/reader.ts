@@ -9,7 +9,7 @@ import { activeSession } from './main.js';
 import { buildLexiconNow } from './lexicon.js';
 import { scheduleHeatRail } from './edit.js';
 import { showGateHelp } from './chat.js';
-import { showSentenceEditor, applyZhAnnotations, applyWordSimplifications, removeZhAnnotation } from './pipew.js';
+import { showSentenceEditor, applyZhAnnotations, applyEnDefinitions, applyWordSimplifications, removeZhAnnotation } from './pipew.js';
 import { aiRewriteSentence } from './aiflow.js';
 import { jumpTo, refreshBookmarksDom, refreshMarkDom, removeMarkDom, renderSidebar, restoreAllMarkDom, scheduleSave } from './review.js';
 import { WORD_TYPES, SENT_TYPES, newMarkId, typeLabel, type FileSession, type Mark, type MarkLevel, type MarkType } from './types.js';
@@ -396,6 +396,7 @@ function bindTypeButtons(session: FileSession, level: MarkLevel, pi: number, si:
           return; // 记录型标记：句子没问题，不触发改写
         }
         if (mark.type === 'zh' && mark.word) void applyZhAnnotations(session, [mark]);
+        else if (mark.type === 'en' && mark.word) void applyEnDefinitions(session, [mark]);
         else if (mark.type === 'simpl' && mark.word) void applyWordSimplifications(session, [mark]);
         else void aiRewriteSentence(pi, si, typeLabel(mark.type), mark.id);
         return;

@@ -155,7 +155,7 @@ test('侧栏：配额增删勾、门禁、清单分组渲染与回调', () => {
 test('标记类型集与门禁项定义完整（P0 要求的按钮组）', () => {
   assert.deepEqual(
     WORD_TYPES.map((t) => t.key),
-    ['simpl', 'zh', 'oov', 'hard', 'factw', 'goodw', 'anchor', 'otherw'],
+    ['simpl', 'zh', 'en', 'oov', 'hard', 'factw', 'goodw', 'anchor', 'otherw'],
   );
   assert.deepEqual(
     SENT_TYPES.map((t) => t.key),
