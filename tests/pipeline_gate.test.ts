@@ -96,7 +96,7 @@ function makeProjectUnder(root: string): { root: string; json: string } {
 }
 
 function run(fake: string, project: string): { status: number | null; stdout: string; stderr: string } {
-  const r = spawnSync(process.execPath, [SCRIPT, '--tier', 'A', '--chapters', '1', '--out', '自检'], {
+  const r = spawnSync(process.execPath, [SCRIPT, '--tier', 'A', '--chapters', '1', '--out', '自检', '--teacher', 'wayne'], {
     cwd: REPO,
     encoding: 'utf-8',
     env: { ...process.env, LAYERTEXT_FAKE_LLM: fake, LAYERTEXT_PROJECT: project, LAYERTEXT_ENGINE: REPO, LAYERTEXT_TEACHER: 'wayne' },
@@ -179,7 +179,7 @@ test('P0 续跑语义：未通过的段不进 done，--resume 会重跑它而不
   assert.equal(reviewEvents.length, 1, '未通过的段必须写 review 事件');
 
   // 换成能过的假模型续跑 → 必须真的重跑并完成
-  const r2 = spawnSync(process.execPath, [SCRIPT, '--tier', 'A', '--chapters', '1', '--out', '自检', '--resume'], {
+  const r2 = spawnSync(process.execPath, [SCRIPT, '--tier', 'A', '--chapters', '1', '--out', '自检', '--resume', '--teacher', 'wayne'], {
     cwd: REPO,
     encoding: 'utf-8',
     env: { ...process.env, LAYERTEXT_FAKE_LLM: 'exact', LAYERTEXT_PROJECT: json, LAYERTEXT_ENGINE: REPO, LAYERTEXT_TEACHER: 'wayne' },
@@ -204,7 +204,7 @@ test('P0 旧标记作废：同一层的上一轮成功标记必须被本轮失�
 test('跨章不重复注：第 1 章注过的词，第 2 章不再注也**不算漏注**（提示词与门禁不能打架）', () => {
   const { root, json } = makeTwoChapterProject();
   // 先只跑第 1 章：产物里会把 barn 注出来
-  const r1 = spawnSync(process.execPath, [SCRIPT, '--tier', 'A', '--chapters', '1', '--out', '两章'], {
+  const r1 = spawnSync(process.execPath, [SCRIPT, '--tier', 'A', '--chapters', '1', '--out', '两章', '--teacher', 'wayne'], {
     cwd: REPO,
     encoding: 'utf-8',
     env: { ...process.env, LAYERTEXT_FAKE_LLM: 'annotate', LAYERTEXT_PROJECT: json, LAYERTEXT_ENGINE: REPO, LAYERTEXT_TEACHER: 'wayne' },
@@ -214,7 +214,7 @@ test('跨章不重复注：第 1 章注过的词，第 2 章不再注也**不算
   assert.match(ch1, /barn（/, '第 1 章应把 barn 注出（首次出现处）');
 
   // 再跑第 2 章：同一个 barn 已被第 1 章注过 → 本段不该再被要求注
-  const r2 = spawnSync(process.execPath, [SCRIPT, '--tier', 'A', '--chapters', '2', '--out', '两章'], {
+  const r2 = spawnSync(process.execPath, [SCRIPT, '--tier', 'A', '--chapters', '2', '--out', '两章', '--teacher', 'wayne'], {
     cwd: REPO,
     encoding: 'utf-8',
     env: { ...process.env, LAYERTEXT_FAKE_LLM: 'exact', LAYERTEXT_PROJECT: json, LAYERTEXT_ENGINE: REPO, LAYERTEXT_TEACHER: 'wayne' },
@@ -224,13 +224,13 @@ test('跨章不重复注：第 1 章注过的词，第 2 章不再注也**不算
 
 test('本地去重：模型在后面的章节里重复注同一个词，会被本地清掉（保首次）', () => {
   const { root, json } = makeTwoChapterProject();
-  const run1 = spawnSync(process.execPath, [SCRIPT, '--tier', 'A', '--chapters', '1', '--out', '去重'], {
+  const run1 = spawnSync(process.execPath, [SCRIPT, '--tier', 'A', '--chapters', '1', '--out', '去重', '--teacher', 'wayne'], {
     cwd: REPO,
     encoding: 'utf-8',
     env: { ...process.env, LAYERTEXT_FAKE_LLM: 'annotate', LAYERTEXT_PROJECT: json, LAYERTEXT_ENGINE: REPO, LAYERTEXT_TEACHER: 'wayne' },
   });
   assert.equal(run1.status, 0, run1.stderr);
-  const run2 = spawnSync(process.execPath, [SCRIPT, '--tier', 'A', '--chapters', '2', '--out', '去重'], {
+  const run2 = spawnSync(process.execPath, [SCRIPT, '--tier', 'A', '--chapters', '2', '--out', '去重', '--teacher', 'wayne'], {
     cwd: REPO,
     encoding: 'utf-8',
     env: { ...process.env, LAYERTEXT_FAKE_LLM: 'annotate', LAYERTEXT_PROJECT: json, LAYERTEXT_ENGINE: REPO, LAYERTEXT_TEACHER: 'wayne' },
@@ -243,7 +243,7 @@ test('本地去重：模型在后面的章节里重复注同一个词，会被�
 
 test('查词走严格 schema 的 tool call：往返成功、事件日志留下 tool 记录', () => {
   const { root, json } = makeTwoChapterProject(); // barn 在词库外 → 会走一次真实查词
-  const r = spawnSync(process.execPath, [SCRIPT, '--tier', 'A', '--chapters', '1', '--out', '工具'], {
+  const r = spawnSync(process.execPath, [SCRIPT, '--tier', 'A', '--chapters', '1', '--out', '工具', '--teacher', 'wayne'], {
     cwd: REPO,
     encoding: 'utf-8',
     env: { ...process.env, LAYERTEXT_FAKE_LLM: 'tool', LAYERTEXT_PROJECT: json, LAYERTEXT_ENGINE: REPO, LAYERTEXT_TEACHER: 'wayne' },
@@ -274,7 +274,7 @@ test('查词走严格 schema 的 tool call：往返成功、事件日志留下 t
 
 test('会话滚动窗口：超出窗口就归档历史、只结转结构化状态，且这一轮照样跑完', () => {
   const { root, json } = makeManySegmentProject(6);
-  const r = spawnSync(process.execPath, [SCRIPT, '--tier', 'A', '--chapters', '1', '--out', '滚动', '--window', '1'], {
+  const r = spawnSync(process.execPath, [SCRIPT, '--tier', 'A', '--chapters', '1', '--out', '滚动', '--window', '1', '--teacher', 'wayne'], {
     cwd: REPO,
     encoding: 'utf-8',
     env: { ...process.env, LAYERTEXT_FAKE_LLM: 'exact', LAYERTEXT_PROJECT: json, LAYERTEXT_ENGINE: REPO, LAYERTEXT_TEACHER: 'wayne' },
@@ -291,7 +291,7 @@ test('会话滚动窗口：超出窗口就归档历史、只结转结构化状�
   assert.equal(log.filter((o) => o.t === 'done').length, 6, '六段都要完成');
 
   // 续跑：必须重放同样的裁剪，重建出合法会话（否则等于"同一份日志两种上下文"）
-  const r2 = spawnSync(process.execPath, [SCRIPT, '--tier', 'A', '--chapters', '1', '--out', '滚动', '--window', '1', '--resume'], {
+  const r2 = spawnSync(process.execPath, [SCRIPT, '--tier', 'A', '--chapters', '1', '--out', '滚动', '--window', '1', '--resume', '--teacher', 'wayne'], {
     cwd: REPO,
     encoding: 'utf-8',
     env: { ...process.env, LAYERTEXT_FAKE_LLM: 'exact', LAYERTEXT_PROJECT: json, LAYERTEXT_ENGINE: REPO, LAYERTEXT_TEACHER: 'wayne' },
@@ -301,7 +301,7 @@ test('会话滚动窗口：超出窗口就归档历史、只结转结构化状�
 
 test('不滚动（--window 0）时行为与从前一致：不留 window 事件', () => {
   const { root, json } = makeManySegmentProject(4);
-  const r = spawnSync(process.execPath, [SCRIPT, '--tier', 'A', '--chapters', '1', '--out', '不滚', '--window', '0'], {
+  const r = spawnSync(process.execPath, [SCRIPT, '--tier', 'A', '--chapters', '1', '--out', '不滚', '--window', '0', '--teacher', 'wayne'], {
     cwd: REPO,
     encoding: 'utf-8',
     env: { ...process.env, LAYERTEXT_FAKE_LLM: 'exact', LAYERTEXT_PROJECT: json, LAYERTEXT_ENGINE: REPO, LAYERTEXT_TEACHER: 'wayne' },
@@ -389,7 +389,7 @@ test('legacy 布局（默认）：路径与从前逐字符一致，教师已有�
   const { root, json } = makeProject();
   const a = initManifest(root, json, 'legacy', 'wayne');
   assert.equal(a.status, 0, a.stdout);
-  const run1 = spawnSync(process.execPath, [SCRIPT, '--tier', 'A', '--chapters', '1'], {
+  const run1 = spawnSync(process.execPath, [SCRIPT, '--tier', 'A', '--chapters', '1', '--teacher', 'wayne'], {
     cwd: REPO,
     encoding: 'utf-8',
     env: { ...process.env, LAYERTEXT_FAKE_LLM: 'annotate', LAYERTEXT_PROJECT: json, LAYERTEXT_ENGINE: REPO, LAYERTEXT_TEACHER: 'wayne' },
@@ -414,7 +414,7 @@ test('统一词典：生成阶段只写运行私有增量，不动共享词典�
   const dictPath = join(root, '词典.csv');
   const before = readFileSync(dictPath, 'utf-8');
 
-  const run1 = spawnSync(process.execPath, [SCRIPT, '--tier', 'A', '--chapters', '1', '--out', '词'], {
+  const run1 = spawnSync(process.execPath, [SCRIPT, '--tier', 'A', '--chapters', '1', '--out', '词', '--teacher', 'wayne'], {
     ...withFake('tool', json),
   });
   assert.equal(run1.status, 0, `${run1.stdout}\n${run1.stderr}`);
@@ -430,7 +430,7 @@ test('统一词典：生成阶段只写运行私有增量，不动共享词典�
   assert.equal(readFileSync(dictPath, 'utf-8'), before, '生成阶段不该直接改共享词典');
 
   // 合并是显式的一步
-  const merge = spawnSync(process.execPath, [MERGE_SCRIPT], {
+  const merge = spawnSync(process.execPath, [MERGE_SCRIPT, '--teacher', 'wayne'], {
     cwd: REPO,
     encoding: 'utf-8',
     env: { ...process.env, LAYERTEXT_PROJECT: json, LAYERTEXT_ENGINE: REPO, LAYERTEXT_TEACHER: 'wayne' } /* 钉教师：CI 的 USER=runner，不钉则运行身份对比清单（wayne）会错退 legacy */,
@@ -441,7 +441,7 @@ test('统一词典：生成阶段只写运行私有增量，不动共享词典�
   assert.match(merge.stdout, /新增 1/);
 
   // 幂等：再合一次不重复加
-  const merge2 = spawnSync(process.execPath, [MERGE_SCRIPT], {
+  const merge2 = spawnSync(process.execPath, [MERGE_SCRIPT, '--teacher', 'wayne'], {
     cwd: REPO,
     encoding: 'utf-8',
     env: { ...process.env, LAYERTEXT_PROJECT: json, LAYERTEXT_ENGINE: REPO, LAYERTEXT_TEACHER: 'wayne' } /* 钉教师：CI 的 USER=runner，不钉则运行身份对比清单（wayne）会错退 legacy */,
@@ -453,9 +453,9 @@ test('统一词典：生成阶段只写运行私有增量，不动共享词典�
 
 test('统一词典：合并过的词下次不再问一遍（原来会被并行运行覆盖掉）', () => {
   const { root, json } = makeTwoChapterProject();
-  assert.equal(spawnSync(process.execPath, [SCRIPT, '--tier', 'A', '--chapters', '1', '--out', '词A'], withFake('tool', json)).status, 0);
+  assert.equal(spawnSync(process.execPath, [SCRIPT, '--tier', 'A', '--chapters', '1', '--out', '词A', '--teacher', 'wayne'], withFake('tool', json)).status, 0);
   assert.equal(
-    spawnSync(process.execPath, [MERGE_SCRIPT], {
+    spawnSync(process.execPath, [MERGE_SCRIPT, '--teacher', 'wayne'], {
       cwd: REPO,
       encoding: 'utf-8',
       env: { ...process.env, LAYERTEXT_PROJECT: json, LAYERTEXT_ENGINE: REPO, LAYERTEXT_TEACHER: 'wayne' } /* 钉教师：CI 的 USER=runner，不钉则运行身份对比清单（wayne）会错退 legacy */,
@@ -464,7 +464,7 @@ test('统一词典：合并过的词下次不再问一遍（原来会被并行�
   );
 
   // 第二次跑：词典里已经有 barn 的释义 → 不该再产生一条"新配"
-  const r2 = spawnSync(process.execPath, [SCRIPT, '--tier', 'A', '--chapters', '1', '--out', '词B'], withFake('tool', json));
+  const r2 = spawnSync(process.execPath, [SCRIPT, '--tier', 'A', '--chapters', '1', '--out', '词B', '--teacher', 'wayne'], withFake('tool', json));
   assert.equal(r2.status, 0, r2.stderr);
   const delta2 = join(root, '产物', '_运行', `${TAG}_词B.词典增量.json`);
   const entries = existsSync(delta2) ? (JSON.parse(readFileSync(delta2, 'utf-8')) as { entries: unknown[] }).entries : [];
@@ -477,9 +477,9 @@ test('run 布局：风险队列也写进运行私有目录（App 面板按同一
   const a = initManifest(root, json, 'run', 'wayne');
   const rid = /运行 ID：(\S+)/.exec(a.stdout)?.[1];
   assert.ok(rid);
-  assert.equal(spawnSync(process.execPath, [SCRIPT, '--tier', 'A', '--chapters', '1'], withFake('annotate', json)).status, 0);
+  assert.equal(spawnSync(process.execPath, [SCRIPT, '--tier', 'A', '--chapters', '1', '--teacher', 'wayne'], withFake('annotate', json)).status, 0);
 
-  const rq = spawnSync(process.execPath, [join(REPO, 'tools', 'af_pipeline', 'LayerText_AF风险队列.mjs'), '--tier', 'A', '--chapters', '1'], {
+  const rq = spawnSync(process.execPath, [join(REPO, 'tools', 'af_pipeline', 'LayerText_AF风险队列.mjs'), '--tier', 'A', '--chapters', '1', '--teacher', 'wayne'], {
     cwd: REPO,
     encoding: 'utf-8',
     env: { ...process.env, LAYERTEXT_PROJECT: json, LAYERTEXT_ENGINE: REPO, LAYERTEXT_TEACHER: 'wayne' } /* 钉教师：CI 的 USER=runner，不钉则运行身份对比清单（wayne）会错退 legacy */,
@@ -522,7 +522,7 @@ function makeProducedProject(): { root: string; json: string; rid: string; produ
 }
 
 function runScript(script: string, json: string, extra: string[] = []): { status: number | null; out: string } {
-  const r = spawnSync(process.execPath, [join(ARCHIVE, script), '--tier', 'A', '--chapters', '1', ...extra], {
+  const r = spawnSync(process.execPath, [join(ARCHIVE, script), '--tier', 'A', '--chapters', '1', ...extra, '--teacher', 'wayne'], {
     cwd: REPO,
     encoding: 'utf-8',
     env: { ...process.env, LAYERTEXT_PROJECT: json, LAYERTEXT_ENGINE: REPO, LAYERTEXT_TEACHER: 'wayne' } /* 钉教师：CI 的 USER=runner，不钉则运行身份对比清单（wayne）会错退 legacy */,
@@ -642,7 +642,7 @@ test('★ 会话日志有坏行时必须**说出来**，而不是静默跳过（
   lines.splice(Math.floor(lines.length / 2), 0, '{"t":"msg","role":"user","content":"被截断的一行');
   writeFileSync(logPath, lines.join('\n') + '\n', 'utf-8');
 
-  const r = spawnSync(process.execPath, [SCRIPT, '--tier', 'A', '--chapters', '1', '--out', '自检', '--resume'], {
+  const r = spawnSync(process.execPath, [SCRIPT, '--tier', 'A', '--chapters', '1', '--out', '自检', '--resume', '--teacher', 'wayne'], {
     cwd: REPO,
     encoding: 'utf-8',
     env: { ...process.env, LAYERTEXT_FAKE_LLM: 'exact', LAYERTEXT_PROJECT: json, LAYERTEXT_ENGINE: REPO, LAYERTEXT_TEACHER: 'wayne' },
@@ -701,7 +701,7 @@ test('★ 删除缓存不影响从 manifest 重建队列（阶段 3 验收原文
   const { root, json } = makeTwoChapterProduced();
   const env = { ...process.env, LAYERTEXT_PROJECT: json, LAYERTEXT_ENGINE: REPO };
   const runQ = (args: string[]): { status: number | null; out: string } => {
-    const r = spawnSync(process.execPath, [join(ARCHIVE, 'LayerText_AF风险队列.mjs'), ...args], { cwd: REPO, encoding: 'utf-8', env });
+    const r = spawnSync(process.execPath, [join(ARCHIVE, 'LayerText_AF风险队列.mjs'), ...args, '--teacher', 'wayne'], { cwd: REPO, encoding: 'utf-8', env });
     return { status: r.status, out: `${r.stdout ?? ''}${r.stderr ?? ''}` };
   };
 
@@ -740,7 +740,7 @@ test('★ 删除缓存不影响从 manifest 重建队列（阶段 3 验收原文
 
 test('★ 没有清单时要如实说"范围只能靠命令行与默认"，而不是假装知道', () => {
   const { root, json } = makeTwoChapterProduced();
-  const r = spawnSync(process.execPath, [join(ARCHIVE, 'LayerText_AF风险队列.mjs')], {
+  const r = spawnSync(process.execPath, [join(ARCHIVE, 'LayerText_AF风险队列.mjs'), '--teacher', 'wayne'], {
     cwd: REPO,
     encoding: 'utf-8',
     env: { ...process.env, LAYERTEXT_PROJECT: json, LAYERTEXT_ENGINE: REPO, LAYERTEXT_TEACHER: 'wayne' } /* 钉教师：CI 的 USER=runner，不钉则运行身份对比清单（wayne）会错退 legacy */,

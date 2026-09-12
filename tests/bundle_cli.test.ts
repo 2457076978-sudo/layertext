@@ -60,7 +60,10 @@ function makeProject(tiers: string = 'A'): { root: string; json: string; runId: 
 
   const env = { ...process.env, LAYERTEXT_PROJECT: json, LAYERTEXT_ENGINE: REPO };
   const run = (script: string, args: string[] = []): { status: number | null; out: string } => {
-    const r = spawnSync(process.execPath, [join(AF, script), ...args], { cwd: REPO, encoding: 'utf-8', env });
+    /* 显式 --teacher（不依赖 env）：CI 的 USER=runner 与夹具 wayne 不一致时，
+     * 身份解析会错退 legacy——这曾是 CI 整批红而本地绿的全因（教师名必须随参数走） */
+    const a = args.some((x) => x === '--teacher') ? args : [...args, '--teacher', 'wayne'];
+    const r = spawnSync(process.execPath, [join(AF, script), ...a], { cwd: REPO, encoding: 'utf-8', env });
     return { status: r.status, out: `${r.stdout ?? ''}${r.stderr ?? ''}` };
   };
 
@@ -83,7 +86,8 @@ function makeProject(tiers: string = 'A'): { root: string; json: string; runId: 
 }
 
 const runBundle = (json: string, args: string[]) => {
-  const r = spawnSync(process.execPath, [join(AF, 'LayerText_AF发布包.mjs'), ...args], {
+  const a = args.some((x) => x === '--teacher') ? args : [...args, '--teacher', 'wayne'];
+  const r = spawnSync(process.execPath, [join(AF, 'LayerText_AF发布包.mjs'), ...a], {
     cwd: REPO,
     encoding: 'utf-8',
     env: { ...process.env, LAYERTEXT_PROJECT: json, LAYERTEXT_ENGINE: REPO, LAYERTEXT_TEACHER: 'wayne' } /* 钉教师：CI 的 USER=runner，不钉则运行身份对比清单（wayne）会错退 legacy */,
