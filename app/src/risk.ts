@@ -1087,3 +1087,6 @@ async function loadBookDict(paths: ProjectPaths): Promise<Map<string, string>> {
   }
   return out;
 }
+
+// Compatibility exports: callers keep importing these helpers from risk.ts.
+export { itemMinutes, countByCategory, ruleLabel } from './risklogic.js';
