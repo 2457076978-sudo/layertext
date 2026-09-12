@@ -10,7 +10,8 @@
  * 用法：
  *   node LayerText_AF决定汇总.mjs                       # 汇总并打印提议（默认层）
  *   node LayerText_AF决定汇总.mjs --tier A --min-support 2
- *   node LayerText_AF决定汇总.mjs --apply 1,3           # 只把第 1、3 条提议落库（需人明确指定）
+ *   node LayerText_AF决定汇总.mjs --apply 1,3           # 只把第 1、3 条提议落库（需人明确指定；同时把对应候选资产晋升为已批准）
+ *   node LayerText_AF决定汇总.mjs --candidates           # 生成/刷新回流候选台账（知识文件/回流候选_v1.json，保留已批/已拒状态）
  *   node LayerText_AF决定汇总.mjs --dry                 # 不写文件，只看
  *   node LayerText_AF决定汇总.mjs --about windmill      # 查询「某位教师对某词的所有决定」
  *   node LayerText_AF决定汇总.mjs --about windmill --teacher wayne
@@ -37,6 +38,8 @@ const has = (n) => argv.includes(n);
 
 const { buildProposals, parseDecisionLog, summarizeDecisions, contestedItems, PROPOSAL_LABEL } =
   await import(`${distOf(REPO)}/src/core/decision.js`);
+const { candidatesFromEvents, promote, SCOPE_LABEL } =
+  await import(`${distOf(REPO)}/src/core/candidate.js`);
 /** SQLite 决定索引：JSONL 仍是正本，索引随时可重建（报告 §四：查询"某位教师对某词的所有决定"）。
  *  拿不到 node:sqlite 时自动降级为"不可用"，查询回落 JSONL 全扫。 */
 const { openDecisionStore } = await import(`${distOf(REPO)}/src/core/decisiondb.js`);
@@ -54,6 +57,10 @@ const { atomicWriteFileSync: writeAtomic } = await import(`${distOf(REPO)}/src/c
  * （有的还是 `args.includes` 风格），在这一段引用会在定义之前求值。 */
 const argRun = (n, d) => { const i = process.argv.indexOf(n); return i >= 0 ? process.argv[i + 1] : d; };
 const TEACHER = argRun('--teacher', process.env.LAYERTEXT_TEACHER ?? process.env.USER ?? 'unknown');
+/* 层列表必须在身份块之前算好（readRunIdentity 要用 TIERS[0]）——原先定义在
+ * 第 74 行，真实项目一跑就 ReferenceError（冒烟门禁的坏指针在更早处退出，
+ * 这条 TDZ 一直没被看见，2026-09-12 接候选台账时抓到）。 */
+const TIERS = (arg('--tier', 'A')).split(',').map((s) => s.trim().toUpperCase()).filter((t) => TAGS[t]);
 const RUN = await SHARED.readRunIdentity(
   { out: P.产物目录, work: P.调适工作区 },
   { teacher: TEACHER, tier: TAGS[TIERS[0]] ?? TIERS[0] },
@@ -68,7 +75,6 @@ const DECISION_DIR = join(P.调适工作区, '_决定');   // 索引与落库留
 const INDEX_PATH = join(DECISION_DIR, '决定索引.db');
 
 /* ────────────────────── 读取全部决定（跨层合并统计） ────────────────────── */
-const TIERS = (arg('--tier', 'A')).split(',').map((s) => s.trim().toUpperCase()).filter((t) => TAGS[t]);
 const allEvents = [];
 const perTier = {};
 let badLines = 0;
@@ -199,6 +205,52 @@ if (!has('--dry')) {
   console.log(`\n✓ ${R.any('运行中间产物', { name: proposeName, ext: '.md' })}`);
 }
 
+/* ────────────────────── 回流候选台账（v2 方向三：先候选、后晋级） ──────────────────────
+ * 事件是正本，台账是**视图**：每轮 --candidates 用最新事件重建证据，
+ * 但教师已经做过的 approve/reject 决定**不丢**（按候选 id 保留状态与范围）。
+ * 位置在知识文件/（书级、教师可见可改）；工序化生成只消费其中 approved 的资产。 */
+const { dirname } = await import('node:path');
+const CAND_PATH = join(dirname(P.知识库路径), '回流候选_v1.json');
+
+function buildCandidateLedger(allEvents) {
+  const fresh = candidatesFromEvents(allEvents);
+  let kept = [];
+  try {
+    kept = JSON.parse(readFileSync(CAND_PATH, 'utf-8')).candidates ?? [];
+  } catch { /* 首轮没有台账=全部新生成 */ }
+  const keptById = new Map(kept.map((c) => [c.id, c]));
+  const merged = fresh.map((c) => {
+    const old = keptById.get(c.id);
+    /* 教师决定过的（approved/rejected/superseded）保留决定；证据数与分布用最新 */
+    if (old && old.status !== 'candidate') return { ...c, status: old.status, proposedScope: old.proposedScope, note: old.note };
+    return c;
+  });
+  /* 台账里已消失的候选（事件被撤销干净）：保留其历史状态供追溯，标 superseded */
+  const freshIds = new Set(merged.map((c) => c.id));
+  for (const old of kept) {
+    if (!freshIds.has(old.id) && old.status === 'approved') merged.push({ ...old, status: 'superseded', note: `${old.note ?? ''}｜最新证据已不足以支撑，转历史`.replace(/^\|/, '') });
+  }
+  return merged.sort((a, b) => (a.status === 'candidate' ? 0 : 1) - (b.status === 'candidate' ? 0 : 1) || b.evidenceCount - a.evidenceCount);
+}
+
+if (has('--candidates')) {
+  const allEvents = TIERS.flatMap((tk) => {
+    try { return parseDecisionLog(join(DECISION_DIR, `${TAGS[tk]}.jsonl`)); } catch { return []; }
+  });
+  const cands = buildCandidateLedger(allEvents);
+  mkdirSync(dirname(CAND_PATH), { recursive: true });
+  writeFileSync(CAND_PATH, JSON.stringify({ schemaVersion: 1, 生成时间: new Date().toISOString(), 候选: cands }, null, 2), 'utf-8');
+  console.log(`\n✓ 回流候选台账：${CAND_PATH}（${cands.length} 条）`);
+  console.log('| 状态 | 类别 | 键 | 默认范围 | 证据 | 层 | 章 |');
+  console.log('|---|---|---|---|---|---|---|');
+  for (const c of cands.slice(0, 30)) {
+    console.log(`| ${c.status} | ${c.kind} | ${c.key} | ${SCOPE_LABEL[c.proposedScope]} | ${c.evidenceCount}（置信 ${c.confidence}） | ${c.evidenceTiers.join('/')} | ${c.evidenceChapters.slice(0, 3).join('/')} |`);
+  }
+  console.log('\n晋级（教师显式操作，范围只升不降靠这一步）：改台账里 status 为 approved 并按需调 proposedScope；');
+  console.log('消费：工序化生成只吃 approved 且范围覆盖本层的资产（gloss→释义、rewrite-rule→改写偏好）。');
+  process.exit(0);
+}
+
 /* ────────────────────── 落库（必须显式指定序号） ────────────────────── */
 const apply = arg('--apply', '');
 if (!apply) {
@@ -250,3 +302,31 @@ for (const i of picked) {
 console.log('\n✓ 已落库：');
 for (const a of applied) console.log(`   ${a}`);
 console.log('  （落库留痕：调适工作区/_决定/_入库.jsonl）');
+
+/* 落库=教师确认：对应的候选资产同步晋升为 approved（v2 方向三闭环：
+ *  提议管"写进哪个库"，候选管"在什么范围生效"——两本账对得上）。 */
+try {
+  const kindMap = { 'dict-entry': 'gloss-entry', 'kb-exception': 'lexicon-entry', 'rewrite-template': 'rewrite-rule' };
+  const allEvents2 = TIERS.flatMap((tk) => {
+    try { return parseDecisionLog(join(DECISION_DIR, `${TAGS[tk]}.jsonl`)); } catch { return []; }
+  });
+  let cands = buildCandidateLedger(allEvents2);
+  let promotedN = 0;
+  for (const i of picked) {
+    const p = proposals[i - 1];
+    const kind = kindMap[p.kind];
+    const hit = cands.find((c) => c.kind === kind && c.key === p.key && c.status === 'candidate');
+    if (hit) {
+      cands = promote(cands, hit.id, undefined, `随 --apply ${i} 入库批准`);
+      promotedN++;
+    }
+  }
+  if (promotedN) {
+    mkdirSync(dirname(CAND_PATH), { recursive: true });
+    writeFileSync(CAND_PATH, JSON.stringify({ schemaVersion: 1, 生成时间: new Date().toISOString(), 候选: cands }, null, 2), 'utf-8');
+    console.log(`✓ 候选台账同步：${promotedN} 条晋升 approved（${CAND_PATH}）`);
+  }
+} catch (e) {
+  /* 候选台账同步失败不撤销已落的库（库是事实），但必须说出口 */
+  console.error(`⚠ 候选台账同步失败（下一章拿不到这批已批准资产）：${String(e).slice(0, 120)}`);
+}

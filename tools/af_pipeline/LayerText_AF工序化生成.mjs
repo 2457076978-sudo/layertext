@@ -38,7 +38,7 @@ const LEDGER = await openLedger(P, '工序化生成');
 const { splitChapter } = await import(`${distOf(REPO)}/src/core/textpipe.js`);
 const { makeResolver, dirOfPath } = await import(`${distOf(REPO)}/src/core/manifest.js`);
 const { atomicWriteFileSync: writeAtomic } = await import(`${distOf(REPO)}/src/core/files.js`);
-const { runStagePipeline, buildChapterRecap } = await import(`${distOf(REPO)}/src/core/stagepipe.js`);
+const { runStagePipeline, buildChapterRecap, defaultInstructions: DEFAULT_INSTRUCTIONS } = await import(`${distOf(REPO)}/src/core/stagepipe.js`);
 const { STAGE_LABEL } = await import(`${distOf(REPO)}/src/core/stagepatch.js`);
 
 /* 层定义沿用两轮调适的难度下移口径（A17/M15/B14 为生成上限；检查线 A20/M17/B14 由
@@ -79,6 +79,29 @@ const KB = loadKbGloss(P.知识库路径);
  * KB 的值是 {zh,n} 对象，取 .zh 进 prompt）。KB 键集 = 教师必注词（配额内优先）。 */
 const glossHints = new Map([...[...KB].map(([w, v]) => [w, v.zh]), ...DICT]);
 const mustAnnotate = new Set([...KB.keys()]);
+/* 回流候选的消费端（v2 方向三）：只吃**已批准且范围覆盖本章本层**的资产——
+ *  下一章只收到命中的已批准资产；候选期的、范围不够的（本章级资产没命中本章）都不进。
+ *  教师批准的释义优先于词典（后 set 覆盖前 set）。 */
+const approvedRewrites = [];
+try {
+  const { dirname: dn, join: jj } = await import('node:path');
+  const candPath = jj(dn(P.知识库路径), '回流候选_v1.json');
+  if (existsSync(candPath)) {
+    const { reusable } = await import(`${distOf(REPO)}/src/core/candidate.js`);
+    const ledger = JSON.parse(readFileSync(candPath, 'utf-8')).候选 ?? [];
+    for (const c of reusable(ledger, 'book-tier')) {
+      if (c.proposedScope === 'chapter' && !(c.evidenceChapters ?? []).includes(chapterNameNow())) continue;
+      if (c.kind === 'gloss-entry' && c.after) glossHints.set(c.key, c.after);
+      if (c.kind === 'rewrite-rule' && c.after) approvedRewrites.push(c);
+    }
+    if (approvedRewrites.length || ledger.some((c) => c.status === 'approved' && c.kind === 'gloss-entry')) {
+      console.log(`  · 回流资产生效：已批准候选 ${ledger.filter((c) => c.status === 'approved').length} 条中命中本章本层的已注入（释义/改写偏好）`);
+    }
+  }
+} catch (e) {
+  console.warn(`⚠ 回流候选台账读不了（按无资产继续，不阻断生成）：${String(e).slice(0, 100)}`);
+}
+function chapterNameNow() { return CN[Number(process.argv.find((a) => /^\d+$/.test(a)) ?? 7) - 1] ?? ''; }
 /* 已问过的释义缓存（跨段共享：一词一释，问过不再问） */
 const askedGloss = new Map();
 
@@ -217,6 +240,10 @@ for (const tk of tiers) {
         mustAnnotate,
         annotate,
         annoCapPerSeg: { A: 2, M: 1, B: 3 }[tk],
+        /* 教师批准的改写偏好进词汇粗筛指令（批准资产消费的第二类） */
+        instructions: approvedRewrites.length
+          ? { ...DEFAULT_INSTRUCTIONS(), 'vocab-primary': `${DEFAULT_INSTRUCTIONS()['vocab-primary']}\n【教师批准的改写偏好（必须遵守）】${approvedRewrites.slice(0, 8).map((c) => c.after).join('；')}。` }
+          : undefined,
         onEvent: (e) => {
           if (e.kind === 'stage-skip') console.log(`  · ${STAGE_LABEL[e.stage]}：本地扫描无命中，零调用`);
           else if (e.kind === 'stage-start') console.log(`  · ${STAGE_LABEL[e.stage]}：${e.detail}`);
