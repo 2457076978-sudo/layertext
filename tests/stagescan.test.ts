@@ -63,9 +63,18 @@ test('词汇复筛：对上一道产稿取差集，只报新引入的词表外�
 test('连贯性：原文信号丢失、否定/因果整段清零都要点名', () => {
   const src = '[P01] Napoleon kept 9 dogs and did not feed them because they failed.';
   const lost = scanFor('coherence', { id: 'P01', source: src, draft: '[P01] Napoleon kept some dogs.' }, ctx());
-  assert.ok(lost.some((x) => x.includes('9')), '数字 9 丢失');
-  assert.ok(lost.some((x) => x.includes('否定')), '否定整段消失');
-  assert.ok(lost.some((x) => x.includes('因果')), '因果连接消失');
+  assert.ok(
+    lost.some((x) => x.includes('9')),
+    '数字 9 丢失',
+  );
+  assert.ok(
+    lost.some((x) => x.includes('否定')),
+    '否定整段消失',
+  );
+  assert.ok(
+    lost.some((x) => x.includes('因果')),
+    '因果连接消失',
+  );
 
   const kept = scanFor('coherence', { id: 'P01', source: src, draft: '[P01] Napoleon kept 9 dogs and did not feed them because they failed.' }, ctx());
   assert.deepEqual(kept, [], '原样段零命中');
@@ -100,4 +109,16 @@ test('注释密度：处/百词口径，加注预算与检查同尺', () => {
   const d = annoDensityOf(['[P01] word word word word word', '[P02] a（一） b（二） word word']);
   assert.equal(d.annos, 2);
   assert.equal(d.words, 9, '注释括号里的中文不算英文词、段标记的 P 不算词');
+});
+
+/* ────────────────── 2026-09-12 全书重制根修：句法超长句点名 ────────────────── */
+
+test('句法超长句点名列原文（不再只报类别标签），引语内长句不点名', () => {
+  const long = 'The animals worked hard all through that summer from morning to night and they were tired but happy.';
+  const draft = `[P01] He spoke. ${long} "Now, comrades, what is the nature of this life of ours, we are born, we are given just so much food as will keep the breath in our bodies."`;
+  const issues = scanFor('syntax', { id: 'P01', source: '', draft }, { ...ctx(), tier: 'M' });
+  const lenIssue = issues.find((x) => x.includes('超长句'))!;
+  assert.ok(lenIssue.includes(long.slice(0, 30)), '超长句原文被点名（模型逐句对着拆）');
+  assert.ok(lenIssue.includes('词）'), '带词数');
+  assert.ok(!lenIssue.includes('nature of this life'), '直接引语内的长句不点名（门禁同口径豁免）');
 });
