@@ -26,3 +26,10 @@ cd app && npm run build
 ## 本轮补丁
 
 将 Rust 系统词典测试改为：系统词典存在时校验 `boar` 中文释义；系统词典缺失时跳过该资源依赖测试。该测试验证的是外部 macOS 资源，不应把“机器未安装词典”误报成代码失败。
+
+## 验证更新（本轮）
+
+- `npm run verify`：通过；898 项测试，897 pass、1 skipped、0 fail。
+- `npm run verify:rust`：通过；Rust 5 项全部通过。系统词典测试在资源存在时校验释义，资源缺失时明确跳过。
+- `npm run build --prefix app`：通过。
+- 工作树干净；当前分支 `codex/total-optimization`，未 push、未 release、未打 tag。
