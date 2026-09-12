@@ -124,13 +124,16 @@ function insertAnnotation(text, word, zh) {
   return { text, ok: false };
 }
 
-/** 批量问模型要释义（只要词义 JSON，不让模型碰文本）；失败抛错不静默 */
-async function askGlosses(words) {
+/** 批量问模型要释义（只要词义 JSON，不让模型碰文本）；失败抛错不静默。
+ *  每词必须带它在正文里的句子——不带语境问词义，模型只会给词典第一义项
+ *  （2026-09-12 实跑：perches 被注成「鲈鱼」，语境明明是鸟跳上栖木）。 */
+async function askGlosses(words, ctxOf) {
   LEDGER.scene.tag = '释义询问';
+  const lines = words.map((w) => `${w}｜语境：${(ctxOf(w) || '').slice(0, 160)}`);
   const r = await LEDGER.call(
     [
-      { role: 'system', content: '你给初中英语教材配生词注释。只输出一个 JSON 对象 {词: 释义}，释义 2-6 个汉字，初中生能懂，不要其他文字。' },
-      { role: 'user', content: `给这些词配释义：${words.join(', ')}` },
+      { role: 'system', content: '你给初中英语教材配生词注释。每个词给了它在课文里的句子，按句子语境选义项。只输出一个 JSON 对象 {词: 释义}，释义 2-6 个汉字，初中生能懂，不要其他文字。' },
+      { role: 'user', content: `按语境给这些词配释义：\n${lines.join('\n')}` },
     ],
     { baseUrl: CFG.baseUrl, key: KEY, model: MODEL, maxTokens: 2000 },
   );
@@ -157,7 +160,8 @@ const annotate = async (draft, targets) => {
     if (r.ok) md = r.text;
   }
   if (missing.length) {
-    const got = await askGlosses(missing);
+    const sentOf = (w) => md.split(/(?<=[.!?])\s+/).find((sn) => new RegExp(`\\b${w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(sn));
+    const got = await askGlosses(missing, sentOf);
     for (const w of missing) {
       const zh = got.get(w) ?? askedGloss.get(w);
       if (!zh) continue;
