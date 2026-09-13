@@ -32,7 +32,7 @@
 **验收**：`tsc` 双工程 + `eslint --max-warnings 0` + 全量测试通过（新增 6 项：引擎规则白名单、
 段级项不编词、排序位次、引擎项不出现三个键、批量确认/取消、跨章汇总与细分筛选）；文档
 [docs/待确认队列与校准台账.md](docs/待确认队列与校准台账.md) 同步改为"三路合成一张"。版式与面板
-用无头 Chrome 在真实 Animal Farm 数据上截图核对（引擎项 → 过滤 → 行内两个键）。**尚未装机**。
+用无头 Chrome 在真实 Animal Farm 数据上截图核对（引擎项 → 过滤 → 行内两个键）。**已装机**（`tauri build --bundles app` → 替换 `/Applications/LayerText.app`）。
 
 ## [未发布] - 2026-09-13（codex/total-optimization · 待确认队列 + 校准台账 + 面板入口；本地模型边界写进文档）
 
@@ -79,7 +79,7 @@
 
 **待确认面板去内联样式。** 原来每条卡都靠 inline style 拼（圆角/字级/间距各写各的），统一收成 `.pk-row/.pk-head/.pk-badge/.pk-word/.pk-gloss/.pk-sentence/.pk-actions` 与侧栏 `.pending-banner` 一份 CSS。侧栏横幅原先在 248px 里折成三行方块（"待确认 72 条 （引擎筛出，你拍板） 去看"），现为一行 34px：正文省略、按钮固定右侧。顺手根修两处渲染成字面量的 markdown（`**未支持难词**`、`**只在当前层生效…**`）。
 
-**验收（如实）**：`tsc` 双工程 + `eslint --max-warnings 0` + `prettier` 全过；测试 938 项仅 1 项红——`筛选条`断言拿 innerHTML 匹配"全部 3"，而新标记把数字包进 `.pk-count` 做等宽对齐，已改为按**渲染文字** `textContent` 断言（测行为，不测标签写法），改后 10/10 绿。版式由无头 Chrome（1200×800 与 1600×1000 × 读检改库四组）逐一截图核对；为让截图带真实数据，本地从 Animal Farm 项目拷了一份章节与待确认队列做夹具（`app/public/_fixture/`，已加 `.gitignore`，绝不入库）。**尚未装机**——本轮只改前端，待功能缺口补齐后一并 `tauri build` 实装。
+**验收（如实）**：`tsc` 双工程 + `eslint --max-warnings 0` + `prettier` 全过；测试 938 项仅 1 项红——`筛选条`断言拿 innerHTML 匹配"全部 3"，而新标记把数字包进 `.pk-count` 做等宽对齐，已改为按**渲染文字** `textContent` 断言（测行为，不测标签写法），改后 10/10 绿。版式由无头 Chrome（1200×800 与 1600×1000 × 读检改库四组）逐一截图核对；为让截图带真实数据，本地从 Animal Farm 项目拷了一份章节与待确认队列做夹具（`app/public/_fixture/`，已加 `.gitignore`，绝不入库）。**已装机**：`npx tauri build --bundles app` → `cp -R` 替换 `/Applications/LayerText.app`（同 ZCode 侧的既有流程）。新二进制 ad-hoc 签名会变，**TCC 桌面/文稿授权会重新弹一次**，需要重新点「允许」。
 
 ## [未发布] - 2026-09-12（codex/total-optimization · UI 工作台三轮重构：窗口贴真实左缘 / 审校双栏 / 教师审校工作台风格）
 
