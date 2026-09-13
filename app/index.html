@@ -2440,7 +2440,7 @@
       }
       #findbar {
         position: fixed;
-        top: 44px;
+        top: calc(var(--chrome-cmd) + var(--chrome-ctx) + 6px);
         right: 12px;
         z-index: 400;
         background: var(--panel);
@@ -3668,15 +3668,6 @@
         </button>
         <button id="btn-open" title="打开章节文件（⌘O）；菜单 文件 → 载入示例 可看演示">打开…</button></span
       >
-      <span class="tgroup" id="grp-chapter" style="display: none"
-        ><button id="btn-run" class="primary" title="打开课文会自动体检；换了词库或改完正文后，点这里重新算一遍">
-          <svg class="ico"><use href="#i-play" /></svg>质检本章
-        </button>
-        <button id="btn-ai" title="精修：先在正文点词/划句做标记，再点这里成批改。改完即改还是等你确认，看右侧模式胶囊">
-          <svg class="ico"><use href="#i-sparkle" /></svg>按标记修改
-        </button>
-        <button id="btn-student" title="学生视角预览：隐藏全部审校视觉（标记下划线/风险角标/AI 建议/段号/热力轨），只看学生将读到的正文（含生词中文注释）。再点一次回到审校视角">学生视角</button></span
-      >
       <span class="tspacer"></span>
       <span class="tgroup" id="grp-edit" style="display: none">
         <button id="btn-undo" title="撤销上一次文件级更改（⌘⌥Z）">↩︎</button>
@@ -3699,7 +3690,27 @@
       <div id="status"></div>
     </header>
 
-    <div class="wstabs" id="wstabs" style="display: none"></div>
+    <!-- 上下文栏（2026-09-13 排版重构·方案 B）：一条管「书/版本 → 章节 → 对本章做什么」。
+         原先这里是两条独立横条（版本胶囊一整行 + 章节标签一整行），共 76px，且把顶栏挤到没地方放状态。 -->
+    <div class="ctxbar" id="ctxbar" style="display: none">
+      <button class="ver-switch" id="ver-switch" title="切换版本，或直接打开本版其他章节">
+        <span class="ver-lab">版本</span><span id="ver-name">—</span>
+        <svg class="ico"><use href="#i-chev" /></svg>
+      </button>
+      <div class="ver-pop" id="ver-pop"></div>
+      <span class="vsep" aria-hidden="true"></span>
+      <div class="filetabs" id="filetabs" style="display: none"></div>
+      <span class="ctx-spacer"></span>
+      <span class="tgroup" id="grp-chapter" style="display: none"
+        ><button id="btn-run" class="primary" title="打开课文会自动体检；换了词库或改完正文后，点这里重新算一遍">
+          <svg class="ico"><use href="#i-play" /></svg>质检本章
+        </button>
+        <button id="btn-ai" title="精修：先在正文点词/划句做标记，再点这里成批改。改完即改还是等你确认，看右侧模式胶囊">
+          <svg class="ico"><use href="#i-sparkle" /></svg>按标记修改
+        </button>
+        <button id="btn-student" title="学生视角预览：隐藏全部审校视觉（标记下划线/风险角标/AI 建议/段号/热力轨），只看学生将读到的正文（含生词中文注释）。再点一次回到审校视角">学生视角</button></span
+      >
+    </div>
     <div id="findbar" style="display: none">
       <input id="find-input" placeholder="查找…" style="width: 150px" />
       <span id="find-count" class="dim" style="min-width: 64px; text-align: center"></span>
@@ -3709,20 +3720,20 @@
       <button id="find-replace-all" title="全部替换（可撤销）">全部替换</button>
       <button id="find-close" title="关闭（Esc）">×</button>
     </div>
-    <div class="filetabs" id="filetabs" style="display: none"></div>
-
     <div id="drop-zone" aria-hidden="true">松开以载入文本到工作台</div>
     <div class="workbench">
+      <!-- 左侧竖栏：一级导航（目录 + 读/检/改/库）。省掉一整条横栏，章节标签因此拿到整条宽度。 -->
+      <nav class="rail" id="railtabs">
+        <button class="rail-it" id="tab-toc" title="全书章节目录与本章书签（再点或 Esc 关闭）">
+          <svg class="ico"><use href="#i-list" /></svg><span>目录</span>
+        </button>
+        <span class="rail-sep" aria-hidden="true"></span>
+        <!-- 一级四组（读/检/改/库，widgets.ts 渲染）：按教师任务流收敛 -->
+        <div class="vt-groups" id="vt-groups"></div>
+      </nav>
       <div class="content">
-        <div class="viewtabs">
-          <button id="tab-toc" title="全书章节目录与本章书签（再点或 Esc 关闭）">
-            <svg class="ico"><use href="#i-list" /></svg>目录
-          </button>
-          <span class="vt-sep" aria-hidden="true"></span>
-          <!-- 两级页签（读/检/改 × 组内二级，widgets.ts 渲染）：8 个平铺页签按教师任务流收敛 -->
-          <div class="vt-groups" id="vt-groups"></div>
-          <div class="vt-sub" id="vt-sub"></div>
-        </div>
+        <!-- 二级页签：贴着正文列顶部（当前组只有一个视图时整条收起） -->
+        <div class="subtabs" id="vt-sub"></div>
         <section id="pane-text" class="pane active">
           <div class="legend">
             <span><i class="dot" style="background: var(--oov)"></i>生词（红）</span>

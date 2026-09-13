@@ -41,7 +41,8 @@ import {
   touchProgress,
   tocPanelEl,
   refreshToc,
-  renderWorkspaceBar,
+  renderVersionSwitcher,
+  toggleVersionPop,
   backToShelf,
   toggleToc,
   closeToc,
@@ -198,7 +199,13 @@ export function syncChrome(): void {
   $('tab-toc').style.display = s ? '' : 'none'; // 书架/版本页无章节概念，目录按钮收起
   // 看板/档案是书级视图，书架也能进；仅正文场景整行收起
   const bookView = curView !== 'text';
-  (document.querySelector('.viewtabs') as HTMLElement).style.display = !hasChapter && !bookView ? 'none' : 'flex';
+  /* 左侧竖栏（读/检/改/库）：书架态也能进书级视图，所以判据是「有章节 或 在看非正文视图」 */
+  const rail = document.getElementById('railtabs');
+  if (rail) rail.style.display = !hasChapter && !bookView ? 'none' : 'flex';
+  /* 上下文栏（版本 → 章节 → 章节动作）：没有打开的章节就没有"上下文"可言，整条收起 */
+  const ctx = document.getElementById('ctxbar');
+  if (ctx) ctx.style.display = hasChapter ? 'flex' : 'none';
+  if (!hasChapter) document.getElementById('ver-pop')?.classList.remove('open');
 }
 
 /* 侧栏每次渲染完，把「待确认 N 条」横幅挂回去（renderSidebar 会整块替换 innerHTML）。
@@ -247,10 +254,6 @@ function renderFileTabs(): void {
   el.style.display = S.sessions.length === 0 ? 'none' : 'flex'; // 无文件时整行收起，不占位
   if (S.sessions.length === 0) {
     el.innerHTML = '';
-    // 工作区条一并收起（修复：关掉全部章节后 wstabs 残留在页面上）
-    const wsBar = $('wstabs');
-    wsBar.style.display = 'none';
-    wsBar.innerHTML = '';
     return;
   }
   el.innerHTML = S.sessions
@@ -284,7 +287,7 @@ function renderFileTabs(): void {
     }),
   );
   el.querySelectorAll('[data-ftab-close]').forEach((x) => x.addEventListener('click', () => closeSession(Number((x as HTMLElement).dataset.ftabClose))));
-  renderWorkspaceBar();
+  renderVersionSwitcher();
 }
 
 /** 改写生效的视觉反馈：新句子绿色高亮一闪 */
@@ -651,6 +654,15 @@ document.querySelector('header')?.addEventListener('dblclick', (e) => {
 });
 $('btn-theme').addEventListener('click', stepTheme);
 $('tab-toc').addEventListener('click', toggleToc);
+/* 版本切换器：点按钮开合；点面板外或按 Esc 收起（与其它弹层同一套手感） */
+$('ver-switch').addEventListener('click', (e) => {
+  e.stopPropagation();
+  toggleVersionPop();
+});
+document.addEventListener('mousedown', (e) => {
+  const t = e.target as HTMLElement;
+  if (!t.closest('#ver-pop') && !t.closest('#ver-switch')) document.getElementById('ver-pop')?.classList.remove('open');
+});
 $('btn-open').addEventListener('click', () => void openChapterFiles());
 // 工作台支持从 Finder 直接拖入文本/Markdown/EPUB；只在放下时读取，不触碰源文件。
 let dragDepth = 0;

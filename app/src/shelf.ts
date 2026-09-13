@@ -47,13 +47,13 @@ export async function loadWorkspaces(dir: string): Promise<void> {
 async function activateWorkspace(name: string): Promise<void> {
   S.activeWorkspace = name;
   const w = S.workspaces.find((x) => x.名 === name);
-  renderWorkspaceBar();
+  renderVersionSwitcher();
   if (w?.定制目标) {
     await ensureClassGroups(); // 绑定口径的前提：分组就位（幂等，未就位才读一次盘）
     if (S.activeWorkspace === name && S.classTargets.some((t) => t.id === w.定制目标)) {
       S.selectedIds = [w.定制目标];
       fileSummary();
-      renderWorkspaceBar();
+      renderVersionSwitcher();
     } else if (S.activeWorkspace === name) {
       setStatus(`工作区【${name}】绑定的口径 ${w.定制目标} 在分组文件里没找到（<svg class="ico"><use href="#i-users"/></svg>班级定制里可查目录位置）`, 'dirty');
     }
@@ -643,29 +643,72 @@ export async function refreshToc(): Promise<void> {
   );
 }
 
-export function renderWorkspaceBar(): void {
-  const el = document.getElementById('wstabs') as HTMLElement | null;
-  if (!el) return;
+/**
+ * 版本切换器（2026-09-13 排版重构·方案 B）。
+ *
+ * 原先是一条常驻的「版本栏」：三个版本胶囊 + 一个章节下拉，占满一整行 38px——而教师一天可能就切两三次。
+ * 现在收成一个下拉：点开是**版本列表 + 本版章节列表**（章节下拉的功能一并收进来，没丢），
+ * 省下的一整行还给了上下文栏里的章节标签。**多一次点击，换一条横栏**，这笔账划算。
+ */
+export function renderVersionSwitcher(): void {
+  const btn = document.getElementById('ver-switch');
+  const nameEl = document.getElementById('ver-name');
+  const pop = document.getElementById('ver-pop');
+  const bar = document.getElementById('ctxbar');
+  if (!btn || !nameEl || !pop || !bar) return;
   if (S.workspaces.length === 0) {
-    el.style.display = 'none';
-    el.innerHTML = '';
+    /* 没有工作区（单文件/示例模式）：整条上下文栏交给章节标签与章节动作，版本位收起 */
+    btn.style.display = 'none';
+    pop.classList.remove('open');
+    pop.innerHTML = '';
     return;
   }
+  btn.style.display = '';
   const active = S.workspaces.find((w) => w.名 === S.activeWorkspace);
+  nameEl.textContent = S.activeWorkspace ?? '未选择版本';
+  btn.classList.toggle('unset', !S.activeWorkspace);
   const cur = activeSession()?.sourcePath ?? null;
-  el.style.display = 'flex';
-  el.innerHTML =
+  const chNameOf = (f: string, i: number): string =>
+    f
+      .split('/')
+      .slice(0, -1)
+      .reverse()
+      .find((part) => /^第.+章$/.test(part)) ?? `章节 ${i + 1}`;
+  pop.innerHTML =
+    `<div class="ver-pop-h">版本</div>` +
     S.workspaces
-      .map((w) => `<span class="ftab ws ${w.名 === S.activeWorkspace ? 'active' : ''}" data-ws="${esc(w.名)}" title="${w.定制目标 ? `绑定定制口径 ${w.定制目标}` : ''}">${esc(w.名)}</span>`)
+      .map(
+        (w) =>
+          `<button class="ver-item${w.名 === S.activeWorkspace ? ' active' : ''}" data-ws="${esc(w.名)}" title="${w.定制目标 ? `绑定定制口径 ${w.定制目标}` : '切换到这个版本'}">${esc(w.名)}${w.定制目标 ? `<span class="dim">${esc(w.定制目标)}</span>` : ''}</button>`,
+      )
       .join('') +
     (active
-      ? `<label class="ws-files">章节 <select aria-label="切换工作区章节" data-ws-select>${active.文件.map((f, i) => `<option value="${esc(f)}" ${f === cur ? 'selected' : ''}>${esc(f.split('/').slice(0, -1).reverse().find((part) => /^第.+章$/.test(part)) ?? `章节 ${i + 1}`)}</option>`).join('')}</select></label>`
+      ? `<div class="ver-pop-h">本版章节（${active.文件.length}）</div>` +
+        active.文件.map((f, i) => `<button class="ver-item ch${f === cur ? ' active' : ''}" data-ch="${esc(f)}">${esc(chNameOf(f, i))}</button>`).join('')
       : '');
-  el.querySelectorAll('[data-ws]').forEach((t) => t.addEventListener('click', () => switchWorkspace((t as HTMLElement).dataset.ws!)));
-  el.querySelector<HTMLSelectElement>('[data-ws-select]')?.addEventListener('change', (event) => {
-    const f = (event.currentTarget as HTMLSelectElement).value;
-    void openPathIntoSession(f).catch((e) => setStatus('打开失败：' + e, 'err'));
-  });
+  pop.querySelectorAll<HTMLElement>('[data-ws]').forEach((el) =>
+    el.addEventListener('click', () => {
+      closeVersionPop();
+      switchWorkspace(el.dataset.ws!);
+    }),
+  );
+  pop.querySelectorAll<HTMLElement>('[data-ch]').forEach((el) =>
+    el.addEventListener('click', () => {
+      closeVersionPop();
+      void openPathIntoSession(el.dataset.ch!).catch((e) => setStatus('打开失败：' + e, 'err'));
+    }),
+  );
+}
+
+function closeVersionPop(): void {
+  document.getElementById('ver-pop')?.classList.remove('open');
+}
+
+/** 点开/收起版本面板。点面板外或按 Esc 收起——与其它弹层同一套手感。 */
+export function toggleVersionPop(): void {
+  const pop = document.getElementById('ver-pop');
+  if (!pop) return;
+  pop.classList.toggle('open');
 }
 
 /* ---- 会话恢复：回到上次编辑 ---- */

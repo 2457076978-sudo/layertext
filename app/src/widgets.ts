@@ -32,12 +32,18 @@ const VIEW_MAP = [
 
 export type ViewName = 'text' | 'report' | 'suggest' | 'diff' | 'align' | 'board' | 'dossier' | 'retro' | 'data' | 'risk' | 'annotate';
 
-/** 一级三组（按教师任务流）：读=阅读与版本比对 / 检=体检与书级状态 / 改=修订处理与回顾 */
-export const VIEW_GROUPS: { label: string; hint: string; views: readonly ViewName[] }[] = [
-  { label: '读', hint: '阅读与版本比对：正文审校 · 逐句对照 · 版本对比', views: ['text', 'align', 'diff'] },
-  { label: '检', hint: '体检与书级状态：质检报告 · 看板 · 审校档案 · 风险队列 · 补注候选', views: ['report', 'board', 'dossier', 'risk', 'annotate'] },
-  { label: '改', hint: '修订处理与回顾：修订建议 · 复盘', views: ['suggest', 'retro'] },
-  { label: '库', hint: '数据资产：词库 / 知识库 / 词典 / 专名 / 分层参数（在此增删改，写回前自动校验）', views: ['data'] },
+/**
+ * 一级四组（按教师任务流）：读=阅读与版本比对 / 检=体检与书级状态 / 改=修订处理与回顾 / 库=数据资产。
+ *
+ * 2026-09-13 排版重构（方案 B）：四组从「顶部横排分段控件」搬到**左侧竖栏**——横排那条吃掉 44px 高度，
+ * 而竖栏不占高度，还把整条横向宽度让给了上下文栏里的章节标签（那才是真的被挤的东西）。
+ * 每组配一个图标：竖栏里光有"读/检/改/库"一个字太单薄。
+ */
+export const VIEW_GROUPS: { label: string; icon: string; hint: string; views: readonly ViewName[] }[] = [
+  { label: '读', icon: 'i-book', hint: '阅读与版本比对：正文审校 · 逐句对照 · 版本对比', views: ['text', 'align', 'diff'] },
+  { label: '检', icon: 'i-chart', hint: '体检与书级状态：质检报告 · 看板 · 审校档案 · 风险队列 · 待确认', views: ['report', 'board', 'dossier', 'risk', 'annotate'] },
+  { label: '改', icon: 'i-wrench', hint: '修订处理与回顾：修订建议 · 复盘', views: ['suggest', 'retro'] },
+  { label: '库', icon: 'i-columns', hint: '数据资产：词库 / 知识库 / 词典 / 专名 / 分层参数（在此增删改，写回前自动校验）', views: ['data'] },
 ];
 
 const SUB_LABELS: Record<ViewName, string> = {
@@ -54,7 +60,7 @@ const SUB_LABELS: Record<ViewName, string> = {
   data: '数据',
 };
 
-const groupOf = (v: ViewName): { label: string; hint: string; views: readonly ViewName[] } => VIEW_GROUPS.find((g) => g.views.includes(v)) ?? VIEW_GROUPS[0]!;
+const groupOf = (v: ViewName): (typeof VIEW_GROUPS)[number] => VIEW_GROUPS.find((g) => g.views.includes(v)) ?? VIEW_GROUPS[0]!;
 
 /** 每组最近视图（会话级记忆：点一级组回到上次所在页） */
 const lastOfGroup: Record<string, ViewName> = {};
@@ -69,14 +75,18 @@ export function switchView(root: Document, name: ViewName): void {
   syncViewTabs(root, name);
 }
 
-/** 同步两级页签渲染（一级组高亮 + 组内二级；容器不存在时静默——happy-dom 旧测试不受影响） */
+/** 同步两级页签渲染（左侧竖栏的一级组 + 正文列顶部的二级；容器不存在时静默——happy-dom 旧测试不受影响） */
 export function syncViewTabs(root: Document, active: ViewName): void {
   const g = groupOf(active);
   const groupsEl = root.getElementById('vt-groups');
   const subEl = root.getElementById('vt-sub');
   if (!groupsEl || !subEl) return;
-  groupsEl.innerHTML = VIEW_GROUPS.map((x) => `<button class="vt-g${x.label === g.label ? ' active' : ''}" data-vt-group="${x.label}" title="${x.hint}">${x.label}</button>`).join('');
+  groupsEl.innerHTML = VIEW_GROUPS.map(
+    (x) => `<button class="vt-g${x.label === g.label ? ' active' : ''}" data-vt-group="${x.label}" title="${x.hint}"><svg class="ico"><use href="#${x.icon}"/></svg><span>${x.label}</span></button>`,
+  ).join('');
+  /* 只有一个视图的组（库）不摆一条只有一项的二级条：那是噪音，不是导航 */
   subEl.innerHTML = g.views.length > 1 ? g.views.map((v) => `<button class="vt-s${v === active ? ' active' : ''}" data-vt-view="${v}">${SUB_LABELS[v]}</button>`).join('') : '';
+  subEl.classList.toggle('empty', g.views.length <= 1);
 }
 
 /** 两级页签事件委托（一级=回该组上次视图；二级=切具体视图）——main 侧唯一绑定入口 */
