@@ -52,6 +52,7 @@
 
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -70,7 +71,17 @@ const { parseDictCsv } = await import(`${DIST}/src/core/dictmerge.js`);
 const { splitChapter } = await import(`${DIST}/src/core/textpipe.js`);
 const { atomicWriteFileSync: writeAtomic } = await import(`${DIST}/src/core/files.js`);
 
-const FIXTURE = join(REPO, 'tests', 'fixtures', 'replay');
+/* 回放夹具**不进公开仓库**（里面是原书正文与教师的三层产物）——放在仓库外，
+   用 `LAYERTEXT_REPLAY_DIR` 指过来；调用方也可以用 `--root` 显式指定。 */
+const FIXTURE = (() => {
+  const 外部 = process.env.LAYERTEXT_REPLAY_DIR;
+  if (外部) return 外部;
+  /* 默认外部位置 = 本应用的配置目录（与 ~/.layertext.json、`书架.json` 同一个家，
+     不是某个人的私人路径）——这样教师本机不用配任何变量就照旧跑得到回放层。 */
+  const 应用配置目录 = join(homedir(), 'Documents', 'LayerText配置', '回放夹具_真项目');
+  if (existsSync(应用配置目录)) return 应用配置目录;
+  return join(REPO, 'tests', 'fixtures', 'replay');
+})();
 const argv = process.argv.slice(2);
 const arg = (n, d) => {
   const i = argv.indexOf(n);
@@ -90,7 +101,14 @@ const chName = (ci) => `第${CN[ci - 1] ?? ci}章`;
 const chNum = (ch) => CN.indexOf(String(ch).replace(/^第|章$/g, '')) + 1;
 /** `--partial 10` / `--partial 3,10` → 章号数组（过滤非法值并去重排序——口径输入先归一） */
 const parsePartial = (raw) =>
-  [...new Set(String(raw ?? '').split(',').map((x) => Number(x.trim())).filter((n) => Number.isInteger(n) && n >= 1 && n <= CN.length))].sort((a, b) => a - b);
+  [
+    ...new Set(
+      String(raw ?? '')
+        .split(',')
+        .map((x) => Number(x.trim()))
+        .filter((n) => Number.isInteger(n) && n >= 1 && n <= CN.length),
+    ),
+  ].sort((a, b) => a - b);
 const tierArgs = (s) =>
   String(s)
     .split(',')
@@ -599,7 +617,10 @@ for (const t of tiers) {
   const w = out.全书定位[t];
   if (c?.质检) console.log(` ${t} 层（第一章）：篇幅 ${c.篇幅比}｜超长句 ${c.超长句总数} 句｜加注覆盖率 ${c.质检.加注覆盖率}%｜生词率 ${c.质检.原文生词率}% → ${c.质检.生词率}%`);
   if (out.定位两条轴[t]) console.log(`        第一章两条轴：阅读负荷下降 ${out.定位两条轴[t].阅读负荷下降}%｜理解支架覆盖率 ${out.定位两条轴[t].理解支架覆盖率}%`);
-  if (w) console.log(`        全书两条轴（${w.章数} 章${w.排除章?.length ? `，partial 未计入：${w.排除章.join('、')}` : ''}）：阅读负荷下降 ${w.阅读负荷下降}%｜理解支架覆盖率 ${w.理解支架覆盖率}%（${w.已注词型}/${w.应注词型} 词型）`);
+  if (w)
+    console.log(
+      `        全书两条轴（${w.章数} 章${w.排除章?.length ? `，partial 未计入：${w.排除章.join('、')}` : ''}）：阅读负荷下降 ${w.阅读负荷下降}%｜理解支架覆盖率 ${w.理解支架覆盖率}%（${w.已注词型}/${w.应注词型} 词型）`,
+    );
   const 每章 = Object.entries(out.分章[t]).map(([ch, r]) => `${ch} ${r.质检.加注覆盖率}%(${r.质检.已注词型}/${r.质检.应注词型})`);
   if (每章.length) console.log(`        每章加注覆盖率：${每章.join('｜')}`);
 }
