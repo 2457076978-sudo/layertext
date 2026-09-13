@@ -39,6 +39,13 @@ for (const name of ['LayerText_AF工序化生成.mjs', 'LayerText_AF会话改写
     const map = readFileSync(join(root, MAP), 'utf8');
     if (!map.includes('必须同步更新本文件')) failures.push(`${MAP}: 顶部的"改架构必须同步更新本文件"这条规矩被删了`);
     if (!map.includes('本文件自己的变更记录')) failures.push(`${MAP}: 缺少"本文件自己的变更记录"一节——改结构的人没有地方留痕`);
+    /* 项目总说明：在，且被 README/AGENTS 链到（它是"项目是什么、到哪一步"的唯一入口）。 */
+    const OVERVIEW = 'docs/项目总说明.md';
+    if (!existsSync(join(root, OVERVIEW))) failures.push(`${OVERVIEW}: 项目总说明不在——"项目是什么、到哪一步了"就没有入口`);
+    else {
+      const refs = ['README.md', 'AGENTS.md'].filter((f) => existsSync(join(root, f)) && readFileSync(join(root, f), 'utf8').includes(OVERVIEW));
+      if (refs.length < 2) failures.push(`${OVERVIEW}: README 与 AGENTS 都应链到它，现在只有 ${refs.join('、') || '（都没有）'}`);
+    }
     /* 动手前先读的那一页：在，且链到地图。 */
     const AGENTS = 'AGENTS.md';
     if (!existsSync(join(root, AGENTS))) failures.push(`${AGENTS}: 缺失——它是"动手前先读这一页"的入口`);
