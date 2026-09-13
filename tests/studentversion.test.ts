@@ -195,7 +195,7 @@ test('★ 端到端：有占位段时拒绝发布（退出码 1）且**一个文
     'utf-8',
   );
 
-  const r = spawnSync(process.execPath, [join(REPO, 'tools', 'af_pipeline', 'LayerText_AF学生版.mjs'), '--tier', 'A', '--chapters', '1'], {
+  const r = spawnSync(process.execPath, [join(REPO, 'tools', 'af_pipeline', 'LayerText_AF学生版.mjs'), '--tier', 'A', '--chapters', '1', '--teacher', 'wayne'], {
     cwd: REPO,
     encoding: 'utf-8',
     env: { ...process.env, LAYERTEXT_PROJECT: json, LAYERTEXT_ENGINE: REPO },
@@ -241,11 +241,15 @@ test('★ 端到端：干净产物给出学生版，落在「学生版」这个�
     'utf-8',
   );
 
-  const r = spawnSync(process.execPath, [join(REPO, 'tools', 'af_pipeline', 'LayerText_AF学生版.mjs'), '--tier', 'A', '--chapters', '1', '--title', 'Animal Farm · Chapter One'], {
-    cwd: REPO,
-    encoding: 'utf-8',
-    env: { ...process.env, LAYERTEXT_PROJECT: json, LAYERTEXT_ENGINE: REPO },
-  });
+  const r = spawnSync(
+    process.execPath,
+    [join(REPO, 'tools', 'af_pipeline', 'LayerText_AF学生版.mjs'), '--tier', 'A', '--chapters', '1', '--title', 'Animal Farm · Chapter One', '--teacher', 'wayne'],
+    {
+      cwd: REPO,
+      encoding: 'utf-8',
+      env: { ...process.env, LAYERTEXT_PROJECT: json, LAYERTEXT_ENGINE: REPO },
+    },
+  );
   assert.equal(r.status, 0, `${r.stdout ?? ''}${r.stderr ?? ''}`);
   const dst = w('产物', '第一章', '学生版_A层85_2026-01-01.md');
   assert.equal(existsSync(dst), true, '学生版要落在这个**独立**的产物名下');
@@ -298,7 +302,7 @@ test('★ 学生版登记进清单、进得了发布包（否则"发布学生版
   );
   const env = { ...process.env, LAYERTEXT_PROJECT: json, LAYERTEXT_ENGINE: REPO };
   const run = (script: string, args: string[]): { status: number | null; out: string } => {
-    const r = spawnSync(process.execPath, [join(REPO, 'tools', 'af_pipeline', script), ...args], { cwd: REPO, encoding: 'utf-8', env });
+    const r = spawnSync(process.execPath, [join(REPO, 'tools', 'af_pipeline', script), ...args, '--teacher', 'wayne'], { cwd: REPO, encoding: 'utf-8', env });
     return { status: r.status, out: `${r.stdout ?? ''}${r.stderr ?? ''}` };
   };
 

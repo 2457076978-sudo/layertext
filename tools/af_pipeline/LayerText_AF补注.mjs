@@ -25,9 +25,9 @@
  *   补到线即停（达不到覆盖率目标时如实报"受密度限"，交教师取舍）。
  */
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
-import { execSync } from 'node:child_process';
 
 const SHARED = await import('./LayerText_AF词表与词典.mjs');
+import { keychainGet } from './keychain.mjs';
 const { distOf } = SHARED;
 const { loadProject, loadLexicon, loadDict, appendDict, loadKbGloss } = SHARED;
 const P = loadProject();
@@ -52,24 +52,27 @@ const { makeResolver } = await import(`${distOf(REPO)}/src/core/manifest.js`);
  * 身份也走共享的那一个入口：两位教师并发时不再互相读到对方的 runId。 */
 /* 身份从命令行取。**刻意不复用各脚本自己的参数助手**：它们的定义位置各不相同
  * （有的还是 `args.includes` 风格），在这一段引用会在定义之前求值。 */
-const argRun = (n, d) => { const i = process.argv.indexOf(n); return i >= 0 ? process.argv[i + 1] : d; };
+const argRun = (n, d) => {
+  const i = process.argv.indexOf(n);
+  return i >= 0 ? process.argv[i + 1] : d;
+};
 const TEACHER = argRun('--teacher', process.env.LAYERTEXT_TEACHER ?? process.env.USER ?? 'unknown');
-const RUN = await SHARED.readRunIdentity(
-  { out: OUT_BASE, work: P.调适工作区 },
-  { teacher: TEACHER, tier: TAGS.A },
-  { runId: argRun('--run', undefined) },
-);
+const RUN = await SHARED.readRunIdentity({ out: OUT_BASE, work: P.调适工作区 }, { teacher: TEACHER, tier: TAGS.A }, { runId: argRun('--run', undefined) });
 if (RUN.warning) console.warn(`\n⚠ ${RUN.warning}`);
 /** 按层级标签取解析器（多层脚本与单层脚本共用同一种写法） */
 const RR = (tag) => makeResolver(RUN.layout, { out: OUT_BASE, work: P.调适工作区 }, { runId: RUN.runId, tier: tag, date: DATE });
 const argv = process.argv.slice(2);
-const arg = (n, d) => { const i = argv.indexOf(n); return i >= 0 ? argv[i + 1] : d; };
+const arg = (n, d) => {
+  const i = argv.indexOf(n);
+  return i >= 0 ? argv[i + 1] : d;
+};
 const has = (n) => argv.includes(n);
 
-const tiers = (arg('--tier', 'A,M,B')).split(',').map((s) => s.trim().toUpperCase()).filter(Boolean);
-const chapters = arg('--chapters', '')
-  ? arg('--chapters').split(',').map(Number)
-  : [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+const tiers = arg('--tier', 'A,M,B')
+  .split(',')
+  .map((s) => s.trim().toUpperCase())
+  .filter(Boolean);
+const chapters = arg('--chapters', '') ? arg('--chapters').split(',').map(Number) : [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 const DRY = has('--dry');
 /** 候补缓冲：多取这么多个候选词，用来顶替“注不进去”的词 */
 const SKIP_BUFFER = 40;
@@ -98,12 +101,12 @@ const wc = (t) => (t.match(/[A-Za-z][A-Za-z'-]*/g) ?? []).length;
  * 已切 ChatECNU 不一致（09-12 换源时漏了它）。本批不动供应商（换源是行为变更，另批处理），
  * 但调用已入台账：谁在用哪家、花多少，_运行/token台账.jsonl 里看得见。 */
 const CFG = JSON.parse(readFileSync(`${process.env.HOME}/.layertext.json`, 'utf-8'));
-const KEY = execSync('security find-generic-password -s layertext.apikey -w').toString().trim();
+const KEY = () => keychainGet('layertext.apikey'); /* 惰性：Linux/CI 无 security 命令，导入期不查钥匙串 */
 const { openLedger } = await import('./LayerText_AF调用台账.mjs');
 const LEDGER = await openLedger(P, '补注');
 
 async function callChat(messages, maxTokens = 2500) {
-  const r = await LEDGER.call(messages, { baseUrl: CFG.baseUrl, key: KEY, model: MODEL, maxTokens });
+  const r = await LEDGER.call(messages, { baseUrl: CFG.baseUrl, key: KEY(), model: MODEL, maxTokens });
   return r.content ?? '';
 }
 
@@ -116,9 +119,7 @@ async function askGlosses(words) {
       [
         {
           role: 'system',
-          content:
-            '你给初中英语教材配生词注释。只输出一个 JSON 对象 {词: 释义}，' +
-            '释义 2-6 个汉字，初中生能懂，不要拼音、不要词性标注、不要其他文字。',
+          content: '你给初中英语教材配生词注释。只输出一个 JSON 对象 {词: 释义}，' + '释义 2-6 个汉字，初中生能懂，不要拼音、不要词性标注、不要其他文字。',
         },
         { role: 'user', content: `给这些词配释义：${chunk.join(', ')}` },
       ],
@@ -221,14 +222,22 @@ for (const tk of tiers) {
 
       const after = runQc(md, LEX, { tier: tk, fileName: path.split('/').pop() });
       results.push({
-        tk, ch, before, after, words,
-        picked: picked.length, fromDict: fromDict.size, asked: asked.size, added,
-        budget, capped: needForTarget > budget,
+        tk,
+        ch,
+        before,
+        after,
+        words,
+        picked: picked.length,
+        fromDict: fromDict.size,
+        asked: asked.size,
+        added,
+        budget,
+        capped: needForTarget > budget,
       });
       console.log(
         `${tk} ${ch}  覆盖率 ${(before.annotationCoverage * 100).toFixed(0)}% → ${(after.annotationCoverage * 100).toFixed(0)}%` +
-        `（${after.annotated}/${after.annotatable}）  本次注 ${added}` +
-        `（词典 ${fromDict.size} + 模型 ${asked.size}）${DRY ? '  [--dry]' : ''}`,
+          `（${after.annotated}/${after.annotatable}）  本次注 ${added}` +
+          `（词典 ${fromDict.size} + 模型 ${asked.size}）${DRY ? '  [--dry]' : ''}`,
       );
     } catch (e) {
       failures.push({ tk, ch, msg: e instanceof Error ? e.message : String(e) });
@@ -242,8 +251,8 @@ console.log('|---|---|---|---|---|---|---|---|---|---|');
 for (const r of results) {
   console.log(
     `| ${r.tk} | ${r.ch} | ${r.after.annotatable} | ${r.before.annotated} | ${r.after.annotated} | ` +
-    `${(r.before.annotationCoverage * 100).toFixed(0)}% → ${(r.after.annotationCoverage * 100).toFixed(0)}% | ` +
-    `${r.added} | ${r.fromDict} | ${r.asked} | ${r.capped ? '是' : ''} |`,
+      `${(r.before.annotationCoverage * 100).toFixed(0)}% → ${(r.after.annotationCoverage * 100).toFixed(0)}% | ` +
+      `${r.added} | ${r.fromDict} | ${r.asked} | ${r.capped ? '是' : ''} |`,
   );
 }
 

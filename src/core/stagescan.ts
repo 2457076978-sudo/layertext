@@ -20,7 +20,7 @@
 import { Stage } from './stagepatch.js';
 import { knownWordHit, introducedHardWords, fidelityCountsOf, SENT_LEN_CHECK } from './adaptcheck.js';
 import { sentenceRisks } from './risks.js';
-import { lostSignals, stripMarkers, segmentSentences } from './segmentgate.js';
+import { lostSignals, stripMarkers, segmentSentences, stripDirectQuotes, wordCount } from './segmentgate.js';
 
 export interface ScanSeg {
   /** 段号（形如 P07） */
@@ -76,12 +76,23 @@ export function scanFor(stage: Stage, seg: ScanSeg, ctx: ScanCtx): string[] {
     case 'syntax': {
       const maxLen = SENT_LEN_CHECK[ctx.tier] ?? SENT_LEN_CHECK.M;
       const kinds = new Set<string>();
+      /* 超长句**点名给原文**（2026-09-12 全书重制实跑根因）：只报类别标签时模型在
+       * 整段里盲找，叙述密集章往往漏拆一两句 → 整段被 SENT-01 否决（ch2-4 A 层
+       * 自动完成 5/22、2/20、2/16）。点名后模型逐句对着拆，其余句子保持不动。
+       * 引语内长句不点名（门禁同口径豁免：句法指令本就禁止拆直接引语）——
+       * 判据=该句在去掉引语跨度的叙述文本里仍完整出现。 */
+      const narration = stripDirectQuotes(seg.draft);
+      const overlong: string[] = [];
       for (const s of segmentSentences(seg.draft)) {
         const r = sentenceRisks(s, maxLen);
-        if (r.overlong) kinds.add(`超长句（>${maxLen} 词）`);
+        if (r.overlong && narration.includes(s.trim())) overlong.push(s);
         if (r.passive) kinds.add('被动语态');
         if (r.relcl) kinds.add('定语从句');
         if (r.pastperf) kinds.add('过去完成');
+      }
+      if (overlong.length) {
+        const shown = overlong.slice(0, 4).map((s) => `「${s.length > 110 ? `${s.slice(0, 110)}…` : s}」（${wordCount(s)} 词）`);
+        kinds.add(`超长句（>${maxLen} 词）必须逐句拆到 ≤${maxLen} 词：${shown.join('；')}${overlong.length > 4 ? `；等共 ${overlong.length} 句` : ''}`);
       }
       return [...kinds];
     }
@@ -105,9 +116,9 @@ export function scanFor(stage: Stage, seg: ScanSeg, ctx: ScanCtx): string[] {
       return issues;
     }
 
-/** 加注工序的**必注清单**（配额口径唯一落点）：OOV 去已注账本，教师知识库必注词优先，
- *  按文中出现序补足到层配额。扫描（写进 prompt）与门禁（ANNO-01 应注集）都从这里取，
- *  两处清单天然一致。 */
+    /** 加注工序的**必注清单**（配额口径唯一落点）：OOV 去已注账本，教师知识库必注词优先，
+     *  按文中出现序补足到层配额。扫描（写进 prompt）与门禁（ANNO-01 应注集）都从这里取，
+     *  两处清单天然一致。 */
     case 'annotation': {
       const { need, extra } = annotationTargets(seg.draft, ctx);
       const lines: string[] = [];
@@ -130,7 +141,7 @@ export function annotationTargets(draft: string, ctx: ScanCtx): AnnotationPlan {
   const pending = oovOfSeg(draft, ctx).filter((w) => !ctx.glossary.has(w));
   const cap = ctx.annoCap ?? Infinity;
   const must = ctx.mustAnnotate ?? new Set<string>();
-  const ordered = [...pending].sort((a, b) => (Number(must.has(b)) - Number(must.has(a))) || pending.indexOf(a) - pending.indexOf(b));
+  const ordered = [...pending].sort((a, b) => Number(must.has(b)) - Number(must.has(a)) || pending.indexOf(a) - pending.indexOf(b));
   return { need: ordered.slice(0, cap), extra: ordered.slice(cap) };
 }
 

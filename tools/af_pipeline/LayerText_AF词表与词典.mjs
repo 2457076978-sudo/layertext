@@ -47,6 +47,7 @@ import { fileURLToPath } from 'node:url';
 /** 引擎目录：本文件在 <引擎>/tools/af_pipeline/ 下，由自身位置推出，不写死绝对路径。
  *  可用环境变量 LAYERTEXT_ENGINE 或项目配置的 `引擎目录` 覆盖。 */
 const HERE = dirname(fileURLToPath(import.meta.url));
+
 export let LTR = process.env.LAYERTEXT_ENGINE ?? join(HERE, '..', '..');
 
 /** 引擎的**编译产物**目录。默认 `<引擎>/dist`。

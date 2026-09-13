@@ -24,8 +24,7 @@ const segs = (): StagePipeSeg[] => [
 ];
 
 /** 把段文本规范成带正确段号开头 */
-const withMarker = (id: string, text: string): string =>
-  text.startsWith(`[${id}]`) ? text : `[${id}] ${text.replace(/^\[P\d+\]\s*/, '')}`;
+const withMarker = (id: string, text: string): string => (text.startsWith(`[${id}]`) ? text : `[${id}] ${text.replace(/^\[P\d+\]\s*/, '')}`);
 
 function optsWith(callStage: StagePipeOpts['callStage'], over: Partial<StagePipeOpts> = {}): StagePipeOpts {
   return {
@@ -44,10 +43,15 @@ function optsWith(callStage: StagePipeOpts['callStage'], over: Partial<StagePipe
 
 test('全零调用：所有段干净时五道工序都跳过，callStage 一次都不被调', async () => {
   let calls = 0;
-  const r = await runStagePipeline(optsWith(async () => {
-    calls++;
-    return '{"patches":[]}';
-  }, { segs: [{ id: 'P01', source: '[P01] They worked hard.', draft: '[P01] They worked hard.' }] }));
+  const r = await runStagePipeline(
+    optsWith(
+      async () => {
+        calls++;
+        return '{"patches":[]}';
+      },
+      { segs: [{ id: 'P01', source: '[P01] They worked hard.', draft: '[P01] They worked hard.' }] },
+    ),
+  );
   assert.equal(calls, 0, '无风险段零调用');
   assert.equal(r.finalVersion, 0);
   assert.ok(r.checkpoints.every((c) => !c.called));
@@ -56,23 +60,29 @@ test('全零调用：所有段干净时五道工序都跳过，callStage 一次�
 
 test('工序化主路径：词汇粗筛只请求命中段；patch 合并且未提及段原样', async () => {
   const requests: StagePatchRequest[] = [];
-  const r = await runStagePipeline(optsWith(async (req) => {
-    requests.push(req);
-    if (req.stage === 'vocab-primary') {
-      return JSON.stringify({
-        patches: [
-          { id: 'P02', status: 'changed', text: '[P02] The animals ruled the farm unfairly and made up stories.' },
-          { id: 'P01', status: 'unchanged' },
-        ],
-      });
-    }
-    /* 其余工序本地扫描已无命中（干净稿）：返回空不调用 */
-    return '{"patches":[]}';
-  }));
+  const r = await runStagePipeline(
+    optsWith(async (req) => {
+      requests.push(req);
+      if (req.stage === 'vocab-primary') {
+        return JSON.stringify({
+          patches: [
+            { id: 'P02', status: 'changed', text: '[P02] The animals ruled the farm unfairly and made up stories.' },
+            { id: 'P01', status: 'unchanged' },
+          ],
+        });
+      }
+      /* 其余工序本地扫描已无命中（干净稿）：返回空不调用 */
+      return '{"patches":[]}';
+    }),
+  );
 
   const vocabReq = requests.find((q) => q.stage === 'vocab-primary');
   assert.ok(vocabReq, '词汇粗筛必须被调用（P02 有 OOV）');
-  assert.deepEqual(vocabReq!.segments.map((s) => s.id), ['P02'], '只请求命中段');
+  assert.deepEqual(
+    vocabReq!.segments.map((s) => s.id),
+    ['P02'],
+    '只请求命中段',
+  );
   assert.ok(vocabReq!.segments[0]!.issues.length > 0, 'issues 带本地扫描结果');
 
   assert.equal(r.text.P02.includes('tyrannised'), false, '难词已换');
@@ -83,19 +93,24 @@ test('工序化主路径：词汇粗筛只请求命中段；patch 合并且未�
 
 test('隔离纪律：门禁拒绝且重试用尽 → quarantined，后续工序跳过该段', async () => {
   let syntaxCalls = 0;
-  const r = await runStagePipeline(optsWith(async (req) => {
-    if (req.stage === 'vocab-primary') {
-      /* 换词但塞一个超长句：句法工序点会被 SENT-01 拒 */
-      const long = withMarker('P02', 'word '.repeat(24).trim() + ' ruled unfairly.');
-      return JSON.stringify({ patches: [{ id: 'P02', status: 'changed', text: long }] });
-    }
-    if (req.stage === 'syntax') {
-      syntaxCalls++;
-      /* 两次尝试都拒不改正（仍超长） */
-      return JSON.stringify({ patches: [{ id: 'P02', status: 'changed', text: withMarker('P02', 'word '.repeat(24).trim() + ' ruled.') }] });
-    }
-    return '{"patches":[]}';
-  }, { maxStageTries: 2 }));
+  const r = await runStagePipeline(
+    optsWith(
+      async (req) => {
+        if (req.stage === 'vocab-primary') {
+          /* 换词但塞一个超长句：句法工序点会被 SENT-01 拒 */
+          const long = withMarker('P02', 'word '.repeat(24).trim() + ' ruled unfairly.');
+          return JSON.stringify({ patches: [{ id: 'P02', status: 'changed', text: long }] });
+        }
+        if (req.stage === 'syntax') {
+          syntaxCalls++;
+          /* 两次尝试都拒不改正（仍超长） */
+          return JSON.stringify({ patches: [{ id: 'P02', status: 'changed', text: withMarker('P02', 'word '.repeat(24).trim() + ' ruled.') }] });
+        }
+        return '{"patches":[]}';
+      },
+      { maxStageTries: 2 },
+    ),
+  );
 
   assert.equal(r.quarantined.filter((q) => q.stage === 'syntax').length, 1, '两次尝试都被拒 → 隔离');
   assert.equal(syntaxCalls, 2, '单段最多两次尝试');
@@ -106,10 +121,12 @@ test('隔离纪律：门禁拒绝且重试用尽 → quarantined，后续工序�
 });
 
 test('解析失败：整道工序不落地，段保持上一版，problems 留痕', async () => {
-  const r = await runStagePipeline(optsWith(async (req) => {
-    if (req.stage === 'vocab-primary') return '这不是 JSON，抱歉。';
-    return '{"patches":[]}';
-  }));
+  const r = await runStagePipeline(
+    optsWith(async (req) => {
+      if (req.stage === 'vocab-primary') return '这不是 JSON，抱歉。';
+      return '{"patches":[]}';
+    }),
+  );
   const cp = r.checkpoints.find((c) => c.stage === 'vocab-primary')!;
   assert.equal(cp.called, false, '无 commit');
   assert.ok(cp.problems.length > 0, '失败原因留痕');
@@ -117,16 +134,22 @@ test('解析失败：整道工序不落地，段保持上一版，problems 留�
 });
 
 test('词汇复筛接住上一道新引入词：prevStageText 生效', async () => {
-  const r = await runStagePipeline(optsWith(async (req) => {
-    if (req.stage === 'vocab-primary') {
-      return JSON.stringify({ patches: [{ id: 'P02', status: 'changed', text: '[P02] The animals fabricated tales on the farm.' }] });
-    }
-    if (req.stage === 'vocab-secondary') {
-      assert.deepEqual(req.segments.map((s) => s.id), ['P02'], '新引入词的段被复筛点名');
-      return JSON.stringify({ patches: [{ id: 'P02', status: 'changed', text: '[P02] The animals made up tales on the farm.' }] });
-    }
-    return '{"patches":[]}';
-  }));
+  const r = await runStagePipeline(
+    optsWith(async (req) => {
+      if (req.stage === 'vocab-primary') {
+        return JSON.stringify({ patches: [{ id: 'P02', status: 'changed', text: '[P02] The animals fabricated tales on the farm.' }] });
+      }
+      if (req.stage === 'vocab-secondary') {
+        assert.deepEqual(
+          req.segments.map((s) => s.id),
+          ['P02'],
+          '新引入词的段被复筛点名',
+        );
+        return JSON.stringify({ patches: [{ id: 'P02', status: 'changed', text: '[P02] The animals made up tales on the farm.' }] });
+      }
+      return '{"patches":[]}';
+    }),
+  );
   assert.ok(r.checkpoints.find((c) => c.stage === 'vocab-secondary')!.called, '复筛被调用');
   assert.ok(!r.text.P02.includes('fabricated'), '新引入词被换掉');
 });
@@ -138,15 +161,23 @@ test('原文永远保留：编排不改入参 segs', async () => {
 });
 
 test('ChapterRecap：本地构建（含加注对、隔离段、逐工序结果）且 schema 校验通过', async () => {
-  const r = await runStagePipeline(optsWith(async (req) => {
-    if (req.stage === 'vocab-primary') {
-      return JSON.stringify({ patches: [{ id: 'P02', status: 'changed', text: '[P02] The animals ruled the farm and made up tales（故事）.' }] });
-    }
-    return '{"patches":[]}';
-  }));
-  const recap = buildChapterRecap(optsWith(async () => '{"patches":[]}'), r);
+  const r = await runStagePipeline(
+    optsWith(async (req) => {
+      if (req.stage === 'vocab-primary') {
+        return JSON.stringify({ patches: [{ id: 'P02', status: 'changed', text: '[P02] The animals ruled the farm and made up tales（故事）.' }] });
+      }
+      return '{"patches":[]}';
+    }),
+  );
+  const recap = buildChapterRecap(
+    optsWith(async () => '{"patches":[]}'),
+    r,
+  );
   assert.equal(recap.chapter, '第一章');
-  assert.ok(recap.acceptedTerms.some((t) => t.word === 'tales' && t.gloss === '故事'), '终稿加注对进 recap');
+  assert.ok(
+    recap.acceptedTerms.some((t) => t.word === 'tales' && t.gloss === '故事'),
+    '终稿加注对进 recap',
+  );
   assert.equal(recap.stageResults.length, 5);
   const verdict = isChapterRecap(recap);
   assert.deepEqual([verdict.ok, verdict.problems], [true, []], '本地构建的 recap 必然过 schema');
@@ -156,30 +187,34 @@ test('ChapterRecap：本地构建（含加注对、隔离段、逐工序结果�
   assert.ok(bad.problems.length >= 2, 'tier 与 stageResults 都被点名');
 });
 
-
 /* ────────────── 2026-09-12 Wayne 审查整改：配额返工 / 缺口报告 / 隔离分类 ────────────── */
 
 test('配额纪律：超额难词触发词汇返工，返工不掉的进未支持缺口（不许静默不注）', async () => {
   const requests: StagePatchRequest[] = [];
-  const r = await runStagePipeline(optsWith(async (req) => {
-    requests.push(req);
-    if (req.stage === 'vocab-primary' && req.segments[0]!.issues[0]!.includes('超出本层注释配额')) {
-      /* 返工：只换掉一个（tyrannised），grudge 换不掉 */
-      return JSON.stringify({ patches: [{ id: req.segments[0]!.id, status: 'changed', text: '[P02] The animals ruled the farm unfairly, grudge remained.' }] });
-    }
-    return '{"patches":[]}';
-  }, {
-    segs: [{ id: 'P02', source: '[P02] The animals tyrannised the farm and kept a grudge.', draft: '[P02] The animals tyrannised the farm and kept a grudge.' }],
-    knownWords: KNOWN, // tyrannised/grudge 均词表外
-    annoCapPerSeg: 1,
-    maxStageTries: 1,
-    annotate: async (draft, targets) => {
-      /* 确定性加注器：只注 need（配额内） */
-      let md = draft;
-      for (const w of targets.need) md = md.replace(new RegExp(`\\b${w}\\b`, 'i'), (m) => `${m}（测试）`);
-      return md;
-    },
-  }));
+  const r = await runStagePipeline(
+    optsWith(
+      async (req) => {
+        requests.push(req);
+        if (req.stage === 'vocab-primary' && req.segments[0]!.issues[0]!.includes('超出本层注释配额')) {
+          /* 返工：只换掉一个（tyrannised），grudge 换不掉 */
+          return JSON.stringify({ patches: [{ id: req.segments[0]!.id, status: 'changed', text: '[P02] The animals ruled the farm unfairly, grudge remained.' }] });
+        }
+        return '{"patches":[]}';
+      },
+      {
+        segs: [{ id: 'P02', source: '[P02] The animals tyrannised the farm and kept a grudge.', draft: '[P02] The animals tyrannised the farm and kept a grudge.' }],
+        knownWords: KNOWN, // tyrannised/grudge 均词表外
+        annoCapPerSeg: 1,
+        maxStageTries: 1,
+        annotate: async (draft, targets) => {
+          /* 确定性加注器：只注 need（配额内） */
+          let md = draft;
+          for (const w of targets.need) md = md.replace(new RegExp(`\\b${w}\\b`, 'i'), (m) => `${m}（测试）`);
+          return md;
+        },
+      },
+    ),
+  );
 
   const rework = requests.find((q) => q.stage === 'vocab-primary' && q.segments[0]!.issues.some((i) => i.includes('超出本层注释配额')));
   assert.ok(rework, '超额词必须触发词汇返工（配额不授权静默放弃）');
@@ -187,22 +222,30 @@ test('配额纪律：超额难词触发词汇返工，返工不掉的进未支�
   assert.ok(r.unsupportedGaps.length === 1 && r.unsupportedGaps[0]!.words.includes('grudge'), '返工不掉的词进未支持缺口');
   assert.ok(!r.unsupportedGaps[0]!.words.includes('tyrannised'), '被返工换掉的词不算缺口');
   const cp = r.checkpoints.find((c) => c.stage === 'annotation')!;
-  assert.ok(cp.problems.some((x) => x.includes('未支持难词')), '缺口写进检查点留痕');
+  assert.ok(
+    cp.problems.some((x) => x.includes('未支持难词')),
+    '缺口写进检查点留痕',
+  );
 });
 
 test('负担报告四项：仍保留/已支持/未支持/最密窗口（密度下降不能靠少注冒充变容易）', async () => {
   /* 短文本不足成窗（<50 词无最密窗口）：补足词数让窗口报告有值 */
   const filler = 'They came home and worked hard all day on the farm with the animals big and small. '.repeat(3);
-  const r = await runStagePipeline(optsWith(async () => '{"patches":[]}', {
-    segs: [{ id: 'P01', source: `[P01] ${filler}They kept a grudge.`, draft: `[P01] ${filler}They kept a grudge.` }],
-    knownWords: new Set([...KNOWN]),
-    annotate: async (draft, targets) => {
-      let md = draft;
-      for (const w of targets.need) md = md.replace(new RegExp(`\\b${w}\\b`, 'i'), (m) => `${m}（怨恨）`);
-      return md;
-    },
-  }));
-  const recap = buildChapterRecap(optsWith(async () => '{"patches":[]}'), r);
+  const r = await runStagePipeline(
+    optsWith(async () => '{"patches":[]}', {
+      segs: [{ id: 'P01', source: `[P01] ${filler}They kept a grudge.`, draft: `[P01] ${filler}They kept a grudge.` }],
+      knownWords: new Set([...KNOWN]),
+      annotate: async (draft, targets) => {
+        let md = draft;
+        for (const w of targets.need) md = md.replace(new RegExp(`\\b${w}\\b`, 'i'), (m) => `${m}（怨恨）`);
+        return md;
+      },
+    }),
+  );
+  const recap = buildChapterRecap(
+    optsWith(async () => '{"patches":[]}'),
+    r,
+  );
   assert.ok(recap.burdenReport, '负担报告必须存在');
   assert.ok(recap.burdenReport!.keptHardWords.includes('grudge'), '仍保留难词点名（不管注没注）');
   assert.ok(recap.burdenReport!.supportedWords.includes('grudge'), '注了的进已支持');
@@ -216,4 +259,32 @@ test('隔离分类：事实疑点/结构损坏/难度残留三列，不混成一
   assert.equal(classifyQuarantine({ ruleIds: ['WHOLE-CHAPTER'] }), '结构损坏');
   assert.equal(classifyQuarantine({ ruleIds: ['SENT-01', 'LEN-01'] }), '难度残留');
   assert.equal(classifyQuarantine({ ruleIds: ['ANNO-01'] }), '难度残留');
+});
+
+/* ────────────────── 2026-09-12 全书重制根修：声明-实效一致性守卫 ────────────────── */
+
+test('声明-实效守卫：声称 changed 却原样返回 → 按被拒重试，仍原样才隔离（不按声明记账）', async () => {
+  const requests: StagePatchRequest[] = [];
+  const original = '[P02] The animals tyrannised the farm and fabricated stories about the harvest.';
+  const r = await runStagePipeline(
+    optsWith(
+      async (req) => {
+        requests.push(req);
+        /* 两轮都把原文原样返回却标 changed——ecnu-max 实测形态（reason 谎称"多为已学词"） */
+        return JSON.stringify({ patches: [{ id: 'P02', status: 'changed', text: original }] });
+      },
+      { maxStageTries: 2 },
+    ),
+  );
+
+  const vocabReqs = requests.filter((q) => q.stage === 'vocab-primary');
+  assert.equal(vocabReqs.length, 2, '被拒后带原因重试一次');
+  assert.ok(
+    vocabReqs[1]!.segments.some((s) => s.issues.some((x) => x.includes('原样返回'))),
+    '重试请求把拒绝原因带进 issues',
+  );
+  const q = r.quarantined.find((x) => x.id === 'P02');
+  assert.ok(q, '重试用尽后隔离');
+  assert.ok(q!.reason.includes('原样返回'), '隔离原因如实：声明 changed 但未做任何修改');
+  assert.equal(r.text.P02, original, '原文保留，没有被伪造的"改动"污染');
 });

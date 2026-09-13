@@ -13,17 +13,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { chineseOutsideAnnotations, dedupeAnnotations, duplicateRate, makeCovers, parseAnnotations } from '../src/core/annot.js';
-import {
-  GATE_RULES,
-  gateSegment,
-  normalizeSegmentBody,
-  stripMarkers,
-  wordCount,
-  type SegmentGateInput,
-} from '../src/core/segmentgate.js';
+import { GATE_RULES, gateSegment, normalizeSegmentBody, stripMarkers, wordCount, type SegmentGateInput } from '../src/core/segmentgate.js';
 
-const gate = (over: Partial<SegmentGateInput>) =>
-  gateSegment({ text: '[P01] The boy ran.', source: '[P01] The boy ran.', target: 5, maxLen: 20, oov: [], ...over });
+const gate = (over: Partial<SegmentGateInput>) => gateSegment({ text: '[P01] The boy ran.', source: '[P01] The boy ran.', target: 5, maxLen: 20, oov: [], ...over });
 
 /* ────────────────── 注释 token 解析（审查报告第③条） ────────────────── */
 
@@ -31,7 +23,10 @@ test('注释解析：保留原词与释义（报告要求"保存原词"）', () 
   const idx = parseAnnotations('[P01] The Boxer（拳击手） ran to the windmill（风车）.');
   assert.deepEqual(
     idx.list.map((a) => [a.word, a.zh]),
-    [['Boxer', '拳击手'], ['windmill', '风车']],
+    [
+      ['Boxer', '拳击手'],
+      ['windmill', '风车'],
+    ],
   );
   assert.equal(idx.list[0].index > 0, true, '下标应是原词在正文中的位置');
 });
@@ -78,7 +73,7 @@ test('重复注释：同词注第二次起要算多余（正文注释唯一性�
 });
 
 test('注释外的中文是格式红线（注释内的中文不算）', () => {
-  assert.deepEqual(chineseOutsideAnnotations('[P01] He ran fast（快地）.') , []);
+  assert.deepEqual(chineseOutsideAnnotations('[P01] He ran fast（快地）.'), []);
   assert.deepEqual(chineseOutsideAnnotations('[P01] 他 ran fast.'), ['他']);
 });
 
@@ -154,7 +149,10 @@ test('P0：永远超长的响应 → needs-review（篇幅 + 句长双阻塞）'
 test('P0：漏注的超纲词是 blocker（不可完成）', () => {
   const v = gate({ text: '[P01] The boy ran.', oov: ['windmill'], target: 4 });
   assert.equal(v.status, 'needs-review');
-  assert.deepEqual(v.blockers.map((p) => p.ruleId), ['ANNO-01']);
+  assert.deepEqual(
+    v.blockers.map((p) => p.ruleId),
+    ['ANNO-01'],
+  );
   assert.deepEqual(v.annotation.missing, ['windmill']);
   assert.equal(v.annotation.coverage, 0);
 });
@@ -169,7 +167,10 @@ test('P0：注了就通过（含词形归一命中）', () => {
 test('P0：正文混入中文是 blocker', () => {
   const v = gate({ text: '[P01] The boy 跑了 fast.', target: 4 });
   assert.equal(v.status, 'needs-review');
-  assert.deepEqual(v.blockers.map((p) => p.ruleId), ['ZH-01']);
+  assert.deepEqual(
+    v.blockers.map((p) => p.ruleId),
+    ['ZH-01'],
+  );
 });
 
 test('事实类只 warn 不阻塞：数字/专名丢失进风险队列，但仍算通过', () => {
@@ -199,7 +200,10 @@ test('重复注释与释义冲突是 warn，不是 blocker', () => {
 
 test('规则表：四条 blocker 恰好是篇幅/句长/漏注/中文，其余都是 warn', () => {
   const all = Object.values(GATE_RULES);
-  const blockers = all.filter((r) => r.severity === 'blocker').map((r) => r.id).sort();
+  const blockers = all
+    .filter((r) => r.severity === 'blocker')
+    .map((r) => r.id)
+    .sort();
   assert.deepEqual(blockers, ['ANNO-01', 'LEN-01', 'SENT-01', 'ZH-01']);
   // 规则号前缀必须与风险类别对得上（风险队列按类别渲染时依赖这一点）
   assert.deepEqual(
@@ -240,10 +244,31 @@ test('段标记不参与事实信号：不会报「原文的 03 在改写里找�
     maxLen: 20,
     oov: [],
   });
-  assert.deepEqual(v.warns.map((p) => p.ruleId), [], '同一段去的段标记后不该有任何假警报');
+  assert.deepEqual(
+    v.warns.map((p) => p.ruleId),
+    [],
+    '同一段去的段标记后不该有任何假警报',
+  );
   assert.deepEqual(stripMarkers('[P03] The animals.'), '  The animals.');
 });
 
 test('wordCount：[P01] 标记里的 P 也计入（与管线各处口径一致）', () => {
   assert.equal(wordCount('[P01] The boy ran.'), 4);
+});
+
+/* ────────────────── 2026-09-12 全书重制根修：SENT-01 引语豁免 ────────────────── */
+
+test('SENT-01 引语豁免：直接引语内的长句不拦，叙述长句照拦（门禁与句法指令同一口径）', () => {
+  const longQuote = 'Now, comrades, what is the nature of this life of ours, we are born, we are given just so much food as will keep the breath in our bodies.';
+  const quoted = `[P05] Major cleared his throat. He said: "${longQuote}" Then he stopped.`;
+  const ok = gateSegment({ text: quoted, source: quoted, target: 0, maxLen: 17, oov: [], exemptQuoteLen: true });
+  assert.equal(ok.overLen, 0, '生成闸门：长句在直接引语内不计入（句法指令本就禁止拆引语）');
+
+  const bare = `[P05] Major cleared his throat. ${longQuote} Then he stopped.`;
+  const bad = gateSegment({ text: bare, source: bare, target: 0, maxLen: 17, oov: [], exemptQuoteLen: true });
+  assert.ok(bad.overLen >= 1, '同一长句在叙述里：闸门照拦');
+
+  /* 报表/风险队列不传 exemptQuoteLen：引语长句照常计数（学生读到的难度是真实的） */
+  const report = gateSegment({ text: quoted, source: quoted, target: 0, maxLen: 17, oov: [] });
+  assert.ok(report.overLen >= 1, '报表口径不豁免：引语长句照常计入超长句');
 });

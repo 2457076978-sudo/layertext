@@ -49,7 +49,6 @@
  */
 import { createHash } from 'node:crypto';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { execSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 
 const SHARED = await import('./LayerText_AF词表与词典.mjs');
@@ -122,7 +121,9 @@ const WINDOW = Number(arg('--window', '30'));
  *  同等质量下「增长历史会话」vs「固定短前缀 + 当前片段」的总输入/输出/费用/
  *  等待——用四格实验跑对照，不用阈值数字下结论。 */
 const CTX_TOKENS = Number(arg('--ctx', '65536')); // deepseek-chat 默认按 64K 有效窗口估
-const CTX_SOFT = 0.4, CTX_WARN = 0.6, CTX_HARD = 0.7;
+const CTX_SOFT = 0.4,
+  CTX_WARN = 0.6,
+  CTX_HARD = 0.7;
 let ctxWarned = false; // 警戒只提醒一次（每轮重置后重置）
 
 /** 最近一次请求的上下文占用检查（prompt_tokens 是"现在对话有多胖"的唯一事实） */
@@ -161,10 +162,11 @@ const CFG = (() => {
     return { baseUrl: 'https://api.deepseek.com' };
   }
 })();
+import { keychainGet } from './keychain.mjs';
 /** API key 惰性读取：--dry、假模型、纯本地路径都不该碰钥匙串 */
 let _key = null;
 const apiKey = () => {
-  if (_key === null) _key = execSync('security find-generic-password -s layertext.apikey -w').toString().trim();
+  if (_key === null) _key = keychainGet('layertext.apikey'); /* 同步：调用方直接拿它当 key 用，不能是 Promise */
   return _key;
 };
 
@@ -305,7 +307,7 @@ const LEXICON_VERSION = (() => {
    * 那份指针并发时可能指向另一位教师的运行，别人的词库版本就是假答案（第七轮 P0-② 同病点）。
    * `readManifest` 的全局兜底读回来的同样校验 runId：对不上就当没有，如实记「未锁定」。 */
   const m = SHARED.readManifest(P, RUN.runId);
-  return m?.runId === RUN.runId ? m.lexicon?.version ?? '未锁定' : '未锁定';
+  return m?.runId === RUN.runId ? (m.lexicon?.version ?? '未锁定') : '未锁定';
 })();
 if (RUN.warning) console.warn(`\n⚠ ${RUN.warning}`);
 const R = makeResolver(RUN.layout, { out: OUT_BASE, work: P.调适工作区 }, { runId: RUN.runId, tier: TAG, date: DATE, suffix: SUFFIX });
@@ -960,14 +962,20 @@ for (const { i } of chSegs) {
   // 章末压缩：固定 JSON schema + 本地校验（v2 方向四：章末摘要不再是自由文本）。
   //  校验不过重试一次，仍不过=降级回 5 行自由文本并 warning——锚要紧，但不许静默。
   try {
-    const askRecap = (retry) => pushMsg(messages, 'user',
-      `本章（${ch}）已处理完。请输出一个 JSON 对象作为章末摘要：{"chapter":"${ch}","addressing":["本章人物如何称呼", …],"methods":["本章用过的简化手法", …],"consistency":["后续章节需保持一致的地方", …]}。每类 1-3 条、每条一句话。${retry ? '上一次不是合法 JSON，这次**只输出 JSON 对象**，不要任何其他文字。' : '只输出 JSON 对象。'}`);
+    const askRecap = (retry) =>
+      pushMsg(
+        messages,
+        'user',
+        `本章（${ch}）已处理完。请输出一个 JSON 对象作为章末摘要：{"chapter":"${ch}","addressing":["本章人物如何称呼", …],"methods":["本章用过的简化手法", …],"consistency":["后续章节需保持一致的地方", …]}。每类 1-3 条、每条一句话。${retry ? '上一次不是合法 JSON，这次**只输出 JSON 对象**，不要任何其他文字。' : '只输出 JSON 对象。'}`,
+      );
     const validRecap = (raw) => {
       try {
         const o = JSON.parse(raw.replace(/^[^{]*/, '').replace(/[^}]*$/, ''));
         if (typeof o.chapter !== 'string' || !Array.isArray(o.addressing) || !Array.isArray(o.methods) || !Array.isArray(o.consistency)) return null;
         return { chapter: o.chapter, addressing: o.addressing.slice(0, 3), methods: o.methods.slice(0, 3), consistency: o.consistency.slice(0, 3) };
-      } catch { return null; }
+      } catch {
+        return null;
+      }
     };
     askRecap(false);
     let r = await callChat(messages, 500);

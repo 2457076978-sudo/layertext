@@ -302,7 +302,19 @@ const OUT_DIR = fileURLToPath(new URL('..', import.meta.url)).replace(/\/$/, '')
 process.env.LAYERTEXT_DIST = OUT_DIR;
 
 const ROOT = mkdtempSync(join(tmpdir(), 'lt-lexiconstore-'));
-after(() => rmSync(ROOT, { recursive: true, force: true }));
+let P_CACHE: TestProject | null = null; /* 声明在 after() 之前：node 20 的 hook 触发时序早于模块尾部求值 */
+after(() => {
+  /* 粘滞指针若被本测试的临时项目占住，删目录前先还回去——不还会把后续本机运行的
+   * 默认项目指向一个已删除的临时路径（"项目配置不存在"就这样漏出去的）。 */
+  const ptr = join(process.env.HOME ?? '.', '.layertext.project');
+  try {
+    if (existsSync(ptr) && readFileSync(ptr, 'utf-8').trim().startsWith(ROOT)) rmSync(ptr, { force: true });
+  } catch {
+    /* 指针清理尽力而为，不挡目录删除 */
+  }
+  P_CACHE = null;
+  rmSync(ROOT, { recursive: true, force: true });
+});
 
 const FILES = {
   vocab: join(ROOT, '词库.csv'),
@@ -384,7 +396,9 @@ interface SharedModule {
 }
 
 const SHARED = (await import(pathToFileURL(join(REPO, 'tools/af_pipeline/LayerText_AF词表与词典.mjs')).href)) as unknown as SharedModule;
-const P = SHARED.loadProject(PROJECT);
+/* 惰性加载：node 20 的测试器时序会让模块顶层的 loadProject 在 after() 删除临时目录
+ * 之后再次触发（node 22 不会）——首次取属性时才真正加载，teardown 之后无人再取。 */
+const P = new Proxy({} as TestProject, { get: (_t, k) => ((P_CACHE ??= SHARED.loadProject(PROJECT)) as unknown as Record<string | symbol, unknown>)[k] });
 
 /** 导入**之前**（legacy 路径）算出来的口径。导入之后要拿它逐词比：
  *  "只做一次导入"不许顺手改掉任何一个词的判定——这里是改造最容易被悄悄破坏的地方。 */

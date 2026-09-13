@@ -13,10 +13,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import type { StagePatchResult } from '../src/core/stagepatch.js';
-import {
-  STAGE_ORDER, STAGE_LABEL, STAGE_BLOCK_RULES,
-  parseStagePatch, markerCount, factGuard, gatePatches, mergePatch,
-} from '../src/core/stagepatch.js';
+import { STAGE_ORDER, STAGE_LABEL, STAGE_BLOCK_RULES, parseStagePatch, markerCount, factGuard, gatePatches, mergePatch } from '../src/core/stagepatch.js';
 
 test('工序顺序固定：加注最后执行', () => {
   assert.deepEqual(STAGE_ORDER, ['vocab-primary', 'syntax', 'vocab-secondary', 'coherence', 'annotation']);
@@ -56,10 +53,7 @@ test('解析：非 JSON / 无 patches / 空 patches 都给出人话诊断而非�
 });
 
 test('解析：未知 id 丢弃并记 problems；重复 id 取第一条', () => {
-  const r = parseStagePatch(
-    '{"patches":[{"id":"P99","status":"changed","text":"x"},{"id":"P01","text":"a"},{"id":"P01","text":"b"}]}',
-    ['P01'],
-  );
+  const r = parseStagePatch('{"patches":[{"id":"P99","status":"changed","text":"x"},{"id":"P01","text":"a"},{"id":"P01","text":"b"}]}', ['P01']);
   assert.equal(r.ok, true);
   assert.equal(r.result?.patches.length, 1, '未知 P99 丢弃、重复 P01 只留一条');
   assert.equal(r.result?.patches[0]?.text, 'a');
@@ -143,4 +137,10 @@ test('markerCount：段标记计数是整章形态检测的尺', () => {
   assert.equal(markerCount('[P01] a'), 1);
   assert.equal(markerCount('[P01] a [P02] b'), 2);
   assert.equal(markerCount('plain text'), 0);
+});
+
+test('篇幅退役：LEN-01 不在任何工序点拦截（两轮调适制拍板——两套尺即缺陷）', () => {
+  assert.ok(!STAGE_BLOCK_RULES.syntax.includes('LEN-01'), '句法点不按段落词数拒绝');
+  assert.ok(!STAGE_BLOCK_RULES.annotation.includes('LEN-01'), '加注点不作篇幅兜底闸');
+  assert.ok(STAGE_BLOCK_RULES.syntax.includes('SENT-01'), '句长（难度把手）照常拦截');
 });

@@ -46,16 +46,101 @@ const stripZh = (s: string): string => s.replace(/（[^）（]*）/gu, ' ');
  * 不规则表是它自己的口径（红线不动），这张小表只服务于"引入对照"，防止把
  * choose 的过去式误报成新词。 */
 const IRREGULAR: Record<string, string> = {
-  chose: 'choose', drank: 'drink', froze: 'freeze', blew: 'blow', grew: 'grow', knew: 'know',
-  threw: 'throw', flew: 'fly', drew: 'draw', fell: 'fall', felt: 'feel', kept: 'keep', slept: 'sleep',
-  left: 'leave', lost: 'lose', built: 'build', sent: 'send', spent: 'spend', lent: 'lend',
-  burnt: 'burn', dreamt: 'dream', learnt: 'learn', sold: 'sell', told: 'tell', won: 'win',
-  beaten: 'beat', blown: 'blow', grown: 'grow', known: 'know', thrown: 'throw', shown: 'show',
-  drawn: 'draw', fallen: 'fall', given: 'give', taken: 'take', eaten: 'eat', broken: 'break',
-  stolen: 'steal', chosen: 'choose', frozen: 'freeze', driven: 'drive', ridden: 'ride', risen: 'rise',
-  gone: 'go', done: 'do', seen: 'see', been: 'be', had: 'have', made: 'make', said: 'say',
-  ran: 'run', came: 'come', began: 'begin', sang: 'sing', swam: 'swim', sat: 'sit', stood: 'stand',
-  understood: 'understand', hid: 'hide', spread: 'spread', shut: 'shut', cut: 'cut', hurt: 'hurt',
+  chose: 'choose',
+  drank: 'drink',
+  froze: 'freeze',
+  blew: 'blow',
+  grew: 'grow',
+  knew: 'know',
+  threw: 'throw',
+  flew: 'fly',
+  drew: 'draw',
+  fell: 'fall',
+  felt: 'feel',
+  kept: 'keep',
+  slept: 'sleep',
+  left: 'leave',
+  lost: 'lose',
+  built: 'build',
+  sent: 'send',
+  spent: 'spend',
+  lent: 'lend',
+  burnt: 'burn',
+  dreamt: 'dream',
+  learnt: 'learn',
+  sold: 'sell',
+  told: 'tell',
+  won: 'win',
+  beaten: 'beat',
+  blown: 'blow',
+  grown: 'grow',
+  known: 'know',
+  thrown: 'throw',
+  shown: 'show',
+  drawn: 'draw',
+  fallen: 'fall',
+  given: 'give',
+  taken: 'take',
+  eaten: 'eat',
+  broken: 'break',
+  stolen: 'steal',
+  chosen: 'choose',
+  frozen: 'freeze',
+  driven: 'drive',
+  ridden: 'ride',
+  risen: 'rise',
+  gone: 'go',
+  done: 'do',
+  seen: 'see',
+  been: 'be',
+  had: 'have',
+  made: 'make',
+  said: 'say',
+  ran: 'run',
+  came: 'come',
+  began: 'begin',
+  sang: 'sing',
+  swam: 'swim',
+  sat: 'sit',
+  stood: 'stand',
+  understood: 'understand',
+  hid: 'hide',
+  spread: 'spread',
+  shut: 'shut',
+  cut: 'cut',
+  hurt: 'hurt',
+  woke: 'wake',
+  woken: 'wake',
+  better: 'good',
+  best: 'good',
+  /* 常用过去式补录（2026-09-12 M 层实跑：forgot 被注「忘记了」暴露原表过稀） */
+  broke: 'break',
+  forgot: 'forget',
+  took: 'take',
+  gave: 'give',
+  saw: 'see',
+  went: 'go',
+  got: 'get',
+  ate: 'eat',
+  wrote: 'write',
+  spoke: 'speak',
+  drove: 'drive',
+  rode: 'ride',
+  rose: 'rise',
+  shook: 'shake',
+  wore: 'wear',
+  beat: 'beat',
+  bit: 'bite',
+  fought: 'fight',
+  thought: 'think',
+  brought: 'bring',
+  bought: 'buy',
+  caught: 'catch',
+  taught: 'teach',
+  held: 'hold',
+  met: 'meet',
+  paid: 'pay',
+  laid: 'lay',
 };
 
 export const normalizeWord = (w: string): string => w.toLowerCase().replace(/['’]s$/, '');
@@ -67,14 +152,40 @@ export function expandForms(w: string): string[] {
   if (base) forms.add(base);
   /* 反向：原形展开也带上它的不规则变形（原文 choose → 产物 chose 不算引入） */
   for (const [k, v] of Object.entries(IRREGULAR)) if (v === x) forms.add(k);
-  if (x.endsWith('ies')) { forms.add(`${x.slice(0, -3)}y`); forms.add(`${x.slice(0, -3)}ye`); }
-  else if (x.endsWith('es')) { forms.add(x.slice(0, -2)); forms.add(`${x.slice(0, -1)}es`.slice(0, -2) + 'e'); }
-  else if (x.endsWith('s')) forms.add(x.slice(0, -1));
-  if (x.endsWith('ed')) { forms.add(x.slice(0, -2)); forms.add(x.slice(0, -1)); forms.add(`${x.slice(0, -2)}e`); }
-  if (x.endsWith('ing')) { forms.add(x.slice(0, -3)); forms.add(`${x.slice(0, -3)}e`); forms.add(x.slice(0, -4)); }
+  /* 复数（2026-09-12 修复：旧 -es 分支先命中把 horses 剥成 hors，普通 -s 候选永远
+   *  出不来——horses/edges 全被当生词注了「马」「边缘」）。规则：ies→y；
+   *  ch/sh/ss/x/z+es→去 es；普通 s→去 s。互斥分支改为一组可叠加候选。 */
+  if (x.endsWith('ies')) forms.add(`${x.slice(0, -3)}y`);
+  else if (/(?:ch|sh|ss|x|z)es$/.test(x)) forms.add(x.slice(0, -2));
+  if (/[^s]s$/.test(x)) forms.add(x.slice(0, -1));
+  if (x.endsWith('ed')) {
+    forms.add(x.slice(0, -2));
+    forms.add(x.slice(0, -1));
+    forms.add(`${x.slice(0, -2)}e`);
+  }
+  if (x.endsWith('ing')) {
+    forms.add(x.slice(0, -3));
+    forms.add(`${x.slice(0, -3)}e`);
+    forms.add(x.slice(0, -4));
+  }
   if (x.endsWith('ied')) forms.add(`${x.slice(0, -3)}y`);
   /* 双写去尾：running→run（ing 去掉后双辅音收尾，再收一次） */
-  if (/(.)\1(ing|ed)$/.test(x)) { forms.add(x.replace(/(.)\1(ing|ed)$/, '$1')); forms.add(x.replace(/(.)\1(ing|ed)$/, '$1e')); }
+  if (/(.)\1(ing|ed)$/.test(x)) {
+    forms.add(x.replace(/(.)\1(ing|ed)$/, '$1'));
+    forms.add(x.replace(/(.)\1(ing|ed)$/, '$1e'));
+  }
+  /* 比较级/最高级（2026-09-12 修复：greater 缺 -er 变形被当生词注了「更大的」——
+   *  词表收原形，变形靠这里展开）。只收**不产生假命中**的规则：通用 -er 双候选
+   *  （greater→great、nicer→nice、worker→work）与 -ier/-iest→y（happier/happiest→happy）。
+   *  通用 -est 与双写 -er 不收：west→we、forest→for、modest→mode、summer→sum 会把
+   *  生词误判已学（漏注比多注更伤学生）；better/best/greatest 这类不规则与已收录
+   *  形走 IRREGULAR 表与词库行。 */
+  if (x.endsWith('er')) {
+    forms.add(x.slice(0, -2));
+    forms.add(x.slice(0, -1));
+  }
+  if (x.endsWith('ier')) forms.add(`${x.slice(0, -3)}y`);
+  if (x.endsWith('iest')) forms.add(`${x.slice(0, -4)}y`);
   return [...forms];
 }
 
@@ -124,9 +235,7 @@ export interface BurdenProfile {
  */
 export function burdenProfileOf(md: string): BurdenProfile {
   /* 标题行（# …）与引用元数据行（> …）不是学生读的正文——header 里的英文不算负担 */
-  const paras = md
-    .split(/\n+/)
-    .filter((p) => /[A-Za-z]{2,}/.test(p) && !/^\s*[#>]/.test(p));
+  const paras = md.split(/\n+/).filter((p) => /[A-Za-z]{2,}/.test(p) && !/^\s*[#>]/.test(p));
   const allAnnos: { segId: string; word: string }[] = [];
   const crowded: CrowdedSentence[] = [];
   let longest: { words: number; text: string } | null = null;
@@ -171,7 +280,16 @@ export function burdenProfileOf(md: string): BurdenProfile {
       const words = slice.length;
       const density = Number(((annos * 100) / Math.max(1, words)).toFixed(1));
       if (!worstWindow || density > worstWindow.density) {
-        worstWindow = { words, annos, density, head: slice.slice(0, 12).map((t) => t.word).join(' ').slice(0, 80) };
+        worstWindow = {
+          words,
+          annos,
+          density,
+          head: slice
+            .slice(0, 12)
+            .map((t) => t.word)
+            .join(' ')
+            .slice(0, 80),
+        };
       }
     }
   }
@@ -361,8 +479,14 @@ export const FEEDBACK_STAGE_MAP: Record<string, readonly Stage[]> = {
 
 /** keep 维度（解析出的"这些方面可以"）→ 结构化保护维度 */
 const KEEP_DIM_MAP: Record<string, ProtectedDimension> = {
-  情节: 'plot', 人物: 'characters', 词汇: 'vocabulary', 句子: 'syntax', 句法: 'syntax',
-  理解: 'coherence', 背景: 'background', 注释: 'support',
+  情节: 'plot',
+  人物: 'characters',
+  词汇: 'vocabulary',
+  句子: 'syntax',
+  句法: 'syntax',
+  理解: 'coherence',
+  背景: 'background',
+  注释: 'support',
 };
 
 export type ProtectedDimension = 'plot' | 'characters' | 'facts' | 'syntax' | 'vocabulary' | 'coherence' | 'background' | 'support';
@@ -391,12 +515,7 @@ export interface RevisionTask {
  * 都从这一份解析出"将修改/将保留"，教师点开始修订才进第二轮。
  * 解析不出的部分留在 parsed.raw 与 needsHuman——预览页必须停在那里等教师，不许默默执行。
  */
-export function planRevisionTask(
-  chapterId: string,
-  baseVersion: string,
-  feedbackRaw: string,
-  opts: { markedTooHard?: string[] } = {},
-): RevisionTask {
+export function planRevisionTask(chapterId: string, baseVersion: string, feedbackRaw: string, opts: { markedTooHard?: string[] } = {}): RevisionTask {
   const fb = parseTeacherFeedback(feedbackRaw);
   const tooHardWords = [...new Set([...fb.tooHardWords, ...(opts.markedTooHard ?? []).map((w) => w.toLowerCase())])];
 
