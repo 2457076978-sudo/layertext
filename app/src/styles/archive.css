@@ -798,6 +798,64 @@ body:not(.no-session) #reader {
   font-size: var(--fs-sm);
 }
 
+/* 待确认面板 · 换词待执行条：② 填过的词排在这里，一键执行（可撤销） */
+.pk-rewrite-queue {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--line));
+  border-radius: 7px;
+  background: var(--accent-soft);
+}
+.pk-rewrite-queue .pk-chip {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--line));
+  background: var(--panel);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* 数据面板 · 校准台账卡：与「读者层级」并列，读的是另一本账（教师对词/句的判断） */
+.dp-ld-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 20px;
+  padding: 0 8px;
+  margin: 0 4px 4px 0;
+  border-radius: var(--r-pill);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  font-size: var(--fs-xs);
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.dp-ld-chip b {
+  color: var(--ink);
+  font-weight: 650;
+}
+.dp-ld-chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  margin-top: 2px;
+}
+.dp-ld-recent {
+  color: var(--muted);
+}
+
+/* 数据面板 · 顶部资产卡（读者层级 / 校准台账）统一口径。
+   注意是**块级**不是 flex 列：卡里是行内混排的文字与 <b>，flex 列会把每个文字片段拆成一行。 */
+.dp-card {
+  margin-bottom: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface-2);
+  font-size: var(--fs-sm);
+  line-height: 1.8;
+}
+
 /* Information-first library without archive numbering and ornament. */
 .shelf {
   max-width: 1260px;

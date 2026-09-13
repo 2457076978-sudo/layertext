@@ -68,6 +68,10 @@ const DOSSIER = {
     新增: ['Snowball planned the windmill for many weeks.'],
   },
   台账: [{ ts: '2026-09-08 21:00', markType: '词汇简化', outcome: '采纳', original: 'utilize the harness', revised: 'use the harness', basis: '词表外→词表内' }],
+  校准台账: [
+    { ts: '2026-09-13T01:00:00.000Z', teacher: 'wayne', source: 'human', level: 'word', anchor: 'tremendous', action: '记下（加注/换写/判定）', type: 'zh', note: '极大的' },
+    { ts: '2026-09-13T01:05:00.000Z', teacher: 'wayne', source: 'human', level: 'word', anchor: 'straw', action: '记下（加注/换写/判定）', type: 'simpl', note: '教师指定替换：straw → hay' },
+  ],
   标记: [
     { label: '词汇简化', n: 3 },
     { label: '超纲', n: 2 },
@@ -84,14 +88,20 @@ test('buildChapterDossierMd：四节齐全（指标对照/对照摘要/决策记
   assert.match(md, /缺：7/);
   assert.match(md, /\| 2026-09-08 21:00 \| 词汇简化 \| 采纳 \|/);
   assert.match(md, /标记 5 处：词汇简化 3／超纲 2/);
+  /* 人工校准台账单独一节：论文引用"人工校准 N 条"数的是这一本，不是 AI 建议台账 */
+  assert.match(md, /## 四、人工校准台账（本章，教师对词\/句的判断）/);
+  assert.match(md, /共 2 条，其中\*\*教师亲判\*\* 2 条/);
+  assert.match(md, /\| 2026-09-13T01:00:00\.000Z \| wayne \| 教师亲判 \| word \| tremendous \|/);
   assert.match(md, /事实核对 ✓\u3000情节要点齐全 ✗/); // \u3000=全角空格（门禁分隔符）
 });
 
 test('buildChapterDossierMd：无基准无对照时降级为两节且无基准列', () => {
-  const md = buildChapterDossierMd({ ...DOSSIER, 基准摘要: undefined, 对照: undefined, 台账: [] });
+  const md = buildChapterDossierMd({ ...DOSSIER, 基准摘要: undefined, 对照: undefined, 台账: [], 校准台账: [] });
   assert.doesNotMatch(md, /基准版/);
   assert.match(md, /## 二、决策记录（AI 建议台账·本章）/);
   assert.match(md, /（本章暂无 AI 建议记录）/);
+  assert.match(md, /## 三、人工校准台账（本章，教师对词\/句的判断）/, '章节号随对照节有无自动顺延');
+  assert.match(md, /（本章台账里还没有校准条目/);
 });
 
 test('dossierFileName：章号映射与日期后缀', () => {

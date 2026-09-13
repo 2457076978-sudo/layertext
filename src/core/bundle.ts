@@ -30,6 +30,7 @@
 
 import { artifactIdOf, artifactLabelOf, contentHash, type ArtifactIdentity, type ArtifactKind, type RunArtifact, type RunManifest } from './manifest.js';
 import type { DecisionEvent } from './decision.js';
+import type { CalibrationEvent } from './calibration.js';
 
 export const BUNDLE_SCHEMA_VERSION = 1;
 
@@ -134,6 +135,12 @@ export interface PublishBundle {
   excluded: ExcludedEntry[];
   /** 决定日志与版本日志**条数**（内容不进包：它们含教师 ID 与逐条操作，属审计材料） */
   decisionCount: number;
+  /**
+   * 校准台账条数（`_运行/校准台账.jsonl`）。**与 `decisionCount` 是两本账**：
+   * 那边是风险队列上的采纳/退回，这边是审校工作台上的词/句级校准。
+   * 论文里"人工校准 N 条"数的是这一本；不写进包描述，收件人只能自己去翻台账文件。
+   */
+  calibrationCount: number;
   versionCount: number;
   createdAt: string;
 }
@@ -182,6 +189,11 @@ export interface BundleInput {
   files: { path: string; id?: string; kind: ArtifactKind; tier?: string; chapter?: string; derivedFrom?: RunArtifact['derivedFrom']; text: string }[];
   /** 决定事件（只数条数，不进包内容） */
   events?: DecisionEvent[];
+  /**
+   * 校准台账事件（只数条数）。**它和 `events` 是两本账**：`events` 是风险队列上的采纳/退回，
+   * 这里是审校工作台上的词/句级校准。论文里"人工校准多少条"数的是这一本。
+   */
+  calibrations?: CalibrationEvent[];
   /** 版本节点（只数条数） */
   versionNodes?: number;
   /** 未写完的章（调用方已确认放行）；进包描述让收件人看得见 */
@@ -255,6 +267,7 @@ export function buildBundle(input: BundleInput): PublishBundle {
     entries,
     excluded,
     decisionCount: input.events?.length ?? 0,
+    calibrationCount: input.calibrations?.length ?? 0,
     versionCount: input.versionNodes ?? 0,
     createdAt: input.now ?? new Date().toISOString(),
   };
@@ -403,8 +416,46 @@ export interface Provenance {
   hashMatches: boolean;
   /** 之后针对它（或其所在章）的决定，时间序 */
   decisions: ProvenanceRow[];
+  /**
+   * 之后针对它（或其所在章）的**人工校准**，时间序。
+   * 与 `decisions` 是两本账：那边是风险队列项的采纳/退回，这边是审校工作台上的词/句级校准。
+   */
+  calibrations: CalibrationRow[];
   /** 一句人读的话 */
   line: string;
+}
+
+/** 一条校准的"是谁在何时做了什么"（人读一行） */
+export interface CalibrationRow {
+  at: string;
+  teacher: string;
+  /** `human` = 教师在 App 里点的；`ai` = 模型提的候选——**一眼分得开**是这条记录存在的理由 */
+  source: string;
+  level: string;
+  anchor: string;
+  action: string;
+  type: string;
+  note: string;
+  propagation: string;
+  /** 在哪一版上做的——**只作溯源，不作锚** */
+  file?: string;
+}
+
+const ACTION_ZH: Record<string, string> = { add: '记下（加注/换写/判定）', remove: '撤销' };
+
+export function calibrationRow(e: CalibrationEvent): CalibrationRow {
+  return {
+    at: e.ts,
+    teacher: e.teacher,
+    source: e.source,
+    level: e.level,
+    anchor: e.word ?? e.text ?? '',
+    action: ACTION_ZH[e.action] ?? e.action,
+    type: e.type,
+    note: e.note ?? '',
+    propagation: e.kind === 'decision' ? '不传播（只是决定，不是标记）' : (e.propagation ?? '—'),
+    ...(e.file ? { file: e.file } : {}),
+  };
 }
 
 /** 一条决定的展示名（`accept` → `采纳`），供溯源行使用 */
@@ -446,6 +497,8 @@ export function provenanceOf(input: {
   bundle?: PublishBundle | null;
   manifest?: RunManifest | null;
   events?: DecisionEvent[];
+  /** 人工校准（`_运行/校准台账.jsonl` 解析后的事件）——查"这句话怎么变成现在这样的"时与决定同等重要 */
+  calibrations?: CalibrationEvent[];
   /** 只算与这份文件有关的决定（按章过滤）；不给就取全部 */
   chapter?: string;
 }): Provenance {
@@ -470,7 +523,12 @@ export function provenanceOf(input: {
     .sort((a, b2) => (a.timestamp < b2.timestamp ? -1 : a.timestamp > b2.timestamp ? 1 : 0))
     .map(decisionRow);
 
-  const found = !!(entry || rows.length);
+  const calRows = (input.calibrations ?? [])
+    .filter((e) => (input.chapter ? e.chapter === input.chapter : true))
+    .sort((a, b2) => (a.ts < b2.ts ? -1 : a.ts > b2.ts ? 1 : 0))
+    .map(calibrationRow);
+
+  const found = !!(entry || rows.length || calRows.length);
   /* 说得出身份就带上：决定是挂在**产物**上的，不是挂在路径上的——
    * 一份文件被搬到别处之后，"这句话怎么变成现在这样的"要能顺着身份接回去。 */
   const artifactId = entry ? artifactIdOf(entry) || undefined : undefined;
@@ -488,6 +546,12 @@ export function provenanceOf(input: {
     if (m?.createdAt) bits.push(m.createdAt);
     if (declaredHash) bits.push(hashMatches ? '内容与清单一致' : input.currentText === undefined ? '（当前内容未提供，未核对哈希）' : '⚠ 内容已与清单不符（被改过）');
     bits.push(rows.length ? `之后有 ${rows.length} 条决定` : '之后没有任何决定');
+    /* 校准单独说一句：它是**教师对词/句的判断**，不是风险队列上的采纳/退回——
+       混在决定那句里，收件人会以为是同一套东西。 */
+    if (calRows.length) {
+      const human = calRows.filter((r) => r.source === 'human').length;
+      bits.push(`${calRows.length} 条人工校准（其中教师亲判 ${human} 条）`);
+    }
   } else {
     bits.push(`${input.path}：清单与决定日志里都查不到它——**不编一个出处**，如实说查不到`);
   }
@@ -505,6 +569,7 @@ export function provenanceOf(input: {
     teacher,
     hashMatches,
     decisions: rows,
+    calibrations: calRows,
     line: bits.join('｜'),
   };
 }
@@ -515,11 +580,20 @@ export function provenanceOf(input: {
  */
 export function renderProvenance(p: Provenance): string[] {
   const L = [p.line, ''];
-  if (!p.decisions.length) return L;
-  L.push('| 时间 | 教师 | 决定 | 规则 | 改动 | 说明 |', '|---|---|---|---|---|---|');
-  for (const d of p.decisions) {
-    const change = d.before || d.after ? `${d.before || '—'} → ${d.after || '—'}` : '（不改正文）';
-    L.push(`| ${d.at} | ${d.teacher} | ${d.failed ? `⚠ ${d.decision}` : d.decision} | ${d.ruleIds.join('/') || '—'} | ${change} | ${d.reason} |`);
+  if (p.decisions.length) {
+    L.push('### 风险队列上的决定', '', '| 时间 | 教师 | 决定 | 规则 | 改动 | 说明 |', '|---|---|---|---|---|---|');
+    for (const d of p.decisions) {
+      const change = d.before || d.after ? `${d.before || '—'} → ${d.after || '—'}` : '（不改正文）';
+      L.push(`| ${d.at} | ${d.teacher} | ${d.failed ? `⚠ ${d.decision}` : d.decision} | ${d.ruleIds.join('/') || '—'} | ${change} | ${d.reason} |`);
+    }
+  }
+  if (p.calibrations.length) {
+    L.push('', '### 审校工作台上的人工校准', '', '| 时间 | 教师 | 来源 | 粒度 | 词/句 | 动作 | 类型 | 说明 | 传播 |', '|---|---|---|---|---|---|---|---|---|');
+    for (const c of p.calibrations) {
+      L.push(
+        `| ${c.at} | ${c.teacher} | ${c.source === 'human' ? '教师亲判' : '模型候选'} | ${c.level} | ${c.anchor.replace(/\|/g, '\\|')} | ${c.action} | ${c.type} | ${c.note.replace(/\|/g, '\\|')} | ${c.propagation} |`,
+      );
+    }
   }
   return L;
 }

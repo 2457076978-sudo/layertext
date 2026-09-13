@@ -29,6 +29,7 @@ const { buildBundle, provenanceOf, publishReadiness, renderProvenance, verifyBun
 const { artifactIdOf, fileSafe, makeResolver } = await import(`${distOf(REPO)}/src/core/manifest.js`);
 const { teacherIdOf } = await import(`${distOf(REPO)}/src/core/teachers.js`);
 const { parseDecisionLog } = await import(`${distOf(REPO)}/src/core/decision.js`);
+const { parseCalibrationLog } = await import(`${distOf(REPO)}/src/core/calibration.js`);
 
 /* 身份从命令行取（**不复用各脚本自己的参数助手**：定义位置各不相同） */
 const argRun = (n, d) => {
@@ -142,6 +143,10 @@ function doExport() {
     const text = readIf(R.decision({ tier: t }));
     if (text) events.push(...parseDecisionLog(text).events);
   }
+  /* 校准台账（`_运行/校准台账.jsonl`）是**另一本账**：风险队列上的决定在上面，这里记的是
+     审校工作台上的词/句级人工校准。论文里"人工校准 N 条"数的是这一本——不读进来，
+     发布包描述就答不了那个数，收件人只能自己去翻文件。台账缺失/坏行都不拦发布（如实说）。 */
+  const calibrations = readCalibrations();
   /* partial 章（清单显式声明"还没写完"）的学生版**默认不发**：学生版是要交到学生手上的读物，
    * 半成品读物的危害不是"少一章"，而是学生读到一半没了、还以为书写完了。
    * 显式 --allow-partial 放行时，partial 章写进包描述——收件人必须看得见（第七轮 P2）。 */
@@ -154,7 +159,7 @@ function doExport() {
     console.error('  确认要发半成品：加 --allow-partial（partial 章会写进包描述，收件人可见）。');
     process.exit(2);
   }
-  const bundle = buildBundle({ manifest: m, files, events, ...(partialStudents.length ? { partialChapters: m.partialChapters } : {}) });
+  const bundle = buildBundle({ manifest: m, files, events, calibrations, ...(partialStudents.length ? { partialChapters: m.partialChapters } : {}) });
 
   /* 写包走 staging + 自检 + 原子替换：自检不过，最终目录一个字都不动；
    * 替换时旧目录整个让位——重复导出后目录内容严格等于本次清单，
@@ -247,6 +252,22 @@ function doCheck(dir) {
   process.exit(r.ok ? 0 : 1);
 }
 
+/* ────────────────────── 校准台账 ────────────────────── */
+
+/**
+ * 读 `_运行/校准台账.jsonl`（append-only 正本）。
+ *
+ * 读不到就说读不到（返回空表），**不拦发布**：台账是审计材料，缺了它发布包本身仍然完整，
+ * 但"人工校准 N 条"这个数会少——所以缺的时候要印一行出来，而不是静默按 0 处理。
+ */
+function readCalibrations() {
+  const abs = join(OUT_BASE, '_运行', '校准台账.jsonl');
+  if (!existsSync(abs)) return [];
+  const { events, bad } = parseCalibrationLog(readFileSync(abs, 'utf-8'));
+  if (bad.length) console.warn(`⚠ 校准台账有 ${bad.length} 行读不动（首条：${bad[0].reason}）——按 0 之外的条数照实计，但请看一眼`);
+  return events;
+}
+
 /* ────────────────────── 溯源 ────────────────────── */
 
 function doWhere(target) {
@@ -263,6 +284,7 @@ function doWhere(target) {
     currentText: existsSync(abs) ? readFileSync(abs, 'utf-8') : undefined,
     manifest: m,
     events,
+    calibrations: readCalibrations(),
   });
   console.log('════ 溯源 ════');
   for (const line of renderProvenance(p)) console.log(line);

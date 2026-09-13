@@ -393,6 +393,12 @@ export interface DossierData {
   当前摘要: QcSummaryLite;
   对照?: { 对齐: number; 丢句: { pos: string; base: string; lost: string[] }[]; 信号缺失: { pos: string; cur: string; lost: string[] }[]; 新增: string[] };
   台账: { ts: string; markType: string; outcome: string; original: string; revised: string; basis: string }[];
+  /**
+   * 校准台账（`_运行/校准台账.jsonl` 本章条目）。**与 `台账` 是两本账**：
+   * 那边是 AI 建议的采纳/退回（`AI建议台账.csv`），这边是**教师对词/句的判断**——
+   * 论文里"人工校准 N 条"数的是这一本。不带它，档案就只有 AI 侧的账。
+   */
+  校准台账: { ts: string; teacher: string; source: string; level: string; anchor: string; action: string; type: string; note: string }[];
   标记: { label: string; n: number }[];
   门禁: Record<string, boolean>;
 }
@@ -438,7 +444,13 @@ export function buildChapterDossierMd(d: DossierData): string {
     }
     L.push('');
   }
-  L.push('## ' + (d.对照 ? '三' : '二') + '、决策记录（AI 建议台账·本章）');
+  /* 章节号随"有没有逐句对照"浮动，用计数器免得插一节就全错 */
+  /* 有逐句对照时它占第二节，后面的节号整体后移一位。写死三档而不是计数器：
+     读代码的人一眼看得见"哪一节是第几节"，插一节时也好改。 */
+  const S决策 = d.对照 ? '三' : '二';
+  const S校准 = d.对照 ? '四' : '三';
+  const S标记 = d.对照 ? '五' : '四';
+  L.push(`## ${S决策}、决策记录（AI 建议台账·本章）`);
   L.push('');
   if (d.台账.length) {
     L.push('| 时间 | 标记类型 | 结果 | 原句 | 建议句 | 依据 |');
@@ -448,7 +460,21 @@ export function buildChapterDossierMd(d: DossierData): string {
     L.push('（本章暂无 AI 建议记录）');
   }
   L.push('');
-  L.push('## ' + (d.对照 ? '四' : '三') + '、标记与终审门禁');
+  /* 教师对词/句的判断单独一节：论文引用"人工校准"时，要的是这一本，不是 AI 建议台账。 */
+  const cal = d.校准台账 ?? [];
+  L.push(`## ${S校准}、人工校准台账（本章，教师对词/句的判断）`);
+  L.push('');
+  L.push(`共 ${cal.length} 条，其中**教师亲判** ${cal.filter((x) => x.source === 'human').length} 条、模型候选 ${cal.filter((x) => x.source !== 'human').length} 条。`);
+  L.push('');
+  if (cal.length) {
+    L.push('| 时间 | 教师 | 来源 | 粒度 | 词/句 | 动作 | 类型 | 说明 |');
+    L.push('|---|---|---|---|---|---|---|---|');
+    for (const r of cal) L.push(`| ${r.ts} | ${r.teacher} | ${r.source === 'human' ? '教师亲判' : '模型候选'} | ${r.level} | ${clip(r.anchor, 30)} | ${r.action} | ${r.type} | ${clip(r.note, 50)} |`);
+  } else {
+    L.push('（本章台账里还没有校准条目；在 App 的「检 → 待确认」点 ①②③ 会逐条落账）');
+  }
+  L.push('');
+  L.push(`## ${S标记}、标记与终审门禁`);
   L.push('');
   L.push(d.标记.length ? `标记 ${d.标记.reduce((n, x) => n + x.n, 0)} 处：` + d.标记.map((x) => `${x.label} ${x.n}`).join('／') : '本章无标记');
   const gates = Object.entries(d.门禁).map(([g, ok]) => `${g}${ok ? ' ✓' : ' ✗'}`);

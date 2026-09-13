@@ -21,6 +21,8 @@ export interface PanelIo {
    *  不是数据变更日志。现在改成"读→拼接→写"，既不用改 Rust（不必重编 App），也落到正确的位置。 */
   appendLog(logPath: string, line: string): Promise<void>;
   listDir(dir: string): Promise<string[]>;
+  /** 在访达中显示一个文件（校准台账卡用）。默认实现走 Tauri，测试可替换。 */
+  reveal(path: string): Promise<void>;
 }
 
 export let io: PanelIo = {
@@ -46,6 +48,10 @@ export let io: PanelIo = {
   async listDir(dir) {
     const mod = await import('@tauri-apps/api/core');
     return mod.invoke<string[]>('list_dir', { dir });
+  },
+  async reveal(path) {
+    const mod = await import('@tauri-apps/api/core');
+    await mod.invoke('reveal_path', { path });
   },
 };
 
@@ -514,6 +520,109 @@ export async function save(
 
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
 
+/* ────────────────── 校准台账（书级一件，`<产物目录>/_运行/校准台账.jsonl`） ────────────────── */
+
+export interface LedgerSummary {
+  path: string;
+  total: number;
+  human: number;
+  ai: number;
+  chapters: number;
+  byChapter: { chapter: string; n: number }[];
+  byType: { type: string; n: number }[];
+  recent: { ts: string; chapter: string; anchor: string; type: string; source: string }[];
+  /** 读不动/坏行的条数——**如实报**，不静默当成 0 */
+  bad: number;
+}
+
+/**
+ * 数据面板里的「校准台账」卡。
+ *
+ * 为什么数据面板要看见它：这是**教师对词/句做了哪些判断**的正本（append-only），
+ * 论文里"人工校准 N 条"数的是它。它落在 `<产物目录>/_运行/`，不在数据面板列的那几个资产文件里，
+ * 于是它此前在这块"只看得见词库/知识库/词典/专名/分层"的面板上**根本不存在**。
+ *
+ * 缺失不算错（管线还没跑过就是这样），返回 null 由调用方显示"还没有"。
+ */
+export async function readLedgerSummary(project: ProjectConfig): Promise<LedgerSummary | null> {
+  const out = typeof project['产物目录'] === 'string' ? (project['产物目录'] as string) : '';
+  if (!out) return null;
+  const path = `${out}/_运行/校准台账.jsonl`;
+  let text: string;
+  try {
+    text = await io.read(path);
+  } catch {
+    /* 有意兜底：还没有台账文件＝没在 App 里点过任何决定，是常态（缺失文件本来就是报错的）。 */
+    return null;
+  }
+  const rows: Record<string, unknown>[] = [];
+  let bad = 0;
+  for (const line of text.split('\n')) {
+    if (!line.trim()) continue;
+    try {
+      rows.push(JSON.parse(line) as Record<string, unknown>);
+    } catch {
+      /* 有意兜底：一行坏 JSON 不拦人看整本台账——坏行数照实计进 `bad`，
+         卡片上那一栏（"N 行读不动"）就是把这个数说出来。 */
+      bad++;
+    }
+  }
+  const byChapter = new Map<string, number>();
+  const byType = new Map<string, number>();
+  for (const r of rows) {
+    const c = String(r['chapter'] ?? '无章');
+    byChapter.set(c, (byChapter.get(c) ?? 0) + 1);
+    const t = String(r['type'] ?? '—');
+    byType.set(t, (byType.get(t) ?? 0) + 1);
+  }
+  const recent = [...rows]
+    .sort((a, b) => (String(a['ts'] ?? '') < String(b['ts'] ?? '') ? 1 : -1))
+    .slice(0, 5)
+    .map((r) => ({
+      ts: String(r['ts'] ?? '')
+        .replace('T', ' ')
+        .slice(0, 19),
+      chapter: String(r['chapter'] ?? ''),
+      anchor: String(r['word'] ?? r['text'] ?? ''),
+      type: String(r['type'] ?? ''),
+      source: String(r['source'] ?? ''),
+    }));
+  return {
+    path,
+    total: rows.length,
+    human: rows.filter((r) => r['source'] === 'human').length,
+    ai: rows.filter((r) => r['source'] === 'ai').length,
+    chapters: byChapter.size,
+    byChapter: [...byChapter.entries()].map(([chapter, n]) => ({ chapter, n })).sort((a, b) => b.n - a.n),
+    byType: [...byType.entries()].map(([type, n]) => ({ type, n })).sort((a, b) => b.n - a.n),
+    recent,
+    bad,
+  };
+}
+
+/** 台账卡片的 HTML（数据面板顶部，与「读者层级」并列） */
+export function ledgerCardHtml(sum: LedgerSummary | null, hasProject: boolean): string {
+  if (!hasProject) return '';
+  if (!sum) {
+    return `<div class="dp-card">校准台账：<b>还没有条目</b>——在「检 → 待确认」点 ①②③ 会逐条落账（append-only 正本，换版本能重放回来）。</div>`;
+  }
+  const chips = sum.byChapter
+    .slice(0, 12)
+    .map((c) => `<span class="dp-ld-chip">${esc(c.chapter)}<b>${c.n}</b></span>`)
+    .join('');
+  const types = sum.byType.map((t) => `${esc(t.type)} ${t.n}`).join('／');
+  const recent = sum.recent.map((r) => `<br>· ${esc(r.ts)} · ${esc(r.chapter)} · ${esc(r.anchor)} · ${esc(r.type)} · ${r.source === 'human' ? '教师亲判' : '模型候选'}`).join('');
+  return `<div class="dp-card">
+    <b>校准台账</b>：共 <b>${sum.total}</b> 条（教师亲判 <b>${sum.human}</b> ／ 模型候选 ${sum.ai}）· 覆盖 ${sum.chapters} 章${sum.bad ? ` · <span style="color:var(--danger)">${sum.bad} 行读不动</span>` : ''}<br>
+    类型：${types || '—'}<br>
+    <span class="dp-ld-chips">${chips}</span>
+    <span class="dp-ld-recent">最近：${recent || '—'}</span><br>
+    <span style="opacity:.7">文件：<code>${esc(sum.path)}</code> 
+    <button id="dp-ledger-reveal" style="font-size:var(--fs-xs);padding:2px 8px">在访达中显示</button>
+    <button id="dp-ledger-copy" style="font-size:var(--fs-xs);padding:2px 8px">复制路径</button></span>
+  </div>`;
+}
+
 export async function renderDataPane(bookDir: string): Promise<void> {
   const el = document.getElementById('pane-data');
   if (!el) return;
@@ -544,6 +653,8 @@ export async function renderDataPane(bookDir: string): Promise<void> {
     await loadAll(DATA_KINDS, found.config);
   }
   const project = panelState.project;
+  /* 校准台账（另一本账）：读一次，卡片与按钮共用 */
+  const ledgerSum = await readLedgerSummary(project);
 
   const cur = DATA_KINDS.find((k) => k.id === panelState.active)!;
   const st = panelState.tables[cur.id] ?? { text: '', errs: [] };
@@ -667,6 +778,7 @@ export async function renderDataPane(bookDir: string): Promise<void> {
     : '';
   el.innerHTML = `<div class="dp">
       <div class="dp-head"><b>数据</b><span class="dp-sub">${esc(cur.note)}</span></div>
+      ${ledgerCardHtml(ledgerSum, true)}
       ${treeCard}
       <div class="dp-tabs">${tabs}</div>
       ${st.errs.length ? `<div class="dp-note dp-err">⚠ ${st.errs.length} 个校验问题（不阻塞本次编辑，但不能引入新问题）：<br>${st.errs.slice(0, 5).map(esc).join('<br>')}${st.errs.length > 5 ? '<br>…' : ''}</div>` : '<div class="dp-note dp-ok">✓ 校验通过</div>'}
@@ -675,6 +787,13 @@ export async function renderDataPane(bookDir: string): Promise<void> {
       ${panelState.projectDir ? `<div class="dp-note" style="margin-top:8px;opacity:.7">项目配置：<code>${esc(panelState.projectDir)}</code> ｜ 变更日志：<code>${esc(CHANGE_LOG_NAME)}</code></div>` : ''}
     </div>`;
 
+  el.querySelector('#dp-ledger-reveal')?.addEventListener('click', () => {
+    if (ledgerSum) void io.reveal(ledgerSum.path);
+  });
+  el.querySelector('#dp-ledger-copy')?.addEventListener('click', () => {
+    if (!ledgerSum) return;
+    void navigator.clipboard?.writeText(ledgerSum.path);
+  });
   el.querySelector('#dp-tree-save')?.addEventListener('click', async () => {
     const selects = [...el.querySelectorAll<HTMLSelectElement>('[data-dp-parent]')];
     const tree: Record<string, string[]> = {};

@@ -28,6 +28,7 @@ import { locateWord, scopeFromChapterPath, type CalibrationScope } from '../../s
 import {
   FACET_LABELS,
   matchFacet,
+  parseSpecifiedReplacement,
   pendingCountOf,
   pendingProgressOf,
   sortPending,
@@ -55,6 +56,19 @@ export interface AnnotateIo {
   /** 打标记（① 补注用）。默认实现**动态** import reader —— 静态 import 会把整个 main 拖进来，
    *  连带 ai.ts 的 Vite `?raw` 导入，node 里就没法给这个面板写 DOM 测试了。 */
   addMark(session: FileSession, mark: Mark): void;
+  /**
+   * 执行换词（② 排进队列的那些 `simpl` 标记）。
+   *
+   * 同样**不静态 import** `pipew.ts`（它经 aiflow → ai.ts 的 `?raw` 会把 node 端编译带崩），
+   * 由 main 注入。默认实现是"没有接线就说没有接线"，不装作做过。
+   */
+  runSimplify(session: FileSession, marks: Mark[]): Promise<void>;
+  /**
+   * 状态出口（可注入）。**刻意不走 `uikit.ts` 的 setStatus**：那个模块顶层就有
+   * `window.addEventListener('error', …)`，静态 import 会让这个面板在 node 下根本 import 不起来
+   * ——而"面板到底渲染出来没有"正是必须能测的那件事。main.ts 注入真实现。
+   */
+  onStatus(msg: string, cls?: string): void;
 }
 let io: AnnotateIo = {
   read: (path) => invoke<string>('read_text_file', { path }),
@@ -67,6 +81,10 @@ let io: AnnotateIo = {
   switchTo: () => undefined,
   session: () => null,
   addMark: () => undefined,
+  runSimplify: async () => {
+    throw new Error('换词管线没有接线（应由 main.ts 注入 applyWordSimplifications）——没有执行，也没有重排队列');
+  },
+  onStatus: () => undefined,
 };
 export function setAnnotateIo(next: Partial<AnnotateIo>): void {
   io = { ...io, ...next };
@@ -229,6 +247,19 @@ export async function renderAnnotatePane(): Promise<void> {
     </div>`;
     })
     .join('');
+  /* ② 换成 X **已经**排在队列里了（决定会落成 `simpl` 标记），缺的是"看得见 + 一键执行"：
+     此前教师点完 ② 之后还得自己想起来去工具栏点「按词汇简化」——想不起来就等于没排。 */
+  const rewriteMarks = (s.review?.marks ?? []).filter((m) => m.type === 'simpl' && m.level !== 'sent' && m.word);
+  const rewriteWords = [...new Set(rewriteMarks.map((m) => m.word!.toLowerCase()))];
+  const specifiedCount = rewriteMarks.filter((m) => parseSpecifiedReplacement(m.note)).length;
+  const rewriteBar = rewriteMarks.length
+    ? `<div class="pk-rewrite-queue">
+        <span><b>换词待执行：${rewriteWords.length} 个词</b>（${rewriteMarks.length} 条标记${specifiedCount ? `，其中 ${specifiedCount} 条是你亲手指定的词——不会再问 AI` : ''}）</span>
+        <span class="pk-dim">② 填过"换成 ___"的词都排在这里；执行后正文就地换掉，可撤销。</span>
+        <button class="pk-chip" id="pk-run-simplify" title="立刻执行这批换词（词级替换，句子其余部分逐字不动；教师指定的词直接采用，其余交给 AI 找课标内简单词）">现在就换</button>
+      </div>`
+    : '';
+
   const progress = pendingProgressOf(queue.items);
   const chapterBars = progress.chapters
     .slice(0, 12)
@@ -247,6 +278,7 @@ export async function renderAnnotatePane(): Promise<void> {
         <div class="pk-chips">${chips}</div>
         <button class="pk-chip${paneSort === 'freq' ? ' active' : ''}" data-pk-sort="1" title="按词频排序：同一个词在越多章出现越靠前——跨章复现的多半是一条口径问题，处理一条顶一批">词频优先</button>
       </div>
+      ${rewriteBar}
       <div class="pk-batch">
         <span class="pk-dim">批量（对当前筛选出的 <b>${shown.length}</b> 条）</span>
         <button data-pk-batch="annotate" title="把当前筛选出的每一条都按 ① 补注记下来（正文先打标记，仍要点「按标记修改」才写入——这一步不会直接改正文）">全部 ① 补注</button>
@@ -268,6 +300,18 @@ export async function renderAnnotatePane(): Promise<void> {
       paneFilter = btn.dataset.pkFilter as PaneFilter;
       void renderAnnotatePane();
     });
+  });
+  host.querySelector('#pk-run-simplify')?.addEventListener('click', () => {
+    void (async () => {
+      try {
+        await io.runSimplify(s, rewriteMarks);
+        await renderAnnotatePane();
+        void refreshPendingBanner();
+      } catch (e) {
+        /* 执行失败**要说出来**：这条通路是"点完自动排进队列"的最后一截，静默失败等于回到手工找按钮 */
+        io.onStatus(`换词执行失败：${String(e)}`, 'err');
+      }
+    })();
   });
   host.querySelector('[data-pk-sort]')?.addEventListener('click', () => {
     paneSort = paneSort === 'freq' ? 'judge' : 'freq';
@@ -310,10 +354,16 @@ async function decideMany(s: FileSession, path: string, queue: PendingQueue, ite
     `把当前筛选出的 ${items.length} 条全部按「${label}」记下来？\n\n· 只记决定与标记，**不会直接改正文**——正文仍要你点「按标记修改」才写入。\n· ② 换写不在批量范围内（每条要填不同的词）。`,
   );
   if (!ok) return;
-  for (const it of items) await decide(s, path, queue, it, act, undefined, { silent: true });
+  let missed = 0;
+  for (const it of items) {
+    const before = s.review.marks?.length ?? 0;
+    await decide(s, path, queue, it, act, undefined, { silent: true });
+    if (act === 'annotate' && (s.review.marks?.length ?? 0) === before) missed++;
+  }
   await saveQueue(path, queue);
   await renderAnnotatePane();
   void refreshPendingBanner();
+  io.onStatus(`批量 ${label}：${items.length} 条已记账${missed ? `；其中 ${missed} 条在正文里找不到词面，只落台账、没打标记（队列可能比这一版旧）` : ''}`, missed ? 'err' : 'saved');
 }
 
 /**
@@ -369,9 +419,12 @@ async function decide(
       const p = spots[0]!;
       io.addMark(s, { id: newMarkId(), level: 'word', pi: p.pi, si: p.si, wi: p.wi, word: it.word, type, note, ts: Date.now() });
     } else {
-      /* 找不到词面：**不许静默丢**——决定照记，但要说清"标记没落下"。 */
+      /* 找不到词面：**不许静默丢**——决定照记，但要说清"标记没落下"。
+         这条在真实项目里会成批出现（队列是按某一版产物算的，产物重生成换了词就找不到锚），
+         所以必须让教师**在界面上看得见**，不能只写 console——否则他会以为自己点过了、正文却没动。 */
       const synthetic: Mark = { id: newMarkId(), level: 'word', word: it.word, type, note, pi: -1, si: -1, ts: Date.now() };
       void recordCalibration(s, synthetic, { teacher: teacherOf(), file: s.fileName, action: 'add', propagation: PROPAGATION[act], kind: 'mark' });
+      if (!opts.silent) io.onStatus(`${act === 'annotate' ? '① 补注' : '② 换写'}：正文里找不到「${it.word}」——只记了台账、没打标记（队列可能比这一版旧，重算队列即可）`, 'err');
       console.warn(`${act}：正文里找不到「${it.word}」，只记了台账、没打标记`);
     }
   }

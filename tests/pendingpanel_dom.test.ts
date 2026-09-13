@@ -62,6 +62,9 @@ function setup(files: Record<string, string>): { files: Record<string, string>; 
   win.document.body.innerHTML = '<aside><div id="side-review"></div></aside><section id="pane-annotate"></section>';
   const views: string[] = [];
   const marks: unknown[] = [];
+  /* 会话夹具要带 `review.marks`：真实 App 里 `addMark` 就是往它上面推（main.ts），
+     面板的"换词待执行"条也从它读——夹具少了这一层，测的就不是真实数据流。 */
+  const session = { sourcePath: SRC, fileName: '原文_A层85_2026-09-12_工序化.md', md: MD, review: { marks } } as unknown as FileSession;
   setAnnotateIo({
     read: (p) => (p in files ? Promise.resolve(files[p]!) : Promise.reject(new Error('no file'))),
     write: (p, c) => {
@@ -71,9 +74,9 @@ function setup(files: Record<string, string>): { files: Record<string, string>; 
     switchTo: (v) => {
       views.push(v);
     },
-    session: () => ({ sourcePath: SRC, fileName: '原文_A层85_2026-09-12_工序化.md', md: MD }) as unknown as FileSession,
+    session: () => session,
     addMark: (_s, m) => {
-      marks.push(m);
+      marks.push(m); // 与 session.review.marks 是同一个数组，只推一次
     },
   });
   setPaneFilter('all');
@@ -267,4 +270,36 @@ test('引擎客观项：不硬塞三个键——给"去风险队列处理"与"�
   assert.equal(row.querySelectorAll('[data-pk-act="goto"]').length, 1, '段级的项不该给"补注/换成"');
   assert.equal(row.querySelectorAll('[data-pk-act="annotate"]').length, 0, '超长句不是"补注"能解决的');
   assert.equal(row.querySelectorAll('[data-pk-input]').length, 0);
+});
+
+/* ────────────────── ② 换成 X 之后：排进队列 + 一键执行（2026-09-13） ────────────────── */
+
+test('② 填了词就排进换词队列，面板显示「换词待执行 N 个词」并能一键执行', async () => {
+  let ran: { words: string[] } | null = null;
+  setAnnotateIo({
+    runSimplify: async (_s, marks) => {
+      ran = { words: marks.map((m) => m.word!) };
+    },
+  });
+  const { marks } = setup({ [QUEUE_PATH]: JSON.stringify(fixture()) });
+  await renderAnnotatePane();
+  const box = win.document.querySelector('[data-pk-input="1"]') as unknown as HTMLInputElement;
+  box.value = 'unkind';
+  (win.document.querySelectorAll('#pane-annotate [data-pk-act="rewrite"]')[1] as unknown as HTMLElement).click();
+  await new Promise((r) => setTimeout(r, 10));
+  assert.equal(marks.length, 1, '换词决定要落成 simpl 标记——标记清单就是换词队列');
+  assert.match((marks[0] as { note: string }).note, /教师指定替换：straw → unkind/);
+
+  const bar = win.document.querySelector('#pk-run-simplify') as unknown as HTMLElement;
+  assert.ok(bar, '排进队列还不够——教师要想得起来去点「按标记修改」，就等于没排');
+  assert.match(win.document.getElementById('pane-annotate')!.textContent ?? '', /换词待执行：1 个词/);
+  bar.click();
+  await new Promise((r) => setTimeout(r, 20));
+  assert.deepEqual(ran, { words: ['straw'] }, '一键执行要把队列里那些词交给换词管线');
+});
+
+test('没有换词待办时不显示那条（不占地方、不假装有活）', async () => {
+  setup({ [QUEUE_PATH]: JSON.stringify(fixture()) });
+  await renderAnnotatePane();
+  assert.equal(win.document.querySelector('#pk-run-simplify'), null);
 });

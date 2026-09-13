@@ -27,6 +27,8 @@ import { bufToB64 } from './bookio.js';
 import { buildPlotPointsPrompt, buildReadingQuizPrompt, simplifyMaxLen } from './ai.js';
 import { extractParas, sentsOf, splitChapter, tokenizeTxt } from '../../src/core/textpipe.js';
 import { parseZipfTable, triageOov } from '../../src/core/wordfreq.js';
+import { readLedger as readCalibrationLedger } from './calibrationio.js';
+import { scopeFromChapterPath } from '../../src/core/calibration.js';
 import zipfTsv from '../../assets/wordfreq/en_zipf.tsv?raw';
 import aoaTsv from '../../assets/wordfreq/en_aoa.tsv?raw';
 import { sentenceRisks } from '../../src/core/risks.js';
@@ -787,6 +789,28 @@ async function buildCurrentDossier(): Promise<DossierData | null> {
     return { newWordRate: r.newWordRate, avgLen: r.avgLenNarrRaw, sentCount: r.sentCount, passive: r.passive, relcl: r.relcl, pastperf: r.pastperf, oovCount: new Set(r.oov).size };
   };
   const ledger = (await readLedger()).filter((x) => x.chapter && (s.fileName.includes(x.chapter) || x.chapter.includes(workspaceChipName(s.sourcePath!)) || s.sourcePath!.includes(x.chapter)));
+  /* 人工校准台账（另一本账）：论文素材要的是"教师对词/句做了哪些判断"，不是 AI 建议的采纳率。
+     读不到就空表——档案正文里会写"这一节还没有条目"，不编。 */
+  let calRows: DossierData['校准台账'] = [];
+  try {
+    const cal = await readCalibrationLedger(s.sourcePath!);
+    calRows = cal
+      .filter((e) => e.chapter === scopeFromChapterPath(s.sourcePath!)?.chapter)
+      .sort((a, b) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0))
+      .map((e) => ({
+        ts: e.ts,
+        teacher: e.teacher,
+        source: e.source,
+        level: e.level,
+        anchor: e.word ?? e.text ?? '',
+        action: e.action === 'add' ? '记下' : '撤销',
+        type: e.type,
+        note: e.note ?? '',
+      }));
+  } catch (e) {
+    /* 有意兜底：台账读不到不拦人看档案（与"账坏不能把活干坏"同口径），但要说出来 */
+    console.warn('人工校准台账读取失败（档案里这一节会显示为空）：' + String(e).slice(0, 120));
+  }
   const byType = new Map<string, number>();
   for (const m of s.review.marks) byType.set(typeLabel(m.type), (byType.get(typeLabel(m.type)) ?? 0) + 1);
   const data: DossierData = {
@@ -797,6 +821,7 @@ async function buildCurrentDossier(): Promise<DossierData | null> {
     句长上限: simplifyMaxLen(),
     当前摘要: qcLite(s.md),
     台账: ledger.map((x) => ({ ts: x.ts, markType: x.markType, outcome: x.outcome, original: x.original, revised: x.revised, basis: x.basis })),
+    校准台账: calRows,
     标记: [...byType.entries()].map(([label, n]) => ({ label, n })).sort((a, b) => b.n - a.n),
     门禁: Object.fromEntries(GATES.map((g) => [g, s.review.gate[g] === true])),
   };
@@ -852,7 +877,7 @@ export async function renderDossierPane(): Promise<void> {
       <tr><td>⑦ 过去完成</td>${hasBase ? `<td>${d.基准摘要!.pastperf}</td>` : ''}<td>${d.当前摘要.pastperf}</td></tr>
     </table>
     ${d.对照 ? `<p class="dim" style="margin:10px 0 4px;font-size:12.5px">逐句对照：对齐 ${d.对照.对齐} 句 · <span style="color:var(--oov)">疑似丢句 ${d.对照.丢句.length}</span> · <span style="color:#b45309">信号缺失 ${d.对照.信号缺失.length} 处</span> · 新增 ${d.对照.新增.length}（明细见导出的 md）</p>` : ''}
-    <p class="dim" style="margin:6px 0;font-size:12.5px">决策记录（台账）：${d.台账.length} 条${d.台账.length ? '（采纳 ' + d.台账.filter((x) => x.outcome === '采纳' || x.outcome === '直改').length + '）' : ''} ｜ 标记 ${d.标记.reduce((n, x) => n + x.n, 0)} 处 ｜ 门禁 ${Object.values(d.门禁).filter(Boolean).length}/${GATES.length}</p>`;
+    <p class="dim" style="margin:6px 0;font-size:12.5px">决策记录（AI 建议台账）：${d.台账.length} 条${d.台账.length ? '（采纳 ' + d.台账.filter((x) => x.outcome === '采纳' || x.outcome === '直改').length + '）' : ''} ｜ <b>人工校准台账</b>：${d.校准台账.length} 条${d.校准台账.length ? `（教师亲判 ${d.校准台账.filter((x) => x.source === 'human').length}）` : ''} ｜ 标记 ${d.标记.reduce((n, x) => n + x.n, 0)} 处 ｜ 门禁 ${Object.values(d.门禁).filter(Boolean).length}/${GATES.length}</p>`;
   pane.querySelector('#dos-export-ch')?.addEventListener('click', () => void exportChapterDossier(d));
   pane.querySelector('#dos-export-book')?.addEventListener('click', () => void exportBookDossier());
 }
@@ -880,6 +905,29 @@ async function exportBookDossier(): Promise<void> {
       return;
     }
     const ledger = await readLedger();
+    /* 全书档案也带人工校准台账：每一章都按章名过滤一次（台账是书级的，一份文件） */
+    let bookCal: Awaited<ReturnType<typeof readCalibrationLedger>> = [];
+    try {
+      bookCal = await readCalibrationLedger(chapters[0]!);
+    } catch (e) {
+      /* 有意兜底：台账读不到**不拦人导出全书档案**（账坏不能把活干坏）——
+         代价写明：这一节会显示为空，教师看得出少了什么，而不是以为"本来就没有"。 */
+      console.warn('人工校准台账读取失败（全书档案里这一节会显示为空）：' + String(e).slice(0, 120));
+    }
+    const calOf = (f: string): DossierData['校准台账'] =>
+      bookCal
+        .filter((e) => e.chapter === scopeFromChapterPath(f)?.chapter)
+        .sort((a, b) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0))
+        .map((e) => ({
+          ts: e.ts,
+          teacher: e.teacher,
+          source: e.source,
+          level: e.level,
+          anchor: e.word ?? e.text ?? '',
+          action: e.action === 'add' ? '记下' : '撤销',
+          type: e.type,
+          note: e.note ?? '',
+        }));
     const parts: string[] = [];
     const boardRows: {
       path: string;
@@ -923,6 +971,7 @@ async function exportBookDossier(): Promise<void> {
           句长上限: simplifyMaxLen(),
           当前摘要: { newWordRate: r.newWordRate, avgLen: r.avgLenNarrRaw, sentCount: r.sentCount, passive: r.passive, relcl: r.relcl, pastperf: r.pastperf, oovCount: new Set(r.oov).size },
           台账: mine.map((x) => ({ ts: x.ts, markType: x.markType, outcome: x.outcome, original: x.original, revised: x.revised, basis: x.basis })),
+          校准台账: calOf(f),
           标记: [...byType.entries()].map(([label, n]) => ({ label, n })).sort((a, b) => b.n - a.n),
           门禁: Object.fromEntries(GATES.map((g) => [g, (rv?.gate?.[g] ?? false) === true])),
         }),

@@ -100,7 +100,14 @@ const CH_IDS = arg('--chapters', '')
  *  partial 是**口径声明**不是技术判定（第五轮对照表："要不要排除在全书口径外是口径决定"），
  *  所以只接受显式给的章号，不做任何"段数少就算没写完"的猜测。 */
 const parsePartialChapters = (raw) =>
-  [...new Set(String(raw ?? '').split(',').map((x) => Number(x.trim())).filter((n) => Number.isInteger(n) && n >= 1 && n <= CN.length))].sort((a, b) => a - b);
+  [
+    ...new Set(
+      String(raw ?? '')
+        .split(',')
+        .map((x) => Number(x.trim()))
+        .filter((n) => Number.isInteger(n) && n >= 1 && n <= CN.length),
+    ),
+  ].sort((a, b) => a - b);
 /* 教师名**原样读进来，写下去之前一律归一成稳定 ID**（总计划阶段 3「Teacher 有稳定 ID」）。
  *
  * 原来这里就是一个自由字符串，于是 `--teacher wayne` / `--teacher Wayne` / `--teacher 'wayne '`
@@ -210,6 +217,25 @@ function scanArtifacts() {
    *  扫描时两样一起写：只写路径的话，这件产物换个目录/换个布局就成了"另一件"，
    *  而"两位教师各写了一份同一件产物"这件事会永远比不出来（阶段 3 要拦的正是它）。 */
   const push = (rec) => out.push({ ...rec, id: artifactIdOf(rec) });
+
+  /* 校准台账（`_运行/校准台账.jsonl`）：**书级一件**，所以登记在层循环之外。
+     它是"教师做过哪些词/句级人工校准"的正本——论文素材与发布包要的正是它，
+     不登记就永远进不了包（发布包只搬清单登记过的产物）。 */
+  {
+    const ledgerAbs = join(OUT_BASE, '_运行', '校准台账.jsonl');
+    if (existsSync(ledgerAbs)) {
+      const text = readFileSync(ledgerAbs, 'utf-8');
+      push({
+        path: join('_运行', '校准台账.jsonl'),
+        kind: '台账',
+        status: 'ok',
+        hash: contentHash(text),
+        bytes: text.length,
+        updatedAt: new Date().toISOString(),
+      });
+    }
+  }
+
   for (const t of TIERS) {
     const tag = TAGS[t];
     const rrx = selfPaths(cur?.manifest?.runId ?? '');

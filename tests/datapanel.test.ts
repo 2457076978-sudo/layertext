@@ -8,9 +8,19 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
-  DATA_KINDS, parseCsv, toTable, fromTable, validateText, validateUnit,
-  upsertRow, deleteRow, deleteRowAt, upsertProperLine, deleteProperLine,
-  setIo, newErrors,
+  DATA_KINDS,
+  parseCsv,
+  toTable,
+  fromTable,
+  validateText,
+  validateUnit,
+  upsertRow,
+  deleteRow,
+  deleteRowAt,
+  upsertProperLine,
+  deleteProperLine,
+  setIo,
+  newErrors,
   type DataKind,
 } from '../app/src/datapanel.js';
 
@@ -132,10 +142,22 @@ test('save：写前校验不过则拒绝写入（面板不能产出非法数据�
   let wrote = false;
   const store: Record<string, string> = { '/tmp/x.csv': '\uFEFF词,释义,来源\n' };
   setIo({
-    async read(p) { return store[p] ?? ''; },
-    async write(p, c) { wrote = true; store[p] = c; },
-    async appendLog() { /* noop */ },
-    async listDir() { return []; },
+    async read(p) {
+      return store[p] ?? '';
+    },
+    async write(p, c) {
+      wrote = true;
+      store[p] = c;
+    },
+    async appendLog() {
+      /* noop */
+    },
+    async listDir() {
+      return [];
+    },
+    async reveal() {
+      /* noop */
+    },
   });
   const DP = await import('../app/src/datapanel.js');
   const bad = '\uFEFF词,释义,来源\nmajestic,威严的,教师知识库\nmajestic,宏大的,归一\n';
@@ -149,15 +171,25 @@ test('save：合法数据写入成功并留痕', async () => {
   const store: Record<string, string> = {};
   const logs: string[] = [];
   setIo({
-    async read(p) { return store[p] ?? ''; },
-    async write(p, c) { store[p] = c; },
-    async appendLog(_n, line) { logs.push(line); },
-    async listDir() { return []; },
+    async read(p) {
+      return store[p] ?? '';
+    },
+    async write(p, c) {
+      store[p] = c;
+    },
+    async appendLog(_n, line) {
+      logs.push(line);
+    },
+    async listDir() {
+      return [];
+    },
+    async reveal() {
+      /* noop */
+    },
   });
   const DP = await import('../app/src/datapanel.js');
   const good = '\uFEFF词,释义,来源\nmajestic,威严的,教师知识库\n';
-  const r = await DP.save(K.dict!, { 书级: { 词典: '/tmp/y.csv' } }, good, '新增 majestic',
-    { existingErrs: [], logDir: '/ws' });
+  const r = await DP.save(K.dict!, { 书级: { 词典: '/tmp/y.csv' } }, good, '新增 majestic', { existingErrs: [], logDir: '/ws' });
   assert.equal(r.ok, true, r.error);
   assert.ok(store['/tmp/y.csv']!.includes('majestic'));
   assert.equal(logs.length, 1, '应留一行变更日志');
@@ -177,10 +209,21 @@ test('save：文件里已有历史错误时，仍允许编辑（只拦新错误�
   const store: Record<string, string> = {};
   const logs: string[] = [];
   setIo({
-    async read(p) { return store[p] ?? ''; },
-    async write(p, c) { store[p] = c; },
-    async appendLog(p, line) { logs.push(`${p}|${line}`); },
-    async listDir() { return []; },
+    async read(p) {
+      return store[p] ?? '';
+    },
+    async write(p, c) {
+      store[p] = c;
+    },
+    async appendLog(p, line) {
+      logs.push(`${p}|${line}`);
+    },
+    async listDir() {
+      return [];
+    },
+    async reveal() {
+      /* noop */
+    },
   });
   const DP = await import('../app/src/datapanel.js');
   // 知识库：两条 harness 不同释义 = 历史问题（正是 harness 那条真数据的形状）
@@ -188,8 +231,7 @@ test('save：文件里已有历史错误时，仍允许编辑（只拦新错误�
   const existing = DP.validateText(K.kb!, text);
   assert.ok(existing.length > 0, '这份数据本来就该判有问题');
   const after = text + '加注词,windmill,风车,1\n';
-  const r = await DP.save(K.kb!, { 书级: { 知识库: '/tmp/kb.csv' } }, after, '新增 windmill',
-    { existingErrs: existing, logDir: '/ws' });
+  const r = await DP.save(K.kb!, { 书级: { 知识库: '/tmp/kb.csv' } }, after, '新增 windmill', { existingErrs: existing, logDir: '/ws' });
   assert.equal(r.ok, true, r.error);
   assert.match(r.warned ?? '', /历史问题/);
   assert.ok(store['/tmp/kb.csv']!.includes('windmill'));
@@ -200,16 +242,26 @@ test('save：文件里已有历史错误时，仍允许编辑（只拦新错误�
 test('save：新引入的错误仍然拦下（放开历史问题不等于不校验）', async () => {
   let wrote = false;
   setIo({
-    async read() { return ''; },
-    async write() { wrote = true; },
-    async appendLog() { /* noop */ },
-    async listDir() { return []; },
+    async read() {
+      return '';
+    },
+    async write() {
+      wrote = true;
+    },
+    async appendLog() {
+      /* noop */
+    },
+    async listDir() {
+      return [];
+    },
+    async reveal() {
+      /* noop */
+    },
   });
   const DP = await import('../app/src/datapanel.js');
   const bad = '\uFEFF类型,词,值,来源数\n加注词,harness,马具,1\n加注词,harness,挽具,1\n加注词,,风车,1\n';
   const existing = DP.validateText(K.kb!, '\uFEFF类型,词,值,来源数\n加注词,harness,马具,1\n加注词,harness,挽具,1\n');
-  const r = await DP.save(K.kb!, { 书级: { 知识库: '/tmp/kb2.csv' } }, bad, '新增空词',
-    { existingErrs: existing, logDir: '/ws' });
+  const r = await DP.save(K.kb!, { 书级: { 知识库: '/tmp/kb2.csv' } }, bad, '新增空词', { existingErrs: existing, logDir: '/ws' });
   assert.equal(r.ok, false);
   assert.match(r.error!, /写前校验未通过/);
   assert.equal(wrote, false);
@@ -246,10 +298,21 @@ test('parseCsv 空文件返回空数组', () => {
 
 test('findProjectConfig：在书目里找到 调适项目_*.json', async () => {
   setIo({
-    async read(_p) { return JSON.stringify({ 书名: 'X', 词库: '/tmp/v.csv' }); },
-    async write() { /* noop */ },
-    async appendLog() { /* noop */ },
-    async listDir(dir) { return dir === '/book' ? ['调适项目_X.json', '其他.md'] : []; },
+    async read(_p) {
+      return JSON.stringify({ 书名: 'X', 词库: '/tmp/v.csv' });
+    },
+    async write() {
+      /* noop */
+    },
+    async appendLog() {
+      /* noop */
+    },
+    async listDir(dir) {
+      return dir === '/book' ? ['调适项目_X.json', '其他.md'] : [];
+    },
+    async reveal() {
+      /* noop */
+    },
   });
   const DP = await import('../app/src/datapanel.js');
   const hit = await DP.findProjectConfig('/book');
@@ -259,10 +322,21 @@ test('findProjectConfig：在书目里找到 调适项目_*.json', async () => {
 
 test('findProjectConfig：找不到时逐级向上一层再试', async () => {
   setIo({
-    async read() { return JSON.stringify({ 书名: 'Y' }); },
-    async write() { /* noop */ },
-    async appendLog() { /* noop */ },
-    async listDir(dir) { return dir === '/book' ? ['调适项目_Y.json'] : []; },
+    async read() {
+      return JSON.stringify({ 书名: 'Y' });
+    },
+    async write() {
+      /* noop */
+    },
+    async appendLog() {
+      /* noop */
+    },
+    async listDir(dir) {
+      return dir === '/book' ? ['调适项目_Y.json'] : [];
+    },
+    async reveal() {
+      /* noop */
+    },
   });
   const DP = await import('../app/src/datapanel.js');
   const hit = await DP.findProjectConfig('/book/调适工作区');
@@ -272,10 +346,21 @@ test('findProjectConfig：找不到时逐级向上一层再试', async () => {
 
 test('findProjectConfig：都没有则返回 null', async () => {
   setIo({
-    async read() { return ''; },
-    async write() { /* noop */ },
-    async appendLog() { /* noop */ },
-    async listDir() { return ['readme.md']; },
+    async read() {
+      return '';
+    },
+    async write() {
+      /* noop */
+    },
+    async appendLog() {
+      /* noop */
+    },
+    async listDir() {
+      return ['readme.md'];
+    },
+    async reveal() {
+      /* noop */
+    },
   });
   const DP = await import('../app/src/datapanel.js');
   assert.equal(await DP.findProjectConfig('/nothing'), null);
@@ -293,14 +378,88 @@ test('getPath：书级数据在 书级.* 下也能取到（回归）', async () 
 
 test('findProjectConfig：向上三层能找到（书开的是 调适工作区/ 时要用到）', async () => {
   setIo({
-    async read() { return JSON.stringify({ 书名: 'Z' }); },
-    async write() { /* noop */ },
-    async appendLog() { /* noop */ },
+    async read() {
+      return JSON.stringify({ 书名: 'Z' });
+    },
+    async write() {
+      /* noop */
+    },
+    async appendLog() {
+      /* noop */
+    },
     // 只在第三层有
-    async listDir(dir) { return dir === '/ws' ? ['调适项目_Z.json'] : ['其他.md']; },
+    async listDir(dir) {
+      return dir === '/ws' ? ['调适项目_Z.json'] : ['其他.md'];
+    },
+    async reveal() {
+      /* noop */
+    },
   });
   const DP = await import('../app/src/datapanel.js');
   const hit = await DP.findProjectConfig('/ws/调适工作区/第三章');
   assert.equal(hit?.config['书名'], 'Z');
   assert.equal(hit?.dir, '/ws');
+});
+
+/* ────────────────── 校准台账卡（2026-09-13 接进数据面板） ────────────────── */
+
+test('readLedgerSummary：按章/类型聚合，human 与 ai 分得开，坏行如实报', async () => {
+  const jsonl = [
+    JSON.stringify({ chapter: '第一章', type: 'zh', word: 'tremendous', source: 'human', ts: '2026-09-13T01:00:00.000Z' }),
+    JSON.stringify({ chapter: '第一章', type: 'simpl', word: 'straw', source: 'human', ts: '2026-09-13T02:00:00.000Z' }),
+    JSON.stringify({ chapter: '第二章', type: 'zh', word: 'windmill', source: 'ai', ts: '2026-09-13T03:00:00.000Z' }),
+    '{ 这行坏了',
+  ].join('\n');
+  setIo({
+    async read(p) {
+      return p === '/out/_运行/校准台账.jsonl' ? jsonl : '';
+    },
+    async write() {
+      /* noop */
+    },
+    async appendLog() {
+      /* noop */
+    },
+    async listDir() {
+      return [];
+    },
+    async reveal() {
+      /* noop */
+    },
+  });
+  const DP = await import('../app/src/datapanel.js');
+  const s = await DP.readLedgerSummary({ 产物目录: '/out' });
+  assert.equal(s?.total, 3);
+  assert.equal(s?.human, 2, '教师亲判与模型候选必须分得开——论文里数的是 human');
+  assert.equal(s?.ai, 1);
+  assert.equal(s?.chapters, 2);
+  assert.equal(s?.bad, 1, '坏行不静默吞：计进 bad，卡片上那一栏会说出去');
+  assert.deepEqual(
+    s?.byChapter.map((x) => x.chapter),
+    ['第一章', '第二章'],
+  );
+  assert.equal(s?.recent[0]!.anchor, 'windmill', '最近的在最前');
+});
+
+test('readLedgerSummary：没有产物目录 / 台账还没建 → 返回 null（面板说"还没有条目"，不报错）', async () => {
+  setIo({
+    async read() {
+      throw new Error('ENOENT');
+    },
+    async write() {
+      /* noop */
+    },
+    async appendLog() {
+      /* noop */
+    },
+    async listDir() {
+      return [];
+    },
+    async reveal() {
+      /* noop */
+    },
+  });
+  const DP = await import('../app/src/datapanel.js');
+  assert.equal(await DP.readLedgerSummary({}), null);
+  assert.equal(await DP.readLedgerSummary({ 产物目录: '/out' }), null);
 });

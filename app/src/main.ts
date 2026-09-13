@@ -205,7 +205,18 @@ export function syncChrome(): void {
    教师找不到候选项 = 等于没做——所以入口放在他一定看得见的右栏顶部。 */
 setAfterSidebarRender(() => void refreshPendingBanner());
 /* 待确认面板的会话来源注入进来（面板本身不静态依赖 main，那样就没法给它写 DOM 测试）。 */
-setAnnotateIo({ session: () => activeSession(), switchTo: (v) => switchView(v as ViewName), addMark: (s, m) => addMark(s, m) });
+setAnnotateIo({
+  session: () => activeSession(),
+  switchTo: (v) => switchView(v as ViewName),
+  addMark: (s, m) => addMark(s, m),
+  /* 换词执行：**动态 import** pipew（静态 import 会把 ai.ts 的 `?raw` 资源导入拖进 node 端编译，
+     这个面板的 DOM 测试就跑不了了——与 addMark 同一条纪律）。 */
+  runSimplify: async (s, marks) => {
+    const { applyWordSimplifications } = await import('./pipew.js');
+    await applyWordSimplifications(s, marks);
+  },
+  onStatus: (msg, cls) => setStatus(msg, cls ?? ''),
+});
 
 export function renderAll(): void {
   renderFileTabs();
@@ -369,7 +380,10 @@ const VIEW_HOOKS: Partial<Record<ViewName, () => void>> = {
   /* 这两个页签点下去要 await 一段读盘渲染。以前失败被 `.catch(() => undefined)` 吃掉，
    * 于是就成了计划里点名的那种症状：**点了没反应、卡片还在**——教师点「数据」，
    * 屏幕什么都不变，也没有任何人告诉他为什么。 */
-  data: () => void renderDataPane(S.currentBookDir ?? '').catch((e) => setStatus('数据面板没能打开：' + e, 'err')),
+  /* 书目录为空时退到**当前章所在目录**：单章模式（拖入/本地示例/直接打开一个文件）下，
+     书根同样是能向上找到 `调适项目_*.json` 的——此前这种模式一律显示"这本书还没有数据资产配置"，
+     连带数据面板里的校准台账卡也永远看不到。 */
+  data: () => void renderDataPane(S.currentBookDir ?? activeSession()?.sourcePath?.replace(/\/[^/]+$/, '') ?? '').catch((e) => setStatus('数据面板没能打开：' + e, 'err')),
   // 风险队列：只看机器点名的地方（审查报告 §一：按段顺序呈现是流程缺陷）
   risk: () => void openRiskPane().catch((e) => setStatus('风险队列没能打开：' + e, 'err')),
   /* 补注候选：引擎筛词 + 本地模型填中文，教师三选一（补注/换写/说明保留）。
