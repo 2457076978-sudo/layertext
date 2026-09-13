@@ -92,7 +92,11 @@ export const S = {
 
 export function setStatus(msg: string, cls = ''): void {
   const el = document.getElementById('status');
-  if (el) el.innerHTML = msg ? `<span class="${cls}">${esc(msg)}</span>` : '';
+  if (!el) return;
+  el.innerHTML = msg ? `<span class="${cls}">${esc(msg)}</span>` : '';
+  /* 命令栏是 nowrap 的：状态文字挤不下只用省略号（不许换行把顶栏撑成两层）。
+     全文挂到 title 上——鼠标准星一停就看得见，信息不丢。 */
+  el.title = msg || '';
 }
 
 export function esc(s: string): string {

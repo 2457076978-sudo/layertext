@@ -116,12 +116,31 @@ button:disabled {
   outline-offset: 2px;
 }
 
+/* ============================================================
+   工作台骨架 v2（2026-09-13 重建）
+   三条硬规则，任何控件都不许破：
+     ① 命令栏/文件栏/视图栏一律 flex-nowrap，高度固定（52/38/44）——换行会把整页顶下去，
+        "状态文字自己占一行"就是这么来的；
+     ② 行内控件统一 28px 高、垂直居中——32 与 28 混着放，怎么摆都是"这里歪那里歪"；
+     ③ 左缘一律贴 16px 栅格（窗口边距），与面板卡片同一条竖线。
+   ============================================================ */
+:root {
+  --chrome-cmd: 52px;
+  --chrome-file: 38px;
+  --chrome-view: 44px;
+  --ctl-h: 28px;
+  --gutter: 16px;
+}
+
 /* A single quiet command bar; the chapter action carries the visual weight. */
 header {
   flex: 0 0 auto;
-  min-height: 52px;
-  padding: 7px 14px 7px 8px;
-  gap: 8px;
+  min-height: var(--chrome-cmd);
+  height: var(--chrome-cmd);
+  padding: 0 var(--gutter) 0 8px;
+  gap: 6px;
+  flex-wrap: nowrap;
+  overflow: hidden;
   background: var(--panel);
   border-bottom: 1px solid var(--line);
   box-shadow: none;
@@ -129,21 +148,30 @@ header {
 
 header .logo {
   margin: 0 8px 0 2px;
-  font-size: 17px;
+  font-size: 16px;
+  font-weight: 650;
   letter-spacing: 0;
+  white-space: nowrap;
+  flex: 0 0 auto;
 }
 
 header .tgroup {
-  gap: 5px;
+  gap: 3px;
+  flex: 0 0 auto;
 }
 header .tsep {
   margin-inline: 3px;
 }
 
 header button {
-  min-height: 32px;
-  padding: 5px 10px;
+  height: var(--ctl-h);
+  min-height: var(--ctl-h);
+  padding: 0 10px;
   background: transparent;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
 }
 
 header button.primary,
@@ -163,6 +191,7 @@ header #btn-run:hover {
 .win-dots {
   margin-left: 0;
   gap: 4px;
+  flex: 0 0 auto;
 }
 .win-dots button {
   width: 16px;
@@ -171,24 +200,42 @@ header #btn-run:hover {
   padding: 0;
 }
 
+/* 状态文字**留在命令栏里**（原先 width:100% 让它独占一行，把顶栏撑成两层）：
+   挤不下就省略号，绝不许换行。 */
 #status {
+  width: auto;
+  flex: 0 1 auto;
+  min-width: 0;
   padding-top: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
+/* 修改模式胶囊与命令栏同高（原先 7px padding 比谁都高，一排按钮里突兀地鼓出来） */
+#mode-pill {
+  height: var(--ctl-h);
+  min-height: var(--ctl-h);
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+}
+
 /* File context is flat and compact, not another row of cards. */
 .wstabs,
 .filetabs {
   flex: 0 0 auto;
-  min-height: 38px;
-  padding: 4px 16px;
+  min-height: var(--chrome-file);
+  height: var(--chrome-file);
+  padding: 0 var(--gutter);
   gap: 5px;
   align-items: center;
   background: var(--panel);
   border-bottom: 1px solid var(--line);
   backdrop-filter: none;
+  overflow: hidden;
 }
 
 #wstabs .ftab.ws,
@@ -196,8 +243,9 @@ header #btn-run:hover {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
+  height: 26px;
   max-width: 240px;
-  padding: 5px 9px;
+  padding: 0 9px;
   border: 1px solid transparent;
   border-radius: 5px;
   background: transparent;
@@ -249,31 +297,82 @@ header #btn-run:hover {
   padding: 0 16px 16px;
 }
 
+/* ---------- 视图栏：目录 ｜ 一级分组 ｜ 二级页签（同高同基线，切组不位移） ----------
+   一级分组固定四格（读检改库），宽度不随选中项变化；
+   二级页签固定接在分组右侧的同一 x 起点上，并给最短的标签留出等宽下限——
+   于是"报告/看板/档案"三格同宽，整排看起来才是对齐的，而不是各自顶着文字长度歪。 */
 .viewtabs {
-  flex: 0 0 48px;
+  flex: 0 0 var(--chrome-view);
+  display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 0;
   margin: 0;
-  padding: 6px 0;
-  overflow-x: auto;
+  padding: 0;
+  overflow: hidden;
   background: transparent;
   border: 0;
 }
 
+/* 目录：与分组同高同基线的幽灵按钮，左缘贴 16px 栅格（=面板卡片左缘） */
+.viewtabs > #tab-toc {
+  flex: 0 0 auto;
+  height: var(--ctl-h);
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+}
+.viewtabs > #tab-toc:hover {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.viewtabs > #tab-toc.active {
+  color: var(--accent);
+  background: var(--accent-soft);
+  font-weight: 600;
+}
+
+/* 竖分隔线：目录 ｜ 分组——高度与控件一致，让三段看起来是一排而不是三块 */
+.vt-sep {
+  flex: 0 0 auto;
+  width: 1px;
+  height: 18px;
+  margin: 0 10px;
+  background: var(--line);
+}
+
 .viewtabs button {
-  height: 32px;
+  height: var(--ctl-h);
   padding: 0 11px;
   border-radius: 5px;
 }
 .vt-groups {
+  flex: 0 0 auto;
+  display: flex;
   gap: 2px;
-  padding: 2px;
-  border-radius: 6px;
+  padding: 3px;
+  border-radius: 8px;
+  background: var(--seg-slot);
 }
 .vt-groups .vt-g {
-  height: 28px;
-  padding: 0 13px;
-  border-radius: 4px;
+  height: 22px;
+  min-width: 30px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .vt-groups .vt-g.active {
@@ -283,13 +382,32 @@ header #btn-run:hover {
 }
 
 .vt-sub {
-  gap: 1px;
-  margin-left: 2px;
+  flex: 0 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 8px;
+  overflow: hidden;
 }
 .vt-sub .vt-s {
-  height: 28px;
-  padding: 0 9px;
-  border-radius: 4px;
+  height: var(--ctl-h);
+  min-width: 62px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--muted);
+  font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
+}
+.vt-sub .vt-s:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 .viewtabs button.active,
@@ -298,12 +416,17 @@ header #btn-run:hover {
   color: var(--accent);
   box-shadow: none;
 }
+.vt-sub .vt-s.active {
+  font-weight: 600;
+}
 
 /* Main panes are the work surface, not floating presentation cards. */
 .pane {
   flex: 1;
   min-height: 0;
-  padding: 22px clamp(22px, 3vw, 40px) 36px;
+  /* 固定内边距：原来用 clamp(22px,3vw,40px)，窗口一改宽窄内容就左右浮动，
+     和顶部页签的对齐关系也跟着变——这正是"这里歪那里歪"的来源之一。 */
+  padding: 20px 28px 28px;
   border: 1px solid var(--line);
   border-radius: 7px;
   background: var(--panel);
@@ -358,20 +481,245 @@ body:not(.no-session) #reader {
 }
 
 .side-tabs {
+  display: inline-flex;
+  width: fit-content; /* 分段控件按内容宽——铺满整个侧栏时灰槽空出一大条，看着像坏了 */
   gap: 2px;
-  padding: 2px;
-  border-radius: 6px;
+  padding: 3px;
+  border-radius: 8px;
   background: var(--seg-slot);
 }
 .side-tabs button {
-  border-radius: 4px;
+  height: 22px;
+  min-width: 56px;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 500;
   box-shadow: none;
+}
+
+.side-tabs button:hover {
+  color: var(--ink);
+  background: rgba(127, 137, 150, 0.12);
 }
 
 .side-tabs button.active {
   background: var(--panel);
   color: var(--ink);
+  font-weight: 600;
   box-shadow: 0 1px 2px rgba(24, 35, 31, 0.1);
+}
+
+/* 要点输入行：输入框与「＋」同高同基线（原来一个 28px 一个 27px，挨着放就错一丝） */
+.quota-add {
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+.quota-add input,
+.quota-add button {
+  height: var(--ctl-h);
+  min-height: var(--ctl-h);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.quota-add button {
+  flex: 0 0 auto;
+  width: var(--ctl-h);
+  padding: 0;
+}
+
+/* ============================================================
+   待确认面板（检 → 待确认）与其侧栏横幅
+   原来每行都靠 inline style 拼，圆角/间距/字级各写各的——
+   "这一块那一块"就是这么做出来的。统一收到这里一份。
+   ============================================================ */
+.pending-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: nowrap;
+  margin: 0 0 10px;
+  padding: 0 6px 0 10px;
+  height: 34px;
+  border-radius: 8px;
+  font-size: var(--fs-sm);
+  line-height: 1;
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, transparent);
+  color: var(--accent);
+}
+.pending-banner .pb-txt {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pending-banner .pb-hint {
+  color: var(--muted);
+}
+.pending-banner b {
+  font-weight: 650;
+}
+.pending-banner #pending-go {
+  flex: 0 0 auto;
+  height: 24px;
+  min-height: 24px;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  border-radius: var(--r-pill);
+  font-size: var(--fs-xs);
+  background: var(--panel);
+}
+
+.pk-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.pk-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.pk-dim {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+.pk-chips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.pk-chip {
+  height: 26px;
+  min-height: 26px;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: var(--r-pill);
+  font-size: var(--fs-sm);
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--muted);
+}
+.pk-chip .pk-count {
+  font-variant-numeric: tabular-nums;
+  color: var(--muted-strong);
+}
+.pk-chip.active {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--line));
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+.pk-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 12px;
+  border-left: 3px solid var(--line);
+  border-radius: 0 6px 6px 0;
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  line-height: 1.7;
+}
+.pk-legend b {
+  color: var(--ink);
+}
+.pk-row {
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 10px 12px;
+}
+.pk-row + .pk-row {
+  margin-top: 8px;
+}
+.pk-row:hover {
+  border-color: color-mix(in srgb, var(--accent) 34%, var(--line));
+}
+.pk-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.pk-badge {
+  font-size: var(--fs-sm);
+  padding: 1px 7px;
+  border-radius: var(--r-pill);
+  border: 1px solid currentColor;
+  white-space: nowrap;
+}
+.pk-badge.pk-star {
+  color: var(--warn);
+}
+.pk-badge.pk-canon {
+  color: var(--accent);
+}
+.pk-badge.pk-anno {
+  color: var(--muted-strong);
+}
+.pk-word {
+  font-size: var(--fs-lg);
+}
+.pk-para {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.pk-gloss {
+  padding: 1px 8px;
+  border-radius: var(--r-pill);
+  background: var(--surface-3);
+}
+.pk-src {
+  font-size: var(--fs-xs);
+  color: var(--muted);
+}
+.pk-sentence {
+  margin: 6px 0 8px;
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  line-height: 1.7;
+}
+.pk-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.pk-actions button {
+  height: var(--ctl-h);
+  min-height: var(--ctl-h);
+  display: inline-flex;
+  align-items: center;
+}
+.pk-rewrite {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.pk-rewrite .pk-label {
+  font-size: var(--fs-sm);
+  color: var(--muted);
+}
+.pk-rewrite input {
+  width: 140px;
+  height: var(--ctl-h);
+  padding: 0 8px;
+  font-size: var(--fs-sm);
 }
 
 /* Information-first library without archive numbering and ornament. */
@@ -522,7 +870,10 @@ details[open] > :not(summary) {
     grid-template-columns: minmax(0, 1fr) 280px;
   }
   .pane {
-    padding-inline: 22px;
+    padding-inline: 20px;
+  }
+  .vt-sub .vt-s {
+    min-width: 54px;
   }
 }
 

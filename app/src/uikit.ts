@@ -8,7 +8,10 @@ import { esc, S } from './state.js';
 export const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 
 export function setStatus(msg: string, cls = ''): void {
-  $('status').innerHTML = msg ? `<span class="${cls}">${esc(msg)}</span>` : '';
+  const el = $('status');
+  el.innerHTML = msg ? `<span class="${cls}">${esc(msg)}</span>` : '';
+  /* 与 state.ts 的同名函数一致：命令栏 nowrap，状态挤不下只省略，全文进 title */
+  el.title = msg || '';
 }
 
 export function toast(msg: string, kind: 'ok' | 'err' | 'info' = 'info'): void {
