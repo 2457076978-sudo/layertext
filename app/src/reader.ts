@@ -211,6 +211,21 @@ export const sidebarHandlers = {
     scheduleSave(s, () => undefined);
   },
   onGateHelp: (g: string, anchor: HTMLElement) => showGateHelp(g, anchor),
+  /* 「摘要点 ▸」不是在侧栏里摘——摘出的候选要在「质检报告」页勾选才进配额。
+     所以它只负责把教师送过去，并把那个按钮闪一下（动态 import：不再加一条静态循环边）。 */
+  onPlotJump: () => {
+    void import('./main.js').then((m) => {
+      m.switchView('report');
+      setTimeout(() => {
+        const btn = document.getElementById('diag-plot-btn');
+        if (!btn) return;
+        btn.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        btn.classList.remove('just-applied');
+        void (btn as HTMLElement).offsetWidth;
+        btn.classList.add('just-applied');
+      }, 150);
+    });
+  },
   onMarkJump: (m: Mark) => jumpTo(m),
   onMarkRemove: (m: Mark) => {
     const s = activeSession();

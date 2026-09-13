@@ -3722,18 +3722,19 @@
     </div>
     <div id="drop-zone" aria-hidden="true">松开以载入文本到工作台</div>
     <div class="workbench">
-      <!-- 左侧竖栏：一级导航（目录 + 读/检/改/库）。省掉一整条横栏，章节标签因此拿到整条宽度。 -->
-      <nav class="rail" id="railtabs">
-        <button class="rail-it" id="tab-toc" title="全书章节目录与本章书签（再点或 Esc 关闭）">
-          <svg class="ico"><use href="#i-list" /></svg><span>目录</span>
-        </button>
-        <span class="rail-sep" aria-hidden="true"></span>
-        <!-- 一级四组（读/检/改/库，widgets.ts 渲染）：按教师任务流收敛 -->
-        <div class="vt-groups" id="vt-groups"></div>
-      </nav>
       <div class="content">
-        <!-- 二级页签：贴着正文列顶部（当前组只有一个视图时整条收起） -->
-        <div class="subtabs" id="vt-sub"></div>
+        <!-- 视图栏（方案 A）：目录 ｜ 一级分组（读/检/改/库）｜ 二级页签。
+             一级分组宽度固定、二级接在同一 x 起点——切组不位移，"报告/看板/档案"三格同宽。 -->
+        <div class="viewtabs">
+          <button id="tab-toc" title="全书章节目录与本章书签（再点或 Esc 关闭）">
+            <svg class="ico"><use href="#i-list" /></svg>目录
+          </button>
+          <span class="vt-sep" aria-hidden="true"></span>
+          <!-- 一级四组（读/检/改/库，widgets.ts 渲染）：按教师任务流收敛 -->
+          <div class="vt-groups" id="vt-groups"></div>
+          <!-- 二级页签：当前组只有一个视图（库）时为空白 -->
+          <div class="vt-sub" id="vt-sub"></div>
+        </div>
         <section id="pane-text" class="pane active">
           <div class="legend">
             <span><i class="dot" style="background: var(--oov)"></i>生词（红）</span>

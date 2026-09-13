@@ -137,7 +137,10 @@ function badgeOf(it: PendingItem): { label: string; cls: string } {
  * 这是 2026-09-13 教师反馈的直接对策：候选项做出来了却没人找得到，等于没做。
  */
 export async function refreshPendingBanner(): Promise<void> {
-  const host = document.getElementById('side-review');
+  /* 2026-09-13 侧栏整理：横幅不再是"单独占一块的条"，而是**状态条里的第一项**
+     （与「标记 N · 门禁 a/b」同一行）——一屏一个计数入口，不再上下两个数字打架。
+     没有状态条时退回侧栏本身（就测试 DOM 的成例）。 */
+  const host = document.getElementById('side-pending-host') ?? document.getElementById('side-review');
   if (!host) return;
   document.getElementById('pending-banner')?.remove();
   const s = io.session();
@@ -152,7 +155,10 @@ export async function refreshPendingBanner(): Promise<void> {
   banner.className = 'pending-banner';
   /* 一行放得下就一行（原来是四段自由换行，侧栏 248px 里折成三行方块）。
      正文拆成"主句 + 提示"，提示挤不下由 CSS 省略，按钮永远在最右不换行。 */
-  banner.innerHTML = `<span class="pb-txt">待确认 <b>${n}</b> 条<span class="pb-hint"> · 你拍板</span></span><button id="pending-go">去看 ▸</button>`;
+  /* 短标签：状态条只有 248px 宽，"待确认 N 条 · 你拍板 + 去看 ▸ + 标记 N + 门禁 a/b" 放不下——
+     挤到最后就成了"待确认 7…"，等于没说。留最要紧的两个字与数字，其余进 title。 */
+  banner.title = `这一层共有 ${n} 条待确认（引擎筛出，你拍板）——点「去看」打开完整列表`;
+  banner.innerHTML = `<span class="pb-txt">待确认 <b>${n}</b></span><button id="pending-go">去看 ▸</button>`;
   /* 走唯一入口切视图（main 导出），免得"当前视图"这个状态被写两份 */
   banner.querySelector('#pending-go')?.addEventListener('click', () => io.switchTo('annotate'));
   host.prepend(banner);

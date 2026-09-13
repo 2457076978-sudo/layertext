@@ -199,9 +199,9 @@ export function syncChrome(): void {
   $('tab-toc').style.display = s ? '' : 'none'; // 书架/版本页无章节概念，目录按钮收起
   // 看板/档案是书级视图，书架也能进；仅正文场景整行收起
   const bookView = curView !== 'text';
-  /* 左侧竖栏（读/检/改/库）：书架态也能进书级视图，所以判据是「有章节 或 在看非正文视图」 */
-  const rail = document.getElementById('railtabs');
-  if (rail) rail.style.display = !hasChapter && !bookView ? 'none' : 'flex';
+  /* 视图栏（目录 ｜ 读/检/改/库 ｜ 二级）：书架态也能进书级视图，所以判据是「有章节 或 在看非正文视图」 */
+  const vtabs = document.querySelector<HTMLElement>('.viewtabs');
+  if (vtabs) vtabs.style.display = !hasChapter && !bookView ? 'none' : 'flex';
   /* 上下文栏（版本 → 章节 → 章节动作）：没有打开的章节就没有"上下文"可言，整条收起 */
   const ctx = document.getElementById('ctxbar');
   if (ctx) ctx.style.display = hasChapter ? 'flex' : 'none';

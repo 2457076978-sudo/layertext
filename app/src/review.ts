@@ -169,6 +169,8 @@ export function renderSidebar(
     onGateHelp: (g: string, anchor: HTMLElement) => void;
     onMarkJump: (m: Mark) => void;
     onMarkRemove: (m: Mark) => void;
+    /** 「摘要点 ▸」：跳到「质检报告」页那个按钮（可选——没接线就不显示这个按钮） */
+    onPlotJump?: () => void;
   },
 ): void {
   const r = session.review;
@@ -220,20 +222,38 @@ export function renderSidebar(
       .join('') || '<div class="side-empty">暂无标记——正文里点词、拖选句子即可标记</div>';
 
   const side = document.getElementById('side-review')!;
+  const gateN = GATES.filter((g) => r.gate[g]).length;
+  /* 2026-09-13 侧栏整理：原来是七块平铺、靠 20px 空白分开，且一屏里两个计数打架
+     （顶部「待确认 74 条」说机器筛出多少要处理，底部「标记清单 0」说你标了几条）。
+     现在：**一条状态条吃掉所有计数** + **四张分区卡**——每块有边界、标题带计数、
+     空状态压成一行；阶段动作（第二轮反馈）默认收起，不占常驻空间。 */
   side.innerHTML = `
-    <div class="side-sec">
-      <div class="side-h">本章要点配额 <span class="cnt">${r.quota.filter((q) => q.done).length}/${r.quota.length}</span></div>
-      <ul class="quota-list">${quotaHtml || '<li class="side-empty">未设置要点——「质检报告」页点「AI 摘情节要点」，或这里手动加（如"保留风车线索"）</li>'}</ul>
-      <div class="quota-add"><input id="quota-input" placeholder="添加本章要点…" /><button id="quota-add-btn">＋</button></div>
+    <div class="side-status" id="side-status">
+      <span class="ss-host" id="side-pending-host"></span>
+      <span class="sp"></span>
+      <span class="ss-item">标记 <b>${r.marks.length}</b></span>
+      <span class="ss-dot">·</span>
+      <span class="ss-item">门禁 <b>${gateN}/${GATES.length}</b></span>
     </div>
-    <div class="side-sec">
-      <div class="side-h">终审门禁 ${gateDone ? '<span class="gate-ok">✅ 已通过</span>' : ''}</div>
-      <ul class="gate-list">${gateHtml}</ul>
+    <div class="side-card">
+      <div class="side-card-h">
+        本章要点<span class="cnt">${r.quota.filter((q) => q.done).length}/${r.quota.length}</span>
+        <span class="sp"></span>
+        <button class="card-act" id="quota-plot-jump" title="跳到「质检报告」页的「AI 摘情节要点」——摘出的候选在那里勾选，勾中的进这张卡">摘要点 ▸</button>
+      </div>
+      <div class="side-card-b">
+        ${r.quota.length ? `<ul class="quota-list">${quotaHtml}</ul>` : '<div class="side-hint">还没设要点 · 可手加，如「保留风车线索」</div>'}
+        <div class="quota-add"><input id="quota-input" placeholder="添加本章要点…" /><button id="quota-add-btn">＋</button></div>
+      </div>
+    </div>
+    <div class="side-card">
+      <div class="side-card-h">终审门禁<span class="cnt">${gateN}/${GATES.length}</span>${gateDone ? '<span class="gate-ok">✅ 已通过</span>' : ''}</div>
+      <div class="side-card-b"><ul class="gate-list">${gateHtml}</ul></div>
     </div>
     ${adaptFeedbackBox(session)}
-    <div class="side-sec">
-      <div class="side-h">标记清单 <span class="cnt">${r.marks.length}</span></div>
-      <div class="mlist">${listHtml}</div>
+    <div class="side-card">
+      <div class="side-card-h">标记清单<span class="cnt">${r.marks.length}</span>${r.marks.length ? '' : '<span class="sp"></span><span class="ss-tag">无待办</span>'}</div>
+      <div class="side-card-b">${listHtml}</div>
     </div>`;
 
   // 事件
@@ -254,6 +274,9 @@ export function renderSidebar(
     const m = r.marks.find((x) => x.id === (el as HTMLElement).dataset.rm);
     if (m) el.addEventListener('click', () => handlers.onMarkRemove(m));
   });
+  const plotBtn = document.getElementById('quota-plot-jump');
+  if (plotBtn && !handlers.onPlotJump) plotBtn.remove(); // 没接线就不摆一个点了没反应的按钮
+  plotBtn?.addEventListener('click', () => handlers.onPlotJump?.());
   document.getElementById('quota-add-btn')?.addEventListener('click', () => {
     const input = document.getElementById('quota-input') as HTMLInputElement | null;
     if (input?.value.trim()) handlers.onQuotaAdd(input.value.trim());
@@ -289,14 +312,22 @@ function adaptTargetOf(sourcePath: string | null): { tierKey: string; tag: strin
   };
 }
 
+/** 反馈卡展合状态：**模块级保留**——renderSidebar 每次标记变动都会整块重渲染，
+ *  不记住的话教师刚点开就被合上。默认收起：这是阶段动作，不是常驻信息。 */
+let adaptOpen = false;
+
 function adaptFeedbackBox(session: FileSession): string {
   if (!adaptTargetOf(session.sourcePath)) return '';
   return `
-    <div class="side-sec">
-      <div class="side-h">给第二轮调适的反馈</div>
-      <textarea id="adapt-fb" rows="3" style="width:100%;font-size:12px" placeholder="读完后用一句话告诉第二轮哪里难、大概超前多少。例：词汇大概超前一学期，句子有些绕，人物和情节可以。"></textarea>
-      <button id="adapt-fb-save" style="margin-top:4px">保存反馈并生成修订任务单</button>
-      <div id="adapt-task-preview" style="display:none;margin-top:6px;padding:6px 8px;border:1px solid var(--glass-line,#ddd);border-radius:8px;font-size:12px;line-height:1.7"></div>
+    <div class="side-card">
+      <div class="side-card-h" id="adapt-fb-toggle" role="button" tabindex="0" title="读完后用一句话告诉第二轮哪里难、大概超前多少——写完生成修订任务单">
+        给第二轮调适的反馈<span class="sp"></span><span class="chev">${adaptOpen ? '▾' : '▸'}</span>
+      </div>
+      <div class="side-card-b" id="adapt-fb-body" style="display:${adaptOpen ? '' : 'none'}">
+        <textarea id="adapt-fb" rows="3" style="width:100%;font-size:12px" placeholder="例：词汇大概超前一学期，句子有些绕，人物和情节可以。"></textarea>
+        <button id="adapt-fb-save" style="margin-top:4px">保存反馈并生成修订任务单</button>
+        <div id="adapt-task-preview" style="display:none;margin-top:6px;padding:6px 8px;border:1px solid var(--line);border-radius:8px;font-size:12px;line-height:1.7"></div>
+      </div>
     </div>`;
 }
 
@@ -345,6 +376,21 @@ function renderAdaptTaskPreview(target: { taskPath: string }, taskFile: AdaptTas
 function bindAdaptFeedback(session: FileSession): void {
   const btn = document.getElementById('adapt-fb-save');
   if (!btn) return;
+  const toggle = document.getElementById('adapt-fb-toggle');
+  const body = document.getElementById('adapt-fb-body');
+  const flip = () => {
+    adaptOpen = !adaptOpen;
+    if (body) body.style.display = adaptOpen ? '' : 'none';
+    const chev = toggle?.querySelector('.chev');
+    if (chev) chev.textContent = adaptOpen ? '▾' : '▸';
+  };
+  toggle?.addEventListener('click', flip);
+  toggle?.addEventListener('keydown', (e) => {
+    if ((e as KeyboardEvent).key === 'Enter' || (e as KeyboardEvent).key === ' ') {
+      e.preventDefault();
+      flip();
+    }
+  });
   /* 已有任务单（含已确认态）时先渲染，教师能看见上次的确认结果 */
   const target = adaptTargetOf(session.sourcePath);
   if (target) {

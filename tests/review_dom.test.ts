@@ -167,3 +167,65 @@ test('标记类型集与门禁项定义完整（P0 要求的按钮组）', () =>
   assert.equal(GATES.length, 4);
   assert.ok(!newMarkId().includes(' '), '标记 id 无空格，可作 DOM data 属性值');
 });
+
+/* ────────────────── 侧栏整理：一条状态条 + 四张分区卡（2026-09-13） ────────────────── */
+
+test('侧栏结构：状态条吃掉计数，四张分区卡，空状态压成一行', () => {
+  const review = newReviewState('ch1.md');
+  renderSidebar({ review, sourcePath: '/book/调适工作区/重制三版/第一章/原文_A层85_2026-09-12_工序化.md' } as never, {
+    onQuotaToggle: () => {},
+    onQuotaRemove: () => {},
+    onQuotaAdd: () => {},
+    onGateToggle: () => {},
+    onGateHelp: () => {},
+    onMarkJump: () => {},
+    onMarkRemove: () => {},
+  });
+  const side = win.document.getElementById('side-review')!;
+  /* 一条状态条：待确认的槽位与「标记/门禁」两个计数在同一行——不再一上一下两个数字打架 */
+  const status = side.querySelector('#side-status')!;
+  assert.ok(status, '状态条必须在');
+  assert.ok(status.querySelector('#side-pending-host'), '待确认要挂进状态条（由 refreshPendingBanner 填）');
+  assert.match(status.textContent!, /标记\s*0/);
+  assert.match(status.textContent!, /门禁\s*0\/4/);
+  /* 四张分区卡（本书配置齐全时会多出「给第二轮调适的反馈」那张） */
+  const cards = [...side.querySelectorAll('.side-card')];
+  assert.equal(cards.length, 4, '本章要点 / 终审门禁 / 反馈 / 标记清单');
+  assert.ok(cards[0]!.textContent!.includes('本章要点'));
+  assert.ok(cards[1]!.textContent!.includes('终审门禁'));
+  /* 空状态不再糊三行灰字 */
+  assert.match(side.textContent!, /还没设要点/);
+  assert.ok(!side.textContent!.includes('「质检报告」页点'), '长说明不该再占版面（进 title）');
+  /* 阶段动作默认收起 */
+  const fbBody = side.querySelector('#adapt-fb-body') as unknown as HTMLElement;
+  assert.equal(fbBody.style.display, 'none', '反馈是阶段动作，默认收起不占常驻空间');
+});
+
+test('侧栏：没接线时「摘要点 ▸」不出现（不摆一个点了没反应的按钮）', () => {
+  const review = newReviewState('ch1.md');
+  renderSidebar({ review } as never, {
+    onQuotaToggle: () => {},
+    onQuotaRemove: () => {},
+    onQuotaAdd: () => {},
+    onGateToggle: () => {},
+    onGateHelp: () => {},
+    onMarkJump: () => {},
+    onMarkRemove: () => {},
+  });
+  assert.equal(win.document.getElementById('quota-plot-jump'), null);
+  let jumped = 0;
+  renderSidebar({ review } as never, {
+    onQuotaToggle: () => {},
+    onQuotaRemove: () => {},
+    onQuotaAdd: () => {},
+    onGateToggle: () => {},
+    onGateHelp: () => {},
+    onMarkJump: () => {},
+    onMarkRemove: () => {},
+    onPlotJump: () => {
+      jumped++;
+    },
+  });
+  (win.document.getElementById('quota-plot-jump') as unknown as HTMLElement).click();
+  assert.equal(jumped, 1);
+});

@@ -388,14 +388,14 @@ header #btn-run:hover {
   padding: 2px 3px;
 }
 
-/* ---------- 工作台栅格 + 左侧竖栏 + 二级页签 ----------
-   2026-09-13 排版重构（方案 B）：一级导航从"顶部横排的视图栏"搬到左侧竖栏——
-   横排那条既吃 44px 高度、又把章节标签挤窄；竖起来之后高度省掉一整条，
-   横向宽度整条让给章节标签，一级（栏）/二级（条）的分工也一眼看得清。 */
+/* ---------- 工作台栅格 + 视图栏（方案 A） ----------
+   2026-09-13：先做过"一级导航搬到左侧竖栏"的方案 B，Wayne 看真机后判定方案 A 更好——
+   四个一级标签全是单字，横排本来就窄，不值得为它省那一行高度、更不值得让正文窄 56px。
+   于是四组回到顶部横排的分段控件，与二级页签同一条视图栏。 */
 .workbench {
   flex: 1;
   display: grid;
-  grid-template-columns: 56px minmax(0, 1fr) clamp(280px, 23vw, 340px);
+  grid-template-columns: minmax(0, 1fr) clamp(280px, 23vw, 340px);
   min-width: 0;
   min-height: 0;
   overflow: hidden;
@@ -408,118 +408,137 @@ header #btn-run:hover {
   padding: 0 16px 16px;
 }
 
-/* 书架/版本页没有竖栏：栅格必须跟着少一列——只把栏 `display:none` 是不够的，
-   网格会自动补位，正文会被塞进 56px 的第一列（2026-09-13 实测踩到）。 */
+/* 书架/版本页没有侧栏（`body.no-session #sidebar`）：栅格必须跟着少一列——
+   只把侧栏 `display:none` 是不够的，网格会自动补位，正文左边会空出一条 280px 的灰带
+   （2026-09-13 实测踩到）。 */
 body.no-session .workbench {
-  /* 书架页连侧栏也收起（`body.no-session #sidebar`），所以只剩一列 */
   grid-template-columns: minmax(0, 1fr);
 }
-body.no-session .subtabs {
+body.no-session .viewtabs {
   display: none;
 }
 
-.rail {
-  flex: 0 0 auto;
+/* ---------- 视图栏：目录 ｜ 一级分组 ｜ 二级页签（同高同基线，切组不位移） ----------
+   一级分组固定四格（读检改库），宽度不随选中项变化；
+   二级页签固定接在分组右侧的同一 x 起点上，并给最短的标签留出等宽下限——
+   于是"报告/看板/档案"三格同宽，整排看起来才是对齐的，而不是各自顶着文字长度歪。 */
+.viewtabs {
+  flex: 0 0 var(--chrome-view);
   display: flex;
-  flex-direction: column;
   align-items: center;
-  gap: 2px;
-  padding: 8px 0;
-  background: var(--panel);
-  border-right: 1px solid var(--line);
+  gap: 0;
+  margin: 0;
+  padding: 0;
   overflow: hidden;
+  background: transparent;
+  border: 0;
 }
 
-.rail-sep {
-  width: 26px;
-  height: 1px;
-  background: var(--line);
-  margin: 6px 0;
+/* 目录：与分组同高同基线的幽灵按钮，左缘贴 16px 栅格（=面板卡片左缘） */
+.viewtabs > #tab-toc {
   flex: 0 0 auto;
-}
-
-.rail-it,
-.vt-groups .vt-g {
-  width: 42px;
-  height: 42px;
-  flex: 0 0 auto;
-  display: flex;
-  flex-direction: column;
+  height: var(--ctl-h);
+  padding: 0 10px;
+  display: inline-flex;
   align-items: center;
-  justify-content: center;
-  gap: 2px;
+  gap: 5px;
   border: none;
-  border-radius: 9px;
+  border-radius: 6px;
   background: transparent;
   color: var(--muted);
-  font-size: var(--fs-xs);
-  font-weight: 500;
-  padding: 0;
+  font-size: 13px;
 }
-.rail-it .ico,
-.vt-groups .vt-g .ico {
-  font-size: 15px;
-  width: 15px;
-  height: 15px;
-}
-.rail-it:hover,
-.vt-groups .vt-g:hover {
-  background: var(--accent-soft);
+.viewtabs > #tab-toc:hover {
   color: var(--accent);
-}
-.rail-it.active,
-.vt-groups .vt-g.active {
   background: var(--accent-soft);
+}
+.viewtabs > #tab-toc.active {
   color: var(--accent);
-  font-weight: 650;
+  background: var(--accent-soft);
+  font-weight: 600;
 }
 
-/* 竖栏里的四组：竖排容器，去掉横排时代的槽底与内边距 */
+/* 竖分隔线：目录 ｜ 分组——高度与控件一致，让三段看起来是一排而不是三块 */
+.vt-sep {
+  flex: 0 0 auto;
+  width: 1px;
+  height: 18px;
+  margin: 0 10px;
+  background: var(--line);
+}
+
+.viewtabs button {
+  height: var(--ctl-h);
+  padding: 0 11px;
+  border-radius: 5px;
+}
 .vt-groups {
+  flex: 0 0 auto;
   display: flex;
-  flex-direction: column;
   gap: 2px;
-  padding: 0;
+  padding: 3px;
+  border-radius: 8px;
+  background: var(--seg-slot);
+}
+.vt-groups .vt-g {
+  height: 22px;
+  min-width: 30px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 5px;
   background: transparent;
-  border-radius: 0;
-}
-
-/* 二级页签：贴着正文列顶部（当前组只有一个视图时整条收起——只有一项的导航条是噪音） */
-.subtabs {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  height: var(--chrome-view);
-  flex: 0 0 var(--chrome-view);
-  border-bottom: 1px solid var(--line);
-  margin-bottom: 12px;
-  overflow: hidden;
-}
-.subtabs.empty {
-  display: none;
-}
-.subtabs .vt-s {
-  height: var(--chrome-view);
-  padding: 0 12px;
-  min-width: 76px;
+  box-shadow: none;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 500;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+}
+
+.vt-groups .vt-g.active {
+  background: var(--panel);
+  color: var(--ink);
+  box-shadow: 0 1px 2px rgba(24, 35, 31, 0.1);
+}
+
+.vt-sub {
+  flex: 0 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 8px;
+  overflow: hidden;
+}
+.vt-sub .vt-s {
+  height: var(--ctl-h);
+  min-width: 62px;
+  padding: 0 10px;
   border: none;
-  border-bottom: 2px solid transparent;
-  border-radius: 0;
+  border-radius: 5px;
   background: transparent;
+  box-shadow: none;
   color: var(--muted);
-  font-size: var(--fs-md);
+  font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
 }
-.subtabs .vt-s:hover {
+.vt-sub .vt-s:hover {
+  background: var(--accent-soft);
   color: var(--accent);
 }
-.subtabs .vt-s.active {
+
+.viewtabs button.active,
+.vt-sub .vt-s.active {
+  background: var(--accent-soft);
   color: var(--accent);
+  box-shadow: none;
+}
+.vt-sub .vt-s.active {
   font-weight: 600;
-  border-bottom-color: var(--accent);
-  background: transparent;
 }
 
 /* Main panes are the work surface, not floating presentation cards. */
@@ -958,6 +977,166 @@ body:not(.no-session) #reader {
   line-height: 1.8;
 }
 
+/* ---------- 右侧审校栏：一条状态条 + 四张分区卡 ----------
+   2026-09-13 整理：原来是七块平铺、靠 20px 空白分开，且一屏里两个计数打架
+   （顶部「待确认 74 条」说机器筛出多少要处理，底部「标记清单 0」说你标了几条）。
+   现在每块有边界（卡片）、标题带计数、空状态压成一行；阶段动作（第二轮反馈）默认收起。 */
+.side-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 10px 0 10px;
+  padding: 5px 6px 5px 8px;
+  border-radius: 8px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+}
+.side-status .ss-host {
+  flex: 0 1 auto;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.side-status .ss-item {
+  color: var(--muted);
+}
+.side-status .ss-item b {
+  color: var(--ink);
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+.side-status .ss-dot {
+  color: var(--line);
+}
+.side-status .sp {
+  flex: 1 1 auto;
+}
+
+/* 待确认：状态条里的第一项（原来是一条独占一块的横幅） */
+.side-status .pending-banner {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: auto;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font-size: var(--fs-sm);
+  line-height: 1.2;
+  max-width: 100%;
+  overflow: hidden;
+}
+.side-status .pending-banner .pb-txt {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.side-status .pending-banner .pb-hint {
+  color: var(--muted);
+}
+.side-status .pending-banner b {
+  font-weight: 650;
+}
+.side-status .pending-banner #pending-go {
+  flex: 0 0 auto;
+  height: 21px;
+  min-height: 21px;
+  padding: 0 8px;
+  display: inline-flex;
+  align-items: center;
+  border-radius: var(--r-pill);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  background: var(--panel);
+  border-color: color-mix(in srgb, var(--accent) 34%, transparent);
+  color: var(--accent);
+}
+
+/* 分区卡 */
+.side-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  margin-bottom: 8px;
+  overflow: hidden;
+  background: var(--panel);
+}
+.side-card-h {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 10px;
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+.side-card-h[role='button'] {
+  cursor: pointer;
+}
+.side-card-h[role='button']:hover {
+  background: var(--surface-2);
+}
+.side-card-h .cnt {
+  font-size: var(--fs-xs);
+  font-weight: 650;
+  color: var(--muted-strong);
+  background: var(--surface-3);
+  border-radius: var(--r-pill);
+  padding: 1px 7px;
+  font-variant-numeric: tabular-nums;
+}
+.side-card-h .sp {
+  flex: 1 1 auto;
+}
+.side-card-h .chev {
+  color: var(--muted);
+  font-size: var(--fs-xs);
+}
+.side-card-h .card-act {
+  height: 22px;
+  min-height: 22px;
+  padding: 0 8px;
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--line));
+  background: var(--panel);
+}
+.side-card-b {
+  padding: 9px 10px 10px;
+  border-top: 1px solid var(--line);
+}
+.side-hint {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+  margin-bottom: 7px;
+}
+/* 门禁两列：四行压成两行，且问号紧跟标签（原来被 margin-left:auto 推到最右，四行四个点像噪点） */
+.gate-list {
+  display: grid;
+  grid-template-columns: max-content max-content;
+  gap: 3px 16px;
+}
+.gate-list li {
+  padding: 2px 0;
+}
+.gate-list .qmark {
+  margin-left: 2px;
+}
+.side-tag,
+.ss-tag {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--muted-strong);
+  background: var(--surface-3);
+  border-radius: var(--r-pill);
+  padding: 1px 8px;
+}
+
 /* Information-first library without archive numbering and ornament. */
 .shelf {
   max-width: 1260px;
@@ -1103,13 +1282,13 @@ details[open] > :not(summary) {
 
 @media (max-width: 1050px) {
   .workbench {
-    grid-template-columns: 56px minmax(0, 1fr) 280px;
+    grid-template-columns: minmax(0, 1fr) 280px;
   }
   .pane {
     padding-inline: 20px;
   }
-  .subtabs .vt-s {
-    min-width: 64px;
+  .vt-sub .vt-s {
+    min-width: 54px;
   }
 }
 
@@ -1118,7 +1297,7 @@ details[open] > :not(summary) {
     gap: 5px;
   }
   .workbench {
-    grid-template-columns: 50px minmax(0, 1fr) 220px;
+    grid-template-columns: minmax(0, 1fr) 220px;
   }
   .workbench .content {
     padding: 0 10px 10px;
