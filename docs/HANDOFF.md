@@ -1,0 +1,64 @@
+# LayerText 工程交接（总优化轮）
+
+> ⚠️ **历史文档（2026-09-13 标注）**：这一页写于"总优化轮"开工时，其中"未 push、
+> 基线 `546c3cc`"等状态**早已不成立**——分支已多次推送、CI 已转绿、且新增了
+> 待确认队列 / 校准台账 / 辅助模型等机制。
+>
+> - **项目当前的完整状态** → [`项目总说明.md`](项目总说明.md)
+> - **文件在哪、该改哪儿** → [`文件架构.md`](文件架构.md)
+> - **每一轮的改动与为什么** → [`../CHANGELOG.md`](../CHANGELOG.md)
+>
+> 保留本页是因为下面「仍需关注」两条仍然有效（`清单_最新.json` 的歧义拒绝、`--allow-partial`
+> 的显式声明），它们描述的是**设计约束**，不是当时的进度。
+
+## 本轮状态
+
+工作在独立分支 `codex/total-optimization`，基线为 `546c3cc`。未 push、未 release、未打 tag；未读取或修改 AnimalFarm 真实教学资产。
+
+本轮核对了当前发布闭环与运行身份实现。发布脚本已经具备缺件拒绝导出、多层决定日志汇总、半成品学生版默认拒绝发布等保护；这些逻辑位于 `tools/af_pipeline/LayerText_AF发布包.mjs`。教师稳定 ID、章节解析、任务实验等模块已在基线中存在。
+
+## 仍需关注
+
+- `清单_最新.json` 是兼容入口，任何未显式指定 run 的发布/恢复流程都应继续保持歧义拒绝；多教师并发验收需在独立目录跑一次。
+- `--allow-partial` 是显式例外，发布包描述必须保留 partial 声明。
+- 四格 AI 实验和真实教师任务实验仍是产品效果证据，不能由单元测试替代。
+- `.mjs` 的 TDZ 风险无法由 tsc 覆盖，继续保留真子进程 smoke test。
+
+## 验证
+
+本轮已执行前端/引擎检查（见最终工作总结）。提交前应在干净 checkout 再执行：
+
+```bash
+npm run verify
+npm run verify:rust
+cd app && npm run build
+```
+
+## 本轮补丁
+
+将 Rust 系统词典测试改为：系统词典存在时校验 `boar` 中文释义；系统词典缺失时跳过该资源依赖测试。该测试验证的是外部 macOS 资源，不应把“机器未安装词典”误报成代码失败。
+
+## 验证更新（本轮）
+
+- `npm run verify`：通过；898 项测试，897 pass、1 skipped、0 fail。
+- `npm run verify:rust`：通过；Rust 5 项全部通过。系统词典测试在资源存在时校验释义，资源缺失时明确跳过。
+- `npm run build --prefix app`：通过。
+- 工作树干净；当前分支 `codex/total-optimization`，未 push、未 release、未打 tag。
+
+## 总优化补充：preflight 门禁
+
+新增 `tools/preflight.mjs` 并接入 `npm run verify`：对 24 个管线 `.mjs` 逐文件执行 Node 语法检查，扫描空 catch，并确认关键脚本保留非破坏性 dry/plan/check/where 入口。该门禁针对 `.mjs` TDZ 与静默吞错无法由 TypeScript 覆盖的问题。当前分支未 push。
+
+## 性能与结构优化补充
+
+新增 `tools/perf_bench.mjs` 与 `npm run perf:bench`：使用固定 250 段/4750 词输入，在 dist 上重复 30 次测量核心 QC 热路径，并设置默认 250ms 回归门槛。本机实测平均 1.66ms/次。该基准不调用 API、不读真实教学资产，适合 CI 做趋势门禁。
+
+本轮对结构的实际收敛点是把性能基准与 preflight 作为独立工程边界接入 `package.json`；大规模前端拆分尚未安全实施，原因是当前模块间循环依赖较多，贸然拆分会改变运行时初始化顺序。后续应以纯函数边界（risk 分组、会话状态、报告格式化）为单位逐步迁移，并每次保留兼容导出。
+
+## 本轮拆分与风险验收
+
+- 依赖图与拆分边界见 `docs/DEPENDENCY_GRAPH.md`；`risk.ts` 已抽出纯函数至 `app/src/risklogic.ts`，并通过 re-export 保持调用方兼容。
+- 清单指针歧义/并发双教师：`tests/bundle_cli.test.ts`（并发双教师）与 `tests/runidentity.test.ts` 锁定“无 run 拒绝、有 run 正确导出”。
+- partial 发布声明：`tests/bundle_cli.test.ts` 锁定默认拒发、`--allow-partial` 放行且包描述保留声明。
+- `.mjs` TDZ/静默 catch：`tools/preflight.mjs` 已接入 `npm run verify`，逐检 24 个脚本；本轮 preflight 通过。
+- 多教师并发：使用 `tests/bundle_cli.test.ts` 的真实子进程临时目录场景验证，双教师包身份与哈希不串线。
