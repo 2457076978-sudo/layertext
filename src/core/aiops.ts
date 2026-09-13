@@ -4,7 +4,11 @@
  * 应用（app/src/ai.ts）与 CLI 评测（src/eval.ts）共用。
  */
 
-export interface PromptMeta { version: string; file: string; desc?: string }
+export interface PromptMeta {
+  version: string;
+  file: string;
+  desc?: string;
+}
 export interface PromptManifest {
   setVersion: string;
   prompts: Record<string, PromptMeta>;
@@ -38,22 +42,65 @@ export interface ProviderTarget {
   index: number;
 }
 
-export interface FailoverConfig { name?: string; baseUrl?: string; model?: string; key?: string }
+export interface FailoverConfig {
+  name?: string;
+  baseUrl?: string;
+  model?: string;
+  key?: string;
+}
 
 /** 由 host 推导服务商显示名（未知 host 原样显示） */
 export function providerNameOf(baseUrl: string): string {
-  try { return new URL(baseUrl).host; } catch { return baseUrl ? '自定义' : '未配置'; }
+  try {
+    return new URL(baseUrl).host;
+  } catch {
+    return baseUrl ? '自定义' : '未配置';
+  }
 }
 
 /** 组装调用序列：主供应商在前，备用按配置顺序；备用未单独配 key 则复用主 key */
-export function buildTargets(
-  primary: { baseUrl: string; model: string; key: string },
-  failover: (FailoverConfig | undefined)[] | undefined,
-  fallbackKeys: Record<number, string>,
-): ProviderTarget[] {
-  const out: ProviderTarget[] = [{
-    name: providerNameOf(primary.baseUrl), baseUrl: primary.baseUrl, model: primary.model, key: primary.key, index: 0,
-  }];
+/* ---------- 辅助模型（可选）：判据在这里，App 与管线共用同一份 ---------- */
+
+/**
+ * 辅助模型一次最多处理多少个词。
+ *
+ * 为什么要有上限：实测这个量级的本机模型**输入一长就不干活**（MiniCPM5-2B 两段输入直接交白卷，
+ * Ling-3.0-tiny 多段扫描质量也差）。映射类任务的输入就是一个词表，超过这个规模说明这一批
+ * 已经不小了，整批退回主模型——**不拆批**：拆成几批会让同一个词在不同批里拿到不一致的译法。
+ */
+export const AUX_MAX_WORDS = 12;
+
+export interface AuxConfig {
+  enabled?: boolean;
+  baseUrl?: string;
+  model?: string;
+}
+
+/** 辅助模型是否可用：**勾了启用**且地址与模型名都填了（Key 允许空——本地服务常常不校验） */
+export function auxReady(cfg: AuxConfig | undefined): boolean {
+  return Boolean(cfg?.enabled && (cfg.baseUrl ?? '').trim() && (cfg.model ?? '').trim());
+}
+
+/**
+ * 这条活该不该交给辅助模型。
+ *
+ * 除了"可用"，还要求**输入规模在限内**。调用方仍然要负责另一件它才知道的事：
+ * 这条活本身是不是"短输入 + 任务单一 + 输出可机检"——`preferAux` 传不传由它决定。
+ */
+export function auxSuitedFor(cfg: AuxConfig | undefined, itemCount: number): boolean {
+  return auxReady(cfg) && itemCount > 0 && itemCount <= AUX_MAX_WORDS;
+}
+
+export function buildTargets(primary: { baseUrl: string; model: string; key: string }, failover: (FailoverConfig | undefined)[] | undefined, fallbackKeys: Record<number, string>): ProviderTarget[] {
+  const out: ProviderTarget[] = [
+    {
+      name: providerNameOf(primary.baseUrl),
+      baseUrl: primary.baseUrl,
+      model: primary.model,
+      key: primary.key,
+      index: 0,
+    },
+  ];
   (failover ?? []).forEach((f, i) => {
     if (!f?.baseUrl?.trim() || !f.model?.trim()) return;
     const key = (fallbackKeys[i] ?? '').trim() || (f.key ?? '').trim() || primary.key;
@@ -87,10 +134,19 @@ export function aiErrHuman(e: unknown): string {
 export const COST_HEADER = ['时间', '场景', '书', '章节', '供应商', '模型', '提示词版本', '入tokens', '出tokens', '耗时ms', 'failover', '结果'] as const;
 
 export interface CostRow {
-  ts: string; scene: string; book: string; chapter: string;
-  provider: string; model: string; promptVer: string;
-  promptTokens?: number; completionTokens?: number; elapsedMs: number;
-  failover: boolean; ok: boolean; note?: string;
+  ts: string;
+  scene: string;
+  book: string;
+  chapter: string;
+  provider: string;
+  model: string;
+  promptVer: string;
+  promptTokens?: number;
+  completionTokens?: number;
+  elapsedMs: number;
+  failover: boolean;
+  ok: boolean;
+  note?: string;
 }
 
 export function toCostLine(r: CostRow): string {
@@ -98,14 +154,33 @@ export function toCostLine(r: CostRow): string {
     const s = String(v ?? '');
     return /[",]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
   };
-  return [
-    r.ts, r.scene, r.book, r.chapter, r.provider, r.model, r.promptVer,
-    r.promptTokens ?? '', r.completionTokens ?? '', r.elapsedMs,
-    r.failover ? '是' : '', r.ok ? 'ok' : 'err' + (r.note ? ':' + r.note.slice(0, 60) : ''),
-  ].map(cell).join(',') + '\n';
+  return (
+    [
+      r.ts,
+      r.scene,
+      r.book,
+      r.chapter,
+      r.provider,
+      r.model,
+      r.promptVer,
+      r.promptTokens ?? '',
+      r.completionTokens ?? '',
+      r.elapsedMs,
+      r.failover ? '是' : '',
+      r.ok ? 'ok' : 'err' + (r.note ? ':' + r.note.slice(0, 60) : ''),
+    ]
+      .map(cell)
+      .join(',') + '\n'
+  );
 }
 
-export interface CostSummary { calls: number; promptTokens: number; completionTokens: number; errCount: number; failoverCount: number }
+export interface CostSummary {
+  calls: number;
+  promptTokens: number;
+  completionTokens: number;
+  errCount: number;
+  failoverCount: number;
+}
 
 /** 汇总成本台账文本（宽容解析：列序即 COST_HEADER；bookFilter 只统计某本书） */
 export function summarizeCost(csv: string, bookFilter?: string): CostSummary {
