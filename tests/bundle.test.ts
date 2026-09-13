@@ -27,6 +27,7 @@ import {
   type PublishBundle,
 } from '../src/core/bundle.js';
 import { makeDecisionEvent, type DecisionEvent } from '../src/core/decision.js';
+import type { CalibrationEvent } from '../src/core/calibration.js';
 import { artifactIdOf, contentHash, newManifest, refOf, type RunManifest } from '../src/core/manifest.js';
 
 /* ────────────────────── 夹具 ────────────────────── */
@@ -185,7 +186,10 @@ test('★ 学生版的派生关系随登记进包：源稿身份、生成器与�
   assert.equal(stu.derivedFrom!.ruleVersion, 1);
   assert.deepEqual(stu.derivedFrom!.dropSections, ['词句卡']);
   // 核对不受影响：派生关系是登记事实，不参与哈希与身份自洽检查
-  const ok = verifyBundle(b, b.entries.map((e) => ({ path: e.path, text: FILES.concat([]).find((f) => f.path === e.path)?.text ?? '# Animal Farm · Chapter One\n\nThe boy ran to the red barn（谷仓）.\n' })));
+  const ok = verifyBundle(
+    b,
+    b.entries.map((e) => ({ path: e.path, text: FILES.concat([]).find((f) => f.path === e.path)?.text ?? '# Animal Farm · Chapter One\n\nThe boy ran to the red barn（谷仓）.\n' })),
+  );
   assert.equal(ok.ok, true, ok.problems.map((p) => p.message).join('；'));
 });
 
@@ -266,6 +270,29 @@ test('★ 身份是算出来的：旧包描述（条目没有 id）照常核对�
 });
 
 /* ────────────────────── ④ 溯源 ────────────────────── */
+
+/** 一条校准事件夹具（与 `_运行/校准台账.jsonl` 的一行同形） */
+function cal(over: Record<string, unknown> = {}): CalibrationEvent {
+  return {
+    schemaVersion: 1,
+    id: 'cal-1',
+    ts: '2026-09-13T01:00:00.000Z',
+    teacher: 'wayne',
+    book: 'Animal Farm',
+    chapter: '第一章',
+    tier: 'A层85',
+    level: 'word',
+    word: 'tremendous',
+    type: 'zh',
+    note: '极大的',
+    action: 'add',
+    source: 'human',
+    kind: 'mark',
+    propagation: 'annotate',
+    file: '原文_A层85_2026-09-12_工序化.md',
+    ...over,
+  } as CalibrationEvent;
+}
 
 test('★ 任意发布文件可查询「哪次运行、哪个模型、哪版词库、谁在何时做了哪条决定」', () => {
   const m = manifest();
@@ -459,4 +486,50 @@ test('★ 拒绝理由逐条可读（不是一句"缺少必需字段"就完了�
   for (const p of ready.problems) {
     assert.equal(p.length > 6, true, `每条都要说清缺什么、为什么重要：${p}`);
   }
+});
+
+/* ────────────────── 校准台账接进发布包与溯源（2026-09-13） ────────────────── */
+
+test('★ 包描述分开记两本账：决定条数与人工校准条数（论文里数的是后者）', () => {
+  const m = manifest();
+  const b = buildBundle({ manifest: m, files: FILES, events: [ev()], calibrations: [cal(), cal({ id: 'cal-2', word: 'straw', ts: '2026-09-13T01:05:00.000Z' })] });
+  assert.equal(b.decisionCount, 1);
+  assert.equal(b.calibrationCount, 2, '校准是另一本账——混进 decisionCount 就再也没人分得开');
+});
+
+test('★ 溯源带上人工校准：谁在何时对哪个词做了什么判断（并按章过滤、时间序）', () => {
+  const m = manifest();
+  const b = buildBundle({ manifest: m, files: FILES, calibrations: [cal()] });
+  const p = provenanceOf({
+    path: FILES[0]!.path,
+    currentText: CH1,
+    bundle: b,
+    manifest: m,
+    chapter: '第一章',
+    calibrations: [
+      cal({ ts: '2026-09-13T01:05:00.000Z', word: 'straw', type: 'simpl', note: '教师指定替换：straw → hay' }),
+      cal({ ts: '2026-09-13T01:00:00.000Z', word: 'tremendous' }),
+      cal({ ts: '2026-09-13T01:10:00.000Z', word: 'windmill', chapter: '第二章' }),
+    ],
+  });
+  assert.equal(p.calibrations.length, 2, '别的章的校准不该算进这一章');
+  assert.deepEqual(
+    p.calibrations.map((c) => c.anchor),
+    ['tremendous', 'straw'],
+    '时间序',
+  );
+  assert.match(p.line, /2 条人工校准（其中教师亲判 2 条）/);
+  const md = renderProvenance(p).join('\n');
+  assert.match(md, /### 审校工作台上的人工校准/);
+  assert.match(md, /教师亲判/);
+  assert.match(md, /教师指定替换：straw → hay/);
+});
+
+test('无校准事件时溯源仍说得出话，且不硬编一节空表', () => {
+  const m = manifest();
+  const b = buildBundle({ manifest: m, files: FILES });
+  const p = provenanceOf({ path: FILES[0]!.path, bundle: b, manifest: m });
+  assert.equal(p.calibrations.length, 0);
+  const md = renderProvenance(p).join('\n');
+  assert.equal(md.includes('人工校准'), false);
 });
