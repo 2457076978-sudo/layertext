@@ -14,7 +14,7 @@ before(() => {
 });
 
 import { jumpTo, refreshMarkDom, removeMarkDom, renderSidebar, restoreAllMarkDom } from '../app/src/review.js';
-import { GATES, WORD_TYPES, SENT_TYPES, newMarkId, newReviewState, typeLabel, type Mark } from '../app/src/types.js';
+import { GATES, WORD_TYPES, WORD_PANEL_TYPES, SENT_TYPES, newMarkId, newReviewState, typeLabel, type Mark } from '../app/src/types.js';
 
 function buildReader(): void {
   win.document.body.innerHTML = `
@@ -228,4 +228,18 @@ test('侧栏：没接线时「摘要点 ▸」不出现（不摆一个点了没�
   });
   (win.document.getElementById('quota-plot-jump') as unknown as HTMLElement).click();
   assert.equal(jumped, 1);
+});
+
+/* ────────────────── 词面板按钮：去掉重复/无落点的三个（2026-09-13） ────────────────── */
+
+test('词面板只摆有落点的标记：超纲 / 事实用词存疑 / 好词保留 已下线', () => {
+  const keys = WORD_PANEL_TYPES.map((t) => t.key);
+  assert.deepEqual(keys, ['simpl', 'zh', 'en', 'hard', 'anchor', 'otherw']);
+  assert.equal(keys.includes('oov'), false, '超纲：引擎已自动判定并显示在弹层顶部，重复');
+  assert.equal(keys.includes('factw'), false, '事实用词存疑：全仓无落点，句级已有「事实逻辑疑」');
+  assert.equal(keys.includes('goodw'), false, '好词保留：与"这条流水线只动手"的落点相反');
+  /* 下线的类型仍要认得出来——旧稿的标记还会被 typeLabel 显示 */
+  assert.equal(typeLabel('oov'), '超纲');
+  assert.equal(typeLabel('factw'), '事实用词存疑');
+  assert.equal(typeLabel('goodw'), '好词保留');
 });

@@ -1018,6 +1018,13 @@ document.addEventListener('scroll', () => scheduleSaveLastSession(), true);
 
 void (async () => {
   await loadConfig();
+  /* ★ 模式胶囊必须在**读到配置之后**重画一次（2026-09-13 查出来的真事故）。
+     模块顶层那次 updateModePill() 跑在 loadConfig() 之前，那时 S.appConfig 还是 `{}`，
+     于是胶囊一律渲染成「候选模式」——配置里明明是即改。后果不是"显示不准"这么轻：
+       ① 弹层里的提示文字（读的是真实配置）写「当前为即改模式」，胶囊写「候选模式」，**两处 UI 自相矛盾**；
+       ② 教师被胶囊误导，去点它"切到即改"，而点击是**取反**——于是把即改真的关掉了，
+          下一次点标记就变成"只入清单、不改正文"，看起来就是「点了没反应」。 */
+  updateModePill();
   // 主题/排版先于一切渲染：书架出现前屏幕保持中性装载态，不闪默认浅色（#reader 初始骨架=书架装载中）
   applyTheme();
   applyReaderFont();

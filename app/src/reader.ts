@@ -12,7 +12,7 @@ import { showGateHelp } from './chat.js';
 import { showSentenceEditor, applyZhAnnotations, applyEnDefinitions, applyWordSimplifications, removeZhAnnotation } from './pipew.js';
 import { aiRewriteSentence } from './aiflow.js';
 import { jumpTo, refreshBookmarksDom, refreshMarkDom, removeMarkDom, renderSidebar, restoreAllMarkDom, scheduleSave } from './review.js';
-import { WORD_TYPES, SENT_TYPES, newMarkId, typeLabel, type FileSession, type Mark, type MarkLevel, type MarkType } from './types.js';
+import { WORD_PANEL_TYPES, SENT_TYPES, newMarkId, typeLabel, type FileSession, type Mark, type MarkLevel, type MarkType } from './types.js';
 import { phraseSpan, toggleParaBookmark } from './pure.js';
 import bundledCefr from '../../assets/wordlists/cefrj_levels.txt?raw';
 import { parseCefrLevels, cefrOf, CEFR_DESC, type CefrLevel } from '../../src/core/cefr.js';
@@ -272,11 +272,15 @@ function refreshPop(): void {
     wi = ctx.wi === undefined ? undefined : Number(ctx.wi);
   const level = ctx.level as MarkLevel;
   renderPopMarks(marksAt(S.popSession, level, pi, si, wi));
-  // 类型按钮置灰已选项
+  // 类型按钮标出已选项：透明度 + 一个 ✓ + 标题里写明（0.45 透明度太轻，教师看不出来）
   pop.querySelectorAll('[data-mk]').forEach((b) => {
-    const t = (b as HTMLElement).dataset.mk!;
+    const el = b as HTMLElement;
+    const t = el.dataset.mk!;
     const has = marksAt(S.popSession!, level, pi, si, wi).some((m) => m.type === t);
-    (b as HTMLElement).style.opacity = has ? '.45' : '';
+    el.classList.toggle('mk-on', has);
+    if (t.startsWith('__')) return; // 动作按钮（改写/手改/去标注）不是"标记类型"，不参与已标记态
+    const label = typeLabel(t as MarkType);
+    el.title = has ? `已经标过「${label}」——再点会说一声，不会重复添加；要换意图先删掉上面那条` : `标记为「${label}」`;
   });
 }
 
@@ -309,7 +313,8 @@ export function showWordPanel(session: FileSession, wEl: HTMLElement, x: number,
     <div class="pop-h">${esc(wEl.textContent ?? '')}</div>
     <div class="pop-info">词表状态：${stateLabel}${origin && origin !== tok ? `<br/>词形还原原形：${esc(origin)}` : ''}<br/>${cefrLine(tok)}</div>
     <div class="pop-marks"></div>
-    <div class="pop-btns">${hasAnno ? `<button data-mk="__unanno" class="primary" title="本地去除该词全章的中文标注（不过模型、可撤销），同时把该词登记进词库=学生已会（下次生成不再注它）">✂ 去除中文标注·记已会</button>` : ''}<button data-mk="__rewrite" class="primary" title="让 AI 按当前标记意图改写这一句（快捷键 R）"><svg class="ico"><use href="#i-sparkle"/></svg>AI 改写本句</button><button data-mk="__edit" title="亲手修改这一句（快捷键 E）——直接写入正文，可撤销，不经引擎复核（你是定稿人）">✎ 手动改这句</button>${WORD_TYPES.map((t, i) => `<button data-mk="${t.key}" title="标记为「${t.label}」${t.key === 'anchor' ? '——记录该词为本篇复现锚点（保留并计入复现，不改正文）' : S.appConfig.autoRewriteOnMark ? '——即改模式下点完立即执行（写原稿+日志）' : '——点「AI 改写本句」或批量时按此意图处理'}"><span class="kbd">${i + 1}</span>${t.label}</button>`).join('')}</div>
+    <div class="pop-btns">${hasAnno ? `<button data-mk="__unanno" class="primary" title="本地去除该词全章的中文标注（不过模型、可撤销），同时把该词登记进词库=学生已会（下次生成不再注它）">✂ 去除中文标注·记已会</button>` : ''}<button data-mk="__rewrite" class="primary" title="让 AI 按当前标记意图改写这一句（快捷键 R）"><svg class="ico"><use href="#i-sparkle"/></svg>AI 改写本句</button><button data-mk="__edit" title="亲手修改这一句（快捷键 E）——直接写入正文，可撤销，不经引擎复核（你是定稿人）">✎ 手动改这句</button></div>
+    <div class="pop-mk">${WORD_PANEL_TYPES.map((t, i) => `<button data-mk="${t.key}" title="标记为「${t.label}」${t.key === 'anchor' ? '——记录该词为本篇复现锚点（保留并计入复现，不改正文）' : S.appConfig.autoRewriteOnMark ? '——即改模式下点完立即执行（写原稿+日志）' : '——点「AI 改写本句」或批量时按此意图处理'}"><span class="kbd">${i + 1}</span>${t.label}</button>`).join('')}</div>
     <textarea id="pop-note" placeholder="备注（可选，随下一条标记保存）"></textarea>
     <div class="pop-tip">${S.appConfig.autoRewriteOnMark ? '当前为即改模式：点任一标记立即执行（如「加中文标注」插入注释、「词汇简化」换课标内简单词），改动写原稿并记日志，首改前自动备份' : '先标记意图再点「AI 改写本句」，改写会直接出现在正文中供采纳'}</div>`;
   bindTypeButtons(session, 'word', pi, si, wi);
@@ -333,7 +338,8 @@ export function showSentPanel(session: FileSession, sentEl: HTMLElement, x: numb
     <div class="pop-h">句子标记（P${String(pi + 1).padStart(2, '0')} · 第${si + 1}句 · ${wc} 词）</div>
     <div class="pop-info">${esc(text.slice(0, 80))}${text.length > 80 ? '…' : ''}<br/>自动检测：${riskBits ? `<span class="warn">${riskBits}</span>` : '<span class="ok">未命中黑名单句法</span>'}${crossSentence ? '<br/>⚠︎ 跨句选择，仅标记所选末句' : ''}</div>
     <div class="pop-marks"></div>
-    <div class="pop-btns"><button data-mk="__edit" title="亲手修改这一句（快捷键 E）——直接写入正文，可撤销，不经引擎复核（你是定稿人）">✎ 手动改这句</button>${SENT_TYPES.map((t, i) => `<button data-mk="${t.key}"><span class="kbd">${i === 9 ? 0 : i + 1}</span>${t.label}</button>`).join('')}</div>
+    <div class="pop-btns"><button data-mk="__edit" title="亲手修改这一句（快捷键 E）——直接写入正文，可撤销，不经引擎复核（你是定稿人）">✎ 手动改这句</button></div>
+    <div class="pop-mk">${SENT_TYPES.map((t, i) => `<button data-mk="${t.key}"><span class="kbd">${i + 1}</span>${t.label}</button>`).join('')}</div>
     <textarea id="pop-note" placeholder="备注（可选，随下一条标记保存）"></textarea>`;
   bindTypeButtons(session, 'sent', pi, si);
   refreshPop();
@@ -365,7 +371,8 @@ export function showPhrasePanel(session: FileSession, sentEl: HTMLElement, range
     <div class="pop-h">短语标记（P${String(pi + 1).padStart(2, '0')} · 第${si + 1}句 · ${wl} 词）</div>
     <div class="pop-info">选区：${esc(shown)}<br/>选什么划什么——短语整体处理（词典释义 / 换简单说法 / 标记保留），句内其余文字不动</div>
     <div class="pop-marks"></div>
-    <div class="pop-btns"><button data-mk="__rewrite" class="primary" title="让 AI 按当前标记意图改写这一句（快捷键 R）"><svg class="ico"><use href="#i-sparkle"/></svg>AI 改写本句</button><button data-mk="__edit" title="亲手修改这一句（快捷键 E）——直接写入正文，可撤销，不经引擎复核（你是定稿人）">✎ 手动改这句</button>${WORD_TYPES.map((t, i) => `<button data-mk="${t.key}" title="标记为「${t.label}」——${t.key === 'anchor' ? '记录整个短语为复现锚点（不改正文）' : `将对整个短语生效（下划线范围）${S.appConfig.autoRewriteOnMark ? '；即改模式下点完立即执行（写原稿+日志）' : ''}`}"><span class="kbd">${i + 1}</span>${t.label}</button>`).join('')}</div>
+    <div class="pop-btns"><button data-mk="__rewrite" class="primary" title="让 AI 按当前标记意图改写这一句（快捷键 R）"><svg class="ico"><use href="#i-sparkle"/></svg>AI 改写本句</button><button data-mk="__edit" title="亲手修改这一句（快捷键 E）——直接写入正文，可撤销，不经引擎复核（你是定稿人）">✎ 手动改这句</button></div>
+    <div class="pop-mk">${WORD_PANEL_TYPES.map((t, i) => `<button data-mk="${t.key}" title="标记为「${t.label}」——${t.key === 'anchor' ? '记录整个短语为复现锚点（不改正文）' : `将对整个短语生效（下划线范围）${S.appConfig.autoRewriteOnMark ? '；即改模式下点完立即执行（写原稿+日志）' : ''}`}"><span class="kbd">${i + 1}</span>${t.label}</button>`).join('')}</div>
     <textarea id="pop-note" placeholder="备注（可选，随下一条标记保存）"></textarea>
     <div class="pop-tip">${S.appConfig.autoRewriteOnMark ? '当前为即改模式：点任一标记立即对整个短语执行，改动写原稿并记日志' : '选什么划什么——标记后可点「AI 改写本句」处理整个短语'}</div>`;
   bindTypeButtons(session, 'phrase', pi, si, wi, wl);
@@ -392,7 +399,15 @@ function bindTypeButtons(session: FileSession, level: MarkLevel, pi: number, si:
         return;
       }
       const note = (pop.querySelector('#pop-note') as HTMLTextAreaElement | null)?.value.trim() || undefined;
-      if (marksAt(session, level, pi, si, wi).some((m) => m.type === type)) return; // 已有同类型标记
+      if (marksAt(session, level, pi, si, wi).some((m) => m.type === type)) {
+        /* 同类型标记已存在。**不许静默 return**（2026-09-13 Wayne："有时候点了没反应"）——
+           原来这一行什么都不做也不说：教师点第二次，弹层不关、正文不动、状态行不变，
+           看起来就是"这个按钮坏了"，于是他会反复点。现在把话说出口。 */
+        const label = typeLabel(type as MarkType);
+        toast(`这个词已经标过「${label}」了——要换意图，先在上面那条标记上点 × 删掉`, 'info');
+        setStatus(`「${label}」已存在：${level === 'word' ? '这个词' : '这一处'}标过了，没有重复添加`, 'dirty');
+        return;
+      }
       const sentText = sentsOf(extractParas(splitChapter(session.md).body)[pi], false)[si] ?? '';
       const mark = addMark(session, {
         id: newMarkId(),

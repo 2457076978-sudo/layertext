@@ -1137,6 +1137,23 @@ body:not(.no-session) #reader {
   padding: 1px 8px;
 }
 
+/* 词/句面板的标记按钮：**等宽网格**排，不再让每个按钮顶着自己的文字长度参差。
+   （原来动作按钮与九个标记按钮同在一个 flex-wrap 容器里，宽窄不一、换行后左右不对齐。） */
+.pop-mk {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.pop-mk button {
+  justify-content: flex-start;
+  gap: 4px;
+  font-size: var(--fs-sm);
+  padding: 5px 7px;
+  min-width: 0;
+  white-space: nowrap;
+}
+
 /* Information-first library without archive numbering and ornament. */
 .shelf {
   max-width: 1260px;

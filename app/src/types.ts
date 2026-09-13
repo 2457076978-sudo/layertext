@@ -92,6 +92,26 @@ export const WORD_TYPES: { key: WordMarkType; label: string; badge: string; cls:
   { key: 'otherw', label: '其他问题', badge: '他', cls: 'mk-otherw' },
 ];
 
+/**
+ * 词/短语面板里**真正摆出来的**那几个键。
+ *
+ * 与 `WORD_TYPES` 分开，因为两者要回答的问题不同：
+ *   · `WORD_TYPES` = 系统认识哪些类型——旧稿里下线过的类型仍要能显示标签（`typeLabel`），一个都不能少；
+ *   · 这里是"教师现在能点的"。
+ *
+ * 2026-09-13 逐个查过去向，去掉三个（Wayne："有没有重复的？没有意义的选项？有就去除"）：
+ *
+ *   `oov` 超纲 —— **和上方的自动判定重复**：引擎已经算出词表状态并在弹层顶部显示
+ *                 「词表状态：词表外（红）」，点这个按钮只是把机器刚说过的话再说一遍；
+ *                 且与「太难」同义、与「词汇简化」同一条规则（R02）、同一条落点。
+ *   `factw` 事实用词存疑 —— **没有落点**：全仓没有一处消费它（连 `RULE_BY_TYPE` 都没有，退 R00），
+ *                 而"事实对不对"本来就该按句判——句级已有「事实逻辑疑」。
+ *   `goodw` 好词保留 —— **表达与落点相反**：它说的是"这个词好、别动"，可这条流水线只会"动手"；
+ *                 即改模式下点它会立刻触发整句 AI 改写。真正"记录型、不改写"的同类是「复现锚点」，
+ *                 那个有真实落点（导出/学生版保留该词，且被句子改写流程显式排除）。
+ */
+export const WORD_PANEL_TYPES = WORD_TYPES.filter((t) => !['oov', 'factw', 'goodw'].includes(t.key));
+
 export const SENT_TYPES: { key: SentMarkType; label: string; badge: string }[] = [
   { key: 'syntax', label: '语法太难', badge: '法' },
   { key: 'long', label: '句太长', badge: '长' },

@@ -2228,7 +2228,9 @@
         position: fixed;
         z-index: 50;
         display: none;
-        width: 300px;
+        /* 词/句面板的标记按钮是 3 列等宽网格，5 个字的中文标签要放得下单行——
+           300px 时「加中文标注」会折行，把那一行撑高、看着就不齐了。 */
+        width: 328px;
         max-width: 90vw;
         background: var(--panel);
         border: 1px solid var(--line);

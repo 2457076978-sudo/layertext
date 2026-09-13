@@ -559,15 +559,24 @@ function checkLabel(c: Suggestion['check']): string {
 
 export async function aiRewriteSentence(pi: number, si: number, intent: string, autoMarkId?: string): Promise<void> {
   const s = activeSession();
-  if (!s) return;
+  /* 下面这几处都**不许静默 return**（2026-09-13："有时候点了没反应"）：
+     即改模式下弹层已经关掉了，这时什么都不说＝教师完全看不到反馈。 */
+  if (!s) {
+    setStatus('没有打开的章节——先打开一章再点标记', 'err');
+    return;
+  }
   const key = await invoke<string>('load_api_key');
   if (!key) {
+    setStatus('还没配 AI：点标记能加注/换词（本机确定性处理），但"改写整句"需要先连上 AI', 'err');
     showAiSettings();
     return;
   }
   const paras = extractParas(splitChapter(s.md).body);
   const sent = sentsOf(paras[pi] ?? '', false)[si];
-  if (!sent) return;
+  if (!sent) {
+    setStatus(`定位不到要改的句子（P${String(pi + 1).padStart(2, '0')} 第${si + 1}句）——正文可能刚被改过，点一下该句重新标记`, 'err');
+    return;
+  }
   const system = await buildSystemPrompt();
   const btn = pop.querySelector('[data-mk="__rewrite"]') as HTMLElement | null;
   if (btn) {
