@@ -8,7 +8,13 @@ import { join, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const REPO = fileURLToPath(new URL('../..', import.meta.url)); // worktree 根
-const AF = '/Users/wayne/Desktop/工作文档库/01-教学工作/名著阅读工作区_AnimalFarm';
+/* 真项目目录从环境变量取：LAYERTEXT_AF_DIR=<Animal Farm 书根>。
+   公开仓库里不写作者本机的绝对路径。 */
+const AF = process.env.LAYERTEXT_AF_DIR ?? '';
+if (!AF) {
+  console.error('需要 LAYERTEXT_AF_DIR=<Animal Farm 书根>；这个脚本分析的是真实的 Animal Farm 项目，不在公开仓库里硬编路径。');
+  process.exit(2);
+}
 const SAN = join(AF, '调适工作区/重制三版');
 const OUT_DIR = join(REPO, 'docs/research');
 

@@ -92,10 +92,7 @@ test('★ 有占位段就**不能发布**，而且要说清是第几段', () => 
   /* 占位段是"这一段没通过门禁、被隔离了"的记录。
    * 把它默默删掉，学生版会变成一个**读得通的段落序列**——
    * 而中间少了一整段这件事，在成品里长得跟"这一段本来就没有"一模一样。 */
-  const md = REAL_LIKE.replace(
-    '[P02] As soon as',
-    '[P02] <!-- 本段未通过复检（ANNO-01）：见待复核/P02 -->\n\n[P03] As soon as',
-  );
+  const md = REAL_LIKE.replace('[P02] As soon as', '[P02] <!-- 本段未通过复检（ANNO-01）：见待复核/P02 -->\n\n[P03] As soon as');
   const r = studentVersionOf(md);
   assert.equal(isPublishable(r), false, '**不能发布**');
   assert.equal(r.blockers.length, 1);
@@ -128,7 +125,11 @@ test('找不到章节标题就**不发**，并说清为什么', () => {
 test('去掉内部内容之后是空的也不发（空文件比没有文件更容易被当成"发过了"）', () => {
   const r = studentVersionOf('# 只有标题\n\n> 只有说明\n\n## Chapter One\n');
   assert.equal(isPublishable(r), false);
-  assert.equal(r.blockers.some((b) => /没有正文/.test(b)), true, `实得 ${JSON.stringify(r.blockers)}`);
+  assert.equal(
+    r.blockers.some((b) => /没有正文/.test(b)),
+    true,
+    `实得 ${JSON.stringify(r.blockers)}`,
+  );
 });
 
 /* ────────────────────── ④ 摘要要说清动了什么 ────────────────────── */
@@ -142,8 +143,11 @@ test('摘要逐项报出动了什么（不静默丢东西）', () => {
 });
 
 test('★ 真项目第一章的产物：跑一遍，给出的学生版干净且可发布', () => {
-  const p = '/Users/wayne/Desktop/工作文档库/01-教学工作/名著阅读工作区_AnimalFarm/调适工作区/重制三版/第一章/原文_A层85_2026-09-10.md';
-  if (!existsSync(p)) return; // 换机器时跳过，而不是假装通过
+  /* 真书稿路径从环境变量取（`LAYERTEXT_AF_DIR=<书根>`），**取不到就跳过**——
+     公开仓库里不写作者本机的绝对路径（本仓 source-available，会推到 GitHub），
+     同时这条用例在有真产物的机器上仍然跑得动。 */
+  const p = process.env.LAYERTEXT_AF_DIR ? `${process.env.LAYERTEXT_AF_DIR}/调适工作区/重制三版/第一章/原文_A层85_2026-09-10.md` : '';
+  if (!p || !existsSync(p)) return; // 换机器/没设变量时跳过，而不是假装通过
   const md = readFileSync(p, 'utf-8');
   const r = studentVersionOf(md, { title: 'Animal Farm · Chapter One' });
   assert.equal(isPublishable(r), true, `真产物应当能出学生版：${r.blockers.join('；')}`);
@@ -164,11 +168,7 @@ test('★ 端到端：有占位段时拒绝发布（退出码 1）且**一个文
   mkdirSync(w('产物', '第一章'), { recursive: true });
   writeFileSync(w('原文', '第一章', '原文_规范化.md'), '## Chapter One\n\n[P01] The boy ran to the red barn.\n', 'utf-8');
   // 产物里第 2 段是**占位段**（门禁未通过）
-  writeFileSync(
-    w('产物', '第一章', '原文_A层85_2026-01-01.md'),
-    '## Chapter One\n\n[P01] The boy ran to the red barn（谷仓）.\n\n[P02] <!-- 本段未通过复检（SENT-01） -->\n',
-    'utf-8',
-  );
+  writeFileSync(w('产物', '第一章', '原文_A层85_2026-01-01.md'), '## Chapter One\n\n[P01] The boy ran to the red barn（谷仓）.\n\n[P02] <!-- 本段未通过复检（SENT-01） -->\n', 'utf-8');
   writeFileSync(w('词库.csv'), '词,类型\nboy,单词\n', 'utf-8');
   writeFileSync(w('专名表.txt'), '# 专名\n', 'utf-8');
   writeFileSync(w('知识库.csv'), '类型,词,值,次数\n', 'utf-8');
@@ -176,7 +176,22 @@ test('★ 端到端：有占位段时拒绝发布（退出码 1）且**一个文
   const json = w('调适项目_自测.json');
   writeFileSync(
     json,
-    JSON.stringify({ 书名: 'T', 工作区: root, 调适工作区: w('调适'), 原文目录: w('原文'), 产物目录: w('产物'), 词库: w('词库.csv'), 书级: { 专名表: w('专名表.txt'), 知识库: w('知识库.csv'), 词典: w('词典.csv') }, 日期: '2026-01-01', 章数: 1, 引擎目录: REPO }, null, 2),
+    JSON.stringify(
+      {
+        书名: 'T',
+        工作区: root,
+        调适工作区: w('调适'),
+        原文目录: w('原文'),
+        产物目录: w('产物'),
+        词库: w('词库.csv'),
+        书级: { 专名表: w('专名表.txt'), 知识库: w('知识库.csv'), 词典: w('词典.csv') },
+        日期: '2026-01-01',
+        章数: 1,
+        引擎目录: REPO,
+      },
+      null,
+      2,
+    ),
     'utf-8',
   );
 
@@ -189,11 +204,7 @@ test('★ 端到端：有占位段时拒绝发布（退出码 1）且**一个文
   assert.equal(r.status, 1, `有占位段就该拒绝发布：${out.slice(-400)}`);
   assert.match(out, /没通过门禁/);
   assert.match(out, /P02/, '要点名是哪一段');
-  assert.equal(
-    existsSync(w('产物', '第一章', '学生版_A层85_2026-01-01.md')),
-    false,
-    '**一个文件都不许写**——写了就等于给出了一份"看起来能用、中间却缺一段"的学生版',
-  );
+  assert.equal(existsSync(w('产物', '第一章', '学生版_A层85_2026-01-01.md')), false, '**一个文件都不许写**——写了就等于给出了一份"看起来能用、中间却缺一段"的学生版');
   rmSync(root, { recursive: true, force: true });
 });
 
@@ -211,7 +222,22 @@ test('★ 端到端：干净产物给出学生版，落在「学生版」这个�
   const json = w('调适项目_自测.json');
   writeFileSync(
     json,
-    JSON.stringify({ 书名: 'T', 工作区: root, 调适工作区: w('调适'), 原文目录: w('原文'), 产物目录: w('产物'), 词库: w('词库.csv'), 书级: { 专名表: w('专名表.txt'), 知识库: w('知识库.csv'), 词典: w('词典.csv') }, 日期: '2026-01-01', 章数: 1, 引擎目录: REPO }, null, 2),
+    JSON.stringify(
+      {
+        书名: 'T',
+        工作区: root,
+        调适工作区: w('调适'),
+        原文目录: w('原文'),
+        产物目录: w('产物'),
+        词库: w('词库.csv'),
+        书级: { 专名表: w('专名表.txt'), 知识库: w('知识库.csv'), 词典: w('词典.csv') },
+        日期: '2026-01-01',
+        章数: 1,
+        引擎目录: REPO,
+      },
+      null,
+      2,
+    ),
     'utf-8',
   );
 
@@ -252,7 +278,22 @@ test('★ 学生版登记进清单、进得了发布包（否则"发布学生版
   const json = w('调适项目_自测.json');
   writeFileSync(
     json,
-    JSON.stringify({ 书名: 'T', 工作区: root, 调适工作区: w('调适'), 原文目录: w('原文'), 产物目录: w('产物'), 词库: w('词库.csv'), 书级: { 专名表: w('专名表.txt'), 知识库: w('知识库.csv'), 词典: w('词典.csv') }, 日期: '2026-01-01', 章数: 1, 引擎目录: REPO }, null, 2),
+    JSON.stringify(
+      {
+        书名: 'T',
+        工作区: root,
+        调适工作区: w('调适'),
+        原文目录: w('原文'),
+        产物目录: w('产物'),
+        词库: w('词库.csv'),
+        书级: { 专名表: w('专名表.txt'), 知识库: w('知识库.csv'), 词典: w('词典.csv') },
+        日期: '2026-01-01',
+        章数: 1,
+        引擎目录: REPO,
+      },
+      null,
+      2,
+    ),
     'utf-8',
   );
   const env = { ...process.env, LAYERTEXT_PROJECT: json, LAYERTEXT_ENGINE: REPO };
@@ -273,7 +314,9 @@ test('★ 学生版登记进清单、进得了发布包（否则"发布学生版
   const runId = /运行 ID：(\S+)/.exec(summary.out)?.[1] ?? '';
   assert.ok(runId, `清单摘要里要能读到运行 ID：${summary.out}`);
   const manifestPath = join(root, '产物', '_运行', `清单_${runId}.json`);
-  const m = JSON.parse(readFileSync(manifestPath, 'utf-8')) as { artifacts: { kind: string; path: string; id?: string; derivedFrom?: { sourceId: string; sourcePath: string; transformer: string; ruleVersion: number; dropSections: string[] } }[] };
+  const m = JSON.parse(readFileSync(manifestPath, 'utf-8')) as {
+    artifacts: { kind: string; path: string; id?: string; derivedFrom?: { sourceId: string; sourcePath: string; transformer: string; ruleVersion: number; dropSections: string[] } }[];
+  };
   const stuArtifacts = m.artifacts.filter((a) => a.kind === '学生版');
   assert.equal(stuArtifacts.length, 1, `学生版要被登记进清单，实得 ${JSON.stringify(m.artifacts.map((a) => a.kind))}`);
   assert.match(stuArtifacts[0]!.path, /学生版_A层85_2026-01-01\.md$/);
@@ -290,7 +333,11 @@ test('★ 学生版登记进清单、进得了发布包（否则"发布学生版
   const exp = run('LayerText_AF发布包.mjs', []);
   assert.equal(exp.status, 0, exp.out);
   const desc = JSON.parse(readFileSync(join(root, '产物', `发布包_${runId}`, '发布包.json'), 'utf-8')) as { entries: { kind: string; path: string }[] };
-  assert.equal(desc.entries.some((e) => e.kind === '学生版'), true, `发布包里要有学生版：${JSON.stringify(desc.entries.map((e) => e.kind))}`);
+  assert.equal(
+    desc.entries.some((e) => e.kind === '学生版'),
+    true,
+    `发布包里要有学生版：${JSON.stringify(desc.entries.map((e) => e.kind))}`,
+  );
 
   rmSync(root, { recursive: true, force: true });
 });

@@ -180,10 +180,12 @@ test('找不到锚要分「办结」和「要看一眼」——糊在一起报�
 });
 
 test('书键/范围/台账路径：App 与管线必须算出同一个（否则台账成了"我写的你看不见"）', () => {
-  const p = '/Users/wayne/Desktop/工作文档库/01-教学工作/名著阅读工作区_AnimalFarm/调适工作区/重制三版/第一章/原文_A层85_2026-09-12_工序化.md';
-  assert.equal(bookKeyFromPath(p), '名著阅读工作区_AnimalFarm');
-  assert.deepEqual(scopeFromChapterPath(p), { book: '名著阅读工作区_AnimalFarm', chapter: '第一章', tier: 'A层85' });
-  assert.equal(ledgerPathFromChapterPath(p), '/Users/wayne/Desktop/工作文档库/01-教学工作/名著阅读工作区_AnimalFarm/调适工作区/重制三版/_运行/校准台账.jsonl');
+  /* 用中性路径：这个断言测的是"路径怎么解析"，不需要把作者本机的真实目录结构写进公开仓库
+     （本仓是 source-available，会推到 GitHub；真实书稿位置属于本机私有信息）。 */
+  const p = '/books/演示书/调适工作区/重制三版/第一章/原文_A层85_2026-09-12_工序化.md';
+  assert.equal(bookKeyFromPath(p), '演示书', '书键 = 「工作区」上一层目录名');
+  assert.deepEqual(scopeFromChapterPath(p), { book: '演示书', chapter: '第一章', tier: 'A层85' });
+  assert.equal(ledgerPathFromChapterPath(p), '/books/演示书/调适工作区/重制三版/_运行/校准台账.jsonl');
   assert.equal(scopeFromChapterPath('/tmp/随便.md'), null, '认不出就不猜');
   assert.equal(scopeFromChapterPath('/tmp/x/第一章/学生版.md'), null, '文件名里没有层 tag 也不猜');
 });

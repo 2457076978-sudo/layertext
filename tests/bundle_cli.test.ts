@@ -25,9 +25,7 @@ const TAG = 'A层85';
 
 /** 建一个自检项目，并把它推到"已建清单 + 已产出 A 层第一章 + 已刷状态"的状态。
  *  tiers 传多层（如 `'A,M,B'`）时每层各写一份正文；台账与 stamp 仍走 A 层（发布只要求清单非空）。 */
-function makeProject(
-  tiers: string = 'A',
-): { root: string; json: string; runId: string; product: string; run: (script: string, args: string[]) => { status: number | null; out: string } } {
+function makeProject(tiers: string = 'A'): { root: string; json: string; runId: string; product: string; run: (script: string, args: string[]) => { status: number | null; out: string } } {
   const root = mkdtempSync(join(tmpdir(), 'lt-bun-'));
   const w = (...p: string[]): string => join(root, ...p);
   mkdirSync(w('原文', '第一章'), { recursive: true });
@@ -169,7 +167,7 @@ test('★ 核对：包里夹带了学生数据 → 认出来并以非 0 退出',
   assert.equal(runBundle(json, []).status, 0);
   const dir = join(root, '产物', '_运行', runId, `发布包_${runId}`);
   // 对方"顺手"多塞了一份分层名单
-  writeFileSync(join(dir, '顺手带的_分层_九3.json'), '{"九3":["A","B"]}', 'utf-8');
+  writeFileSync(join(dir, '顺手带的_分层_示例班.json'), '{"示例班":["A","B"]}', 'utf-8');
   const r = runBundle(json, ['--check', dir]);
   assert.notEqual(r.status, 0, r.out);
   assert.match(r.out, /student-data|不该出包|学生数据/);
@@ -233,7 +231,11 @@ test('★ 并发双教师：被串线的一方不带 --run 必须拒绝；带 --
   const ab = JSON.parse(readFileSync(join(root, '产物', '_运行', adaRun, `发布包_${adaRun}`, '发布包.json'), 'utf-8')) as { run: { runId: string }; teacher: string; entries: { kind: string }[] };
   assert.equal(ab.run.runId, adaRun);
   assert.equal(ab.teacher, 'ada');
-  assert.equal(ab.entries.some((e) => e.kind === '正文'), true, 'ada 的包里要有她自己的产物');
+  assert.equal(
+    ab.entries.some((e) => e.kind === '正文'),
+    true,
+    'ada 的包里要有她自己的产物',
+  );
 });
 
 test('★ 缺件即拒：清单登记的产物不在盘上 → 不写任何文件、exit 1、点名是哪一件（P0-③）', () => {
@@ -252,10 +254,10 @@ test('★ 重复导出：旧目录整个让位，目录内容严格等于本次�
   assert.equal(runBundle(json, []).status, 0);
   const dir = join(root, '产物', '_运行', runId, `发布包_${runId}`);
   // 模拟"上一次导出留下的多余文件"（旧清单登记过、这次已删的产物）
-  writeFileSync(join(dir, '上一轮残留_分层_九3.json'), '{}', 'utf-8');
+  writeFileSync(join(dir, '上一轮残留_分层_示例班.json'), '{}', 'utf-8');
   const r = runBundle(json, []);
   assert.equal(r.status, 0, r.out);
-  assert.equal(existsSync(join(dir, '上一轮残留_分层_九3.json')), false, '旧的多余文件必须消失——收件人拿到的目录内容等于本次清单');
+  assert.equal(existsSync(join(dir, '上一轮残留_分层_示例班.json')), false, '旧的多余文件必须消失——收件人拿到的目录内容等于本次清单');
   // 收件人核对也应通过：旧文件混进 --check 的视野会被报成"夹带"，那就是一次假警报
   assert.equal(runBundle(json, ['--check', dir]).status, 0);
 });
@@ -268,7 +270,17 @@ test('★ 决定条数：三层各一条决定 → decisionCount = 3，层键与
   const decisionDir = join(root, '产物', '_运行', runId, '决定');
   mkdirSync(decisionDir, { recursive: true });
   for (const t of ['A', 'M', 'B']) {
-    const ev = { schemaVersion: 1, itemId: `第一章#1:TEST-${t}`, decision: 'accept', before: 'x', after: 'y', reason: '第七轮验收用', ruleIds: [], teacherId: 'wayne', timestamp: '2026-01-01T00:00:00.000Z' };
+    const ev = {
+      schemaVersion: 1,
+      itemId: `第一章#1:TEST-${t}`,
+      decision: 'accept',
+      before: 'x',
+      after: 'y',
+      reason: '第七轮验收用',
+      ruleIds: [],
+      teacherId: 'wayne',
+      timestamp: '2026-01-01T00:00:00.000Z',
+    };
     writeFileSync(join(decisionDir, `${TIER_TAG[t]}.jsonl`), `${JSON.stringify(ev)}\n`, 'utf-8');
   }
 
@@ -296,5 +308,8 @@ test('★ partial 章的学生版默认拒发；--allow-partial 放行且包描�
   assert.equal(allowed.status, 0, allowed.out);
   const desc = JSON.parse(readFileSync(join(dir, '发布包.json'), 'utf-8')) as { run: { partialChapters?: number[] }; entries: { kind: string }[] };
   assert.deepEqual(desc.run.partialChapters, [1], '放行的 partial 章要写进包描述——收件人必须看得见');
-  assert.equal(desc.entries.some((e) => e.kind === '学生版'), true);
+  assert.equal(
+    desc.entries.some((e) => e.kind === '学生版'),
+    true,
+  );
 });

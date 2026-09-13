@@ -1,12 +1,8 @@
 {
   "schemaVersion": 1,
   "书名": "Animal Farm",
-  "层级": [
-    "A"
-  ],
-  "章节": [
-    1
-  ],
+  "层级": ["A"],
+  "章节": [1],
   "生成时间": "2026-09-11T12:37:39.137Z",
   "规则表": {
     "LEN-01": {
@@ -152,7 +148,7 @@
   },
   "未完成段落": [],
   "章节产物": {
-    "第一章": "/Users/wayne/Desktop/工作文档库/01-教学工作/名著阅读工作区_AnimalFarm/调适工作区/重制三版/第一章/原文_A层85_2026-09-10.md"
+    "第一章": "/book/调适工作区/重制三版/第一章/原文_A层85_2026-09-10.md"
   },
   "队列": [
     {
@@ -168,9 +164,7 @@
       "segIndex": 2,
       "segLabel": "第一章 第3段",
       "detail": {
-        "signals": [
-          "Presently"
-        ],
+        "signals": ["Presently"],
         "source": "[P03] At one end of the big barn, on a sort of raised platform, Major was already ensconced on his bed of straw, under a lantern which hung from a beam. He was twelve years old and had lately grown rather stout, but he was still a majestic-looking pig, with a wise and benevolent appearance in spite ",
         "rewritten": "[P03] At one end of the big barn, on a raised platform（舞台）, Major was already in his bed of straw（稻草）, under a lantern hanging from a beam. He was twelve years old and had grown rather fat lately, but he was still a majestic（威严的）-looking pig, with a wise and kind appearance even though his tushes（獠牙",
         "signal": "Presently",
@@ -187,9 +181,7 @@
       "plot": {
         "score": 0.167,
         "level": "低",
-        "hits": [
-          "角色/地名：major"
-        ],
+        "hits": ["角色/地名：major"],
         "parts": [
           {
             "label": "底线原文锚点",
@@ -198,9 +190,7 @@
           },
           {
             "label": "角色/地名",
-            "hits": [
-              "major"
-            ],
+            "hits": ["major"],
             "weight": 1.2
           },
           {
@@ -234,9 +224,7 @@
       "segIndex": 6,
       "segLabel": "第一章 第7段",
       "detail": {
-        "signals": [
-          "Remove"
-        ],
+        "signals": ["Remove"],
         "source": "[P07] \"That, comrades, is the answer to all our problems. It is summed up in a single word—Man. Remove Man from the scene, and the root cause of hunger and overwork is abolished for ever.\"\n\n",
         "rewritten": "[P07] \"That, comrades, is the answer to all our problems. It is all in one word—Man. Take Man away, and the cause of hunger and too much work is gone for ever.\"",
         "signal": "Remove",
@@ -296,11 +284,7 @@
       "segIndex": 1,
       "segLabel": "第一章 第2段",
       "detail": {
-        "missing": [
-          "previous",
-          "exhibited",
-          "highly"
-        ],
+        "missing": ["previous", "exhibited", "highly"],
         "word": "exhibited"
       },
       "id": "第一章#1:ANNO-01:exhibited",
@@ -314,31 +298,16 @@
       "plot": {
         "score": 1,
         "level": "高",
-        "hits": [
-          "底线原文锚点：willingdon beauty",
-          "角色/地名：jones",
-          "角色/地名：major",
-          "角色/地名：willingdon",
-          "角色/地名：beauty",
-          "因果连接词：in order to",
-          "章节转折位置：章首/章尾"
-        ],
+        "hits": ["底线原文锚点：willingdon beauty", "角色/地名：jones", "角色/地名：major", "角色/地名：willingdon", "角色/地名：beauty", "因果连接词：in order to", "章节转折位置：章首/章尾"],
         "parts": [
           {
             "label": "底线原文锚点",
-            "hits": [
-              "willingdon beauty"
-            ],
+            "hits": ["willingdon beauty"],
             "weight": 3
           },
           {
             "label": "角色/地名",
-            "hits": [
-              "jones",
-              "major",
-              "willingdon",
-              "beauty"
-            ],
+            "hits": ["jones", "major", "willingdon", "beauty"],
             "weight": 1.2
           },
           {
@@ -348,16 +317,12 @@
           },
           {
             "label": "因果连接词",
-            "hits": [
-              "in order to"
-            ],
+            "hits": ["in order to"],
             "weight": 0.8
           },
           {
             "label": "章节转折位置",
-            "hits": [
-              "章首/章尾"
-            ],
+            "hits": ["章首/章尾"],
             "weight": 0.6
           }
         ]
@@ -376,11 +341,7 @@
       "segIndex": 1,
       "segLabel": "第一章 第2段",
       "detail": {
-        "missing": [
-          "previous",
-          "exhibited",
-          "highly"
-        ],
+        "missing": ["previous", "exhibited", "highly"],
         "word": "highly"
       },
       "id": "第一章#1:ANNO-01:highly",
@@ -394,31 +355,16 @@
       "plot": {
         "score": 1,
         "level": "高",
-        "hits": [
-          "底线原文锚点：willingdon beauty",
-          "角色/地名：jones",
-          "角色/地名：major",
-          "角色/地名：willingdon",
-          "角色/地名：beauty",
-          "因果连接词：in order to",
-          "章节转折位置：章首/章尾"
-        ],
+        "hits": ["底线原文锚点：willingdon beauty", "角色/地名：jones", "角色/地名：major", "角色/地名：willingdon", "角色/地名：beauty", "因果连接词：in order to", "章节转折位置：章首/章尾"],
         "parts": [
           {
             "label": "底线原文锚点",
-            "hits": [
-              "willingdon beauty"
-            ],
+            "hits": ["willingdon beauty"],
             "weight": 3
           },
           {
             "label": "角色/地名",
-            "hits": [
-              "jones",
-              "major",
-              "willingdon",
-              "beauty"
-            ],
+            "hits": ["jones", "major", "willingdon", "beauty"],
             "weight": 1.2
           },
           {
@@ -428,16 +374,12 @@
           },
           {
             "label": "因果连接词",
-            "hits": [
-              "in order to"
-            ],
+            "hits": ["in order to"],
             "weight": 0.8
           },
           {
             "label": "章节转折位置",
-            "hits": [
-              "章首/章尾"
-            ],
+            "hits": ["章首/章尾"],
             "weight": 0.6
           }
         ]
@@ -456,11 +398,7 @@
       "segIndex": 1,
       "segLabel": "第一章 第2段",
       "detail": {
-        "missing": [
-          "previous",
-          "exhibited",
-          "highly"
-        ],
+        "missing": ["previous", "exhibited", "highly"],
         "word": "previous"
       },
       "id": "第一章#1:ANNO-01:previous",
@@ -474,31 +412,16 @@
       "plot": {
         "score": 1,
         "level": "高",
-        "hits": [
-          "底线原文锚点：willingdon beauty",
-          "角色/地名：jones",
-          "角色/地名：major",
-          "角色/地名：willingdon",
-          "角色/地名：beauty",
-          "因果连接词：in order to",
-          "章节转折位置：章首/章尾"
-        ],
+        "hits": ["底线原文锚点：willingdon beauty", "角色/地名：jones", "角色/地名：major", "角色/地名：willingdon", "角色/地名：beauty", "因果连接词：in order to", "章节转折位置：章首/章尾"],
         "parts": [
           {
             "label": "底线原文锚点",
-            "hits": [
-              "willingdon beauty"
-            ],
+            "hits": ["willingdon beauty"],
             "weight": 3
           },
           {
             "label": "角色/地名",
-            "hits": [
-              "jones",
-              "major",
-              "willingdon",
-              "beauty"
-            ],
+            "hits": ["jones", "major", "willingdon", "beauty"],
             "weight": 1.2
           },
           {
@@ -508,16 +431,12 @@
           },
           {
             "label": "因果连接词",
-            "hits": [
-              "in order to"
-            ],
+            "hits": ["in order to"],
             "weight": 0.8
           },
           {
             "label": "章节转折位置",
-            "hits": [
-              "章首/章尾"
-            ],
+            "hits": ["章首/章尾"],
             "weight": 0.6
           }
         ]
@@ -536,16 +455,7 @@
       "segIndex": 3,
       "segLabel": "第一章 第4段",
       "detail": {
-        "missing": [
-          "straw",
-          "platform",
-          "setting",
-          "vast",
-          "concealed",
-          "approaching",
-          "enormous",
-          "universal"
-        ],
+        "missing": ["straw", "platform", "setting", "vast", "concealed", "approaching", "enormous", "universal"],
         "word": "approaching"
       },
       "id": "第一章#3:ANNO-01:approaching",
@@ -559,15 +469,7 @@
       "plot": {
         "score": 1,
         "level": "高",
-        "hits": [
-          "角色/地名：benjamin",
-          "角色/地名：muriel",
-          "角色/地名：bluebell",
-          "角色/地名：jessie",
-          "角色/地名：pincher",
-          "角色/地名：boxer",
-          "角色/地名：clover"
-        ],
+        "hits": ["角色/地名：benjamin", "角色/地名：muriel", "角色/地名：bluebell", "角色/地名：jessie", "角色/地名：pincher", "角色/地名：boxer", "角色/地名：clover"],
         "parts": [
           {
             "label": "底线原文锚点",
@@ -576,15 +478,7 @@
           },
           {
             "label": "角色/地名",
-            "hits": [
-              "benjamin",
-              "muriel",
-              "bluebell",
-              "jessie",
-              "pincher",
-              "boxer",
-              "clover"
-            ],
+            "hits": ["benjamin", "muriel", "bluebell", "jessie", "pincher", "boxer", "clover"],
             "weight": 1.2
           },
           {
@@ -618,16 +512,7 @@
       "segIndex": 3,
       "segLabel": "第一章 第4段",
       "detail": {
-        "missing": [
-          "straw",
-          "platform",
-          "setting",
-          "vast",
-          "concealed",
-          "approaching",
-          "enormous",
-          "universal"
-        ],
+        "missing": ["straw", "platform", "setting", "vast", "concealed", "approaching", "enormous", "universal"],
         "word": "concealed"
       },
       "id": "第一章#3:ANNO-01:concealed",
@@ -641,15 +526,7 @@
       "plot": {
         "score": 1,
         "level": "高",
-        "hits": [
-          "角色/地名：benjamin",
-          "角色/地名：muriel",
-          "角色/地名：bluebell",
-          "角色/地名：jessie",
-          "角色/地名：pincher",
-          "角色/地名：boxer",
-          "角色/地名：clover"
-        ],
+        "hits": ["角色/地名：benjamin", "角色/地名：muriel", "角色/地名：bluebell", "角色/地名：jessie", "角色/地名：pincher", "角色/地名：boxer", "角色/地名：clover"],
         "parts": [
           {
             "label": "底线原文锚点",
@@ -658,15 +535,7 @@
           },
           {
             "label": "角色/地名",
-            "hits": [
-              "benjamin",
-              "muriel",
-              "bluebell",
-              "jessie",
-              "pincher",
-              "boxer",
-              "clover"
-            ],
+            "hits": ["benjamin", "muriel", "bluebell", "jessie", "pincher", "boxer", "clover"],
             "weight": 1.2
           },
           {
@@ -700,16 +569,7 @@
       "segIndex": 3,
       "segLabel": "第一章 第4段",
       "detail": {
-        "missing": [
-          "straw",
-          "platform",
-          "setting",
-          "vast",
-          "concealed",
-          "approaching",
-          "enormous",
-          "universal"
-        ],
+        "missing": ["straw", "platform", "setting", "vast", "concealed", "approaching", "enormous", "universal"],
         "word": "enormous"
       },
       "id": "第一章#3:ANNO-01:enormous",
@@ -723,15 +583,7 @@
       "plot": {
         "score": 1,
         "level": "高",
-        "hits": [
-          "角色/地名：benjamin",
-          "角色/地名：muriel",
-          "角色/地名：bluebell",
-          "角色/地名：jessie",
-          "角色/地名：pincher",
-          "角色/地名：boxer",
-          "角色/地名：clover"
-        ],
+        "hits": ["角色/地名：benjamin", "角色/地名：muriel", "角色/地名：bluebell", "角色/地名：jessie", "角色/地名：pincher", "角色/地名：boxer", "角色/地名：clover"],
         "parts": [
           {
             "label": "底线原文锚点",
@@ -740,15 +592,7 @@
           },
           {
             "label": "角色/地名",
-            "hits": [
-              "benjamin",
-              "muriel",
-              "bluebell",
-              "jessie",
-              "pincher",
-              "boxer",
-              "clover"
-            ],
+            "hits": ["benjamin", "muriel", "bluebell", "jessie", "pincher", "boxer", "clover"],
             "weight": 1.2
           },
           {
@@ -782,16 +626,7 @@
       "segIndex": 3,
       "segLabel": "第一章 第4段",
       "detail": {
-        "missing": [
-          "straw",
-          "platform",
-          "setting",
-          "vast",
-          "concealed",
-          "approaching",
-          "enormous",
-          "universal"
-        ],
+        "missing": ["straw", "platform", "setting", "vast", "concealed", "approaching", "enormous", "universal"],
         "word": "platform"
       },
       "id": "第一章#3:ANNO-01:platform",
@@ -805,15 +640,7 @@
       "plot": {
         "score": 1,
         "level": "高",
-        "hits": [
-          "角色/地名：benjamin",
-          "角色/地名：muriel",
-          "角色/地名：bluebell",
-          "角色/地名：jessie",
-          "角色/地名：pincher",
-          "角色/地名：boxer",
-          "角色/地名：clover"
-        ],
+        "hits": ["角色/地名：benjamin", "角色/地名：muriel", "角色/地名：bluebell", "角色/地名：jessie", "角色/地名：pincher", "角色/地名：boxer", "角色/地名：clover"],
         "parts": [
           {
             "label": "底线原文锚点",
@@ -822,15 +649,7 @@
           },
           {
             "label": "角色/地名",
-            "hits": [
-              "benjamin",
-              "muriel",
-              "bluebell",
-              "jessie",
-              "pincher",
-              "boxer",
-              "clover"
-            ],
+            "hits": ["benjamin", "muriel", "bluebell", "jessie", "pincher", "boxer", "clover"],
             "weight": 1.2
           },
           {
@@ -864,16 +683,7 @@
       "segIndex": 3,
       "segLabel": "第一章 第4段",
       "detail": {
-        "missing": [
-          "straw",
-          "platform",
-          "setting",
-          "vast",
-          "concealed",
-          "approaching",
-          "enormous",
-          "universal"
-        ],
+        "missing": ["straw", "platform", "setting", "vast", "concealed", "approaching", "enormous", "universal"],
         "word": "setting"
       },
       "id": "第一章#3:ANNO-01:setting",
@@ -887,15 +697,7 @@
       "plot": {
         "score": 1,
         "level": "高",
-        "hits": [
-          "角色/地名：benjamin",
-          "角色/地名：muriel",
-          "角色/地名：bluebell",
-          "角色/地名：jessie",
-          "角色/地名：pincher",
-          "角色/地名：boxer",
-          "角色/地名：clover"
-        ],
+        "hits": ["角色/地名：benjamin", "角色/地名：muriel", "角色/地名：bluebell", "角色/地名：jessie", "角色/地名：pincher", "角色/地名：boxer", "角色/地名：clover"],
         "parts": [
           {
             "label": "底线原文锚点",
@@ -904,15 +706,7 @@
           },
           {
             "label": "角色/地名",
-            "hits": [
-              "benjamin",
-              "muriel",
-              "bluebell",
-              "jessie",
-              "pincher",
-              "boxer",
-              "clover"
-            ],
+            "hits": ["benjamin", "muriel", "bluebell", "jessie", "pincher", "boxer", "clover"],
             "weight": 1.2
           },
           {
@@ -946,16 +740,7 @@
       "segIndex": 3,
       "segLabel": "第一章 第4段",
       "detail": {
-        "missing": [
-          "straw",
-          "platform",
-          "setting",
-          "vast",
-          "concealed",
-          "approaching",
-          "enormous",
-          "universal"
-        ],
+        "missing": ["straw", "platform", "setting", "vast", "concealed", "approaching", "enormous", "universal"],
         "word": "straw"
       },
       "id": "第一章#3:ANNO-01:straw",
@@ -969,15 +754,7 @@
       "plot": {
         "score": 1,
         "level": "高",
-        "hits": [
-          "角色/地名：benjamin",
-          "角色/地名：muriel",
-          "角色/地名：bluebell",
-          "角色/地名：jessie",
-          "角色/地名：pincher",
-          "角色/地名：boxer",
-          "角色/地名：clover"
-        ],
+        "hits": ["角色/地名：benjamin", "角色/地名：muriel", "角色/地名：bluebell", "角色/地名：jessie", "角色/地名：pincher", "角色/地名：boxer", "角色/地名：clover"],
         "parts": [
           {
             "label": "底线原文锚点",
@@ -986,15 +763,7 @@
           },
           {
             "label": "角色/地名",
-            "hits": [
-              "benjamin",
-              "muriel",
-              "bluebell",
-              "jessie",
-              "pincher",
-              "boxer",
-              "clover"
-            ],
+            "hits": ["benjamin", "muriel", "bluebell", "jessie", "pincher", "boxer", "clover"],
             "weight": 1.2
           },
           {
@@ -1028,16 +797,7 @@
       "segIndex": 3,
       "segLabel": "第一章 第4段",
       "detail": {
-        "missing": [
-          "straw",
-          "platform",
-          "setting",
-          "vast",
-          "concealed",
-          "approaching",
-          "enormous",
-          "universal"
-        ],
+        "missing": ["straw", "platform", "setting", "vast", "concealed", "approaching", "enormous", "universal"],
         "word": "universal"
       },
       "id": "第一章#3:ANNO-01:universal",
@@ -1051,15 +811,7 @@
       "plot": {
         "score": 1,
         "level": "高",
-        "hits": [
-          "角色/地名：benjamin",
-          "角色/地名：muriel",
-          "角色/地名：bluebell",
-          "角色/地名：jessie",
-          "角色/地名：pincher",
-          "角色/地名：boxer",
-          "角色/地名：clover"
-        ],
+        "hits": ["角色/地名：benjamin", "角色/地名：muriel", "角色/地名：bluebell", "角色/地名：jessie", "角色/地名：pincher", "角色/地名：boxer", "角色/地名：clover"],
         "parts": [
           {
             "label": "底线原文锚点",
@@ -1068,15 +820,7 @@
           },
           {
             "label": "角色/地名",
-            "hits": [
-              "benjamin",
-              "muriel",
-              "bluebell",
-              "jessie",
-              "pincher",
-              "boxer",
-              "clover"
-            ],
+            "hits": ["benjamin", "muriel", "bluebell", "jessie", "pincher", "boxer", "clover"],
             "weight": 1.2
           },
           {
@@ -1110,16 +854,7 @@
       "segIndex": 3,
       "segLabel": "第一章 第4段",
       "detail": {
-        "missing": [
-          "straw",
-          "platform",
-          "setting",
-          "vast",
-          "concealed",
-          "approaching",
-          "enormous",
-          "universal"
-        ],
+        "missing": ["straw", "platform", "setting", "vast", "concealed", "approaching", "enormous", "universal"],
         "word": "vast"
       },
       "id": "第一章#3:ANNO-01:vast",
@@ -1133,15 +868,7 @@
       "plot": {
         "score": 1,
         "level": "高",
-        "hits": [
-          "角色/地名：benjamin",
-          "角色/地名：muriel",
-          "角色/地名：bluebell",
-          "角色/地名：jessie",
-          "角色/地名：pincher",
-          "角色/地名：boxer",
-          "角色/地名：clover"
-        ],
+        "hits": ["角色/地名：benjamin", "角色/地名：muriel", "角色/地名：bluebell", "角色/地名：jessie", "角色/地名：pincher", "角色/地名：boxer", "角色/地名：clover"],
         "parts": [
           {
             "label": "底线原文锚点",
@@ -1150,15 +877,7 @@
           },
           {
             "label": "角色/地名",
-            "hits": [
-              "benjamin",
-              "muriel",
-              "bluebell",
-              "jessie",
-              "pincher",
-              "boxer",
-              "clover"
-            ],
+            "hits": ["benjamin", "muriel", "bluebell", "jessie", "pincher", "boxer", "clover"],
             "weight": 1.2
           },
           {
@@ -1192,10 +911,7 @@
       "segIndex": 11,
       "segLabel": "第一章 第12段",
       "detail": {
-        "missing": [
-          "beasts",
-          "succession"
-        ],
+        "missing": ["beasts", "succession"],
         "word": "beasts"
       },
       "id": "第一章#11:ANNO-01:beasts",
@@ -1209,27 +925,16 @@
       "plot": {
         "score": 0.917,
         "level": "高",
-        "hits": [
-          "底线原文锚点：beasts of england",
-          "角色/地名：major",
-          "角色/地名：england",
-          "角色/地名：ireland"
-        ],
+        "hits": ["底线原文锚点：beasts of england", "角色/地名：major", "角色/地名：england", "角色/地名：ireland"],
         "parts": [
           {
             "label": "底线原文锚点",
-            "hits": [
-              "beasts of england"
-            ],
+            "hits": ["beasts of england"],
             "weight": 3
           },
           {
             "label": "角色/地名",
-            "hits": [
-              "major",
-              "england",
-              "ireland"
-            ],
+            "hits": ["major", "england", "ireland"],
             "weight": 1.2
           },
           {
@@ -1263,10 +968,7 @@
       "segIndex": 11,
       "segLabel": "第一章 第12段",
       "detail": {
-        "missing": [
-          "beasts",
-          "succession"
-        ],
+        "missing": ["beasts", "succession"],
         "word": "succession"
       },
       "id": "第一章#11:ANNO-01:succession",
@@ -1280,27 +982,16 @@
       "plot": {
         "score": 0.917,
         "level": "高",
-        "hits": [
-          "底线原文锚点：beasts of england",
-          "角色/地名：major",
-          "角色/地名：england",
-          "角色/地名：ireland"
-        ],
+        "hits": ["底线原文锚点：beasts of england", "角色/地名：major", "角色/地名：england", "角色/地名：ireland"],
         "parts": [
           {
             "label": "底线原文锚点",
-            "hits": [
-              "beasts of england"
-            ],
+            "hits": ["beasts of england"],
             "weight": 3
           },
           {
             "label": "角色/地名",
-            "hits": [
-              "major",
-              "england",
-              "ireland"
-            ],
+            "hits": ["major", "england", "ireland"],
             "weight": 1.2
           },
           {
@@ -1334,9 +1025,7 @@
       "segIndex": 0,
       "segLabel": "第一章 第1段",
       "detail": {
-        "missing": [
-          "scullery"
-        ],
+        "missing": ["scullery"],
         "word": "scullery"
       },
       "id": "第一章#0:ANNO-01:scullery",
@@ -1350,26 +1039,16 @@
       "plot": {
         "score": 0.833,
         "level": "高",
-        "hits": [
-          "底线原文锚点：manor farm",
-          "角色/地名：jones",
-          "角色/地名：manor",
-          "章节转折位置：章首/章尾"
-        ],
+        "hits": ["底线原文锚点：manor farm", "角色/地名：jones", "角色/地名：manor", "章节转折位置：章首/章尾"],
         "parts": [
           {
             "label": "底线原文锚点",
-            "hits": [
-              "manor farm"
-            ],
+            "hits": ["manor farm"],
             "weight": 3
           },
           {
             "label": "角色/地名",
-            "hits": [
-              "jones",
-              "manor"
-            ],
+            "hits": ["jones", "manor"],
             "weight": 1.2
           },
           {
@@ -1384,9 +1063,7 @@
           },
           {
             "label": "章节转折位置",
-            "hits": [
-              "章首/章尾"
-            ],
+            "hits": ["章首/章尾"],
             "weight": 0.6
           }
         ]
@@ -1405,9 +1082,7 @@
       "segIndex": 10,
       "segLabel": "第一章 第11段",
       "detail": {
-        "missing": [
-          "relates"
-        ],
+        "missing": ["relates"],
         "word": "relates"
       },
       "id": "第一章#10:ANNO-01:relates",
@@ -1421,25 +1096,16 @@
       "plot": {
         "score": 0.75,
         "level": "高",
-        "hits": [
-          "底线原文锚点：beasts of england",
-          "角色/地名：major",
-          "角色/地名：england"
-        ],
+        "hits": ["底线原文锚点：beasts of england", "角色/地名：major", "角色/地名：england"],
         "parts": [
           {
             "label": "底线原文锚点",
-            "hits": [
-              "beasts of england"
-            ],
+            "hits": ["beasts of england"],
             "weight": 3
           },
           {
             "label": "角色/地名",
-            "hits": [
-              "major",
-              "england"
-            ],
+            "hits": ["major", "england"],
             "weight": 1.2
           },
           {
@@ -1473,14 +1139,7 @@
       "segIndex": 8,
       "segLabel": "第一章 第9段",
       "detail": {
-        "missing": [
-          "resemble",
-          "conquered",
-          "adopt",
-          "vices",
-          "engage",
-          "tyrannise"
-        ],
+        "missing": ["resemble", "conquered", "adopt", "vices", "engage", "tyrannise"],
         "word": "adopt"
       },
       "id": "第一章#8:ANNO-01:adopt",
@@ -1494,16 +1153,11 @@
       "plot": {
         "score": 0.528,
         "level": "中",
-        "hits": [
-          "底线原文锚点：all animals are equal",
-          "因果连接词：so that"
-        ],
+        "hits": ["底线原文锚点：all animals are equal", "因果连接词：so that"],
         "parts": [
           {
             "label": "底线原文锚点",
-            "hits": [
-              "all animals are equal"
-            ],
+            "hits": ["all animals are equal"],
             "weight": 3
           },
           {
@@ -1518,9 +1172,7 @@
           },
           {
             "label": "因果连接词",
-            "hits": [
-              "so that"
-            ],
+            "hits": ["so that"],
             "weight": 0.8
           },
           {
@@ -1544,14 +1196,7 @@
       "segIndex": 8,
       "segLabel": "第一章 第9段",
       "detail": {
-        "missing": [
-          "resemble",
-          "conquered",
-          "adopt",
-          "vices",
-          "engage",
-          "tyrannise"
-        ],
+        "missing": ["resemble", "conquered", "adopt", "vices", "engage", "tyrannise"],
         "word": "conquered"
       },
       "id": "第一章#8:ANNO-01:conquered",
@@ -1565,16 +1210,11 @@
       "plot": {
         "score": 0.528,
         "level": "中",
-        "hits": [
-          "底线原文锚点：all animals are equal",
-          "因果连接词：so that"
-        ],
+        "hits": ["底线原文锚点：all animals are equal", "因果连接词：so that"],
         "parts": [
           {
             "label": "底线原文锚点",
-            "hits": [
-              "all animals are equal"
-            ],
+            "hits": ["all animals are equal"],
             "weight": 3
           },
           {
@@ -1589,9 +1229,7 @@
           },
           {
             "label": "因果连接词",
-            "hits": [
-              "so that"
-            ],
+            "hits": ["so that"],
             "weight": 0.8
           },
           {
@@ -1615,14 +1253,7 @@
       "segIndex": 8,
       "segLabel": "第一章 第9段",
       "detail": {
-        "missing": [
-          "resemble",
-          "conquered",
-          "adopt",
-          "vices",
-          "engage",
-          "tyrannise"
-        ],
+        "missing": ["resemble", "conquered", "adopt", "vices", "engage", "tyrannise"],
         "word": "engage"
       },
       "id": "第一章#8:ANNO-01:engage",
@@ -1636,16 +1267,11 @@
       "plot": {
         "score": 0.528,
         "level": "中",
-        "hits": [
-          "底线原文锚点：all animals are equal",
-          "因果连接词：so that"
-        ],
+        "hits": ["底线原文锚点：all animals are equal", "因果连接词：so that"],
         "parts": [
           {
             "label": "底线原文锚点",
-            "hits": [
-              "all animals are equal"
-            ],
+            "hits": ["all animals are equal"],
             "weight": 3
           },
           {
@@ -1660,9 +1286,7 @@
           },
           {
             "label": "因果连接词",
-            "hits": [
-              "so that"
-            ],
+            "hits": ["so that"],
             "weight": 0.8
           },
           {
@@ -1686,14 +1310,7 @@
       "segIndex": 8,
       "segLabel": "第一章 第9段",
       "detail": {
-        "missing": [
-          "resemble",
-          "conquered",
-          "adopt",
-          "vices",
-          "engage",
-          "tyrannise"
-        ],
+        "missing": ["resemble", "conquered", "adopt", "vices", "engage", "tyrannise"],
         "word": "resemble"
       },
       "id": "第一章#8:ANNO-01:resemble",
@@ -1707,16 +1324,11 @@
       "plot": {
         "score": 0.528,
         "level": "中",
-        "hits": [
-          "底线原文锚点：all animals are equal",
-          "因果连接词：so that"
-        ],
+        "hits": ["底线原文锚点：all animals are equal", "因果连接词：so that"],
         "parts": [
           {
             "label": "底线原文锚点",
-            "hits": [
-              "all animals are equal"
-            ],
+            "hits": ["all animals are equal"],
             "weight": 3
           },
           {
@@ -1731,9 +1343,7 @@
           },
           {
             "label": "因果连接词",
-            "hits": [
-              "so that"
-            ],
+            "hits": ["so that"],
             "weight": 0.8
           },
           {
@@ -1757,14 +1367,7 @@
       "segIndex": 8,
       "segLabel": "第一章 第9段",
       "detail": {
-        "missing": [
-          "resemble",
-          "conquered",
-          "adopt",
-          "vices",
-          "engage",
-          "tyrannise"
-        ],
+        "missing": ["resemble", "conquered", "adopt", "vices", "engage", "tyrannise"],
         "word": "tyrannise"
       },
       "id": "第一章#8:ANNO-01:tyrannise",
@@ -1778,16 +1381,11 @@
       "plot": {
         "score": 0.528,
         "level": "中",
-        "hits": [
-          "底线原文锚点：all animals are equal",
-          "因果连接词：so that"
-        ],
+        "hits": ["底线原文锚点：all animals are equal", "因果连接词：so that"],
         "parts": [
           {
             "label": "底线原文锚点",
-            "hits": [
-              "all animals are equal"
-            ],
+            "hits": ["all animals are equal"],
             "weight": 3
           },
           {
@@ -1802,9 +1400,7 @@
           },
           {
             "label": "因果连接词",
-            "hits": [
-              "so that"
-            ],
+            "hits": ["so that"],
             "weight": 0.8
           },
           {
@@ -1828,14 +1424,7 @@
       "segIndex": 8,
       "segLabel": "第一章 第9段",
       "detail": {
-        "missing": [
-          "resemble",
-          "conquered",
-          "adopt",
-          "vices",
-          "engage",
-          "tyrannise"
-        ],
+        "missing": ["resemble", "conquered", "adopt", "vices", "engage", "tyrannise"],
         "word": "vices"
       },
       "id": "第一章#8:ANNO-01:vices",
@@ -1849,16 +1438,11 @@
       "plot": {
         "score": 0.528,
         "level": "中",
-        "hits": [
-          "底线原文锚点：all animals are equal",
-          "因果连接词：so that"
-        ],
+        "hits": ["底线原文锚点：all animals are equal", "因果连接词：so that"],
         "parts": [
           {
             "label": "底线原文锚点",
-            "hits": [
-              "all animals are equal"
-            ],
+            "hits": ["all animals are equal"],
             "weight": 3
           },
           {
@@ -1873,9 +1457,7 @@
           },
           {
             "label": "因果连接词",
-            "hits": [
-              "so that"
-            ],
+            "hits": ["so that"],
             "weight": 0.8
           },
           {
@@ -1899,12 +1481,7 @@
       "segIndex": 5,
       "segLabel": "第一章 第6段",
       "detail": {
-        "missing": [
-          "dwell",
-          "comrades",
-          "consumes",
-          "prevent"
-        ],
+        "missing": ["dwell", "comrades", "consumes", "prevent"],
         "word": "comrades"
       },
       "id": "第一章#5:ANNO-01:comrades",
@@ -1918,11 +1495,7 @@
       "plot": {
         "score": 0.444,
         "level": "中",
-        "hits": [
-          "角色/地名：clover",
-          "角色/地名：england",
-          "因果连接词：because"
-        ],
+        "hits": ["角色/地名：clover", "角色/地名：england", "因果连接词：because"],
         "parts": [
           {
             "label": "底线原文锚点",
@@ -1931,10 +1504,7 @@
           },
           {
             "label": "角色/地名",
-            "hits": [
-              "clover",
-              "england"
-            ],
+            "hits": ["clover", "england"],
             "weight": 1.2
           },
           {
@@ -1944,9 +1514,7 @@
           },
           {
             "label": "因果连接词",
-            "hits": [
-              "because"
-            ],
+            "hits": ["because"],
             "weight": 0.8
           },
           {
@@ -1970,12 +1538,7 @@
       "segIndex": 5,
       "segLabel": "第一章 第6段",
       "detail": {
-        "missing": [
-          "dwell",
-          "comrades",
-          "consumes",
-          "prevent"
-        ],
+        "missing": ["dwell", "comrades", "consumes", "prevent"],
         "word": "consumes"
       },
       "id": "第一章#5:ANNO-01:consumes",
@@ -1989,11 +1552,7 @@
       "plot": {
         "score": 0.444,
         "level": "中",
-        "hits": [
-          "角色/地名：clover",
-          "角色/地名：england",
-          "因果连接词：because"
-        ],
+        "hits": ["角色/地名：clover", "角色/地名：england", "因果连接词：because"],
         "parts": [
           {
             "label": "底线原文锚点",
@@ -2002,10 +1561,7 @@
           },
           {
             "label": "角色/地名",
-            "hits": [
-              "clover",
-              "england"
-            ],
+            "hits": ["clover", "england"],
             "weight": 1.2
           },
           {
@@ -2015,9 +1571,7 @@
           },
           {
             "label": "因果连接词",
-            "hits": [
-              "because"
-            ],
+            "hits": ["because"],
             "weight": 0.8
           },
           {
@@ -2041,12 +1595,7 @@
       "segIndex": 5,
       "segLabel": "第一章 第6段",
       "detail": {
-        "missing": [
-          "dwell",
-          "comrades",
-          "consumes",
-          "prevent"
-        ],
+        "missing": ["dwell", "comrades", "consumes", "prevent"],
         "word": "dwell"
       },
       "id": "第一章#5:ANNO-01:dwell",
@@ -2060,11 +1609,7 @@
       "plot": {
         "score": 0.444,
         "level": "中",
-        "hits": [
-          "角色/地名：clover",
-          "角色/地名：england",
-          "因果连接词：because"
-        ],
+        "hits": ["角色/地名：clover", "角色/地名：england", "因果连接词：because"],
         "parts": [
           {
             "label": "底线原文锚点",
@@ -2073,10 +1618,7 @@
           },
           {
             "label": "角色/地名",
-            "hits": [
-              "clover",
-              "england"
-            ],
+            "hits": ["clover", "england"],
             "weight": 1.2
           },
           {
@@ -2086,9 +1628,7 @@
           },
           {
             "label": "因果连接词",
-            "hits": [
-              "because"
-            ],
+            "hits": ["because"],
             "weight": 0.8
           },
           {
@@ -2112,12 +1652,7 @@
       "segIndex": 5,
       "segLabel": "第一章 第6段",
       "detail": {
-        "missing": [
-          "dwell",
-          "comrades",
-          "consumes",
-          "prevent"
-        ],
+        "missing": ["dwell", "comrades", "consumes", "prevent"],
         "word": "prevent"
       },
       "id": "第一章#5:ANNO-01:prevent",
@@ -2131,11 +1666,7 @@
       "plot": {
         "score": 0.444,
         "level": "中",
-        "hits": [
-          "角色/地名：clover",
-          "角色/地名：england",
-          "因果连接词：because"
-        ],
+        "hits": ["角色/地名：clover", "角色/地名：england", "因果连接词：because"],
         "parts": [
           {
             "label": "底线原文锚点",
@@ -2144,10 +1675,7 @@
           },
           {
             "label": "角色/地名",
-            "hits": [
-              "clover",
-              "england"
-            ],
+            "hits": ["clover", "england"],
             "weight": 1.2
           },
           {
@@ -2157,9 +1685,7 @@
           },
           {
             "label": "因果连接词",
-            "hits": [
-              "because"
-            ],
+            "hits": ["because"],
             "weight": 0.8
           },
           {
@@ -2183,11 +1709,7 @@
       "segIndex": 13,
       "segLabel": "第一章 第14段",
       "detail": {
-        "missing": [
-          "charge",
-          "barn",
-          "straw"
-        ],
+        "missing": ["charge", "barn", "straw"],
         "word": "barn"
       },
       "id": "第一章#13:ANNO-01:barn",
@@ -2201,11 +1723,7 @@
       "plot": {
         "score": 0.389,
         "level": "中",
-        "hits": [
-          "角色/地名：jones",
-          "数字：6",
-          "章节转折位置：章首/章尾"
-        ],
+        "hits": ["角色/地名：jones", "数字：6", "章节转折位置：章首/章尾"],
         "parts": [
           {
             "label": "底线原文锚点",
@@ -2214,16 +1732,12 @@
           },
           {
             "label": "角色/地名",
-            "hits": [
-              "jones"
-            ],
+            "hits": ["jones"],
             "weight": 1.2
           },
           {
             "label": "数字",
-            "hits": [
-              "6"
-            ],
+            "hits": ["6"],
             "weight": 1
           },
           {
@@ -2233,9 +1747,7 @@
           },
           {
             "label": "章节转折位置",
-            "hits": [
-              "章首/章尾"
-            ],
+            "hits": ["章首/章尾"],
             "weight": 0.6
           }
         ]
@@ -2254,11 +1766,7 @@
       "segIndex": 13,
       "segLabel": "第一章 第14段",
       "detail": {
-        "missing": [
-          "charge",
-          "barn",
-          "straw"
-        ],
+        "missing": ["charge", "barn", "straw"],
         "word": "charge"
       },
       "id": "第一章#13:ANNO-01:charge",
@@ -2272,11 +1780,7 @@
       "plot": {
         "score": 0.389,
         "level": "中",
-        "hits": [
-          "角色/地名：jones",
-          "数字：6",
-          "章节转折位置：章首/章尾"
-        ],
+        "hits": ["角色/地名：jones", "数字：6", "章节转折位置：章首/章尾"],
         "parts": [
           {
             "label": "底线原文锚点",
@@ -2285,16 +1789,12 @@
           },
           {
             "label": "角色/地名",
-            "hits": [
-              "jones"
-            ],
+            "hits": ["jones"],
             "weight": 1.2
           },
           {
             "label": "数字",
-            "hits": [
-              "6"
-            ],
+            "hits": ["6"],
             "weight": 1
           },
           {
@@ -2304,9 +1804,7 @@
           },
           {
             "label": "章节转折位置",
-            "hits": [
-              "章首/章尾"
-            ],
+            "hits": ["章首/章尾"],
             "weight": 0.6
           }
         ]
@@ -2325,11 +1823,7 @@
       "segIndex": 13,
       "segLabel": "第一章 第14段",
       "detail": {
-        "missing": [
-          "charge",
-          "barn",
-          "straw"
-        ],
+        "missing": ["charge", "barn", "straw"],
         "word": "straw"
       },
       "id": "第一章#13:ANNO-01:straw",
@@ -2343,11 +1837,7 @@
       "plot": {
         "score": 0.389,
         "level": "中",
-        "hits": [
-          "角色/地名：jones",
-          "数字：6",
-          "章节转折位置：章首/章尾"
-        ],
+        "hits": ["角色/地名：jones", "数字：6", "章节转折位置：章首/章尾"],
         "parts": [
           {
             "label": "底线原文锚点",
@@ -2356,16 +1846,12 @@
           },
           {
             "label": "角色/地名",
-            "hits": [
-              "jones"
-            ],
+            "hits": ["jones"],
             "weight": 1.2
           },
           {
             "label": "数字",
-            "hits": [
-              "6"
-            ],
+            "hits": ["6"],
             "weight": 1
           },
           {
@@ -2375,9 +1861,7 @@
           },
           {
             "label": "章节转折位置",
-            "hits": [
-              "章首/章尾"
-            ],
+            "hits": ["章首/章尾"],
             "weight": 0.6
           }
         ]
@@ -2396,9 +1880,7 @@
       "segIndex": 4,
       "segLabel": "第一章 第5段",
       "detail": {
-        "missing": [
-          "capable"
-        ],
+        "missing": ["capable"],
         "word": "capable"
       },
       "id": "第一章#4:ANNO-01:capable",
@@ -2412,10 +1894,7 @@
       "plot": {
         "score": 0.333,
         "level": "中",
-        "hits": [
-          "角色/地名：major",
-          "角色/地名：england"
-        ],
+        "hits": ["角色/地名：major", "角色/地名：england"],
         "parts": [
           {
             "label": "底线原文锚点",
@@ -2424,10 +1903,7 @@
           },
           {
             "label": "角色/地名",
-            "hits": [
-              "major",
-              "england"
-            ],
+            "hits": ["major", "england"],
             "weight": 1.2
           },
           {
@@ -2461,14 +1937,7 @@
       "segIndex": 2,
       "segLabel": "第一章 第3段",
       "detail": {
-        "missing": [
-          "barn",
-          "ensconced",
-          "stout",
-          "benevolent",
-          "spite",
-          "presently"
-        ],
+        "missing": ["barn", "ensconced", "stout", "benevolent", "spite", "presently"],
         "word": "barn"
       },
       "id": "第一章#2:ANNO-01:barn",
@@ -2482,9 +1951,7 @@
       "plot": {
         "score": 0.167,
         "level": "低",
-        "hits": [
-          "角色/地名：major"
-        ],
+        "hits": ["角色/地名：major"],
         "parts": [
           {
             "label": "底线原文锚点",
@@ -2493,9 +1960,7 @@
           },
           {
             "label": "角色/地名",
-            "hits": [
-              "major"
-            ],
+            "hits": ["major"],
             "weight": 1.2
           },
           {
@@ -2529,14 +1994,7 @@
       "segIndex": 2,
       "segLabel": "第一章 第3段",
       "detail": {
-        "missing": [
-          "barn",
-          "ensconced",
-          "stout",
-          "benevolent",
-          "spite",
-          "presently"
-        ],
+        "missing": ["barn", "ensconced", "stout", "benevolent", "spite", "presently"],
         "word": "benevolent"
       },
       "id": "第一章#2:ANNO-01:benevolent",
@@ -2550,9 +2008,7 @@
       "plot": {
         "score": 0.167,
         "level": "低",
-        "hits": [
-          "角色/地名：major"
-        ],
+        "hits": ["角色/地名：major"],
         "parts": [
           {
             "label": "底线原文锚点",
@@ -2561,9 +2017,7 @@
           },
           {
             "label": "角色/地名",
-            "hits": [
-              "major"
-            ],
+            "hits": ["major"],
             "weight": 1.2
           },
           {
@@ -2597,14 +2051,7 @@
       "segIndex": 2,
       "segLabel": "第一章 第3段",
       "detail": {
-        "missing": [
-          "barn",
-          "ensconced",
-          "stout",
-          "benevolent",
-          "spite",
-          "presently"
-        ],
+        "missing": ["barn", "ensconced", "stout", "benevolent", "spite", "presently"],
         "word": "ensconced"
       },
       "id": "第一章#2:ANNO-01:ensconced",
@@ -2618,9 +2065,7 @@
       "plot": {
         "score": 0.167,
         "level": "低",
-        "hits": [
-          "角色/地名：major"
-        ],
+        "hits": ["角色/地名：major"],
         "parts": [
           {
             "label": "底线原文锚点",
@@ -2629,9 +2074,7 @@
           },
           {
             "label": "角色/地名",
-            "hits": [
-              "major"
-            ],
+            "hits": ["major"],
             "weight": 1.2
           },
           {
@@ -2665,14 +2108,7 @@
       "segIndex": 2,
       "segLabel": "第一章 第3段",
       "detail": {
-        "missing": [
-          "barn",
-          "ensconced",
-          "stout",
-          "benevolent",
-          "spite",
-          "presently"
-        ],
+        "missing": ["barn", "ensconced", "stout", "benevolent", "spite", "presently"],
         "word": "presently"
       },
       "id": "第一章#2:ANNO-01:presently",
@@ -2686,9 +2122,7 @@
       "plot": {
         "score": 0.167,
         "level": "低",
-        "hits": [
-          "角色/地名：major"
-        ],
+        "hits": ["角色/地名：major"],
         "parts": [
           {
             "label": "底线原文锚点",
@@ -2697,9 +2131,7 @@
           },
           {
             "label": "角色/地名",
-            "hits": [
-              "major"
-            ],
+            "hits": ["major"],
             "weight": 1.2
           },
           {
@@ -2733,14 +2165,7 @@
       "segIndex": 2,
       "segLabel": "第一章 第3段",
       "detail": {
-        "missing": [
-          "barn",
-          "ensconced",
-          "stout",
-          "benevolent",
-          "spite",
-          "presently"
-        ],
+        "missing": ["barn", "ensconced", "stout", "benevolent", "spite", "presently"],
         "word": "spite"
       },
       "id": "第一章#2:ANNO-01:spite",
@@ -2754,9 +2179,7 @@
       "plot": {
         "score": 0.167,
         "level": "低",
-        "hits": [
-          "角色/地名：major"
-        ],
+        "hits": ["角色/地名：major"],
         "parts": [
           {
             "label": "底线原文锚点",
@@ -2765,9 +2188,7 @@
           },
           {
             "label": "角色/地名",
-            "hits": [
-              "major"
-            ],
+            "hits": ["major"],
             "weight": 1.2
           },
           {
@@ -2801,14 +2222,7 @@
       "segIndex": 2,
       "segLabel": "第一章 第3段",
       "detail": {
-        "missing": [
-          "barn",
-          "ensconced",
-          "stout",
-          "benevolent",
-          "spite",
-          "presently"
-        ],
+        "missing": ["barn", "ensconced", "stout", "benevolent", "spite", "presently"],
         "word": "stout"
       },
       "id": "第一章#2:ANNO-01:stout",
@@ -2822,9 +2236,7 @@
       "plot": {
         "score": 0.167,
         "level": "低",
-        "hits": [
-          "角色/地名：major"
-        ],
+        "hits": ["角色/地名：major"],
         "parts": [
           {
             "label": "底线原文锚点",
@@ -2833,9 +2245,7 @@
           },
           {
             "label": "角色/地名",
-            "hits": [
-              "major"
-            ],
+            "hits": ["major"],
             "weight": 1.2
           },
           {
@@ -2869,13 +2279,7 @@
       "segIndex": 6,
       "segLabel": "第一章 第7段",
       "detail": {
-        "missing": [
-          "comrades",
-          "summed",
-          "remove",
-          "overwork",
-          "abolished"
-        ],
+        "missing": ["comrades", "summed", "remove", "overwork", "abolished"],
         "word": "abolished"
       },
       "id": "第一章#6:ANNO-01:abolished",
@@ -2932,13 +2336,7 @@
       "segIndex": 6,
       "segLabel": "第一章 第7段",
       "detail": {
-        "missing": [
-          "comrades",
-          "summed",
-          "remove",
-          "overwork",
-          "abolished"
-        ],
+        "missing": ["comrades", "summed", "remove", "overwork", "abolished"],
         "word": "comrades"
       },
       "id": "第一章#6:ANNO-01:comrades",
@@ -2995,13 +2393,7 @@
       "segIndex": 6,
       "segLabel": "第一章 第7段",
       "detail": {
-        "missing": [
-          "comrades",
-          "summed",
-          "remove",
-          "overwork",
-          "abolished"
-        ],
+        "missing": ["comrades", "summed", "remove", "overwork", "abolished"],
         "word": "overwork"
       },
       "id": "第一章#6:ANNO-01:overwork",
@@ -3058,13 +2450,7 @@
       "segIndex": 6,
       "segLabel": "第一章 第7段",
       "detail": {
-        "missing": [
-          "comrades",
-          "summed",
-          "remove",
-          "overwork",
-          "abolished"
-        ],
+        "missing": ["comrades", "summed", "remove", "overwork", "abolished"],
         "word": "remove"
       },
       "id": "第一章#6:ANNO-01:remove",
@@ -3121,13 +2507,7 @@
       "segIndex": 6,
       "segLabel": "第一章 第7段",
       "detail": {
-        "missing": [
-          "comrades",
-          "summed",
-          "remove",
-          "overwork",
-          "abolished"
-        ],
+        "missing": ["comrades", "summed", "remove", "overwork", "abolished"],
         "word": "summed"
       },
       "id": "第一章#6:ANNO-01:summed",
@@ -3184,11 +2564,7 @@
       "segIndex": 7,
       "segLabel": "第一章 第8段",
       "detail": {
-        "missing": [
-          "comrades",
-          "straw",
-          "beneath"
-        ],
+        "missing": ["comrades", "straw", "beneath"],
         "word": "beneath"
       },
       "id": "第一章#7:ANNO-01:beneath",
@@ -3245,11 +2621,7 @@
       "segIndex": 7,
       "segLabel": "第一章 第8段",
       "detail": {
-        "missing": [
-          "comrades",
-          "straw",
-          "beneath"
-        ],
+        "missing": ["comrades", "straw", "beneath"],
         "word": "comrades"
       },
       "id": "第一章#7:ANNO-01:comrades",
@@ -3306,11 +2678,7 @@
       "segIndex": 7,
       "segLabel": "第一章 第8段",
       "detail": {
-        "missing": [
-          "comrades",
-          "straw",
-          "beneath"
-        ],
+        "missing": ["comrades", "straw", "beneath"],
         "word": "straw"
       },
       "id": "第一章#7:ANNO-01:straw",
@@ -3367,9 +2735,7 @@
       "segIndex": 9,
       "segLabel": "第一章 第10段",
       "detail": {
-        "missing": [
-          "comrades"
-        ],
+        "missing": ["comrades"],
         "word": "comrades"
       },
       "id": "第一章#9:ANNO-01:comrades",
@@ -3446,31 +2812,16 @@
       "plot": {
         "score": 1,
         "level": "高",
-        "hits": [
-          "底线原文锚点：willingdon beauty",
-          "角色/地名：jones",
-          "角色/地名：major",
-          "角色/地名：willingdon",
-          "角色/地名：beauty",
-          "因果连接词：in order to",
-          "章节转折位置：章首/章尾"
-        ],
+        "hits": ["底线原文锚点：willingdon beauty", "角色/地名：jones", "角色/地名：major", "角色/地名：willingdon", "角色/地名：beauty", "因果连接词：in order to", "章节转折位置：章首/章尾"],
         "parts": [
           {
             "label": "底线原文锚点",
-            "hits": [
-              "willingdon beauty"
-            ],
+            "hits": ["willingdon beauty"],
             "weight": 3
           },
           {
             "label": "角色/地名",
-            "hits": [
-              "jones",
-              "major",
-              "willingdon",
-              "beauty"
-            ],
+            "hits": ["jones", "major", "willingdon", "beauty"],
             "weight": 1.2
           },
           {
@@ -3480,16 +2831,12 @@
           },
           {
             "label": "因果连接词",
-            "hits": [
-              "in order to"
-            ],
+            "hits": ["in order to"],
             "weight": 0.8
           },
           {
             "label": "章节转折位置",
-            "hits": [
-              "章首/章尾"
-            ],
+            "hits": ["章首/章尾"],
             "weight": 0.6
           }
         ]
@@ -3528,31 +2875,16 @@
       "plot": {
         "score": 1,
         "level": "高",
-        "hits": [
-          "底线原文锚点：willingdon beauty",
-          "角色/地名：jones",
-          "角色/地名：major",
-          "角色/地名：willingdon",
-          "角色/地名：beauty",
-          "因果连接词：in order to",
-          "章节转折位置：章首/章尾"
-        ],
+        "hits": ["底线原文锚点：willingdon beauty", "角色/地名：jones", "角色/地名：major", "角色/地名：willingdon", "角色/地名：beauty", "因果连接词：in order to", "章节转折位置：章首/章尾"],
         "parts": [
           {
             "label": "底线原文锚点",
-            "hits": [
-              "willingdon beauty"
-            ],
+            "hits": ["willingdon beauty"],
             "weight": 3
           },
           {
             "label": "角色/地名",
-            "hits": [
-              "jones",
-              "major",
-              "willingdon",
-              "beauty"
-            ],
+            "hits": ["jones", "major", "willingdon", "beauty"],
             "weight": 1.2
           },
           {
@@ -3562,16 +2894,12 @@
           },
           {
             "label": "因果连接词",
-            "hits": [
-              "in order to"
-            ],
+            "hits": ["in order to"],
             "weight": 0.8
           },
           {
             "label": "章节转折位置",
-            "hits": [
-              "章首/章尾"
-            ],
+            "hits": ["章首/章尾"],
             "weight": 0.6
           }
         ]
@@ -3610,31 +2938,16 @@
       "plot": {
         "score": 1,
         "level": "高",
-        "hits": [
-          "底线原文锚点：willingdon beauty",
-          "角色/地名：jones",
-          "角色/地名：major",
-          "角色/地名：willingdon",
-          "角色/地名：beauty",
-          "因果连接词：in order to",
-          "章节转折位置：章首/章尾"
-        ],
+        "hits": ["底线原文锚点：willingdon beauty", "角色/地名：jones", "角色/地名：major", "角色/地名：willingdon", "角色/地名：beauty", "因果连接词：in order to", "章节转折位置：章首/章尾"],
         "parts": [
           {
             "label": "底线原文锚点",
-            "hits": [
-              "willingdon beauty"
-            ],
+            "hits": ["willingdon beauty"],
             "weight": 3
           },
           {
             "label": "角色/地名",
-            "hits": [
-              "jones",
-              "major",
-              "willingdon",
-              "beauty"
-            ],
+            "hits": ["jones", "major", "willingdon", "beauty"],
             "weight": 1.2
           },
           {
@@ -3644,16 +2957,12 @@
           },
           {
             "label": "因果连接词",
-            "hits": [
-              "in order to"
-            ],
+            "hits": ["in order to"],
             "weight": 0.8
           },
           {
             "label": "章节转折位置",
-            "hits": [
-              "章首/章尾"
-            ],
+            "hits": ["章首/章尾"],
             "weight": 0.6
           }
         ]
@@ -3691,15 +3000,7 @@
       "plot": {
         "score": 1,
         "level": "高",
-        "hits": [
-          "角色/地名：benjamin",
-          "角色/地名：muriel",
-          "角色/地名：bluebell",
-          "角色/地名：jessie",
-          "角色/地名：pincher",
-          "角色/地名：boxer",
-          "角色/地名：clover"
-        ],
+        "hits": ["角色/地名：benjamin", "角色/地名：muriel", "角色/地名：bluebell", "角色/地名：jessie", "角色/地名：pincher", "角色/地名：boxer", "角色/地名：clover"],
         "parts": [
           {
             "label": "底线原文锚点",
@@ -3708,15 +3009,7 @@
           },
           {
             "label": "角色/地名",
-            "hits": [
-              "benjamin",
-              "muriel",
-              "bluebell",
-              "jessie",
-              "pincher",
-              "boxer",
-              "clover"
-            ],
+            "hits": ["benjamin", "muriel", "bluebell", "jessie", "pincher", "boxer", "clover"],
             "weight": 1.2
           },
           {
@@ -3769,15 +3062,7 @@
       "plot": {
         "score": 1,
         "level": "高",
-        "hits": [
-          "角色/地名：benjamin",
-          "角色/地名：muriel",
-          "角色/地名：bluebell",
-          "角色/地名：jessie",
-          "角色/地名：pincher",
-          "角色/地名：boxer",
-          "角色/地名：clover"
-        ],
+        "hits": ["角色/地名：benjamin", "角色/地名：muriel", "角色/地名：bluebell", "角色/地名：jessie", "角色/地名：pincher", "角色/地名：boxer", "角色/地名：clover"],
         "parts": [
           {
             "label": "底线原文锚点",
@@ -3786,15 +3071,7 @@
           },
           {
             "label": "角色/地名",
-            "hits": [
-              "benjamin",
-              "muriel",
-              "bluebell",
-              "jessie",
-              "pincher",
-              "boxer",
-              "clover"
-            ],
+            "hits": ["benjamin", "muriel", "bluebell", "jessie", "pincher", "boxer", "clover"],
             "weight": 1.2
           },
           {
@@ -3846,27 +3123,16 @@
       "plot": {
         "score": 0.917,
         "level": "高",
-        "hits": [
-          "底线原文锚点：beasts of england",
-          "角色/地名：major",
-          "角色/地名：england",
-          "角色/地名：ireland"
-        ],
+        "hits": ["底线原文锚点：beasts of england", "角色/地名：major", "角色/地名：england", "角色/地名：ireland"],
         "parts": [
           {
             "label": "底线原文锚点",
-            "hits": [
-              "beasts of england"
-            ],
+            "hits": ["beasts of england"],
             "weight": 3
           },
           {
             "label": "角色/地名",
-            "hits": [
-              "major",
-              "england",
-              "ireland"
-            ],
+            "hits": ["major", "england", "ireland"],
             "weight": 1.2
           },
           {
@@ -3919,26 +3185,16 @@
       "plot": {
         "score": 0.833,
         "level": "高",
-        "hits": [
-          "底线原文锚点：manor farm",
-          "角色/地名：jones",
-          "角色/地名：manor",
-          "章节转折位置：章首/章尾"
-        ],
+        "hits": ["底线原文锚点：manor farm", "角色/地名：jones", "角色/地名：manor", "章节转折位置：章首/章尾"],
         "parts": [
           {
             "label": "底线原文锚点",
-            "hits": [
-              "manor farm"
-            ],
+            "hits": ["manor farm"],
             "weight": 3
           },
           {
             "label": "角色/地名",
-            "hits": [
-              "jones",
-              "manor"
-            ],
+            "hits": ["jones", "manor"],
             "weight": 1.2
           },
           {
@@ -3953,9 +3209,7 @@
           },
           {
             "label": "章节转折位置",
-            "hits": [
-              "章首/章尾"
-            ],
+            "hits": ["章首/章尾"],
             "weight": 0.6
           }
         ]
@@ -3993,26 +3247,16 @@
       "plot": {
         "score": 0.833,
         "level": "高",
-        "hits": [
-          "底线原文锚点：manor farm",
-          "角色/地名：jones",
-          "角色/地名：manor",
-          "章节转折位置：章首/章尾"
-        ],
+        "hits": ["底线原文锚点：manor farm", "角色/地名：jones", "角色/地名：manor", "章节转折位置：章首/章尾"],
         "parts": [
           {
             "label": "底线原文锚点",
-            "hits": [
-              "manor farm"
-            ],
+            "hits": ["manor farm"],
             "weight": 3
           },
           {
             "label": "角色/地名",
-            "hits": [
-              "jones",
-              "manor"
-            ],
+            "hits": ["jones", "manor"],
             "weight": 1.2
           },
           {
@@ -4027,9 +3271,7 @@
           },
           {
             "label": "章节转折位置",
-            "hits": [
-              "章首/章尾"
-            ],
+            "hits": ["章首/章尾"],
             "weight": 0.6
           }
         ]
@@ -4049,9 +3291,7 @@
       "segLabel": "第一章 第11段",
       "detail": {
         "maxLen": 20,
-        "sentences": [
-          "Major said that as a young pig his mother and the other sows（母猪） sang an old tune, Beasts（野兽） of England, and he knows only the tune and three words... "
-        ],
+        "sentences": ["Major said that as a young pig his mother and the other sows（母猪） sang an old tune, Beasts（野兽） of England, and he knows only the tune and three words... "],
         "sentence": "Major said that as a young pig his mother and the other sows（母猪） sang an old tune, Beasts（野兽） of England, and he knows only the tune and three words... ",
         "index": 0
       },
@@ -4066,25 +3306,16 @@
       "plot": {
         "score": 0.75,
         "level": "高",
-        "hits": [
-          "底线原文锚点：beasts of england",
-          "角色/地名：major",
-          "角色/地名：england"
-        ],
+        "hits": ["底线原文锚点：beasts of england", "角色/地名：major", "角色/地名：england"],
         "parts": [
           {
             "label": "底线原文锚点",
-            "hits": [
-              "beasts of england"
-            ],
+            "hits": ["beasts of england"],
             "weight": 3
           },
           {
             "label": "角色/地名",
-            "hits": [
-              "major",
-              "england"
-            ],
+            "hits": ["major", "england"],
             "weight": 1.2
           },
           {
@@ -4119,9 +3350,7 @@
       "segLabel": "第一章 第9段",
       "detail": {
         "maxLen": 20,
-        "sentences": [
-          "No animal must ever live in a house, or sleep in a bed, or wear clothes, or drink alcohol（酒精）, or smoke tobacco（烟草）, or touch money, or do trade. "
-        ],
+        "sentences": ["No animal must ever live in a house, or sleep in a bed, or wear clothes, or drink alcohol（酒精）, or smoke tobacco（烟草）, or touch money, or do trade. "],
         "sentence": "No animal must ever live in a house, or sleep in a bed, or wear clothes, or drink alcohol（酒精）, or smoke tobacco（烟草）, or touch money, or do trade. ",
         "index": 0
       },
@@ -4136,16 +3365,11 @@
       "plot": {
         "score": 0.528,
         "level": "中",
-        "hits": [
-          "底线原文锚点：all animals are equal",
-          "因果连接词：so that"
-        ],
+        "hits": ["底线原文锚点：all animals are equal", "因果连接词：so that"],
         "parts": [
           {
             "label": "底线原文锚点",
-            "hits": [
-              "all animals are equal"
-            ],
+            "hits": ["all animals are equal"],
             "weight": 3
           },
           {
@@ -4160,9 +3384,7 @@
           },
           {
             "label": "因果连接词",
-            "hits": [
-              "so that"
-            ],
+            "hits": ["so that"],
             "weight": 0.8
           },
           {
@@ -4207,11 +3429,7 @@
       "plot": {
         "score": 0.444,
         "level": "中",
-        "hits": [
-          "角色/地名：clover",
-          "角色/地名：england",
-          "因果连接词：because"
-        ],
+        "hits": ["角色/地名：clover", "角色/地名：england", "因果连接词：because"],
         "parts": [
           {
             "label": "底线原文锚点",
@@ -4220,10 +3438,7 @@
           },
           {
             "label": "角色/地名",
-            "hits": [
-              "clover",
-              "england"
-            ],
+            "hits": ["clover", "england"],
             "weight": 1.2
           },
           {
@@ -4233,9 +3448,7 @@
           },
           {
             "label": "因果连接词",
-            "hits": [
-              "because"
-            ],
+            "hits": ["because"],
             "weight": 0.8
           },
           {
@@ -4280,11 +3493,7 @@
       "plot": {
         "score": 0.444,
         "level": "中",
-        "hits": [
-          "角色/地名：clover",
-          "角色/地名：england",
-          "因果连接词：because"
-        ],
+        "hits": ["角色/地名：clover", "角色/地名：england", "因果连接词：because"],
         "parts": [
           {
             "label": "底线原文锚点",
@@ -4293,10 +3502,7 @@
           },
           {
             "label": "角色/地名",
-            "hits": [
-              "clover",
-              "england"
-            ],
+            "hits": ["clover", "england"],
             "weight": 1.2
           },
           {
@@ -4306,9 +3512,7 @@
           },
           {
             "label": "因果连接词",
-            "hits": [
-              "because"
-            ],
+            "hits": ["because"],
             "weight": 0.8
           },
           {
@@ -4353,11 +3557,7 @@
       "plot": {
         "score": 0.444,
         "level": "中",
-        "hits": [
-          "角色/地名：clover",
-          "角色/地名：england",
-          "因果连接词：because"
-        ],
+        "hits": ["角色/地名：clover", "角色/地名：england", "因果连接词：because"],
         "parts": [
           {
             "label": "底线原文锚点",
@@ -4366,10 +3566,7 @@
           },
           {
             "label": "角色/地名",
-            "hits": [
-              "clover",
-              "england"
-            ],
+            "hits": ["clover", "england"],
             "weight": 1.2
           },
           {
@@ -4379,9 +3576,7 @@
           },
           {
             "label": "因果连接词",
-            "hits": [
-              "because"
-            ],
+            "hits": ["because"],
             "weight": 0.8
           },
           {
@@ -4426,11 +3621,7 @@
       "plot": {
         "score": 0.444,
         "level": "中",
-        "hits": [
-          "角色/地名：clover",
-          "角色/地名：england",
-          "因果连接词：because"
-        ],
+        "hits": ["角色/地名：clover", "角色/地名：england", "因果连接词：because"],
         "parts": [
           {
             "label": "底线原文锚点",
@@ -4439,10 +3630,7 @@
           },
           {
             "label": "角色/地名",
-            "hits": [
-              "clover",
-              "england"
-            ],
+            "hits": ["clover", "england"],
             "weight": 1.2
           },
           {
@@ -4452,9 +3640,7 @@
           },
           {
             "label": "因果连接词",
-            "hits": [
-              "because"
-            ],
+            "hits": ["because"],
             "weight": 0.8
           },
           {
@@ -4479,9 +3665,7 @@
       "segLabel": "第一章 第14段",
       "detail": {
         "maxLen": 20,
-        "sentences": [
-          "The birds jumped on to their perches, the animals settled in the straw, and the whole farm was asleep in a moment."
-        ],
+        "sentences": ["The birds jumped on to their perches, the animals settled in the straw, and the whole farm was asleep in a moment."],
         "sentence": "The birds jumped on to their perches, the animals settled in the straw, and the whole farm was asleep in a moment.",
         "index": 0
       },
@@ -4496,11 +3680,7 @@
       "plot": {
         "score": 0.389,
         "level": "中",
-        "hits": [
-          "角色/地名：jones",
-          "数字：6",
-          "章节转折位置：章首/章尾"
-        ],
+        "hits": ["角色/地名：jones", "数字：6", "章节转折位置：章首/章尾"],
         "parts": [
           {
             "label": "底线原文锚点",
@@ -4509,16 +3689,12 @@
           },
           {
             "label": "角色/地名",
-            "hits": [
-              "jones"
-            ],
+            "hits": ["jones"],
             "weight": 1.2
           },
           {
             "label": "数字",
-            "hits": [
-              "6"
-            ],
+            "hits": ["6"],
             "weight": 1
           },
           {
@@ -4528,9 +3704,7 @@
           },
           {
             "label": "章节转折位置",
-            "hits": [
-              "章首/章尾"
-            ],
+            "hits": ["章首/章尾"],
             "weight": 0.6
           }
         ]
@@ -4568,10 +3742,7 @@
       "plot": {
         "score": 0.333,
         "level": "中",
-        "hits": [
-          "角色/地名：major",
-          "角色/地名：england"
-        ],
+        "hits": ["角色/地名：major", "角色/地名：england"],
         "parts": [
           {
             "label": "底线原文锚点",
@@ -4580,10 +3751,7 @@
           },
           {
             "label": "角色/地名",
-            "hits": [
-              "major",
-              "england"
-            ],
+            "hits": ["major", "england"],
             "weight": 1.2
           },
           {
@@ -4636,10 +3804,7 @@
       "plot": {
         "score": 0.333,
         "level": "中",
-        "hits": [
-          "角色/地名：major",
-          "角色/地名：england"
-        ],
+        "hits": ["角色/地名：major", "角色/地名：england"],
         "parts": [
           {
             "label": "底线原文锚点",
@@ -4648,10 +3813,7 @@
           },
           {
             "label": "角色/地名",
-            "hits": [
-              "major",
-              "england"
-            ],
+            "hits": ["major", "england"],
             "weight": 1.2
           },
           {
@@ -4704,9 +3866,7 @@
       "plot": {
         "score": 0.167,
         "level": "低",
-        "hits": [
-          "角色/地名：major"
-        ],
+        "hits": ["角色/地名：major"],
         "parts": [
           {
             "label": "底线原文锚点",
@@ -4715,9 +3875,7 @@
           },
           {
             "label": "角色/地名",
-            "hits": [
-              "major"
-            ],
+            "hits": ["major"],
             "weight": 1.2
           },
           {
@@ -4770,9 +3928,7 @@
       "plot": {
         "score": 0.167,
         "level": "低",
-        "hits": [
-          "角色/地名：major"
-        ],
+        "hits": ["角色/地名：major"],
         "parts": [
           {
             "label": "底线原文锚点",
@@ -4781,9 +3937,7 @@
           },
           {
             "label": "角色/地名",
-            "hits": [
-              "major"
-            ],
+            "hits": ["major"],
             "weight": 1.2
           },
           {
@@ -4831,25 +3985,16 @@
       "plot": {
         "score": 0.75,
         "level": "高",
-        "hits": [
-          "底线原文锚点：beasts of england",
-          "角色/地名：major",
-          "角色/地名：england"
-        ],
+        "hits": ["底线原文锚点：beasts of england", "角色/地名：major", "角色/地名：england"],
         "parts": [
           {
             "label": "底线原文锚点",
-            "hits": [
-              "beasts of england"
-            ],
+            "hits": ["beasts of england"],
             "weight": 3
           },
           {
             "label": "角色/地名",
-            "hits": [
-              "major",
-              "england"
-            ],
+            "hits": ["major", "england"],
             "weight": 1.2
           },
           {
@@ -4897,16 +4042,11 @@
       "plot": {
         "score": 0.528,
         "level": "中",
-        "hits": [
-          "底线原文锚点：all animals are equal",
-          "因果连接词：so that"
-        ],
+        "hits": ["底线原文锚点：all animals are equal", "因果连接词：so that"],
         "parts": [
           {
             "label": "底线原文锚点",
-            "hits": [
-              "all animals are equal"
-            ],
+            "hits": ["all animals are equal"],
             "weight": 3
           },
           {
@@ -4921,9 +4061,7 @@
           },
           {
             "label": "因果连接词",
-            "hits": [
-              "so that"
-            ],
+            "hits": ["so that"],
             "weight": 0.8
           },
           {
@@ -4961,10 +4099,7 @@
       "plot": {
         "score": 0.333,
         "level": "中",
-        "hits": [
-          "角色/地名：major",
-          "角色/地名：england"
-        ],
+        "hits": ["角色/地名：major", "角色/地名：england"],
         "parts": [
           {
             "label": "底线原文锚点",
@@ -4973,10 +4108,7 @@
           },
           {
             "label": "角色/地名",
-            "hits": [
-              "major",
-              "england"
-            ],
+            "hits": ["major", "england"],
             "weight": 1.2
           },
           {
@@ -5067,9 +4199,7 @@
       "segIndex": 5,
       "segLabel": "第一章 第6段",
       "detail": {
-        "words": [
-          "labour"
-        ],
+        "words": ["labour"],
         "word": "labour"
       },
       "id": "第一章#5:ANNO-02:labour",
@@ -5083,11 +4213,7 @@
       "plot": {
         "score": 0.444,
         "level": "中",
-        "hits": [
-          "角色/地名：clover",
-          "角色/地名：england",
-          "因果连接词：because"
-        ],
+        "hits": ["角色/地名：clover", "角色/地名：england", "因果连接词：because"],
         "parts": [
           {
             "label": "底线原文锚点",
@@ -5096,10 +4222,7 @@
           },
           {
             "label": "角色/地名",
-            "hits": [
-              "clover",
-              "england"
-            ],
+            "hits": ["clover", "england"],
             "weight": 1.2
           },
           {
@@ -5109,9 +4232,7 @@
           },
           {
             "label": "因果连接词",
-            "hits": [
-              "because"
-            ],
+            "hits": ["because"],
             "weight": 0.8
           },
           {
