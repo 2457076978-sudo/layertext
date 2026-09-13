@@ -8,8 +8,18 @@ import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  buildTargets, composePrompt, COST_HEADER, fillTemplate, parseManifest,
-  providerNameOf, shouldFailover, summarizeCost, toCostLine,
+  AUX_MAX_WORDS,
+  auxReady,
+  auxSuitedFor,
+  buildTargets,
+  composePrompt,
+  COST_HEADER,
+  fillTemplate,
+  parseManifest,
+  providerNameOf,
+  shouldFailover,
+  summarizeCost,
+  toCostLine,
 } from '../src/core/aiops.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -32,7 +42,9 @@ test('fillTemplate：占位符替换；未知占位符保留', () => {
 
 test('composePrompt：分层初稿模板与生产占位符对齐', () => {
   const out = composePrompt('{{tierRule}}{{chnoNote}}\n{{instructions}}', {
-    tierRule: 'M 层：平均句长 ≤16 词', chnoNote: '（本章章号 1）', instructions: '',
+    tierRule: 'M 层：平均句长 ≤16 词',
+    chnoNote: '（本章章号 1）',
+    instructions: '',
   });
   assert.match(out, /M 层：平均句长 ≤16 词（本章章号 1）/);
   assert.doesNotMatch(out, /\{\{/); // 全部填充，无残留占位符
@@ -72,15 +84,28 @@ test('providerNameOf：host 提取与坏地址兜底', () => {
 });
 
 test('成本台账：行写入与汇总（含按书过滤/failover/错误计数）往返', () => {
-  const mk = (scene: string, book: string, pt: number, ct: number, fo: boolean, err: boolean) => toCostLine({
-    ts: '2026-09-06 10:00:00', scene, book, chapter: 'ch1.md', provider: 'api.deepseek.com', model: 'deepseek-chat',
-    promptVer: 'v1.0', promptTokens: pt, completionTokens: ct, elapsedMs: 1200, failover: fo, ok: !err,
-  });
-  const csv = COST_HEADER.join(',') + '\n'
-    + mk('分层初稿', '动物农场', 1000, 800, false, false)
-    + mk('审核建议', '动物农场', 200, 100, true, false)
-    + mk('AI 助手', '动物农场', 300, 50, false, true)
-    + mk('分层初稿', '另一本书', 5000, 4000, false, false);
+  const mk = (scene: string, book: string, pt: number, ct: number, fo: boolean, err: boolean) =>
+    toCostLine({
+      ts: '2026-09-06 10:00:00',
+      scene,
+      book,
+      chapter: 'ch1.md',
+      provider: 'api.deepseek.com',
+      model: 'deepseek-chat',
+      promptVer: 'v1.0',
+      promptTokens: pt,
+      completionTokens: ct,
+      elapsedMs: 1200,
+      failover: fo,
+      ok: !err,
+    });
+  const csv =
+    COST_HEADER.join(',') +
+    '\n' +
+    mk('分层初稿', '动物农场', 1000, 800, false, false) +
+    mk('审核建议', '动物农场', 200, 100, true, false) +
+    mk('AI 助手', '动物农场', 300, 50, false, true) +
+    mk('分层初稿', '另一本书', 5000, 4000, false, false);
   const all = summarizeCost(csv);
   assert.equal(all.calls, 4);
   assert.equal(all.promptTokens, 6500);
@@ -109,4 +134,24 @@ test('aiErrHuman：常见服务商错误码全覆盖（欠账#7：403/模型无�
   assert.match(aiErrHuman('账户余额不足'), /余额不足/);
   // 不认识的原样返回
   assert.equal(aiErrHuman('奇怪的错误'), '奇怪的错误');
+});
+
+/* ────────────────── 辅助模型（可选）：判据（2026-09-13） ────────────────── */
+
+test('auxReady：没勾启用 / 缺地址 / 缺模型名，都不算可用（Key 允许空——本地服务常常不校验）', () => {
+  assert.equal(auxReady(undefined), false);
+  assert.equal(auxReady({}), false, '默认关着');
+  assert.equal(auxReady({ enabled: true }), false, '勾了但没地址');
+  assert.equal(auxReady({ enabled: true, baseUrl: 'http://127.0.0.1:8000/v1' }), false, '勾了有地址但没模型名');
+  assert.equal(auxReady({ enabled: false, baseUrl: 'x', model: 'y' }), false, '地址模型都填了但没启用');
+  assert.equal(auxReady({ enabled: true, baseUrl: 'http://127.0.0.1:8000/v1', model: 'Ling-3.0-tiny-oQ4e' }), true);
+});
+
+test('auxSuitedFor：空批次与超限批次都不交给辅助模型——超限整批退主模型，不拆批', () => {
+  const cfg = { enabled: true, baseUrl: 'http://127.0.0.1:8000/v1', model: 'm' };
+  assert.equal(auxSuitedFor(cfg, 0), false, '没有词就没有活，别发一次空请求');
+  assert.equal(auxSuitedFor(cfg, 1), true);
+  assert.equal(auxSuitedFor(cfg, AUX_MAX_WORDS), true, '正好到上限还能用');
+  assert.equal(auxSuitedFor(cfg, AUX_MAX_WORDS + 1), false, '超一个词就整批退主模型');
+  assert.equal(auxSuitedFor({ enabled: false, baseUrl: 'x', model: 'y' }, 3), false, '关掉就一律走主模型');
 });

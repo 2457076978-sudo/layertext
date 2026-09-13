@@ -298,11 +298,16 @@ export function flashApplied(revised: string): void {
   el.classList.add('just-applied');
 }
 
-/** 请求直到解析出 JSON：若模型把整轮输出耗在思考上（无 [ 字符），自动追发"直接输出 JSON"再试一次 */
-export async function chatUntilJson(messages: { role: string; content: string }[], maxTokens: number, scene: string): Promise<{ raw: unknown[]; usage: string }> {
+/**
+ * 请求直到解析出 JSON：若模型把整轮输出耗在思考上（无 [ 字符），自动追发"直接输出 JSON"再试一次。
+ *
+ * `preferAux`：这条活适合辅助模型时置真（**由调用方判断**"短输入 + 单任务 + 输出可机检"）。
+ * 辅助模型失败/交白卷会自动回主模型，且这件事会写在状态行上。
+ */
+export async function chatUntilJson(messages: { role: string; content: string }[], maxTokens: number, scene: string, preferAux = false): Promise<{ raw: unknown[]; usage: string }> {
   const msgs = [...messages];
   for (let attempt = 0; attempt < 2; attempt++) {
-    const { content, usage } = await callChat(msgs, maxTokens, undefined, scene);
+    const { content, usage } = await callChat(msgs, maxTokens, undefined, scene, { preferAux });
     try {
       return { raw: parseAiJson(content), usage };
     } catch (e) {

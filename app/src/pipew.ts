@@ -33,7 +33,7 @@ import {
 } from './pure.js';
 import { extractParas, hit, sentsOf, splitChapter } from '../../src/core/textpipe.js';
 import { sentenceRisks } from '../../src/core/risks.js';
-import { simplifyMaxLen } from './ai.js';
+import { auxSuitedFor, AUX_MAX_WORDS, simplifyMaxLen } from './ai.js';
 
 /** 「加中文标注」管线：AI 只出 词→中文 映射（一次小调用，零改写风险），
  *  原句逐字保留，机器在标记所在段对该词的词边界出现处插入 词（中文） */
@@ -71,6 +71,9 @@ export async function applyZhAnnotations(s: FileSession, marks: Mark[]): Promise
         ],
         1500,
         '短语注释',
+        /* 辅助模型适用：输入就是一个短语表、任务单一（短语→2-6 汉字）、输出可机检（正则验汉字数）。
+           超过 AUX_MAX_WORDS 就整批退主模型——不拆批，拆了同一个短语可能拿到不一致的译法。 */
+        auxSuitedFor(S.appConfig.aux, missedPhrases.length),
       );
       const pg = normalizeGlossMap(praw);
       for (const w of missedPhrases) {
@@ -179,8 +182,13 @@ export async function applyWordSimplifications(s: FileSession, marks: Mark[]): P
     if (r && r.word === m.word) specified[m.word!] = r.replacement;
   }
   const needAi = uniq.filter((m) => !specified[m.word!]);
+  /* 这一批走辅助模型还是主模型：由调用方（这里）判断，判据是"短输入 + 单任务 + 输出可机检" */
+  const useAux = auxSuitedFor(S.appConfig.aux, needAi.length);
+  const whose = useAux ? `辅助模型（本机，≤${AUX_MAX_WORDS} 词）` : '主模型';
   setStatus(
-    needAi.length ? `正在为 ${needAi.length} 个词找课标内简单词（另有 ${Object.keys(specified).length} 个由教师指定，不问了）…` : `${Object.keys(specified).length} 个词的替换词由教师指定，无需问 AI…`,
+    needAi.length
+      ? `正在为 ${needAi.length} 个词找课标内简单词（${whose}；另有 ${Object.keys(specified).length} 个由教师指定，不问了）…`
+      : `${Object.keys(specified).length} 个词的替换词由教师指定，无需问 AI…`,
   );
   try {
     /* 教师指定过的词**不进 AI 的输入**——既省一次调用，也杜绝"机器把人定的改掉"。 */
@@ -196,6 +204,8 @@ export async function applyWordSimplifications(s: FileSession, marks: Mark[]): P
         ],
         2000,
         '词汇简化',
+        /* 同短语注释：短词表 + 单一任务 + 输出可机检（剥 markdown / 拒中文 / 词边界替换）。 */
+        auxSuitedFor(S.appConfig.aux, needAi.length),
       );
       // #22 根修：parseAiJson 恒返数组（单对象被包一层），Object.assign 只会得到 {0:{…}}——
       // 曾致 AI 给出的简单词全部丢失、每个词都被误判"换不出"而降级加注
@@ -306,6 +316,7 @@ export async function applyWordSimplifications(s: FileSession, marks: Mark[]): P
     <div class="pop-h">词汇简化总结</div>
     <table class="gtable">
       <tr><td>已换（写入正文，句子未动）</td><td><b>${done.length}</b> 个</td></tr>
+      ${needAi.length ? `<tr><td>这一批问的是</td><td>${useAux ? `辅助模型（本机 ${esc(S.appConfig.aux?.model ?? '')}）` : '主模型'}</td></tr>` : ''}
       ${noted ? `<tr><td>换不出更简单词 → 降级加中文标注</td><td><b>${noted}</b> 个</td></tr>` : ''}
       ${morphWarn.length ? `<tr class="warnrow"><td>⚠︎ 词形可能与语境不符（AI 边界 #17：词尾 ed/ing/s/原形类不一致，建议复核）</td><td><b>${morphWarn.length}</b> 处</td></tr>` : ''}
     </table>
@@ -313,7 +324,10 @@ export async function applyWordSimplifications(s: FileSession, marks: Mark[]): P
     ${morphWarn.length ? `<div class="dim" style="margin-top:6px;font-size:12px;line-height:1.9">⚠︎ 词形待复核：<br/>${morphWarn.map((d) => '· ' + esc(d)).join('<br/>')}</div>` : ''}
     <div id="sum-prop" class="dim" style="margin-top:6px;font-size:12px;line-height:1.8">⇄ 正在传播到同章其他版本…</div>
     <div class="pop-btns" style="margin-top:10px"><button id="sum-close">关闭</button></div>`);
-  setStatus(`已换 ${done.length} 个词（句子未动）${noted ? `；${noted} 个降级加注` : ''}${morphWarn.length ? `；⚠︎ ${morphWarn.length} 处词形待复核（明细见右下总结面板）` : ''}`, 'saved');
+  setStatus(
+    `已换 ${done.length} 个词（句子未动）${noted ? `；${noted} 个降级加注` : ''}${morphWarn.length ? `；⚠︎ ${morphWarn.length} 处词形待复核（明细见右下总结面板）` : ''}${useAux && needAi.length ? '｜这批用辅助模型，未花 API 钱' : ''}`,
+    'saved',
+  );
   for (const p of simplified) void propagateWordAction(s, 'rewrite', p.word, p.zh);
   // 传播结果回填总结面板（感知原则：后台自动行为必须在可回看的面板留一行，不允许只有一闪 toast）
   void propagateCorrection(s, corrPairs2).then((msg) => {

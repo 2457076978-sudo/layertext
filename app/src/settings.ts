@@ -11,7 +11,7 @@ import { activeSession, fileSummary, renderAll, updateModePill } from './main.js
 import { mergedSelection, reinforceWordsNow } from './lexicon.js';
 import { showVocabEditor } from './pipew.js';
 import { scheduleHeatRail } from './edit.js';
-import { AI_PROVIDERS, aiErrHuman, loadConfig, reloadPrompts, saveConfig, simplifyMaxLen } from './ai.js';
+import { AI_PROVIDERS, AUX_DEFAULT_BASE_URL, AUX_DEFAULT_MODEL, AUX_MAX_WORDS, aiErrHuman, loadConfig, reloadPrompts, saveConfig, simplifyMaxLen } from './ai.js';
 import { filterTargets, type ClassTarget } from './bookpure.js';
 
 /* ---------- 班级多人定制（折叠多选栏，feature/reinforce） ---------- */
@@ -197,6 +197,14 @@ export function showAiSettings(): void {
     <div class="fld"><label style="display:flex;align-items:flex-start;gap:6px"><input type="checkbox" id="ai-trust" style="width:auto;margin-top:3px" /> <span><b>信任模式</b>：允许 AI 助手在对话中直接修改正文（你说"直接改"即生效）</span></label></div>
     <div class="fld"><label style="display:flex;align-items:flex-start;gap:6px"><input type="checkbox" id="ai-inplace" style="width:auto;margin-top:3px" checked /> <span><b>直接修改原稿文件</b>（推荐）：改动直接写进书稿本身，不另存工作稿——<b>首次修改前自动备份</b>原始版（xxx_原始备份.md），随时可整体还原。关闭则另存工作稿、原稿不动</span></label></div>
     <div class="fld"><label style="display:flex;align-items:flex-start;gap:6px"><input type="checkbox" id="ai-lowthink" style="width:auto;margin-top:3px" checked /> <span><b>关闭思考</b>（推荐）：直接关闭模型的深度思考（thinking=disabled）——改写任务不需要，关了更快更省更稳</span></label></div>
+    <div class="fld"><label style="display:flex;align-items:flex-start;gap:6px"><input type="checkbox" id="aux-on" style="width:auto;margin-top:3px" /> <span><b>启用辅助模型</b>（可选，默认关）：<b>本机小模型</b>跑"短输入、任务单一、结果可机检"的小活——<b>词→课标内简单词</b>（词汇简化）与 <b>短语→中文注释</b>。这些活它实测扛得住，且**不花 API 钱**。整章简化 / 逐句改写 / 对话<b>一律仍走主模型</b>——实测本地这个量级做不了多段一致性。关掉不影响任何功能。</span></label></div>
+    <div class="fld" id="aux-fields"><label>辅助模型地址 / 模型名 / Key（默认指向本机 oMLX；Key 在 <code>~/.omlx/settings.json</code>；不校验 Key 的本地服务随便填个占位符）</label>
+      <div class="rw-row" style="display:flex;gap:6px">
+        <input id="aux-url" placeholder="${AUX_DEFAULT_BASE_URL}" style="flex:1" />
+        <input id="aux-model" placeholder="${AUX_DEFAULT_MODEL}" style="max-width:170px" />
+        <input id="aux-key" type="password" placeholder="Key（本地服务可不填）" style="max-width:140px" />
+      </div>
+      <div style="margin-top:5px"><button id="aux-test" style="font-size:12px">测试辅助模型</button> <span id="aux-test-out" style="font-size:12px;color:var(--muted)"></span></div></div>
     <div class="fld"><label>备用供应商（可选）：主服务商连不上/报错时按顺序自动切换。Key 留空 = 复用上面第 ④ 步的主 Key（适合同服务商多模型）</label>
       <div id="ai-fb-rows"></div>
       <button id="ai-fb-add" style="font-size:12px">＋ 添加备用</button></div>
@@ -272,7 +280,48 @@ export function showAiSettings(): void {
     ($('ai-trust') as HTMLInputElement).checked = S.appConfig.trustEdit ?? false;
     ($('ai-inplace') as HTMLInputElement).checked = S.appConfig.inPlaceEdit ?? true;
     ($('ai-lowthink') as HTMLInputElement).checked = S.appConfig.lowThinking !== false;
+    /* 辅助模型（可选）：读回已存配置；Key 从钥匙串 account:'aux' */
+    const auxUrl = $('aux-url') as HTMLInputElement;
+    const auxModel = $('aux-model') as HTMLInputElement;
+    auxUrl.value = S.appConfig.aux?.baseUrl ?? '';
+    auxModel.value = S.appConfig.aux?.model ?? '';
+    ($('aux-on') as HTMLInputElement).checked = S.appConfig.aux?.enabled === true;
+    try {
+      ($('aux-key') as HTMLInputElement).value = (await invoke<string>('load_api_key', { account: 'aux' })) ?? '';
+    } catch {
+      /* 有意兜底：辅助模型的 Key 允许没配（本地服务常常不校验）——留空是正常状态，不是错误 */
+      ($('aux-key') as HTMLInputElement).value = '';
+    }
+    syncAuxFields();
   })();
+
+  /** 没勾"启用"时把下面三个框收起来——可选就得看得出可选 */
+  function syncAuxFields(): void {
+    const on = ($('aux-on') as HTMLInputElement).checked;
+    ($('aux-fields') as HTMLElement).style.display = on ? '' : 'none';
+  }
+  $('aux-on').addEventListener('change', syncAuxFields);
+
+  $('aux-test').addEventListener('click', async () => {
+    const out = $('aux-test-out');
+    const url = (($('aux-url') as HTMLInputElement).value.trim() || AUX_DEFAULT_BASE_URL).replace(/\/+$/, '');
+    const model = ($('aux-model') as HTMLInputElement).value.trim() || AUX_DEFAULT_MODEL;
+    const key = ($('aux-key') as HTMLInputElement).value.trim();
+    out.textContent = '连接中…';
+    try {
+      const resp = await tauriFetch(`${url}/chat/completions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+        body: JSON.stringify({ model, temperature: 0.3, max_tokens: 40, messages: [{ role: 'user', content: '只回复两个字：正常' }] }),
+      });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${(await resp.text()).slice(0, 120)}`);
+      const d = (await resp.json()) as { choices?: { message?: { content?: string } }[] };
+      const got = (d.choices?.[0]?.message?.content ?? '').trim().slice(0, 40);
+      out.textContent = `✓ 通了（返回：${got || '（空）'}）——点「保存」生效`;
+    } catch (e) {
+      out.textContent = `✗ ${aiErrHuman(e)}（本机服务没开？oMLX 默认在 ${AUX_DEFAULT_BASE_URL}）`;
+    }
+  });
 
   const currentModel = () => (modelSel.style.display !== 'none' ? modelSel.value : modelEl.value.trim());
 
@@ -290,14 +339,24 @@ export function showAiSettings(): void {
       S.appConfig.lowThinking = ($('ai-lowthink') as HTMLInputElement).checked;
       const fbs = collectFb();
       S.appConfig.failover = fbs.length ? fbs.map((f) => ({ name: f.name, baseUrl: f.baseUrl, model: f.model })) : undefined;
+      /* 辅助模型（可选）：关着也把地址/模型留着——下次再开不用重填 */
+      const auxOn = ($('aux-on') as HTMLInputElement).checked;
+      S.appConfig.aux = {
+        enabled: auxOn,
+        baseUrl: (($('aux-url') as HTMLInputElement).value.trim() || AUX_DEFAULT_BASE_URL).replace(/\/+$/, ''),
+        model: ($('aux-model') as HTMLInputElement).value.trim() || AUX_DEFAULT_MODEL,
+      };
       await saveConfig();
       const k = cur.value.trim();
       if (k) await invoke('save_api_key', { key: k });
+      const auxKey = ($('aux-key') as HTMLInputElement).value.trim();
+      if (auxKey) await invoke('save_api_key', { key: auxKey, account: 'aux' });
       for (let i = 0; i < fbs.length; i++) {
         if (fbs[i].key) await invoke('save_api_key', { key: fbs[i].key, account: 'fb' + i });
       }
       reloadPrompts();
-      out.textContent = fbs.length ? `✓ 已保存（Key 存入本机钥匙串；备用供应商 ${fbs.length} 个，主服务商失败时按序自动切换）` : '✓ 已保存（Key 存入本机钥匙串）';
+      const auxNote = !auxOn ? '' : `；辅助模型已启用（${S.appConfig.aux.model}，只跑 ${AUX_MAX_WORDS} 词以内的映射类小活）`;
+      out.textContent = fbs.length ? `✓ 已保存（Key 存入本机钥匙串；备用供应商 ${fbs.length} 个，主服务商失败时按序自动切换${auxNote}）` : `✓ 已保存（Key 存入本机钥匙串${auxNote}）`;
     } catch (e) {
       out.textContent = '✗ 保存失败：' + e;
     }

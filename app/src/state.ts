@@ -22,6 +22,13 @@ export interface AppConfig {
   recentFiles?: string[];
   /** 备用供应商序列（W3 failover）：主供应商失败时按序降级；key 留空则复用主 Key */
   failover?: { name?: string; baseUrl?: string; model?: string; key?: string }[];
+  /**
+   * 辅助模型（可选，2026-09-13）：本机小模型**只**干"输入短 + 任务单一 + 输出可机检"的映射类小活
+   * （词→课标内简单词、短语→中文注释）。整章简化 / 逐句改写 / 对话一律仍走主模型——
+   * 实测（`Desktop/LayerText_本地裁判_试验/Ling复测_总结.md`）7.9B 的本地模型做不了多段一致性。
+   * 关掉它不影响任何功能，只是这些小活也交给主模型。Key 存钥匙串 `account: 'aux'`。
+   */
+  aux?: { enabled?: boolean; baseUrl?: string; model?: string };
   /** 简化标准（无预设难度）：句长上限可调，黑名单句法一律禁用。旧配置的 tiers 字段已停用忽略 */
   simplify?: { maxLen: number };
   /* UX 补齐：阅读字号 + 上次会话恢复（书架"继续上次编辑"） */

@@ -9,7 +9,18 @@ import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
 import { S, type AppConfig } from './state.js';
 import { withRetry } from './pure.js';
 import { DEFAULT_MAX_LEN } from './types.js';
-import { aiErrHuman as aiErrHumanCore, buildTargets, composePrompt, COST_HEADER, parseManifest, shouldFailover, toCostLine, type ProviderTarget, type PromptManifest } from '../../src/core/aiops.js';
+import {
+  aiErrHuman as aiErrHumanCore,
+  auxReady,
+  buildTargets,
+  composePrompt,
+  COST_HEADER,
+  parseManifest,
+  shouldFailover,
+  toCostLine,
+  type ProviderTarget,
+  type PromptManifest,
+} from '../../src/core/aiops.js';
 import manifestText from '../../prompts/manifest.json?raw';
 import promptSimplify from '../../prompts/system_simplify.md?raw';
 import promptDraft from '../../prompts/system_draft.md?raw';
@@ -102,6 +113,50 @@ export function aiErrHuman(e: unknown): string {
   return aiErrHumanCore(e);
 }
 
+/* ---------- 辅助模型（可选）：本机小模型干"短输入 + 单任务 + 输出可机检"的活 ---------- */
+
+/**
+ * 默认指向本机 oMLX 的 OpenAI 兼容端点。oMLX 需要真 Key（在 `~/.omlx/settings.json`），
+ * 所以「留空 Key」这条路留给不校验 Key 的本地服务（如 Ollama，随便填个占位符也行）。
+ */
+export const AUX_DEFAULT_BASE_URL = 'http://127.0.0.1:8000/v1';
+export const AUX_DEFAULT_MODEL = 'Ling-3.0-tiny-oQ4e';
+
+/* 判据（`auxReady` / `auxSuitedFor` / `AUX_MAX_WORDS`）在 `src/core/aiops.ts`——
+   放纯逻辑那边才能在 node 下单测，App 与管线也共用同一份。 */
+export { AUX_MAX_WORDS, auxSuitedFor } from '../../src/core/aiops.js';
+
+/** 辅助模型启用且地址/模型都填了没有 */
+export function auxConfigured(): boolean {
+  return auxReady(S.appConfig.aux);
+}
+
+/** 给辅助模型补的一条硬约束：实测它会先把"分析过程"吐出来（`1. **Analyze the Request:** …`） */
+const AUX_NO_TALK = '只输出要求的内容本身。不要输出分析、思考过程、步骤、标题或任何解释。';
+
+/** 按辅助模型的要求重整消息：把"别解释"并进 system，避免多一条 system 让某些服务端挑食 */
+function auxMessages(messages: { role: string; content: string }[]): { role: string; content: string }[] {
+  const out = messages.map((m) => ({ ...m }));
+  const first = out[0];
+  if (first && first.role === 'system') out[0] = { role: 'system', content: `${AUX_NO_TALK}\n\n${first.content}` };
+  else out.unshift({ role: 'system', content: AUX_NO_TALK });
+  return out;
+}
+
+async function auxTarget(): Promise<ProviderTarget | null> {
+  if (!auxConfigured()) return null;
+  const a = S.appConfig.aux!;
+  let key: string;
+  try {
+    key = (await invoke<string>('load_api_key', { account: 'aux' })) ?? '';
+  } catch {
+    /* 有意兜底：辅助模型的 Key 允许没配（本地服务常常不校验）——空串照发，
+       真正的鉴权失败会由下面的请求如实报出来，不在这里假装成功。 */
+    key = '';
+  }
+  return { name: '辅助模型', baseUrl: (a.baseUrl ?? '').trim().replace(/\/+$/, ''), model: (a.model ?? '').trim(), key, index: -1 };
+}
+
 /* ---------- 供应商序列（failover） ---------- */
 
 async function activeTargets(): Promise<ProviderTarget[]> {
@@ -180,7 +235,15 @@ function usageText(u?: UsageNums): UsageText {
   return u ? `（消耗 ${u.promptTokens ?? '?'} 入 + ${u.completionTokens ?? '?'} 出 tokens）` : '';
 }
 
-async function chatOnce(t: ProviderTarget, messages: { role: string; content: string }[], maxTokens: number, externalSignal: AbortSignal | undefined): Promise<{ content: string; usage: UsageNums }> {
+async function chatOnce(
+  t: ProviderTarget,
+  messages: { role: string; content: string }[],
+  maxTokens: number,
+  externalSignal: AbortSignal | undefined,
+  /* `bare`：只发 model/temperature/messages/max_tokens。辅助模型（本机小模型）走这条——
+     实测它不认 reasoning_effort/thinking；虽然下面有"不认就重发"的兜底，但那要多一次来回。 */
+  opts: { bare?: boolean } = {},
+): Promise<{ content: string; usage: UsageNums }> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 180000);
   const onAbort = () => ctrl.abort();
@@ -192,7 +255,7 @@ async function chatOnce(t: ProviderTarget, messages: { role: string; content: st
         temperature: 0.3,
         max_tokens: maxTokens,
         messages,
-        ...(withEffort && S.appConfig.lowThinking !== false
+        ...(!opts.bare && withEffort && S.appConfig.lowThinking !== false
           ? { reasoning_effort: 'low', thinking: { type: 'disabled' } } // DeepSeek：关思考（改写任务无需深度思考）
           : {}),
       });
@@ -265,7 +328,39 @@ async function callWithFailover<T>(
   throw lastErr;
 }
 
-export async function callChat(messages: { role: string; content: string }[], maxTokens: number, externalSignal?: AbortSignal, scene = 'AI 请求'): Promise<{ content: string; usage: string }> {
+/**
+ * 一次 AI 请求。
+ *
+ * `opts.preferAux`：这条活适合辅助模型时置真（调用方负责判断"短输入 + 单任务 + 输出可机检"）。
+ * 辅助模型**失败/返回空就自动回主模型**，并把这件事说在状态行上——不静默降级，
+ * 也不因为"辅助模型坏了"就让教师的活干不成。
+ */
+export async function callChat(
+  messages: { role: string; content: string }[],
+  maxTokens: number,
+  externalSignal?: AbortSignal,
+  scene = 'AI 请求',
+  opts: { preferAux?: boolean } = {},
+): Promise<{ content: string; usage: string }> {
+  if (opts.preferAux) {
+    const aux = await auxTarget();
+    if (aux) {
+      const start = Date.now();
+      try {
+        const { content, usage } = await chatOnce(aux, auxMessages(messages), maxTokens, externalSignal, { bare: true });
+        if (String(content ?? '').trim()) {
+          S.lastProvider = { name: aux.name, model: aux.model };
+          await logCost(`${scene}（辅助模型）`, aux, Date.now() - start, true, usage);
+          return { content, usage: usageText(usage) };
+        }
+        /* 空内容不能当成"跑通了"：辅助模型交白卷是实测过的失效模式（2B 两段起就这样）。 */
+        ui?.onStatus?.(`辅助模型返回空内容，已自动改走主模型（${scene}）`);
+      } catch (e) {
+        await logCost(`${scene}（辅助模型）`, aux, Date.now() - start, false, undefined, String(e).slice(0, 80));
+        ui?.onStatus?.(`辅助模型不可用（${aiErrHuman(e)}），已自动改走主模型（${scene}）`);
+      }
+    }
+  }
   const { result, usage } = await callWithFailover(scene, async (t) => {
     const { content, usage: nums } = await chatOnce(t, messages, maxTokens, externalSignal);
     return { result: content, usage: nums };
