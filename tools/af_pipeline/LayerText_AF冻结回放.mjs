@@ -52,6 +52,7 @@
 
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -70,7 +71,17 @@ const { parseDictCsv } = await import(`${DIST}/src/core/dictmerge.js`);
 const { splitChapter } = await import(`${DIST}/src/core/textpipe.js`);
 const { atomicWriteFileSync: writeAtomic } = await import(`${DIST}/src/core/files.js`);
 
-const FIXTURE = join(REPO, 'tests', 'fixtures', 'replay');
+/* 回放夹具**不进公开仓库**（里面是原书正文与教师的三层产物）——放在仓库外，
+   用 `LAYERTEXT_REPLAY_DIR` 指过来；调用方也可以用 `--root` 显式指定。 */
+const FIXTURE = (() => {
+  const 外部 = process.env.LAYERTEXT_REPLAY_DIR;
+  if (外部) return 外部;
+  /* 默认外部位置 = 本应用的配置目录（与 ~/.layertext.json、`书架.json` 同一个家，
+     不是某个人的私人路径）——这样教师本机不用配任何变量就照旧跑得到回放层。 */
+  const 应用配置目录 = join(homedir(), 'Documents', 'LayerText配置', '回放夹具_真项目');
+  if (existsSync(应用配置目录)) return 应用配置目录;
+  return join(REPO, 'tests', 'fixtures', 'replay');
+})();
 const argv = process.argv.slice(2);
 const arg = (n, d) => {
   const i = argv.indexOf(n);
