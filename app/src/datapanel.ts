@@ -697,7 +697,11 @@ export async function renderDataPane(bookDir: string): Promise<void> {
       const msg = el.querySelector('#dp-tree-msg');
       if (msg) msg.textContent = '✓ 已保存——上级的加注/去标注决定将自动传播到全部下级';
     } catch (e) {
-      alert('层级保存失败：' + String(e));
+      /* 失败要说出去（App 层守卫：不许静默吞）：写进面板消息位，教师当场看得见配置没写进去。
+         用 alert 既不合守卫口径，也会打断教师手上正在做的事。 */
+      const msg = el.querySelector('#dp-tree-msg');
+      if (msg) msg.textContent = `✗ 层级保存失败：${String(e)}——配置没写进去，读者层级还是旧的`;
+      console.error('保存读者层级失败：', e);
     }
   });
 

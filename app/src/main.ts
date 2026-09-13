@@ -52,7 +52,7 @@ import {
   loadWorkspaces,
   alignWorkspaceToSession,
 } from './shelf.js';
-import { renderReader, updateMarkBadge, sidebarHandlers, showWordPanel, showSentPanel, showPhrasePanel } from './reader.js';
+import { addMark, renderReader, updateMarkBadge, sidebarHandlers, showWordPanel, showSentPanel, showPhrasePanel } from './reader.js';
 import { restoreChat, chatRender, hideGatePop, gatePop } from './chat.js';
 import { saveBookConfig, loadBookConfig, exportDocx, exportTts, showRewritePop, showAnkiExport } from './bookio.js';
 import { showGradingPop, showClassGradingPop } from './grading.js';
@@ -64,8 +64,10 @@ import exampleMd from '../../examples/texts/aesop_tortoise_hare.md?raw';
 import exampleVocab from '../../examples/vocab/sample_teaching_vocab.csv?raw';
 import { runQc, toLegacyReport } from '../../src/core/qc.js';
 import { extractParas, sentsOf, splitChapter } from '../../src/core/textpipe.js';
-import { renderSidebar, scheduleSave } from './review.js';
-import { GATES, newReviewState, type FileSession } from './types.js';
+import { renderSidebar, scheduleSave, setAfterSidebarRender } from './review.js';
+import { GATES, newReviewState, type FileSession, type Mark } from './types.js';
+import { markFromReplayed, recordCalibration, replayInto } from './calibrationio.js';
+import { refreshPendingBanner, renderAnnotatePane, setAnnotateIo } from './annotate.js';
 
 /* ---------- 全局状态 ---------- */
 
@@ -94,6 +96,20 @@ export async function markPathFor(sourcePath: string | null, fileName: string): 
   }
   const dir = await invoke<string>('reports_dir');
   return `${dir}/示例_审校标记.json`;
+}
+
+/**
+ * 教师点了一下 → 往**校准台账**记一条（正本，append-only）。
+ *
+ * 为什么还要记：`_审校标记.json` 是**视图**，按文件名落盘——管线每重生成一版就换文件名，
+ * 教师的校准在新版本里就"不见了"（2026-09-13 查出的真事故）。
+ * 台账挂 书/章/层/词，换版本由 `replayInto` 重放回来。
+ *
+ * fire-and-forget：记不上不该拦教师干活（与 logCost 同口径），但要在控制台说一声。
+ */
+export function logCalibration(session: FileSession, mark: Mark, action: 'add' | 'remove'): void {
+  const teacher = teacherIdOf((S.appConfig as { teacherId?: string }).teacherId ?? 'unknown');
+  void recordCalibration(session, mark, { teacher, file: session.fileName, action });
 }
 
 export async function addSession(md: string, fileName: string, sourcePath: string | null, opts: { noAutoQc?: boolean } = {}): Promise<void> {
@@ -125,6 +141,21 @@ export async function addSession(md: string, fileName: string, sourcePath: strin
   }
   S.sessions.push({ md, fileName, sourcePath, markPath, review, report: null, reportSavedPath: null, dirty: false });
   S.activeIdx = S.sessions.length - 1;
+  /* ★ 校准台账重放（2026-09-13）：标记文件按**文件名**落盘，管线每重生成一版就换文件名，
+   *   于是教师在旧版上点的校准在新版里"不见了"（账没丢，是新文件读了自己那张空表）。
+   *   这里把台账按 书/章/层/词 重放到**当前这一版**——换版本照样回得来。 */
+  const replaySession = S.sessions[S.sessions.length - 1]!;
+  try {
+    const replayed = await replayInto(replaySession);
+    if (replayed.length) {
+      replaySession.review.marks.push(...replayed.map(markFromReplayed));
+      setStatus(`校准台账：${replayed.length} 条过往人工校准已放回这一版`, 'saved');
+    }
+  } catch (e) {
+    /* 有意兜底：台账坏了不能拦人打开文件（与 logCost 同口径——账坏不能把活干坏）；
+       视图里的标记照常可用，只是这次没能把旧校准放回来。 */
+    console.warn('校准台账重放失败（不影响本次打开）：' + String(e).slice(0, 120));
+  }
   touchProgress(sourcePath); // 阅读进度记账（无书根上下文则跳过）
   resetRiskJump(); // 难句跳转索引随章复位
   if (tocPanelEl()?.classList.contains('open')) void refreshToc(); // 目录开着时同步高亮/书签区
@@ -169,6 +200,12 @@ export function syncChrome(): void {
   const bookView = curView !== 'text';
   (document.querySelector('.viewtabs') as HTMLElement).style.display = !hasChapter && !bookView ? 'none' : 'flex';
 }
+
+/* 侧栏每次渲染完，把「待确认 N 条」横幅挂回去（renderSidebar 会整块替换 innerHTML）。
+   教师找不到候选项 = 等于没做——所以入口放在他一定看得见的右栏顶部。 */
+setAfterSidebarRender(() => void refreshPendingBanner());
+/* 待确认面板的会话来源注入进来（面板本身不静态依赖 main，那样就没法给它写 DOM 测试）。 */
+setAnnotateIo({ session: () => activeSession(), switchTo: (v) => switchView(v as ViewName), addMark: (s, m) => addMark(s, m) });
 
 export function renderAll(): void {
   renderFileTabs();
@@ -335,6 +372,9 @@ const VIEW_HOOKS: Partial<Record<ViewName, () => void>> = {
   data: () => void renderDataPane(S.currentBookDir ?? '').catch((e) => setStatus('数据面板没能打开：' + e, 'err')),
   // 风险队列：只看机器点名的地方（审查报告 §一：按段顺序呈现是流程缺陷）
   risk: () => void openRiskPane().catch((e) => setStatus('风险队列没能打开：' + e, 'err')),
+  /* 补注候选：引擎筛词 + 本地模型填中文，教师三选一（补注/换写/说明保留）。
+   * 与风险队列同理——打开失败必须**说出来**，否则就是"点了没反应"。 */
+  annotate: () => void renderAnnotatePane().catch((e) => setStatus('补注候选没能打开：' + e, 'err')),
 };
 
 /** 风险队列页：从当前书定位调适项目 → 解析产物目录/调适工作区 → 渲染队列。

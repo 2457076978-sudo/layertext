@@ -8,7 +8,9 @@ import { execFileSync } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+/* 从 dist/tests/ 往上两级才是仓库根——只往上**一级**会指到 dist/，
+   而 tools/*.mjs 不被 tsc 编译，dist/tools 里根本没有它（2026-09-13 实测：主仓是对的，本分支被改坏）。 */
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const run = (ver: string) => execFileSync('node', [join(ROOT, 'tools', 'extract_changelog.mjs'), ver], { encoding: 'utf-8' });
 
 test('提取已发布版本段落（1.0.0）：有正文、不含标题行、不含相邻段', () => {

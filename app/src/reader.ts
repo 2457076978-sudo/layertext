@@ -5,7 +5,7 @@
 
 import { S, esc } from './state.js';
 import { $, setStatus, toast, pop, hidePop, placePop } from './uikit.js';
-import { activeSession } from './main.js';
+import { logCalibration as logCalibrationOf, activeSession } from './main.js';
 import { buildLexiconNow } from './lexicon.js';
 import { scheduleHeatRail } from './edit.js';
 import { showGateHelp } from './chat.js';
@@ -136,6 +136,8 @@ export function renderReader(session: FileSession): void {
 
 export function addMark(session: FileSession, mark: Mark): Mark {
   session.review.marks.push(mark);
+  /* 视图（_审校标记.json）照旧，同时往**台账**记一条正本——换版本才回得来（2026-09-13） */
+  logCalibrationOf(session, mark, 'add');
   refreshMarkDom(mark);
   scheduleHeatRail();
   renderSidebar(session, sidebarHandlers);
@@ -150,6 +152,8 @@ export function addMark(session: FileSession, mark: Mark): Mark {
 
 function removeMark(session: FileSession, m: Mark): void {
   session.review.marks = session.review.marks.filter((x) => x.id !== m.id);
+  /* 删标记也要记账：台账是 append-only，「撤销」是一条 remove 事件，不是抹掉历史 */
+  logCalibrationOf(session, m, 'remove');
   removeMarkDom(m);
   scheduleHeatRail();
   renderSidebar(session, sidebarHandlers);

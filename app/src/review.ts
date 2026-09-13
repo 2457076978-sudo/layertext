@@ -14,6 +14,13 @@ import { planRevisionTask, revisionTaskPreview } from '../../src/core/adaptcheck
 
 const SAVE_DEBOUNCE_MS = 600;
 
+/** 侧栏渲染完之后的回调（补注面板拿它把「待确认 N 条」横幅挂上去）。
+ *  用注册钩子而不是直接 import：`annotate → reader → review`，直接互相 import 就成环了。 */
+let afterSidebarRender: (() => void) | null = null;
+export function setAfterSidebarRender(fn: () => void): void {
+  afterSidebarRender = fn;
+}
+
 export function scheduleSave(session: FileSession, onStatus: (s: 'dirty' | 'saved' | 'error', detail?: string) => void): void {
   session.dirty = true;
   onStatus('dirty');
@@ -258,6 +265,7 @@ export function renderSidebar(
     }
   });
   bindAdaptFeedback(session);
+  afterSidebarRender?.();
 }
 
 /* ---------- 给第二轮调适的反馈（两轮制教师的入口：读完说一句，第二轮照它复写） ---------- */
@@ -272,7 +280,10 @@ function adaptTargetOf(sourcePath: string | null): { tierKey: string; tag: strin
   const outRoot = dir.slice(0, dir.lastIndexOf('/'));
   if (!chapDir || !outRoot) return null;
   return {
-    tierKey: m[1]![0], tag: m[1]!, chapDir, outRoot,
+    tierKey: m[1]![0],
+    tag: m[1]!,
+    chapDir,
+    outRoot,
     feedbackPath: `${outRoot}/_运行/调适反馈_${m[1]}_${chapDir}.json`,
     taskPath: `${outRoot}/_运行/调适任务单_${m[1]}_${chapDir}.json`,
   };
@@ -289,7 +300,11 @@ function adaptFeedbackBox(session: FileSession): string {
     </div>`;
 }
 
-interface AdaptTaskFile { task: ReturnType<typeof planRevisionTask>; confirmed: boolean; confirmedAt?: string }
+interface AdaptTaskFile {
+  task: ReturnType<typeof planRevisionTask>;
+  confirmed: boolean;
+  confirmedAt?: string;
+}
 
 /** 任务单预览：教师先看「系统准备怎么改」，点开始修订才落 confirmed——先确认后执行 */
 function renderAdaptTaskPreview(target: { taskPath: string }, taskFile: AdaptTaskFile): void {
@@ -310,7 +325,9 @@ function renderAdaptTaskPreview(target: { taskPath: string }, taskFile: AdaptTas
       taskFile.confirmedAt = new Date().toISOString();
       void invoke('write_text_file', { path: target.taskPath, content: JSON.stringify(taskFile, null, 2) })
         .then(() => renderAdaptTaskPreview(target, taskFile))
-        .catch((e: unknown) => { go.textContent = '确认失败：' + String(e).slice(0, 50); });
+        .catch((e: unknown) => {
+          go.textContent = '确认失败：' + String(e).slice(0, 50);
+        });
     });
   }
   const edit = document.getElementById('adapt-task-edit');
@@ -333,7 +350,9 @@ function bindAdaptFeedback(session: FileSession): void {
   if (target) {
     void invoke<string>('read_text_file', { path: target.taskPath })
       .then((json) => renderAdaptTaskPreview(target, JSON.parse(json) as AdaptTaskFile))
-      .catch(() => { /* 有意兜底：任务单文件还不存在=教师没写过反馈的正常初始态，预览区不显示 */ });
+      .catch(() => {
+        /* 有意兜底：任务单文件还不存在=教师没写过反馈的正常初始态，预览区不显示 */
+      });
   }
   btn.addEventListener('click', () => {
     const ta = document.getElementById('adapt-fb') as HTMLTextAreaElement | null;

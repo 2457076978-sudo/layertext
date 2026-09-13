@@ -24,17 +24,18 @@ const VIEW_MAP = [
   ['tab-align', 'pane-align'],
   ['tab-board', 'pane-board'],
   ['tab-risk', 'pane-risk'],
+  ['tab-annotate', 'pane-annotate'],
   ['tab-dossier', 'pane-dossier'],
   ['tab-retro', 'pane-retro'],
   ['tab-data', 'pane-data'],
 ] as const;
 
-export type ViewName = 'text' | 'report' | 'suggest' | 'diff' | 'align' | 'board' | 'dossier' | 'retro' | 'data' | 'risk';
+export type ViewName = 'text' | 'report' | 'suggest' | 'diff' | 'align' | 'board' | 'dossier' | 'retro' | 'data' | 'risk' | 'annotate';
 
 /** 一级三组（按教师任务流）：读=阅读与版本比对 / 检=体检与书级状态 / 改=修订处理与回顾 */
 export const VIEW_GROUPS: { label: string; hint: string; views: readonly ViewName[] }[] = [
   { label: '读', hint: '阅读与版本比对：正文审校 · 逐句对照 · 版本对比', views: ['text', 'align', 'diff'] },
-  { label: '检', hint: '体检与书级状态：质检报告 · 看板 · 审校档案 · 风险队列', views: ['report', 'board', 'dossier', 'risk'] },
+  { label: '检', hint: '体检与书级状态：质检报告 · 看板 · 审校档案 · 风险队列 · 补注候选', views: ['report', 'board', 'dossier', 'risk', 'annotate'] },
   { label: '改', hint: '修订处理与回顾：修订建议 · 复盘', views: ['suggest', 'retro'] },
   { label: '库', hint: '数据资产：词库 / 知识库 / 词典 / 专名 / 分层参数（在此增删改，写回前自动校验）', views: ['data'] },
 ];
@@ -47,6 +48,7 @@ const SUB_LABELS: Record<ViewName, string> = {
   board: '看板',
   dossier: '档案',
   risk: '风险队列',
+  annotate: '待确认',
   suggest: '建议',
   retro: '复盘',
   data: '数据',

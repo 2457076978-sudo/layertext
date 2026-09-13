@@ -12,6 +12,7 @@ import { renderReader, sidebarHandlers, updateMarkBadge } from './reader.js';
 import { scheduleHeatRail, applyMdSnapshot } from './edit.js';
 import { restoreAllMarkDom, renderSidebar, scheduleSave } from './review.js';
 import { CHANGELOG_HEADER, newMarkId, type FileSession, type Mark } from './types.js';
+import { parseSpecifiedReplacement } from '../../src/core/pendingqueue.js';
 import { S as _S } from './state.js';
 import {
   annotatedHeadOf,
@@ -30,7 +31,7 @@ import {
   syncMarksToMd,
   type SyncPlan,
 } from './pure.js';
-import { extractParas, sentsOf, splitChapter } from '../../src/core/textpipe.js';
+import { extractParas, hit, sentsOf, splitChapter } from '../../src/core/textpipe.js';
 import { sentenceRisks } from '../../src/core/risks.js';
 import { simplifyMaxLen } from './ai.js';
 
@@ -157,7 +158,9 @@ export async function applyZhAnnotations(s: FileSession, marks: Mark[]): Promise
   setStatus(`已加中文标注 ${done.length} 处（原句未动）：${done.slice(0, 6).join('、')}${done.length > 6 ? '…' : ''}`, 'saved');
   toast(`已加中文标注 ${done.length} 处（原句未动）`, 'ok');
   void propagateCorrection(s, corrPairs);
-  for (const p of propagated) void propagateWordAction(s, 'annotate', p.word, p.zh);
+  /* 与「词汇简化」那条对称（见本文件 simplified 的处理）：加注同样要往层级树传播。
+     原写法引用了不存在的 propagated，tsc 直接报未定义——是重构留下的断线。 */
+  for (const p of corrPairs) void propagateWordAction(s, 'annotate', p.word, p.result);
   return done.length;
 }
 
@@ -165,26 +168,41 @@ export async function applyZhAnnotations(s: FileSession, marks: Mark[]): Promise
  *  保词性与语境形态），机器在该词的词边界处替换，句子其余部分逐字不动 */
 export async function applyWordSimplifications(s: FileSession, marks: Mark[]): Promise<void> {
   const uniq = [...new Map(marks.map((m) => [m.word!, m])).values()];
-  setStatus(`正在为 ${uniq.length} 个词找课标内简单词（不重构句子）…`);
   const paras = extractParas(splitChapter(s.md).body);
   const simplified: { word: string; zh: string }[] = [];
   const gloss: Record<string, string> = {};
+  /* ★ 教师**亲手指定**的替换词优先（在「待确认」里点 ② 填的那个）：
+     人定的东西不能被机器覆盖——原来的写法是把所有词再问一次 AI，教师填的词被静默丢掉。 */
+  const specified: Record<string, string> = {};
+  for (const m of uniq) {
+    const r = parseSpecifiedReplacement(m.note);
+    if (r && r.word === m.word) specified[m.word!] = r.replacement;
+  }
+  const needAi = uniq.filter((m) => !specified[m.word!]);
+  setStatus(
+    needAi.length ? `正在为 ${needAi.length} 个词找课标内简单词（另有 ${Object.keys(specified).length} 个由教师指定，不问了）…` : `${Object.keys(specified).length} 个词的替换词由教师指定，无需问 AI…`,
+  );
   try {
-    const { raw } = await chatUntilJson(
-      [
-        {
-          role: 'system',
-          content:
-            '你是词汇简化器。把每个超纲英文词换成中国《义务教育英语课程标准》三级（约1600词）内的同义简单词：保持词性一致，按所在句的语境给正确形态（时态/单复数）。只输出一个 JSON 对象，键=原词（与输入完全一致），值=简单词，例如 {"cynical": "bitter", "abandoned": "left alone"}。不要输出数组，不要解释文字。',
-        },
-        { role: 'user', content: uniq.map((m) => `${m.word}\n${(paras[m.pi] ?? '').slice(0, 120)}`).join('\n\n') },
-      ],
-      2000,
-      '词汇简化',
-    );
-    // #22 根修：parseAiJson 恒返数组（单对象被包一层），Object.assign 只会得到 {0:{…}}——
-    // 曾致 AI 给出的简单词全部丢失、每个词都被误判"换不出"而降级加注
-    Object.assign(gloss, normalizeGlossMap(raw));
+    /* 教师指定过的词**不进 AI 的输入**——既省一次调用，也杜绝"机器把人定的改掉"。 */
+    if (needAi.length) {
+      const { raw } = await chatUntilJson(
+        [
+          {
+            role: 'system',
+            content:
+              '你是词汇简化器。把每个超纲英文词换成中国《义务教育英语课程标准》三级（约1600词）内的同义简单词：保持词性一致，按所在句的语境给正确形态（时态/单复数）。只输出一个 JSON 对象，键=原词（与输入完全一致），值=简单词，例如 {"cynical": "bitter", "abandoned": "left alone"}。不要输出数组，不要解释文字。',
+          },
+          { role: 'user', content: needAi.map((m) => `${m.word}\n${(paras[m.pi] ?? '').slice(0, 120)}`).join('\n\n') },
+        ],
+        2000,
+        '词汇简化',
+      );
+      // #22 根修：parseAiJson 恒返数组（单对象被包一层），Object.assign 只会得到 {0:{…}}——
+      // 曾致 AI 给出的简单词全部丢失、每个词都被误判"换不出"而降级加注
+      Object.assign(gloss, normalizeGlossMap(raw));
+    }
+    /* 教师指定的放在最后覆盖：同词冲突时**以人为准**。 */
+    Object.assign(gloss, specified);
   } catch (e) {
     setStatus('词汇简化获取失败：' + e, 'err');
     return;
@@ -781,13 +799,13 @@ export async function removeZhAnnotation(s: FileSession, word: string): Promise<
     try {
       csv = await invoke<string>('read_text_file', { path: logPath });
     } catch {
-      /* 日志还不存在＝这张表第一次写（读缺失文件本来就是报错的），下面补表头。 */
+      /* 有意兜底：日志还不存在＝这张表第一次写（读缺失文件本来就是报错的），下面补表头。 */
     }
     if (!csv.trim()) csv = CHANGELOG_HEADER.join(',') + '\n';
     csv += ['R1', date, `标准${simplifyMaxLen()}词`, '', '', `${head}（…）`, head, 'R16', '去除中文标注（教师认定已会，本地剥离不过模型）', '人工矫正-去标注'].map(csvCell).join(',') + '\n';
     await invoke('write_text_file', { path: logPath, content: csv });
   } catch {
-    /* 留痕失败不拦正文修改（applyMdSnapshot 已保存正文） */
+    /* 有意兜底：留痕失败不拦正文修改（applyMdSnapshot 已保存正文）——正文已落盘，这里再抛只会让教师以为改稿失败。 */
   }
   /* 词库正本登记：从章节目录向上发现项目配置，upsert 一行「单词」进词库 CSV
    * （AF 场景=知识文件/已知词汇库，管线下次生成直接生效）。面板没打开也能写。 */
@@ -807,7 +825,7 @@ export async function removeZhAnnotation(s: FileSession, word: string): Promise<
       }
     }
   } catch {
-    /* 项目未配/写正本失败：只落会话词表，不阻断（toast 里说清） */
+    /* 有意兜底：项目未配/写正本失败——只落会话词表，不阻断；toast 里已把失败说出来。 */
   }
   /* 会话立即生效：S.vocabCsvText 追加该词并重跑质检——该词当场不再红 */
   const base = S.vocabCsvText?.trim() ? S.vocabCsvText : '词,类型,词性,释义,来源册,来源单元,音标,备注\n';
@@ -863,12 +881,14 @@ export async function applyEnDefinitions(s: FileSession, marks: Mark[]): Promise
     let at = -1;
     let matched = '';
     const para = paras[m.pi] ?? '';
-    const hit = re.exec(para);
-    if (hit) {
+    /* 变量名不能叫 hit：本文件顶层 import 了 hit()（词库命中判定），同名 const 会把它遮蔽，
+       上面释义门槛的 hit(x, S.currentKnown) 就报「不可调用」——2026-09-13 tsc --noEmit 的两条错即此。 */
+    const m0 = re.exec(para);
+    if (m0) {
       const pAt = s.md.indexOf(para);
       if (pAt >= 0) {
-        at = pAt + hit.index;
-        matched = s.md.slice(at, at + hit[0].length);
+        at = pAt + m0.index;
+        matched = s.md.slice(at, at + m0[0].length);
       }
     }
     if (at < 0) {
@@ -907,14 +927,14 @@ export async function applyEnDefinitions(s: FileSession, marks: Mark[]): Promise
     try {
       csv = await invoke<string>('read_text_file', { path: logPath });
     } catch {
-      /* 首次写表补表头 */
+      /* 有意兜底：首次写表补表头——文件不存在是这张表的正常初始态。 */
     }
     if (!csv.trim()) csv = CHANGELOG_HEADER.join(',') + '\n';
     for (const d of done)
       csv += ['R1', date, `标准${simplifyMaxLen()}词`, '', '', d, d, 'R17', '加英语释义（内置 WordNet 词典机器插入，语境选义零 AI）', 'AI直改-英语释义'].map(csvCell).join(',') + '\n';
     await invoke('write_text_file', { path: logPath, content: csv });
   } catch {
-    /* 正文已改；日志失败与加中文标注同口径（那里会再报一次） */
+    /* 有意兜底：正文已改；日志失败与加中文标注同口径（那里会再报一次），此处不重复打断。 */
   }
   setStatus(`已加英语释义 ${done.length} 个${missed.length ? `；未收 ${missed.length} 个` : ''}${ambiguous.length ? `；语境不决 ${ambiguous.length} 个` : ''}`, 'saved');
   return done.length;
@@ -958,12 +978,13 @@ export async function propagateWordAction(s: FileSession, op: 'annotate' | 'unan
         // 跨层机器改写有风险：只记待办，交下级教师过目
         const todoDir = `${dir}/_待复核`;
         try {
+          /* 有意兜底：待办文件还不存在＝这个层级第一次收到传播，读不到不是错误。 */
           const prev = await invoke<string>('read_text_file', { path: `${todoDir}/层级传播_待办.md` }).catch(() => '');
           const line = `- ${new Date().toLocaleDateString('sv-SE')} 上级 ${myTag} 将「${word}」换成了「${zh ?? '更简单说法'}」——请核对本层文本命中处\n`;
           if (!prev.includes(line)) await invoke('write_text_file', { path: `${todoDir}/层级传播_待办.md`, content: prev + line });
           touched++;
         } catch {
-          /* 待办写失败不拦主流程 */
+          /* 有意兜底：待办写失败不拦主流程——正文与视图标记都已落盘，这里只是低层没收到清单。 */
         }
         continue;
       }
@@ -979,7 +1000,7 @@ export async function propagateWordAction(s: FileSession, op: 'annotate' | 'unan
         try {
           csv = await invoke<string>('read_text_file', { path: logPath });
         } catch {
-          /* 首次写表 */
+          /* 有意兜底：首次写表 */
         }
         if (!csv.trim()) csv = CHANGELOG_HEADER.join(',') + '\n';
         const detail = op === 'annotate' ? `${word}（${zh}）` : word;
@@ -1000,7 +1021,7 @@ export async function propagateWordAction(s: FileSession, op: 'annotate' | 'unan
             .join(',') + '\n';
         await invoke('write_text_file', { path: logPath, content: csv });
       } catch {
-        /* 日志失败不拦正文 */
+        /* 有意兜底：日志失败不拦正文 */
       }
     }
     if (touched)
@@ -1012,6 +1033,6 @@ export async function propagateWordAction(s: FileSession, op: 'annotate' | 'unan
         'ok',
       );
   } catch {
-    /* 传播是增强路径：项目没配层级/文件枚举失败都静默——主操作已成功 */
+    /* 有意兜底：传播是增强路径：项目没配层级/文件枚举失败都静默——主操作已成功 */
   }
 }
