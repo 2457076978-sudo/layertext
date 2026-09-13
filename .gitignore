@@ -20,5 +20,9 @@ tools/_af_*
 # UI 走查夹具：本地从真实项目拷出的章节/队列，供无头浏览器截图核对版式（绝不入库）
 app/public/_fixture/
 
+# 真项目回放夹具：**原书正文 + 教师三层产物**，只该在应用配置目录里（绝不入库）。
+# 放这儿是防呆——历史上它进过公开仓库（2026-09-13 移出，见 docs/文件架构.md 第六节）。
+tests/fixtures/replay/
+
 # 评测报告（生成物，不入库；基线在 examples/evals/baseline.json）
 eval-reports/
