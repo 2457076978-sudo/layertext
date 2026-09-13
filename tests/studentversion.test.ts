@@ -143,7 +143,7 @@ test('摘要逐项报出动了什么（不静默丢东西）', () => {
 });
 
 test('★ 真项目第一章的产物：跑一遍，给出的学生版干净且可发布', () => {
-  const p = '/Users/wayne/Desktop/工作文档库/01-教学工作/名著阅读工作区_AnimalFarm/调适工作区/重制三版/第一章/原文_A层85_2026-09-10.md';
+  const p = '/book/调适工作区/重制三版/第一章/原文_A层85_2026-09-10.md';
   if (!existsSync(p)) return; // 换机器时跳过，而不是假装通过
   const md = readFileSync(p, 'utf-8');
   const r = studentVersionOf(md, { title: 'Animal Farm · Chapter One' });

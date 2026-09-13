@@ -171,7 +171,7 @@ test('★ 核对：包里夹带了学生数据 → 认出来并以非 0 退出',
   assert.equal(runBundle(json, []).status, 0);
   const dir = join(root, '产物', '_运行', runId, `发布包_${runId}`);
   // 对方"顺手"多塞了一份分层名单
-  writeFileSync(join(dir, '顺手带的_分层_九3.json'), '{"九3":["A","B"]}', 'utf-8');
+  writeFileSync(join(dir, '顺手带的_分层_示例班.json'), '{"示例班":["A","B"]}', 'utf-8');
   const r = runBundle(json, ['--check', dir]);
   assert.notEqual(r.status, 0, r.out);
   assert.match(r.out, /student-data|不该出包|学生数据/);
@@ -258,10 +258,10 @@ test('★ 重复导出：旧目录整个让位，目录内容严格等于本次�
   assert.equal(runBundle(json, []).status, 0);
   const dir = join(root, '产物', '_运行', runId, `发布包_${runId}`);
   // 模拟"上一次导出留下的多余文件"（旧清单登记过、这次已删的产物）
-  writeFileSync(join(dir, '上一轮残留_分层_九3.json'), '{}', 'utf-8');
+  writeFileSync(join(dir, '上一轮残留_分层_示例班.json'), '{}', 'utf-8');
   const r = runBundle(json, []);
   assert.equal(r.status, 0, r.out);
-  assert.equal(existsSync(join(dir, '上一轮残留_分层_九3.json')), false, '旧的多余文件必须消失——收件人拿到的目录内容等于本次清单');
+  assert.equal(existsSync(join(dir, '上一轮残留_分层_示例班.json')), false, '旧的多余文件必须消失——收件人拿到的目录内容等于本次清单');
   // 收件人核对也应通过：旧文件混进 --check 的视野会被报成"夹带"，那就是一次假警报
   assert.equal(runBundle(json, ['--check', dir]).status, 0);
 });

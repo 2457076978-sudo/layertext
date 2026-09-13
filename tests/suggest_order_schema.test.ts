@@ -220,7 +220,7 @@ test('班级批改汇总：md 表 + csv BOM，复现命中列有队列才显示'
     { name: '甲', words: 100, sents: 10, avgLen: 10, structure: 2, longSents: 1, oovWords: 3, used: 4, queue: 8 },
     { name: '乙', words: 80, sents: 9, avgLen: 8.9, structure: 0, longSents: 0, oovWords: 1, used: 0, queue: 0 },
   ];
-  const md = buildClassGradingMd(rows, { date: '2026-09-10', folder: '/tmp/九4班', vocabNote: '课标1600' });
+  const md = buildClassGradingMd(rows, { date: '2026-09-10', folder: '/tmp/示例班班', vocabNote: '课标1600' });
   assert.ok(md.includes('| 甲 | 100 | 10 |') && md.includes('4/8'));
   assert.ok(md.includes('| 乙 |') && md.includes('—'));
   const csv = classGradingCsv(rows);

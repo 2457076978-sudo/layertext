@@ -84,8 +84,8 @@ const ev = (over: Partial<Parameters<typeof makeDecisionEvent>[0]> = {}): Decisi
 
 test('★ 学生数据迹象：画像 / 成绩 / 分层 / 名单 / 电子表格都要认得出来', () => {
   for (const [p, keyword] of [
-    ['分层_九3九4.json', '分层'],
-    ['产物/班级画像_九3.json', '画像'],
+    ['分层_示例班.json', '分层'],
+    ['产物/班级画像_示例班.json', '画像'],
     ['成绩分析_期中.xlsx', '成绩'],
     ['八下区统练_质量分析表.pdf', '统练'],
     ['学生名册.csv', '名册'],
@@ -115,7 +115,7 @@ test('★ 白名单：没被明确允许的产物种类，一律不出包', () =
 test('★ 发布包默认不含学生数据：被排除的每一件都写清原因（**不许静默丢弃**）', () => {
   const b = buildBundle({
     manifest: manifest(),
-    files: [...FILES, { path: '分层_九3九4.json', kind: '其他' as const, text: '{"九3":["A","B"]}' }, { path: '成绩/期中_英语_九3.xlsx', kind: '其他' as const, text: '(二进制)' }],
+    files: [...FILES, { path: '分层_示例班.json', kind: '其他' as const, text: '{"示例班":["A","B"]}' }, { path: '成绩/期中_英语_示例班.xlsx', kind: '其他' as const, text: '(二进制)' }],
     now: '2026-09-11T12:00:00.000Z',
   });
   assert.equal(b.entries.length, FILES.length);
