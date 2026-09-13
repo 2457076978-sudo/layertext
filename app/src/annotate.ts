@@ -25,7 +25,18 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import { locateWord, scopeFromChapterPath, type CalibrationScope } from '../../src/core/calibration.js';
-import { pendingCountOf, type PendingItem, type PendingQueue } from '../../src/core/pendingqueue.js';
+import {
+  FACET_LABELS,
+  matchFacet,
+  pendingCountOf,
+  pendingProgressOf,
+  sortPending,
+  wordSpreadOf,
+  type PendingFacet,
+  type PendingItem,
+  type PendingQueue,
+  type PendingSort,
+} from '../../src/core/pendingqueue.js';
 import { newMarkId, type FileSession, type Mark } from './types.js';
 import { recordCalibration } from './calibrationio.js';
 import { teacherIdOf } from '../../src/core/teachers.js';
@@ -94,9 +105,10 @@ function esc(s: string): string {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 }
 
-/** 三条判据的显示标签：★加注词最硬，其次教师词典，最后是引擎的缺口报告。 */
+/** 判据显示标签：★加注词最硬，其次引擎客观项，再是教师词典，最后是引擎的缺口报告。 */
 function badgeOf(it: PendingItem): { label: string; cls: string } {
   if (it.star) return { label: '★正本加注词', cls: 'pk-star' };
+  if (it.kind === 'engine') return { label: `引擎·${it.ruleId ?? ''}`, cls: 'pk-engine' };
   return it.kind === 'restore' ? { label: '正本', cls: 'pk-canon' } : { label: '补注', cls: 'pk-anno' };
 }
 
@@ -132,13 +144,17 @@ export async function refreshPendingBanner(): Promise<void> {
 
 /** 面板筛选（模块级：重渲染后保持教师选的那一档）。
  *  为什么不默认只显示★：教师上一轮的原话是"我怎么也没看到候选项"——
- *  默认藏东西是把同一个问题换个花样犯。默认全给，筛选用按钮。 */
-type PaneFilter = 'all' | 'star' | 'canon' | 'anno';
+ *  默认藏东西是把同一个问题换个花样犯。默认全给，筛选用按钮。
+ *
+ *  2026-09-13 细分（Wayne："大章没细分——第八章 214 条，只有 ★/正本/补注 三个筛子"）：
+ *  再加「跨章复现 / 仅本章」一档（判据是这个词出现在几**章**，见 wordSpreadOf），
+ *  以及"词频优先"的排序——同一个词在 6 个段落全丢是**一条口径问题**，不该被当成 6 次手滑。 */
+type PaneFilter = PendingFacet;
 let paneFilter: PaneFilter = 'all';
+let paneSort: PendingSort = 'judge';
 export function setPaneFilter(f: PaneFilter): void {
   paneFilter = f;
 }
-const matchFilter = (i: PendingItem, f: PaneFilter): boolean => (f === 'all' ? true : f === 'star' ? Boolean(i.star) : f === 'canon' ? i.kind === 'restore' : i.kind === 'annotate');
 
 export async function renderAnnotatePane(): Promise<void> {
   const host = document.getElementById('pane-annotate');
@@ -158,57 +174,91 @@ export async function renderAnnotatePane(): Promise<void> {
   const chapter = scopeFromChapterPath(s.sourcePath)!.chapter;
   const todo = queue.items.filter((i) => i.chapter === chapter && !i.status);
   const done = queue.items.filter((i) => i.chapter === chapter && i.status).length;
+  /* 词分布按**全队列**算（不是只算本章）：跨章复现的判据本来就跨章 */
+  const spread = wordSpreadOf(queue.items);
+  const chaptersWithTodo = pendingProgressOf(queue.items).chapters.filter((c) => c.todo > 0).length;
   if (!todo.length) {
     host.innerHTML = `<div class="empty"><b>${esc(chapter)}·${esc(queue.tier)} 都处理完了</b>（已处理 ${done} 条）<br />重新跑管线会补进新出现的缺口。</div>`;
     return;
   }
-  const star = todo.filter((i) => i.star).length;
-  const canonN = todo.filter((i) => i.kind === 'restore').length;
-  const annoN = todo.filter((i) => i.kind === 'annotate').length;
-  const shown = todo.filter((i) => matchFilter(i, paneFilter));
-  const count = (f: PaneFilter) => (f === 'star' ? star : f === 'canon' ? canonN : f === 'anno' ? annoN : todo.length);
-  const chips = (['all', 'star', 'canon', 'anno'] as PaneFilter[])
-    .map(
-      (f) =>
-        `<button class="pk-chip${paneFilter === f ? ' active' : ''}" data-pk-filter="${f}">${{ all: '全部', star: '★加注词', canon: '正本', anno: '补注' }[f]} <span class="pk-count">${count(f)}</span></button>`,
-    )
+  const count = (f: PaneFilter) => todo.filter((i) => matchFacet(i, f, spread)).length;
+  const shown = sortPending(
+    todo.filter((i) => matchFacet(i, paneFilter, spread)),
+    paneSort,
+    spread,
+  );
+  const chips = (['all', 'star', 'engine', 'canon', 'anno', 'recur', 'single'] as PaneFilter[])
+    .map((f) => `<button class="pk-chip${paneFilter === f ? ' active' : ''}" data-pk-filter="${f}">${FACET_LABELS[f]} <span class="pk-count">${count(f)}</span></button>`)
     .join('');
   const rows = shown
     .map((it, i) => {
       const b = badgeOf(it);
+      const sp = spread.get(it.word.toLowerCase());
+      const recur =
+        sp && sp.chapters > 1 ? `<span class="pk-recur" title="这个词在全层 ${sp.chapters} 章里都有条目（共 ${sp.hits} 条）——多半是一条口径问题，不是一个一个手滑">×${sp.chapters} 章</span>` : '';
       return `
     <div class="pk-row">
       <div class="pk-head">
         <span class="pk-badge ${b.cls}">${b.label}</span>
         <b class="pk-word">${esc(it.word)}</b>
+        ${recur}
         <span class="pk-para">${esc(it.para)}</span>
         <span class="pk-gloss">${esc(it.gloss)}</span>
-        <span class="pk-src">${esc(it.source === 'dict' ? '词典正本' : it.source === 'model' ? '模型候选·需过目' : '教师词典')}</span>
+        <span class="pk-src">${esc(it.source === 'dict' ? '词典正本' : it.source === 'model' ? '模型候选·需过目' : it.source === 'engine' ? '引擎客观项' : '教师词典')}</span>
       </div>
       <div class="pk-sentence">${esc(it.sentence)}</div>
-      <div class="pk-actions">
+      ${
+        it.kind === 'engine'
+          ? /* 引擎客观项要么是**段级**判断（超长句/篇幅），要么是"这个词本来就没注"——
+               三个键（补注/换成/忽略）在这里并不都成立。诚实的做法是给一条去风险队列处理的路，
+               再加一个"我看过了"，不硬塞三个不成立的按钮。 */
+            `<div class="pk-actions">
+        <button data-pk-act="goto" data-pk-i="${i}" title="引擎客观项在「风险队列」里有完整上下文与处理入口（原句 / 改写句 / 触发规则）——这里只把它一并列出，不重复造一套操作">去风险队列处理 →</button>
+        <button data-pk-act="keep" data-pk-i="${i}" title="我看过了，不用管——只记一笔「我看过了」，免得每次重生成又来问。只在当前层生效，不向下传播。">③ 忽略（记我看过了）</button>
+      </div>`
+          : `<div class="pk-actions">
         <button data-pk-act="annotate" data-pk-i="${i}" title="保留原词，在正文里给它加中文注释（如 cynical（冷嘲的））。正文先打标记，点「按标记修改」才真正写入。会随层级传播到 M/B。">① 补注：${esc(it.gloss)}</button>
         <span class="pk-rewrite">
           <span class="pk-label">② 换成</span>
           <input data-pk-input="${i}" placeholder="替换词" value="${esc(it.replacement ?? '')}" />
           <button data-pk-act="rewrite" data-pk-i="${i}" title="把上面填的词作为替换词记下来（生成时照它换）。留空则由管线自己找课标内的简单词。换词只写下级待办，不直接改下级正文。">确定</button>
         </span>
-        <button data-pk-act="keep" data-pk-i="${i}" title="这个词不用管——不改、不注，只记一笔「我看过了」。作用是不再让它每次重生成都冒出来问你。注意：这条**只在当前这一层生效，不向下层传播**（上级觉得不用管，不代表下级也不用管）。">③ 忽略（不加注）</button>
-      </div>
+        <button data-pk-act="keep" data-pk-i="${i}" title="这个词不用管——不改、不注，只记一笔「我看过了」。作用是不再让它每次重生成都冒出来问你。注意：这条只在当前一层生效，不向下传播（上级觉得不用管，不代表下级也不用管）。">③ 忽略（不加注）</button>
+      </div>`
+      }
     </div>`;
     })
+    .join('');
+  const progress = pendingProgressOf(queue.items);
+  const chapterBars = progress.chapters
+    .slice(0, 12)
+    .map((c) => `<span class="pk-chapter${c.chapter === chapter ? ' cur' : ''}" title="${esc(c.chapter)}：待确认 ${c.todo} 条 / 已处理 ${c.done} 条">${esc(c.chapter)}<b>${c.todo}</b></span>`)
     .join('');
   host.innerHTML = `
     <div class="pk-pane">
       <div class="pk-title"><b>${esc(chapter)} · ${esc(queue.tier)} · 待确认 ${todo.length} 条</b>
-        <span class="pk-dim">｜已处理 ${done} 条｜判据强弱：★正本加注词 → 正本 → 补注</span></div>
-      <div class="pk-chips">${chips}</div>
+        <span class="pk-dim">｜已处理 ${done} 条｜判据强弱：★正本加注词 → 引擎客观项 → 正本 → 补注</span></div>
+      <div class="pk-progress" title="全书（本层）进度：待确认 ${progress.todo} 条 / 已处理 ${progress.done} 条 / 共 ${progress.total} 条">
+        <b>全书 ${progress.todo} 条待确认</b>
+        <span class="pk-dim">已处理 ${progress.done} · 共 ${progress.total} · 还有 ${chaptersWithTodo} 章没清完（数字=各章待确认）</span>
+        <div class="pk-chapters">${chapterBars}</div>
+      </div>
+      <div class="pk-toolbar">
+        <div class="pk-chips">${chips}</div>
+        <button class="pk-chip${paneSort === 'freq' ? ' active' : ''}" data-pk-sort="1" title="按词频排序：同一个词在越多章出现越靠前——跨章复现的多半是一条口径问题，处理一条顶一批">词频优先</button>
+      </div>
+      <div class="pk-batch">
+        <span class="pk-dim">批量（对当前筛选出的 <b>${shown.length}</b> 条）</span>
+        <button data-pk-batch="annotate" title="把当前筛选出的每一条都按 ① 补注记下来（正文先打标记，仍要点「按标记修改」才写入——这一步不会直接改正文）">全部 ① 补注</button>
+        <button data-pk-batch="keep" title="把当前筛选出的每一条都按 ③ 忽略记下来（不加注、不换词，只记「我看过了」）">全部 ③ 忽略</button>
+      </div>
       <div class="pk-legend">
         <b>三个键什么意思</b>
         <span>① <b>补注</b>——保留这个词，给它加中文注释（正文先打标记，点「按标记修改」才写入）</span>
         <span>② <b>换成 ___</b>——直接填你想换成的词（留空则由管线找课标内的简单词）；换词只写下级待办，不直接改下级正文</span>
         <span>③ <b>忽略</b>——不用管它：不注也不换，只记一笔「我看过了」，免得每次重生成又来问。<b>只在当前层生效，不向下传播</b></span>
-        <span class="pk-dim">看到 <b>★正本加注词</b> 基本就是照章点 ①（你自己的知识库定了「要加注」）。</span>
+        <span class="pk-dim">看到 <b>★正本加注词</b> 基本就是照章点 ①（你自己的知识库定了「要加注」）；判据最硬的一批可以先用「全部 ①」扫一遍，仍然要你点「按标记修改」才落进正文。</span>
+        <span class="pk-dim"><b>引擎·规则号</b>那几条是机器确定的客观项（超长句 / 漏注 / 正文混入中文 / 篇幅偏离）——它们真正的处理入口在「风险队列」（那里有原句、改写句与触发规则），这里把它们一并列出，是为了**一张表看全**，不再两处各看一半。</span>
       </div>
       ${shown.length ? rows : '<div class="empty">这一档没有待确认项。</div>'}
     </div>`;
@@ -219,13 +269,51 @@ export async function renderAnnotatePane(): Promise<void> {
       void renderAnnotatePane();
     });
   });
-  host.querySelectorAll<HTMLElement>('[data-pk-act]').forEach((btn) => {
+  host.querySelector('[data-pk-sort]')?.addEventListener('click', () => {
+    paneSort = paneSort === 'freq' ? 'judge' : 'freq';
+    void renderAnnotatePane();
+  });
+  host.querySelectorAll<HTMLElement>('[data-pk-batch]').forEach((btn) => {
     btn.addEventListener('click', () => {
-      const i = Number(btn.dataset.pkI);
-      const box = host.querySelector<HTMLInputElement>(`[data-pk-input="${i}"]`);
-      void decide(s, path, queue, shown[i]!, btn.dataset.pkAct as 'annotate' | 'rewrite' | 'keep', box?.value);
+      const act = btn.dataset.pkBatch as 'annotate' | 'keep';
+      void decideMany(s, path, queue, shown, act);
     });
   });
+  host.querySelectorAll<HTMLElement>('[data-pk-act]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const act = btn.dataset.pkAct as 'annotate' | 'rewrite' | 'keep' | 'goto';
+      /* 引擎客观项：三个键在这里不成立，只把人送回风险队列那套完整入口，不重复造操作 */
+      if (act === 'goto') {
+        io.switchTo('risk');
+        return;
+      }
+      const i = Number(btn.dataset.pkI);
+      const box = host.querySelector<HTMLInputElement>(`[data-pk-input="${i}"]`);
+      void decide(s, path, queue, shown[i]!, act, box?.value);
+    });
+  });
+}
+
+/**
+ * 批量 ① / ③（Wayne 2026-09-13："★114 条判据最硬，现在也得一条条点"）。
+ *
+ * 三条纪律：
+ *   · **只处理当前筛选出来的**——教师看到的范围就是他批量的范围，不许背着他多改；
+ *   · **必须显式确认**——弹窗写清楚条数与动作，"仍然要你确认才落"；
+ *   · **只打标记、不写正文**——①/③ 都只记台账与标记，正文仍要教师自己点「按标记修改」。
+ *     （这也是它敢一次批量的前提：批错了可以撤销，正文没被动过。）
+ */
+async function decideMany(s: FileSession, path: string, queue: PendingQueue, items: PendingItem[], act: 'annotate' | 'keep'): Promise<void> {
+  if (!items.length) return;
+  const label = act === 'annotate' ? '① 补注' : '③ 忽略（不加注）';
+  const ok = window.confirm(
+    `把当前筛选出的 ${items.length} 条全部按「${label}」记下来？\n\n· 只记决定与标记，**不会直接改正文**——正文仍要你点「按标记修改」才写入。\n· ② 换写不在批量范围内（每条要填不同的词）。`,
+  );
+  if (!ok) return;
+  for (const it of items) await decide(s, path, queue, it, act, undefined, { silent: true });
+  await saveQueue(path, queue);
+  await renderAnnotatePane();
+  void refreshPendingBanner();
 }
 
 /**
@@ -241,7 +329,16 @@ const PROPAGATION: Record<'annotate' | 'rewrite' | 'keep', 'none' | 'annotate' |
   keep: 'none',
 };
 
-async function decide(s: FileSession, path: string, queue: PendingQueue, it: PendingItem, act: 'annotate' | 'rewrite' | 'keep', replacement?: string): Promise<void> {
+async function decide(
+  s: FileSession,
+  path: string,
+  queue: PendingQueue,
+  it: PendingItem,
+  act: 'annotate' | 'rewrite' | 'keep',
+  replacement?: string,
+  /* 批量调用时由 decideMany 统一落盘/重渲染一次——逐条重渲染会让 114 条把面板刷 114 遍 */
+  opts: { silent?: boolean } = {},
+): Promise<void> {
   const repl = (replacement ?? '').trim();
   it.status = act === 'annotate' ? 'annotated' : act === 'rewrite' ? 'rewrite' : 'keep';
   it.decidedAt = new Date().toISOString();
@@ -278,6 +375,7 @@ async function decide(s: FileSession, path: string, queue: PendingQueue, it: Pen
       console.warn(`${act}：正文里找不到「${it.word}」，只记了台账、没打标记`);
     }
   }
+  if (opts.silent) return;
   await saveQueue(path, queue);
   await renderAnnotatePane();
   void refreshPendingBanner();

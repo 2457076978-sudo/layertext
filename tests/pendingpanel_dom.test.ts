@@ -119,7 +119,7 @@ test('筛选条：点「★加注词」只剩最硬的那一档', async () => {
   setup({ [QUEUE_PATH]: JSON.stringify(fixture()) });
   await renderAnnotatePane();
   const chips = Array.from(win.document.querySelectorAll('#pane-annotate [data-pk-filter]'));
-  assert.equal(chips.length, 4, '全部 / ★ / 正本 / 补注');
+  assert.equal(chips.length, 7, '全部 / ★ / 引擎 / 正本 / 补注 / 跨章复现 / 仅本章（2026-09-13 大章细分 + 引擎客观项并入）');
   assert.match(win.document.getElementById('pane-annotate')!.innerHTML, /全部/);
   /* 计数按**渲染出来的文字**校验：2026-09-13 UI 重建把数字包进 .pk-count（等宽对齐），
      再拿 innerHTML 去匹配"全部 3"就变成了在测标签写法，而不是测这条筛选的行为。 */
@@ -191,4 +191,80 @@ test('没有打开章节时，横幅不出现（不要在书架页凭空多一�
   setAnnotateIo({ session: () => null });
   await refreshPendingBanner();
   assert.equal(win.document.getElementById('pending-banner'), null);
+});
+
+/* ────────────────── 2026-09-13 大章细分 / 批量 / 跨章汇总 ────────────────── */
+
+test('跨章汇总：面板顶上给出全书进度与各章待确认（教师看得到"哪章最多、还剩多少"）', async () => {
+  setup({ [QUEUE_PATH]: JSON.stringify(fixture()) });
+  await renderAnnotatePane();
+  const html = win.document.getElementById('pane-annotate')!.innerHTML;
+  assert.match(html, /pk-progress/, '进度块必须在');
+  assert.match(html, /全书 4 条待确认/, '本章 3 条 + 第二章 1 条 = 4 条待确认（已决定的 pellets 不算）');
+  assert.match(html, /pk-chapter/, '各章待确认条数要列出来');
+});
+
+test('大章细分：「跨章复现」只留跨章出现的词，「仅本章」只留本章独有的', async () => {
+  setup({ [QUEUE_PATH]: JSON.stringify({ ...fixture(), items: [...fixture().items, item({ id: 'pq-w2', chapter: '第二章', word: 'tremendous' })] }) });
+  setPaneFilter('recur');
+  await renderAnnotatePane();
+  let html = win.document.getElementById('pane-annotate')!.innerHTML;
+  assert.equal(html.includes('tremendous'), true, 'tremendous 跨第一/二章 → 属跨章复现');
+  assert.equal(html.includes('unsteady'), false, 'unsteady 只在第一章 → 不该出现在跨章复现里');
+  setPaneFilter('single');
+  await renderAnnotatePane();
+  html = win.document.getElementById('pane-annotate')!.innerHTML;
+  assert.equal(html.includes('unsteady'), true);
+  assert.equal(html.includes('tremendous'), false, '跨章的词不该落进"仅本章"');
+  setPaneFilter('all');
+});
+
+test('批量 ①：确认后把当前筛选出的全部记下来——但只打标记、不写正文', async () => {
+  const { files, marks } = setup({ [QUEUE_PATH]: JSON.stringify(fixture()) });
+  (win as unknown as { confirm: () => boolean }).confirm = () => true;
+  await renderAnnotatePane();
+  const btn = win.document.querySelector('#pane-annotate [data-pk-batch="annotate"]') as unknown as HTMLElement;
+  assert.ok(btn, '★114 条判据最硬，必须有批量入口');
+  btn.click();
+  await new Promise((r) => setTimeout(r, 20));
+  const saved = JSON.parse(files[QUEUE_PATH]!) as PendingQueue;
+  assert.equal(saved.items.find((i) => i.id === 'pq-star')?.status, 'annotated');
+  assert.equal(saved.items.find((i) => i.id === 'pq-canon')?.status, 'annotated');
+  assert.equal(saved.items.find((i) => i.id === 'pq-anno')?.status, 'annotated');
+  assert.equal(saved.items.find((i) => i.id === 'pq-other')?.status, undefined, '别的章不在当前筛选里，不许被顺手改掉');
+  assert.ok(marks.length > 0, '① 是真待办，要落成 zh 标记');
+});
+
+test('批量 ③：取消确认就一条都不落（教师没点确认，机器不许自己动）', async () => {
+  const { files } = setup({ [QUEUE_PATH]: JSON.stringify(fixture()) });
+  (win as unknown as { confirm: () => boolean }).confirm = () => false;
+  await renderAnnotatePane();
+  (win.document.querySelector('#pane-annotate [data-pk-batch="keep"]') as unknown as HTMLElement).click();
+  await new Promise((r) => setTimeout(r, 20));
+  const saved = JSON.parse(files[QUEUE_PATH]!) as PendingQueue;
+  assert.equal(saved.items.find((i) => i.id === 'pq-star')?.status, undefined);
+});
+
+test('引擎客观项：不硬塞三个键——给"去风险队列处理"与"我看过了"', async () => {
+  const engine: PendingItem = {
+    id: 'pq-engine',
+    kind: 'engine',
+    chapter: '第一章',
+    tier: 'A层85',
+    para: 'P06',
+    word: 'Alpha beta gamma…',
+    gloss: '超长句',
+    sentence: 'Alpha beta gamma delta.',
+    why: '引擎客观项 SENT-01｜超长句',
+    source: 'engine',
+    ruleId: 'SENT-01',
+  };
+  setup({ [QUEUE_PATH]: JSON.stringify({ ...fixture(), items: [...fixture().items, engine] }) });
+  await renderAnnotatePane();
+  const html = win.document.getElementById('pane-annotate')!.innerHTML;
+  assert.match(html, /引擎·SENT-01/, '要一眼看出是引擎客观项、哪条规则');
+  const row = win.document.querySelector('#pane-annotate .pk-row:last-child')!;
+  assert.equal(row.querySelectorAll('[data-pk-act="goto"]').length, 1, '段级的项不该给"补注/换成"');
+  assert.equal(row.querySelectorAll('[data-pk-act="annotate"]').length, 0, '超长句不是"补注"能解决的');
+  assert.equal(row.querySelectorAll('[data-pk-input]').length, 0);
 });

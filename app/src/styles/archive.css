@@ -601,6 +601,79 @@ body:not(.no-session) #reader {
   gap: 6px;
   flex-wrap: wrap;
 }
+/* 跨章复现摘要：全书进度 + 各章待确认条数（教师一眼看到"哪章最多、还剩多少"） */
+.pk-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface-2);
+}
+.pk-chapters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.pk-chapter {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: var(--r-pill);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  font-size: var(--fs-xs);
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+/* 章名与条数之间加一条细分隔：否则"十13"会被读成一个数字 */
+.pk-chapter b {
+  padding-left: 6px;
+  border-left: 1px solid var(--line);
+  color: var(--ink);
+  font-weight: 650;
+}
+.pk-chapter.cur {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--line));
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.pk-chapter.cur b {
+  color: var(--accent);
+}
+.pk-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.pk-batch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  border: 1px dashed var(--line);
+  border-radius: 7px;
+}
+.pk-batch button {
+  height: var(--ctl-h);
+  min-height: var(--ctl-h);
+  display: inline-flex;
+  align-items: center;
+}
+.pk-recur {
+  padding: 1px 7px;
+  border-radius: var(--r-pill);
+  background: var(--warn-soft);
+  border: 1px solid var(--warn-line);
+  color: var(--warn);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+}
 .pk-chip {
   height: 26px;
   min-height: 26px;
@@ -671,6 +744,9 @@ body:not(.no-session) #reader {
 }
 .pk-badge.pk-anno {
   color: var(--muted-strong);
+}
+.pk-badge.pk-engine {
+  color: var(--danger);
 }
 .pk-word {
   font-size: var(--fs-lg);

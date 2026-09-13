@@ -24,9 +24,9 @@
  *    但教师点过的决定不能因为"重算"就消失——按稳定 ID 把 `status` 带过来。
  */
 
-export type PendingKind = 'annotate' | 'restore';
-/** `dict` = 教师词典正本已有释义；`model` = 本地模型带句填的候选；`canon` = 来自正本核对（词本身是正本词） */
-export type PendingSource = 'dict' | 'model' | 'canon';
+export type PendingKind = 'annotate' | 'restore' | 'engine';
+/** `dict` = 教师词典正本已有释义；`model` = 本地模型带句填的候选；`canon` = 来自正本核对（词本身是正本词）；`engine` = 引擎客观项（风险队列里的 blocker） */
+export type PendingSource = 'dict' | 'model' | 'canon' | 'engine';
 
 export interface PendingItem {
   /** 稳定 ID：层|章|段|词|种类——重算队列时靠它把教师的决定带过来 */
@@ -50,6 +50,8 @@ export interface PendingItem {
   decidedAt?: string;
   /** ② 换写：教师**直接指定**的替换词（留空＝交管线自己找课标内的简单词） */
   replacement?: string;
+  /** 引擎客观项（`kind: 'engine'`）来自哪条规则——`SENT-01` 超长句 / `ANNO-01` 漏注 / `ZH-01` 正文中文 / `LEN-01` 篇幅 */
+  ruleId?: string;
 }
 
 export interface PendingFragment {
@@ -137,33 +139,98 @@ export function fromCanonRow(r: { tier: string; chapter: string; para: string; w
 }
 
 /**
- * 合并两路 → 一条队列。
+ * 合并若干路 → 一条队列。
  *
- * - 去重按**稳定 ID**（层|章|段|词|种类）；同 ID 保留先来的（补注优先——它带模型候选与出处句）
- * - `previous` 里已决定的条目：把 `status`/`decidedAt` 带回来（**重算队列不许抹掉教师的决定**）
- * - 排序：★加注词 → 正本 → 补注；同档按章、段——教师从上往下扫，先看判据最硬的
+ * - 去重按**稳定 ID**（层|章|段|词）；同 ID 保留先来的，`why` 用 `｜` 串起两边的理由
+ * - `previous` 里已决定的条目：把 `status`/`decidedAt`/`replacement` 带回来（**重算队列不许抹掉教师的决定**）
+ * - 排序：★加注词 → 引擎客观项 → 正本 → 补注；同档按章、段——教师从上往下扫，先看判据最硬的
  */
-export function mergePending(annotate: readonly PendingItem[], restore: readonly PendingItem[], previous?: readonly PendingItem[]): PendingItem[] {
+export function mergePending(annotate: readonly PendingItem[], restore: readonly PendingItem[], previous?: readonly PendingItem[], engines: readonly PendingItem[] = []): PendingItem[] {
   const byId = new Map<string, PendingItem>();
-  for (const it of [...restore, ...annotate]) {
+  for (const it of [...engines, ...restore, ...annotate]) {
     if (!byId.has(it.id)) byId.set(it.id, it);
     else {
       const kept = byId.get(it.id)!;
-      /* 同一条（同层章段词）两种口径都命中：合并成一条，标注双来源——教师只该点一次 */
-      byId.set(it.id, { ...kept, star: kept.star || it.star, why: kept.why.includes('｜') ? kept.why : `${kept.why}｜${it.why}` });
+      /* 同一条（同层章段词）多种口径都命中：合并成一条，多个理由都留着——教师只该点一次。
+         ★取并集；引擎规则号留着（它决定这条能不能用三个键处理）。 */
+      byId.set(it.id, {
+        ...kept,
+        star: kept.star || it.star,
+        ruleId: kept.ruleId ?? it.ruleId,
+        why: kept.why.includes('｜') || kept.why === it.why ? kept.why : `${kept.why}｜${it.why}`,
+      });
     }
   }
   const decided = new Map((previous ?? []).filter((p) => p.status).map((p) => [p.id, p]));
   const out = [...byId.values()].map((it) => {
     const prev = decided.get(it.id);
-    return prev ? { ...it, status: prev.status, decidedAt: prev.decidedAt } : it;
+    return prev ? { ...it, status: prev.status, decidedAt: prev.decidedAt, replacement: prev.replacement ?? it.replacement } : it;
   });
-  const rank = (x: PendingItem) => (x.star ? 0 : x.kind === 'restore' ? 1 : 2);
+  const rank = (x: PendingItem) => (x.star ? 0 : x.kind === 'engine' ? 1 : x.kind === 'restore' ? 2 : 3);
   return out.sort((a, b) => rank(a) - rank(b) || a.chapter.localeCompare(b.chapter, 'zh') || a.para.localeCompare(b.para) || a.word.localeCompare(b.word));
 }
 
 /** 待处理的条数（已决定的不算）——面板顶上那行数字就是它。 */
 export const pendingCountOf = (items: readonly PendingItem[], chapter?: string): number => items.filter((i) => !i.status && (!chapter || i.chapter === chapter)).length;
+
+/* ────────────────────────── 引擎客观项：并进同一张表 ────────────────────────── */
+
+/**
+ * 哪些规则算"客观项"（可以并进待确认）。
+ *
+ * 口径是**机器确定、不需要人判真伪**的那几条 blocker：
+ *   `SENT-01` 超长句 / `ANNO-01` 超纲词漏注 / `ZH-01` 正文混入中文 / `LEN-01` 篇幅偏离
+ *
+ * `FACT-01/02`（数字、专名在改写里找不到）与 `ANNO-02/03` **刻意不并**：改写可能合法地换说法，
+ * 机器判不准，那是"按风险排队等人工权衡"的活，留在风险队列里按 `风险 = 概率 × 后果` 排序才有意义。
+ * 并进来只会让教师在一张表里分不清"必须改"和"可能要改"。
+ */
+export const ENGINE_OBJECTIVE_RULES = ['SENT-01', 'ANNO-01', 'ZH-01', 'LEN-01'] as const;
+
+const RULE_LABELS: Record<string, string> = {
+  'SENT-01': '超长句',
+  'ANNO-01': '超纲词漏注',
+  'ZH-01': '正文混入中文',
+  'LEN-01': '篇幅偏离',
+};
+
+/** 风险队列里的一条 → 待确认项（不是客观项就返回 null，由调用方过滤）。 */
+export function fromRiskItem(
+  r: {
+    ruleId?: string;
+    chapter: string;
+    tier: string;
+    segIndex?: number;
+    segLabel?: string;
+    title?: string;
+    detail?: { signal?: string; signals?: string[]; sourceSentence?: string; source?: string };
+  },
+  sentenceOf?: (word: string, para: string) => string,
+): PendingItem | null {
+  const rule = String(r.ruleId ?? '');
+  if (!(ENGINE_OBJECTIVE_RULES as readonly string[]).includes(rule)) return null;
+  const tier = normalizeTier(r.tier);
+  const para = `P${String((r.segIndex ?? 0) + 1).padStart(2, '0')}`;
+  const signal = (r.detail?.signal ?? r.detail?.signals?.[0] ?? '').trim();
+  const rawSentence = (r.detail?.sourceSentence ?? r.detail?.source ?? '').replace(/\s+/g, ' ').trim();
+  /* 段级规则（超长句/篇幅）没有"那个词"——用句子开头几个词做**可见的标识**，
+     绝不编一个像样的词出来冒充（教师会以为要处理的是那个词）。 */
+  const word = signal || (rawSentence ? `${rawSentence.split(/\s+/).slice(0, 5).join(' ')}…` : para);
+  const sentence = rawSentence.slice(0, 400) || (sentenceOf ? sentenceOf(word, para) : '');
+  return {
+    id: pendingIdOf({ tier, chapter: r.chapter, para, word }),
+    kind: 'engine',
+    chapter: r.chapter,
+    tier,
+    para,
+    word,
+    gloss: RULE_LABELS[rule] ?? rule,
+    sentence,
+    why: `引擎客观项 ${rule}｜${r.title ?? RULE_LABELS[rule] ?? rule}`,
+    source: 'engine',
+    ruleId: rule,
+  };
+}
 
 /* ────────────────────────── 教师指定的替换词 ────────────────────────── */
 
@@ -188,4 +255,115 @@ export function parseSpecifiedReplacement(note?: string): { word: string; replac
   const replacement = m[2]!.trim();
   if (!word || !replacement) return null;
   return { word, replacement };
+}
+
+/* ────────────────────────── 大章细分：跨章复现 · 词频 · 跨章汇总 ────────────────────────── */
+
+/**
+ * 一个词在全队列里的分布。
+ *
+ * 为什么需要它：第八章一次 214 条，教师从上往下扫会淹没在同一个词里——
+ * `comrades` 在 6 个段落全丢，那不是 6 次手滑，是**一条口径问题**。
+ * 把"跨章复现"单独拎出来，教师处理一条就等于处理一批。
+ */
+export interface WordSpread {
+  word: string;
+  /** 出现过这个词的**章数**（跨章复现的判据；同一章里出现 10 次不算跨章） */
+  chapters: number;
+  /** 队列里的条目数（同章同段同词只算一条，见 pendingIdOf） */
+  hits: number;
+  /** 各章分布，便于显示"第一章 / 第五章" */
+  byChapter: Record<string, number>;
+}
+
+/** 全队列的词分布表（大小写无关；按 hits 降序、同 hits 按章数降序）。 */
+export function wordSpreadOf(items: readonly PendingItem[]): Map<string, WordSpread> {
+  const out = new Map<string, WordSpread>();
+  for (const it of items) {
+    const key = it.word.toLowerCase();
+    let s = out.get(key);
+    if (!s) {
+      s = { word: it.word, chapters: 0, hits: 0, byChapter: {} };
+      out.set(key, s);
+    }
+    s.hits++;
+    if (!s.byChapter[it.chapter]) s.chapters++;
+    s.byChapter[it.chapter] = (s.byChapter[it.chapter] ?? 0) + 1;
+  }
+  return new Map([...out.entries()].sort((a, b) => b[1].hits - a[1].hits || b[1].chapters - a[1].chapters || a[1].word.localeCompare(b[1].word)));
+}
+
+/**
+ * 细分档位（大章里再分一层）。
+ *
+ * `recur` 的口径是**跨章**：同一个词出现在 ≥2 章才算——
+ * 同一章里出现 10 次是"这一章的事"，跨章出现才是"当初就没定下口径"。
+ */
+export type PendingFacet = 'all' | 'star' | 'engine' | 'canon' | 'anno' | 'recur' | 'single';
+
+export const FACET_LABELS: Record<PendingFacet, string> = {
+  all: '全部',
+  star: '★加注词',
+  engine: '引擎',
+  canon: '正本',
+  anno: '补注',
+  recur: '跨章复现',
+  single: '仅本章',
+};
+
+export function matchFacet(it: PendingItem, facet: PendingFacet, spread: Map<string, WordSpread>): boolean {
+  switch (facet) {
+    case 'all':
+      return true;
+    case 'star':
+      return Boolean(it.star);
+    case 'engine':
+      return it.kind === 'engine';
+    case 'canon':
+      return it.kind === 'restore';
+    case 'anno':
+      return it.kind === 'annotate';
+    case 'recur':
+      return (spread.get(it.word.toLowerCase())?.chapters ?? 1) > 1;
+    case 'single':
+      return (spread.get(it.word.toLowerCase())?.chapters ?? 1) === 1;
+  }
+}
+
+/** 排序：默认按判据强弱（★ → 正本 → 补注）；`freq` 按词频（复现多的在前，同频回落到判据）。 */
+export type PendingSort = 'judge' | 'freq';
+
+export function sortPending(items: readonly PendingItem[], sort: PendingSort, spread: Map<string, WordSpread>): PendingItem[] {
+  const rank = (x: PendingItem) => (x.star ? 0 : x.kind === 'restore' ? 1 : 2);
+  const out = [...items];
+  if (sort === 'freq') {
+    return out.sort((a, b) => {
+      const sa = spread.get(a.word.toLowerCase());
+      const sb = spread.get(b.word.toLowerCase());
+      return (sb?.chapters ?? 1) - (sa?.chapters ?? 1) || (sb?.hits ?? 1) - (sa?.hits ?? 1) || rank(a) - rank(b) || a.chapter.localeCompare(b.chapter, 'zh') || a.para.localeCompare(b.para);
+    });
+  }
+  return out.sort((a, b) => rank(a) - rank(b) || a.chapter.localeCompare(b.chapter, 'zh') || a.para.localeCompare(b.para) || a.word.localeCompare(b.word));
+}
+
+/** 全书进度（跨章汇总）：教师看不到"全书还剩多少、哪章最多"，就只能一章一章地猜。 */
+export interface PendingProgress {
+  total: number;
+  done: number;
+  todo: number;
+  /** 按待处理条数降序的章节表（最重的章在最上面） */
+  chapters: { chapter: string; todo: number; done: number }[];
+}
+
+export function pendingProgressOf(items: readonly PendingItem[]): PendingProgress {
+  const by = new Map<string, { todo: number; done: number }>();
+  for (const it of items) {
+    const c = by.get(it.chapter) ?? { todo: 0, done: 0 };
+    if (it.status) c.done++;
+    else c.todo++;
+    by.set(it.chapter, c);
+  }
+  const chapters = [...by.entries()].map(([chapter, c]) => ({ chapter, ...c })).sort((a, b) => b.todo - a.todo || a.chapter.localeCompare(b.chapter, 'zh'));
+  const done = items.filter((i) => i.status).length;
+  return { total: items.length, done, todo: items.length - done, chapters };
 }

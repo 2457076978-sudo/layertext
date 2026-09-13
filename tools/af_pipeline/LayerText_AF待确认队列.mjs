@@ -22,6 +22,13 @@
  *   node LayerText_AF待确认队列.mjs                    # 三层都生成
  *   node LayerText_AF待确认队列.mjs --tier A            # 只生成 A 层
  *   node LayerText_AF待确认队列.mjs --no-canon          # 不带正本核对那一批（只要补注）
+ *   node LayerText_AF待确认队列.mjs --no-engine         # 不带引擎客观项那一批
+ *
+ * ## 第三路（2026-09-13 补）：引擎客观项
+ *
+ * 超长句 / 超纲词漏注 / 正文混入中文 / 篇幅偏离原先只在「风险队列」里看，教师在两个入口各看一半。
+ * 现在把这几条**机器确定**的 blocker 也并进这张表；`FACT-*` 与 `ANNO-02/03` 刻意不并——
+ * 机器的判断在那里不可靠，留在风险队列按「风险 = 概率 × 后果」排队才合理。
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -46,8 +53,9 @@ const TIERS = String(arg('--tier', 'A,M,B'))
   .map((t) => (t.length === 1 ? ({ A: 'A层85', M: 'M层75', B: 'B层60' }[t] ?? t) : t))
   .filter((t) => TAGS.includes(t));
 const WITH_CANON = !has('--no-canon');
+const WITH_ENGINE = !has('--no-engine');
 
-const { fromAnnotateItem, fromCanonRow, mergePending, pendingCountOf, normalizeTier } = await import(`${SHARED.distOf(P.引擎目录)}/src/core/pendingqueue.js`);
+const { fromAnnotateItem, fromCanonRow, fromRiskItem, mergePending, pendingCountOf, normalizeTier } = await import(`${SHARED.distOf(P.引擎目录)}/src/core/pendingqueue.js`);
 
 const readJson = (p) => {
   try {
@@ -94,14 +102,30 @@ for (const tier of TIERS) {
     }),
   );
 
-  const items = mergePending(annotate, canonItems, previous?.items ?? []);
+  /* 引擎客观项：读风险队列的机器格式（`_运行/风险队列_<层>.json`）。
+     它按**段**报（ruleId/chapter/segIndex），fromRiskItem 负责换算成待确认项；
+     非客观项（FACT-* 等）返回 null，这里滤掉。 */
+  const risk = WITH_ENGINE ? readJson(join(RUN_DIR, `风险队列_${tier}.json`)) : null;
+  const engineItems = (risk?.队列 ?? [])
+    .map((r) =>
+      fromRiskItem(r, (w, para) => {
+        const f = join(OUT_BASE, r.chapter, `原文_${tier}_${DATE}_工序化.md`);
+        if (!existsSync(f)) return '';
+        return sentenceOf(readFileSync(f, 'utf-8'), w, para);
+      }),
+    )
+    .filter(Boolean);
+  if (WITH_ENGINE && !risk) console.log(`（没有 ${join(RUN_DIR, `风险队列_${tier}.json`)}——先跑 LayerText_AF风险队列.mjs 才能带上引擎客观项）`);
+
+  const items = mergePending(annotate, canonItems, previous?.items ?? [], engineItems);
   writeFileSync(queuePath, `${JSON.stringify({ tier, items, fragments: annotateQ?.fragments ?? [], updatedAt: new Date().toISOString() }, null, 1)}\n`, 'utf-8');
 
   const todo = pendingCountOf(items);
   const star = items.filter((i) => !i.status && i.star).length;
   const rest = items.filter((i) => !i.status && i.kind === 'restore' && !i.star).length;
   const ann = items.filter((i) => !i.status && i.kind === 'annotate').length;
-  console.log(`${tier}：待确认 ${todo} 条（★加注词 ${star}｜正本 ${rest}｜补注 ${ann}）｜已处理 ${items.length - todo} 条`);
+  const eng = items.filter((i) => !i.status && i.kind === 'engine').length;
+  console.log(`${tier}：待确认 ${todo} 条（★加注词 ${star}｜引擎客观项 ${eng}｜正本 ${rest}｜补注 ${ann}）｜已处理 ${items.length - todo} 条`);
   console.log(`  → ${queuePath}`);
   total += todo;
 
@@ -109,7 +133,7 @@ for (const tier of TIERS) {
   const L = [
     `# 待确认 · ${tier} · ${DATE}`,
     '',
-    '> 合并两路：**正本核对**（教师词典登记过的词在产物里消失了，判据最硬）＋ **补注候选**（未支持难词，模型填的中文）。',
+    '> 合并三路：**正本核对**（教师词典登记过的词在产物里消失了，判据最硬）＋ **引擎客观项**（超长句/漏注/正文中文，机器确定）＋ **补注候选**（未支持难词，模型填的中文）。',
     '> 每条给"词 · 出处句 · 中文候选"——教师在 App 的「检 → 待确认」里点确认，决定进校准台账（source: human）。',
     '',
     '| # | 判据 | 章 | 段 | 词 | 中文 | 出处句 |',
@@ -119,7 +143,7 @@ for (const tier of TIERS) {
     .filter((i) => !i.status)
     .slice(0, 400)
     .forEach((i, n) => {
-      const tag = i.star ? '★加注词' : i.kind === 'restore' ? '正本' : '补注';
+      const tag = i.star ? '★加注词' : i.kind === 'engine' ? `引擎·${i.ruleId ?? ''}` : i.kind === 'restore' ? '正本' : '补注';
       L.push(`| ${n + 1} | ${tag} | ${i.chapter} | ${i.para} | **${i.word}** | ${i.gloss} | ${i.sentence.slice(0, 60)} |`);
     });
   if (items.filter((i) => !i.status).length > 400) L.push(`| … | 其余见 JSON | | | | | |`);

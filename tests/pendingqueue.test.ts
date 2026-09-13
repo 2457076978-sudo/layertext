@@ -11,7 +11,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { fromAnnotateItem, fromCanonRow, mergePending, normalizeTier, pendingCountOf, parseSpecifiedReplacement, pendingIdOf, type PendingItem } from '../src/core/pendingqueue.js';
+import { fromAnnotateItem, fromCanonRow, fromRiskItem, mergePending, normalizeTier, pendingCountOf, parseSpecifiedReplacement, pendingIdOf, type PendingItem } from '../src/core/pendingqueue.js';
 
 const sent = (w: string, p: string) => `（${p} 里含 ${w} 的那句）`;
 
@@ -88,4 +88,30 @@ test('教师指定的替换词要能从备注里解出来（人定的不能被�
   assert.equal(parseSpecifiedReplacement('教师判定：这个词忽略，不注也不换'), null);
   assert.equal(parseSpecifiedReplacement(undefined), null);
   assert.equal(parseSpecifiedReplacement('教师指定替换： → x'), null, '空原词不算');
+});
+
+/* ────────────────── 引擎客观项并进同一张表（2026-09-13） ────────────────── */
+
+test('引擎客观项：blocker 并进来，FACT/ANNO-02/03 这类"要人判"的留在风险队列', () => {
+  const seg = { chapter: '第二章', tier: 'M', segIndex: 5, segLabel: '第二章 第6段', title: '原文的「1911」在改写里找不到' };
+  assert.equal(fromRiskItem({ ...seg, ruleId: 'SENT-01', detail: { sourceSentence: 'A very long sentence here.' } })?.kind, 'engine');
+  assert.equal(fromRiskItem({ ...seg, ruleId: 'FACT-01' }), null, '事实类机器判不准，不能混进"必须改"的一堆里');
+  assert.equal(fromRiskItem({ ...seg, ruleId: 'ANNO-02' }), null);
+});
+
+test('引擎客观项：段级规则没有"那个词"时用句子开头做标识，绝不编一个词出来冒充', () => {
+  const it = fromRiskItem({ chapter: '第二章', tier: 'M', segIndex: 5, ruleId: 'SENT-01', detail: { sourceSentence: 'Alpha beta gamma delta epsilon zeta eta.' } });
+  assert.equal(it?.word, 'Alpha beta gamma delta epsilon…', '就是原句开头，不是编的');
+  assert.equal(it?.para, 'P06', 'segIndex 5 → 第 6 段');
+  assert.equal(it?.gloss, '超长句');
+  assert.match(it?.why ?? '', /SENT-01/);
+});
+
+test('引擎客观项排序在最硬的一档之后、教师词典之前', () => {
+  const e = fromRiskItem({ chapter: '第一章', tier: 'A', segIndex: 0, ruleId: 'ZH-01', detail: { signal: '中文' } })!;
+  const items = mergePending([anno({ word: 'w1' })], [canon({ word: 'c1' })], undefined, [e]);
+  assert.deepEqual(
+    items.map((i) => i.kind),
+    ['engine', 'restore', 'annotate'],
+  );
 });
