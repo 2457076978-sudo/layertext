@@ -10,7 +10,7 @@ import { zipSync, strToU8 } from 'fflate';
 import { S, esc } from './state.js';
 import { $, setStatus } from './uikit.js';
 import { aiRewriteSentence } from './aiflow.js';
-import { activeSession, chatUntilJson, docxToText, openPathIntoSession, readTextSmart, renderAll } from './main.js';
+import { activeSession, chatUntilJson, docxToText, openPathIntoSession, persistEdit, readTextSmart, renderAll } from './main.js';
 import { buildLexiconNow, mergedSelection, reinforceWordsNow } from './lexicon.js';
 import { addMark, sidebarHandlers } from './reader.js';
 import { tocChapters } from './shelf.js';
@@ -30,6 +30,7 @@ import { parseZipfTable, triageOov } from '../../src/core/wordfreq.js';
 import zipfTsv from '../../assets/wordfreq/en_zipf.tsv?raw';
 import aoaTsv from '../../assets/wordfreq/en_aoa.tsv?raw';
 import { sentenceRisks } from '../../src/core/risks.js';
+import { repairDoc } from '../../src/core/docast.js';
 
 /** 词频/习得年龄先验（wordfreq + Kuperman 2012 AoA 常模，纯离线）：OOV 双信号分诊——高频且在常模内=疑似漏收，
  *  高频但常模外（专名/衍生词）降级待核；低频=真·生词。不碰判定。 */
@@ -73,6 +74,83 @@ function riskSentenceList(s: FileSession): RiskSentItem[] {
     }),
   );
   return out;
+}
+
+/* ---------- ⑤ 标注体检：嵌套标注 / 同词释义不一致（接线 `src/core/docast.ts` 的 `repairDoc`） ----------
+
+ * `applyRepairs` 在 2026-09-14 被修好了 bug（原先"报修好了、实际一个字符没改"），
+ * 但**全仓只有测试调它**：教师看到的那句"嵌套标注会自动拍平"从来没跑过。
+ * 这里把它接到「质检报告」页：先算、再给教师看逐条 diff、确认后才走 `persistEdit`
+ * （带 `_原始备份.md` 与撤销快照），与仓库"改正文必须留下退路"的口径一致。 */
+
+/** 逐行 diff：只为了**给教师看改了什么**，不是权威 diff 算法——两版行数一致时逐行比，
+ *  行数变了就退化成"整段前后各截一段"。宁可少显示，也不假装精确。 */
+function repairDiff(before: string, after: string): { from: string; to: string }[] {
+  const a = before.split('\n');
+  const b = after.split('\n');
+  const out: { from: string; to: string }[] = [];
+  if (a.length === b.length) {
+    for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) out.push({ from: a[i]!, to: b[i]! });
+    return out;
+  }
+  for (let i = 0, j = 0; i < a.length || j < b.length;) {
+    if (a[i] === b[j]) {
+      i++;
+      j++;
+      continue;
+    }
+    out.push({ from: a[i] ?? '（无）', to: b[j] ?? '（无）' });
+    i++;
+    j++;
+  }
+  return out;
+}
+
+function repairCardHtml(s: FileSession): string {
+  const r = repairDoc(s.md);
+  const n = r.nested + r.senses;
+  if (!n) return '<div class="dim" style="margin-bottom:10px">标注结构没问题：没有嵌套标注，同一个词的释义全篇一致</div>';
+  const parts: string[] = [];
+  if (r.nested) parts.push(`嵌套标注 <b>${r.nested}</b> 处`);
+  if (r.senses) parts.push(`同词释义不一致 <b>${r.senses}</b> 处`);
+  return `<div style="margin-bottom:8px">
+    <button id="diag-repair-btn" class="primary">预览并修复（${n} 处）</button>
+    <span class="dim">${parts.join(' ｜ ')}。修复只改标注结构（保留英文原词与情节），应用前给你逐条预览；${s.sourcePath ? '会先留一份原始备份' : '示例稿不落盘'}，可 ⌘Z 撤销。</span>
+  </div>`;
+}
+
+/** 预览 → 确认 → 落盘。**绝不"点了就改"**：改正文的按钮必须让教师先看见要改什么。 */
+async function applyRepairPreview(s: FileSession): Promise<void> {
+  const before = s.md;
+  const r = repairDoc(before);
+  const n = r.nested + r.senses;
+  if (!n) {
+    setStatus('没有需要修复的标注问题', 'ok');
+    return;
+  }
+  const diffs = repairDiff(before, r.md).slice(0, 12);
+  const head = [
+    `将要修复 ${n} 处：嵌套标注 ${r.nested} 处、同词释义不一致 ${r.senses} 处。`,
+    r.senses ? '同词多义按「首次出现的释义为正」统一（与"一个词全篇只注一次"的正本一致）。' : '',
+    r.issues.filter((i) => i.needsHuman).length ? `另有 ${r.issues.filter((i) => i.needsHuman).length} 处**需要人来判断**，本次不动。` : '',
+    '',
+    ...diffs.map((d) => `原文：${d.from.slice(0, 120)}\n改为：${d.to.slice(0, 120)}`),
+    diffs.length < repairDiff(before, r.md).length ? `…（只列前 ${diffs.length} 条）` : '',
+  ]
+    .filter(Boolean)
+    .join('\n');
+  if (!window.confirm(`${head}\n\n确定应用这 ${n} 处修复吗？`)) {
+    setStatus('已取消——正文一个字没动', '');
+    return;
+  }
+  try {
+    const savedTo = await persistEdit(s, r.md);
+    s.md = r.md;
+    renderAll();
+    setStatus(`标注修复已应用（${n} 处）并写入 ${savedTo}${savedTo === s.sourcePath ? '（首次改动前已留原始备份）' : ''}`, 'saved');
+  } catch (e) {
+    setStatus('标注修复没能写入：' + String(e) + '——正文没有改', 'err');
+  }
 }
 
 export function renderReportPane(s: FileSession): void {
@@ -160,6 +238,9 @@ export function renderReportPane(s: FileSession): void {
         : '<div class="dim" style="margin-bottom:10px">没有命中黑名单的难句</div>'
     }
 
+    <div class="diag-h">⑤ 标注体检（嵌套标注 / 同词释义不一致）<span class="dim">——结构与释义层面的机械问题，修的是标注，不动英文与情节</span></div>
+    ${repairCardHtml(s)}
+
     <div class="diag-h">③ 情节要点（AI 摘候选 → 你勾选 → 进右侧"要点配额"）</div>
     <div style="margin-bottom:8px">
       <button id="diag-plot-btn" class="primary"><svg class="ico"><use href="#i-sparkle"/></svg>AI 摘情节要点</button>
@@ -176,6 +257,10 @@ export function renderReportPane(s: FileSession): void {
   document.getElementById('btn-reveal')?.addEventListener('click', () => {
     if (s.reportSavedPath) void invoke('reveal_path', { path: s.reportSavedPath });
   });
+  /* ⑤ 标注体检 → 预览 → 教师确认 → 走 persistEdit（带原始备份与撤销快照）。
+   * 为什么值得单独一个入口：`applyRepairs` 早就写好、也有单测，但**全仓零调用**——
+   * 教师手册里说"嵌套标注会自动拍平"，实际从来没跑过。这条把它接到按钮上。 */
+  document.getElementById('diag-repair-btn')?.addEventListener('click', () => void applyRepairPreview(s));
 
   /* 难度反馈直接定位到正文：这句太难 → 看更简单的候选（AI 改写本句，正文预览、点 ✓ 才生效） */
   pane.querySelectorAll('[data-risk-ai]').forEach((btn) =>

@@ -8,6 +8,8 @@ import { S, esc } from './state.js';
 import { $, setStatus, toast, hidePop, showSummaryPop } from './uikit.js';
 import { switchSide } from './chat.js';
 import { activeSession, renderAll, runQcCurrent, persistEdit, markPathFor, readTextSmart, chatUntilJson, flashApplied } from './main.js';
+import { applyWordActionToText, DEFAULT_READER_TREE, descendantTierFiles, normalizeTree, tierTagOfFilename, type PropagationTarget, type ReaderTree } from '../../src/core/propagate.js';
+import { readTextChecked } from './fsx.js';
 import { renderReader, sidebarHandlers, updateMarkBadge } from './reader.js';
 import { scheduleHeatRail } from './edit.js';
 import { restoreAllMarkDom, renderSidebar, scheduleSave } from './review.js';
@@ -155,7 +157,124 @@ export async function applyZhAnnotations(s: FileSession, marks: Mark[]): Promise
   setStatus(`已加中文标注 ${done.length} 处（原句未动）：${done.slice(0, 6).join('、')}${done.length > 6 ? '…' : ''}`, 'saved');
   toast(`已加中文标注 ${done.length} 处（原句未动）`, 'ok');
   void propagateCorrection(s, corrPairs);
+  /* 跨层传播（`src/core/propagate.ts` 的接线，2026-09-14）：这一层确认过的加注，
+   * 问一次要不要同步到**下级读者**的正文。每次都要教师确认（Wayne 拍的），不自动写。 */
+  void offerPropagation(s, corrPairs);
   return done.length;
+}
+
+/* ---------- 跨层传播：上级确认的加注 → 下级读者正文（`src/core/propagate.ts` 接线） ----------
+
+ * 为什么单独一段：`propagate.ts` 是 2026-09-13 拍板的能力规格，纯函数与单测都齐，
+ * 但**全仓零调用**——"上级加了注，下级自动跟上"这句话从来没成立过。
+ * 现在接上，并按拍板口径收窄：
+ *   · 触发点：加注之后**每次都问**，不自动写；
+ *   · 只写同章目录下的 `原文_<下级层标签>_*.md`（正文产物正本），备份/工作稿/标记文件不碰；
+ *   · 每个文件写之前留 `_原始备份.md`，写完落一行变更日志——与 `persistEdit` 同一套口径。 */
+
+/** 从书根到当前章目录，找一个能读出 调适项目_*.json 的地方拿 产物命名 / 读者层级。 */
+async function propagationConfig(s: FileSession): Promise<{ naming: Record<string, string>; tree: ReaderTree } | null> {
+  if (!s.sourcePath) return null;
+  const { findProjectConfig } = await import('./datapanel.js');
+  const dir = s.sourcePath.slice(0, s.sourcePath.lastIndexOf('/'));
+  const found = await findProjectConfig(dir);
+  if (!found) return null;
+  const cfg = found.config as Record<string, unknown>;
+  const naming = (cfg['产物命名'] ?? { A: 'A层85', M: 'M层75', B: 'B层60' }) as Record<string, string>;
+  const tree = normalizeTree(cfg['读者层级'] ?? DEFAULT_READER_TREE);
+  return { naming, tree };
+}
+
+export async function offerPropagation(s: FileSession, pairs: { word: string; type: 'zh'; result: string }[]): Promise<void> {
+  if (!pairs.length) return;
+  const cfg = await propagationConfig(s);
+  if (!cfg) return; // 没有调适项目配置⇒不知道层级，静默跳过（不是错误：绝大多数书没有层级树）
+  const fromTag = tierTagOfFilename(s.fileName, cfg.naming);
+  if (!fromTag) return; // 当前这份不是分层产物（可能在原稿上工作）⇒没有"下级"可言
+  const dir = s.sourcePath!.slice(0, s.sourcePath!.lastIndexOf('/'));
+  let files: string[];
+  try {
+    files = await invoke<string[]>('list_dir', { dir });
+  } catch (e) {
+    setStatus(`列本章目录失败，跨层传播已跳过：${String(e)}`, 'err');
+    return;
+  }
+  const targets = descendantTierFiles(cfg.tree, cfg.naming, fromTag, files);
+  if (!targets.length) return;
+
+  /* 先**算清楚再问**：每个文件会改几处。读不了的文件如实报出来，不猜。 */
+  const plan: { target: PropagationTarget; text: string; hits: number }[] = [];
+  const unreadable: string[] = [];
+  for (const t of targets) {
+    const r = await readTextChecked(t.path);
+    if (r.kind !== 'ok') {
+      unreadable.push(baseName(t.path));
+      continue;
+    }
+    let text = r.text;
+    let hits = 0;
+    for (const p of pairs) {
+      const out = applyWordActionToText(text, p.word, 'annotate', p.result);
+      if (out.changed) {
+        text = out.text;
+        hits++;
+      }
+    }
+    if (hits) plan.push({ target: t, text, hits });
+  }
+  if (unreadable.length) setStatus(`跨层传播：${unreadable.length} 个下级文件读不出来，已跳过（${unreadable.slice(0, 3).join('、')}）`, 'err');
+  if (!plan.length) return;
+
+  const total = plan.reduce((n, p) => n + p.hits, 0);
+  const lines = plan.map((p) => `· ${p.target.tag} ${baseName(p.target.path)}：${p.hits} 处`).join('\n');
+  if (!window.confirm(`把这次加注同步到下级读者正文？\n\n${lines}\n\n合计 ${total} 处（只插/剥中文注释，英文原句不动）。每个文件写前会留一份 _原始备份.md。`)) {
+    setStatus(`跨层传播已取消（${total} 处未写入下级）`, '');
+    return;
+  }
+
+  let wrote = 0;
+  /* 记进账、随后渲染出来（`appswallow` 认的就是这个形状）。 */
+  const failedFiles: string[] = [];
+  for (const p of plan) {
+    try {
+      const backup = `${p.target.path.replace(/\.(md|txt)$/i, '')}_原始备份.md`;
+      const bak = await readTextChecked(backup);
+      if (bak.kind === 'unreadable') throw new Error(`原始备份 ${backup} 读不出来，未改动`);
+      if (bak.kind === 'missing') {
+        const cur = await readTextChecked(p.target.path);
+        if (cur.kind === 'ok') await invoke('write_text_file', { path: backup, content: cur.text });
+      }
+      await invoke('write_text_file', { path: p.target.path, content: p.text });
+      wrote++;
+    } catch (e) {
+      failedFiles.push(`${baseName(p.target.path)}（${String(e)}）`);
+    }
+  }
+  /* 变更日志：跨层传播也是一次正文改动，必须留在审计链里（同 persistEdit 的口径）。 */
+  const outDir = s.sourcePath!.slice(0, s.sourcePath!.lastIndexOf('/'));
+  try {
+    const logPath = `${outDir}/变更日志_AI审核.csv`;
+    let csv = '';
+    const rd = await readTextChecked(logPath);
+    if (rd.kind === 'ok') csv = rd.text;
+    else if (rd.kind === 'unreadable') throw new Error(rd.error);
+    if (!csv.trim()) csv = CHANGELOG_HEADER.join(',') + '\n';
+    const date = new Date().toLocaleDateString('sv-SE');
+    for (const p of plan) {
+      csv +=
+        ['R1', date, `标准${simplifyMaxLen()}词`, p.target.tier, '', `跨层传播→${p.target.tag}`, `${p.hits} 处`, 'R13', '上级加注传播到下级（机器插入，原句不动）', '跨层传播-加注']
+          .map(csvCell)
+          .join(',') + '\n';
+    }
+    await invoke('write_text_file', { path: logPath, content: csv });
+  } catch (e) {
+    toast(`下级正文已改，但变更日志没写上：${String(e)}——这次传播不会出现在台账里`, 'err');
+  }
+  toast(
+    failedFiles.length ? `跨层传播：已写 ${wrote} 个文件，${failedFiles.length} 个失败（${failedFiles.slice(0, 2).join('、')}）` : `跨层传播完成：${wrote} 个下级文件、${total} 处`,
+    failedFiles.length ? 'err' : 'ok',
+  );
+  setStatus(failedFiles.length ? `跨层传播部分失败：${failedFiles.join('；')}` : `已把这次加注同步到 ${wrote} 个下级正文（${total} 处）`, failedFiles.length ? 'err' : 'saved');
 }
 
 /** 「词汇简化」管线：词级操作不重构句子——AI 只出 原词→简单词 映射（课标1600内、

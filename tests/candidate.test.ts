@@ -140,3 +140,13 @@ test('回流红线：撤销与执行失败不产生正证据', () => {
   const gloss = cands.find((c) => c.key === 'tyrannise');
   assert.equal(gloss, undefined, '唯一正证据被撤销：不成为候选（而不是顶着撤销上岗）');
 });
+
+test('撤销只有一条实现：`applyUndo` 不许回来（增量扣证据 vs 全量重建，两套口径会互相打架）', async () => {
+  /* 这条守的是"删掉的东西不要被好心人捡回来"。
+   * `applyUndo` 在 2026-09-14 被删：① 全仓零生产调用点；② 它在证据清零时把候选标成
+   * `rejected`，而生产路径 `candidatesFromEvents` 的结论是**根本不成候选**。
+   * 上一个想"把撤销接进来"的人如果照它写，会在**已经扣过一次**的候选上再扣一次。
+   * 这里直接断言它不再导出——比写一句注释强，注释拦不住 import。 */
+  const mod = (await import('../src/core/candidate.js')) as Record<string, unknown>;
+  assert.equal(mod['applyUndo'], undefined, 'applyUndo 已删；撤销的正路是 candidatesFromEvents 的全量重建');
+});
