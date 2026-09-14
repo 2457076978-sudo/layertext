@@ -9,7 +9,7 @@
  */
 
 import { invoke } from '@tauri-apps/api/core';
-import { S } from './state.js';
+import { S, setStatus } from './state.js';
 import { WORD_TYPES, SENT_TYPES, GATES, typeLabel, type FileSession, type Mark } from './types.js';
 import { planRevisionTask, revisionTaskPreview } from '../../src/core/adaptcheck.js';
 
@@ -259,7 +259,28 @@ export function renderSidebar(
      （顶部「待确认 74 条」说机器筛出多少要处理，底部「标记清单 0」说你标了几条）。
      现在：**一条状态条吃掉所有计数** + **四张分区卡**——每块有边界、标题带计数、
      空状态压成一行；阶段动作（第二轮反馈）默认收起，不占常驻空间。 */
+  /* 2026-09-14：**"暂停保存"必须有一个恢复入口**。
+   * `_审校标记.json` 读不出来时我们会把这一章放进 `S.markFileBroken`，保存一律跳过
+   * ——这是对的（宁可这一次存不下，也不拿空清单覆盖教师的整章标记）。
+   * 但原先教师唯一的出路是**重启 App**：界面上只有一条一闪而过的状态行，
+   * 备份好文件之后没有任何办法让它重新开始保存，他只会看到"标记又白标了"。
+   * 这里给一条明确的出路，并且**当场试存一次**——按钮点完只是消失的话，
+   * 他还是不知道到底存上没有。 */
+  const brokenHtml = S.markFileBroken.has(session.markPath)
+    ? `<div class="side-card" style="border-color:var(--err,#c62828)">
+      <div class="side-card-h" style="color:var(--err,#c62828)">⚠ 本章标记没有在保存</div>
+      <div class="side-card-b" style="font-size:12px;line-height:1.7">
+        <code>${esc(session.markPath)}</code> 读不出来（损坏或读不了）。为防止用空清单覆盖它，
+        <b>这一章本次会话不再写盘</b>——你刚点的标记只在屏幕里。
+        <div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap">
+          <button id="mk-reveal" style="font-size:12px">打开所在文件夹（先备份它）</button>
+          <button id="mk-resume" style="font-size:12px">我已备份好，恢复保存</button>
+        </div>
+      </div>
+    </div>`
+    : '';
   side.innerHTML = `
+    ${brokenHtml}
     <div class="side-status" id="side-status">
       <span class="ss-host" id="side-pending-host"></span>
       <span class="sp"></span>
@@ -287,6 +308,19 @@ export function renderSidebar(
       <div class="side-card-h">标记清单<span class="cnt">${r.marks.length}</span>${r.marks.length ? '' : '<span class="sp"></span><span class="ss-tag">无待办</span>'}</div>
       <div class="side-card-b">${listHtml}</div>
     </div>`;
+
+  if (S.markFileBroken.has(session.markPath)) {
+    side.querySelector('#mk-reveal')?.addEventListener('click', () => {
+      void invoke('reveal_path', { path: session.markPath });
+    });
+    side.querySelector('#mk-resume')?.addEventListener('click', () => {
+      S.markFileBroken.delete(session.markPath);
+      setStatus('已恢复保存——正在把这一章的标记写回盘上…');
+      scheduleSave(session, (st, detail) => {
+        if (st === 'error') scream(detail ?? '标记保存失败', () => undefined);
+      });
+    });
+  }
 
   // 事件
   side.querySelectorAll('[data-quota]').forEach((el) => el.addEventListener('change', () => handlers.onQuotaToggle(Number((el as HTMLElement).dataset.quota))));

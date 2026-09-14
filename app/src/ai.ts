@@ -7,7 +7,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
 import { S, type AppConfig } from './state.js';
-import { withRetry } from './pure.js';
+import { failoverKeyAccounts, withRetry } from './pure.js';
 import { DEFAULT_MAX_LEN } from './types.js';
 import {
   aiErrHuman as aiErrHumanCore,
@@ -177,8 +177,15 @@ async function activeTargets(): Promise<ProviderTarget[]> {
       /* 2026-09-14：**优先按稳定 id 取**（`fb:<id>`，见 settings.ts 的保存侧）。
        * 旧配置没有 id，退回下标账号；有 id 但新账号还没写过 Key 时也回落一次，
        * 这样迁移期两边的 Key 都认，不会出现"升级后备用全失效"。 */
-      let k = f.id ? await invoke<string>('load_api_key', { account: `fb:${f.id}` }) : '';
-      if (!k) k = await invoke<string>('load_api_key', { account: 'fb' + i });
+      /* 2026-09-14：**优先按稳定 id 取**（`fb:<id>`）。关键在这一句的**条件**：
+       * 只有**没有 id**（老配置，升级后还没保存过一次）才回落下标账号。
+       * 原先写的是"稳定账号取不到就回落下标"——那让「清」按钮变成假动作：
+       * 删掉 `fb:<id>` 之后立刻从 `fb0` 把同一把 Key 读了回来，界面上说"已删除"，
+       * 实际照旧在用；更糟的是删过行以后 `fb0` 已经属于别家，会串 Key。
+       * 老 Key 由 `settings.ts` 在给一行**新分配稳定 id 的那一刻**搬过去。 */
+      const { stable, legacy } = failoverKeyAccounts(f.id, i);
+      let k = stable ? await invoke<string>('load_api_key', { account: stable }) : '';
+      if (!k && !stable) k = await invoke<string>('load_api_key', { account: legacy });
       fallbackKeys[i] = k ?? '';
     } catch {
       /* 有意兜底：备用供应商的 Key 允许没配（没配就没配，不是错误）。

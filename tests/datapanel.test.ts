@@ -463,3 +463,55 @@ test('readLedgerSummary：没有产物目录 / 台账还没建 → 返回 null�
   assert.equal(await DP.readLedgerSummary({}), null);
   assert.equal(await DP.readLedgerSummary({ 产物目录: '/out' }), null);
 });
+
+/* ══════ 2026-09-14：一键生成 调适项目_*.json（采纳失败的出口） ══════
+ *
+ * 背景：没有这份配置时，"采纳 / 直改"**100% 被拒**（这是设计如此——没有版本与追溯的去处
+ * 就不该写正文）。但原先界面上只教"复制模板"那条命令，等于要求教师开终端、还得知道仓库在哪。
+ * 现在 App 里能一键生成。这条用例钉两件事：
+ *  ① 能从书目录推出来的路径必须**真的填进去**（不是把模板原样抄一遍）；
+ *  ② 猜不出来的那几项必须**如实列为待办**——它们指向教师自己机器上的文件，
+ *     悄悄留个占位符而不告诉他，等于让他拿着一份坏配置去用。
+ */
+test('createProjectConfig：能推的路径填好、猜不到的如实列成待办', async () => {
+  const store: Record<string, string> = {};
+  setIo({
+    async read(p) {
+      return store[p] ?? '';
+    },
+    async write(p, c) {
+      store[p] = c;
+    },
+    async appendLog() {
+      /* noop */
+    },
+    async listDir() {
+      return [];
+    },
+    /* 本分支的 PanelIo 比主仓多一个 `reveal`（台账卡上的"在访达中显示"）。 */
+    async reveal() {
+      /* noop */
+    },
+  });
+  const DP = await import('../app/src/datapanel.js');
+  const made = await DP.createProjectConfig('/Users/某某/我的书');
+  assert.ok(made, '模板读不出来时返回 null；这里应当成功');
+  assert.equal(made!.path, '/Users/某某/我的书/调适项目_我的书.json');
+
+  const cfg = JSON.parse(store[made!.path]!) as Record<string, unknown>;
+  assert.equal(cfg['书名'], '我的书');
+  assert.equal(cfg['调适工作区'], '/Users/某某/我的书/调适工作区');
+  assert.equal(cfg['产物目录'], '/Users/某某/我的书/调适工作区/重制三版');
+  assert.equal(cfg['原文目录'], '/Users/某某/我的书/调适工作区/原文重制_M50');
+
+  /* 模板里带"（…）"的占位项必须全部出现在待办里，且推出来的那几项**不在**待办里 */
+  assert.ok(made!.todo.length > 0, '模板本来就有猜不出来的路径，待办不该是空的');
+  assert.ok(made!.todo.includes('引擎目录'), '引擎目录指向 LayerText 本体，必须让教师自己填');
+  assert.ok(
+    made!.todo.some((t) => t.startsWith('书级.')),
+    '书级下的词库/专名表/知识库/词典都要点名',
+  );
+  for (const filled of ['书名', '工作区', '调适工作区', '原文目录', '产物目录']) {
+    assert.ok(!made!.todo.includes(filled), `${filled} 已经填好了，不该出现在待办里`);
+  }
+});

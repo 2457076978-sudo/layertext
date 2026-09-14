@@ -31,6 +31,7 @@ import { sentenceRisks } from '../../src/core/risks.js';
 import { buildSystemPrompt, buildRewriteSentencePrompt, promptSetVersion, simplifyMaxLen } from './ai.js';
 import { RULE_BY_TYPE, appendCsvLine } from './main.js';
 import { showAiSettings } from './settings.js';
+import { readTextChecked } from './fsx.js';
 import { applyZhAnnotations, applyWordSimplifications } from './pipew.js';
 import { buildAppPolicy } from './rewritegate.js';
 import { checkRewrite } from '../../src/core/rewrite.js';
@@ -355,14 +356,11 @@ export async function acceptSuggestion(g: Suggestion, opts: { scene?: string; ou
         // 首改前留一份"原始备份"（与 persistEdit 同一约定），有备份就不覆盖
         const dir = p.slice(0, p.lastIndexOf('/'));
         const bak = `${dir}/${p.slice(p.lastIndexOf('/') + 1).replace(/\.(md|txt|markdown)$/i, '')}_原始备份.md`;
-        try {
-          await invoke<string>('read_text_file', { path: bak });
-        } catch {
-          /* 有意兜底：读不到就当作"还没有备份"（首改前留一份＝这个 catch 的主用途）。
-           * 风险写明：后端没给错误码，"文件不存在"与"文件存在但读不出来"在这里分不出来，
-           * 后一种情况下这一写会把原始备份换成当前内容。 */
-          await invoke('write_text_file', { path: bak, content: c });
-        }
+        /* 2026-09-14：用 `fsx` 把"还没有备份"与"备份在、但读不出来"分开——
+         * 后者如果照写，会把教师唯一的原始版换成当前内容（原先的风险是写在注释里自认的）。 */
+        const r = await readTextChecked(bak);
+        if (r.kind === 'unreadable') throw new Error(`原始备份 ${bak} 读不出来（${r.error}）——为免覆盖掉它，本次改动没有执行`);
+        if (r.kind === 'missing') await invoke('write_text_file', { path: bak, content: c });
       },
       now: () => new Date().toISOString(),
     },

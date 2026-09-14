@@ -4,6 +4,35 @@
 1.0.0 之前的版本号为开发期里程碑（当时 `package.json` 未同步递增，本文件按里程碑整理，2026-09-06 校准）。
 面向教师的通俗版功能说明见 [README](README.md) 与 [docs/PRD.md](docs/PRD.md)。
 
+## [未发布] - 2026-09-14（codex/total-optimization · 第十一轮同步：新模块 fsx.ts + Rust describe_path + 一键建配置 + 恢复保存入口）
+
+主仓第十一轮把上一轮结尾列的"还没解决"做掉了（第 101–107 项，逐条理由见主仓 CHANGELOG）。
+本分支照旧**逐条断言锚点**同步，不做整文件覆盖。
+
+**同步过来的**
+
+| 位置 | 内容 |
+| --- | --- |
+| `app/src/fsx.ts`（**新模块**） | 文件读取的三态：`ok` / `missing` / `unreadable`。把"文件不存在"（常态）与"文件在但读不出来"（权限/占位——这时写回去就是覆盖教师数据）分开 |
+| `app/src-tauri/src/main.rs` | 新增并注册 `describe_path`（回答"这个路径在不在"），`fsx` 靠它做判定 |
+| `app/src/bookio.ts` | `loadBookConfig` 与 `_词库.csv` 的读取改走三态："读不出来"不再是"没配过" |
+| `app/src/chat.ts` | `restoreChat` 改走三态；损坏/读不出来时**暂停自动保存**，并给「我已备份好，恢复保存」 |
+| `app/src/main.ts` | 打开章节读 `_审校标记.json` 改走三态；风险面板空态加「一键生成 调适项目_*.json」 |
+| `app/src/aiflow.ts` | 原始备份读不出来时**中止本次改动**（原先注释里明写"风险自认"） |
+| `app/src/review.ts` | 侧栏加「本章标记没有在保存」常驻横幅 + 恢复保存（原先只能重启 App） |
+| `app/src/adoptrewrite.ts` | 缺调适项目配置的拒绝文案补上"下一步去哪做" |
+| `app/src/datapanel.ts` | `createProjectConfig()`：一键生成配置，能推的路径填好、猜不到的如实列成待办 |
+| `app/src/ai.ts` + `settings.ts` | 「清 Key」不再是假动作：有稳定 id 就不回落下标账号（老 Key 在分配 id 那一刻搬过去） |
+| `app/src/pure.ts` | 新增 `failoverRowKind` / `partitionFailoverRows` / `failoverKeyAccounts`（读、写、删共用一套判据） |
+| `tests/fsx.test.ts`（新）、`tests/app_logic.test.ts`、`tests/datapanel.test.ts` | 9 条新用例 |
+
+**分支独有的一处**：`tests/datapanel.test.ts` 里的 `setIo` 替身要补一个 `reveal`——
+本分支的 `PanelIo` 比主仓多这一个成员（台账卡上的「在访达中显示」）。编译错误当场指出来的。
+
+**验证**：本 worktree `npm run verify` 全绿（preflight 43 + 根/app typecheck + lint 0 warning +
+**1009 项：1008 通过 / 0 失败 / 1 跳过**）；Rust gate（`cargo fmt` / `cargo clippy --all-targets -- -D warnings` /
+6 测试）全绿。
+
 ## [未发布] - 2026-09-14（codex/total-optimization · 按钮审计后半批：把"发现了但没改"的九条同步过来）
 
 主仓第十轮把上一轮留下的九条"发现但没改"逐条核实并改完（第 86–100 项，逐条理由见主仓 CHANGELOG）。

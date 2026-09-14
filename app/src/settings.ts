@@ -13,6 +13,7 @@ import { showVocabEditor } from './pipew.js';
 import { scheduleHeatRail } from './edit.js';
 import { AI_PROVIDERS, AUX_DEFAULT_BASE_URL, AUX_DEFAULT_MODEL, AUX_MAX_WORDS, aiErrHuman, loadConfig, reloadPrompts, saveConfig, simplifyMaxLen } from './ai.js';
 import { filterTargets, type ClassTarget } from './bookpure.js';
+import { failoverKeyAccounts, partitionFailoverRows } from './pure.js';
 
 /* ---------- 班级多人定制（折叠多选栏，feature/reinforce） ---------- */
 
@@ -290,7 +291,23 @@ export function showAiSettings(): void {
       key: (r.querySelector('.fb-key') as HTMLInputElement).value.trim(),
     }));
   $('ai-fb-add').addEventListener('click', () => addFbRow());
-  for (const f of S.appConfig.failover ?? []) addFbRow(f.name ?? '', f.baseUrl ?? '', f.model ?? '', '', f.id ?? '');
+  /* 2026-09-14：老配置的行**没有稳定 id**，Key 存在按下标的老账号（`fb0`/`fb1`）里。
+   * 这里给它们新分配 id 的**同时**把老 Key 搬过去——这时下标还有意义，搬完就再也不用它了
+   * （`ai.ts` 现在"有 id 就不回落下标"）。搬失败也认：老配置没有 id 时仍走老路径。 */
+  (S.appConfig.failover ?? []).forEach((f, i) => {
+    addFbRow(f.name ?? '', f.baseUrl ?? '', f.model ?? '', '', f.id ?? '');
+    if (f.id) return;
+    void (async () => {
+      try {
+        const legacy = await invoke<string>('load_api_key', { account: failoverKeyAccounts(undefined, i).legacy });
+        const row = fbRows.querySelectorAll('.rw-row')[i] as HTMLElement | undefined;
+        const stable = row?.dataset.fbId;
+        if (legacy && stable) await invoke('save_api_key', { key: legacy, account: `fb:${stable}` });
+      } catch {
+        /* 有意兜底：搬不动不改行为——这一行仍按老账号（`fb<i>`）读，最坏是"没搬成功"。 */
+      }
+    })();
+  });
 
   void (async () => {
     await loadConfig();
@@ -375,9 +392,9 @@ export function showAiSettings(): void {
        * 用的是**过滤后**的 N——教师明明填了两行，界面说保存了一个，另一个不见了，
        * 且没有任何提示。现在改成：整行全空＝只是没用的空行，静默跳过；
        * **填了一半的必须点名**，并且不谎报"已保存"。 */
-      const allFb = collectFb();
-      const fbs = allFb.filter((f) => f.baseUrl && f.model);
-      const halfFilled = allFb.filter((f) => !(f.baseUrl && f.model) && (f.name || f.baseUrl || f.model || f.key));
+      /* 分拣是**纯逻辑**，抽到 `pure.ts` 并单测——原先它跟那句 `.filter()` 一起埋在
+       * 收集函数里，过滤器把半成品在到达判定点之前就吃掉了，"点名"根本无从谈起。 */
+      const { keep: fbs, half: halfFilled } = partitionFailoverRows(collectFb());
       S.appConfig.failover = fbs.length ? fbs.map((f) => ({ id: f.id, name: f.name, baseUrl: f.baseUrl, model: f.model })) : undefined;
       /* 辅助模型（可选）：关着也把地址/模型留着——下次再开不用重填 */
       const auxOn = ($('aux-on') as HTMLInputElement).checked;

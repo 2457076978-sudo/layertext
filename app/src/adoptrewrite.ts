@@ -155,7 +155,11 @@ export async function adoptRewrite(io: TxIo, input: AdoptRewriteInput): Promise<
 
   const paths = await adoptPathsFor(io, { sourcePath: input.sourcePath, config: input.config, tier: input.tier });
   if (!paths) {
-    return reject('这本书还没有调适项目配置（缺 产物目录 / 调适工作区）——没有它就没有版本与追溯的去处');
+    /* 这条拒绝是**设计如此**（没有版本与追溯的去处就不该写正文），但光说"不行"等于死路：
+     * 教师看到的就是"采纳按钮永远失败"。把**下一步去哪做**一起说了。 */
+    return reject(
+      '这本书还没有调适项目配置（缺 产物目录 / 调适工作区）——没有它就没有版本与追溯的去处。去「库」页点「一键在这本书里生成 调适项目_*.json」，再把其中几项路径换成你自己的真实文件，然后重新打开这本书',
+    );
   }
 
   let doc: string;

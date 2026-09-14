@@ -11,7 +11,8 @@ import { unzipSync, strFromU8 } from 'fflate';
 import { chnoFromPath, tagFromPath, normalizeAndSplitChapters, parseAiJson, routeSelection, decodeAuto } from './pure.js';
 import { parseEpubChapters, epubChapterMd } from './bookpure.js';
 import { renderModePill, switchView as switchViewDom, bindViewTabs, type ViewName } from './widgets.js';
-import { findProjectConfig, io as panelIo, renderDataPane } from './datapanel.js';
+import { createProjectConfig, findProjectConfig, io as panelIo, renderDataPane } from './datapanel.js';
+import { readTextChecked } from './fsx.js';
 import { teacherIdOf } from '../../src/core/teachers.js';
 import { renderRiskPane, setRiskIo, TAGS as RISK_TAGS } from './risk.js';
 import { S, esc } from './state.js';
@@ -128,13 +129,16 @@ export async function addSession(md: string, fileName: string, sourcePath: strin
   }
   const markPath = await markPathFor(sourcePath, fileName);
   const review = newReviewState(fileName);
-  let saved: string | null = null;
-  try {
-    saved = await invoke<string>('read_text_file', { path: markPath });
-  } catch {
-    /* 有意兜底：这一章还没审过＝没有标记文件，是常态（`read_text_file` 对缺失文件是报错的）。 */
+  /* `fsx.readTextChecked` 把"还没审过"（没有这个文件，常态）与"文件在但读不出来"
+   * （权限/占位——这时把空清单写回去就是整章标记全丢）分开了。
+   * `markFileBroken` 会拦住后一种情况的保存。 */
+  const markRead = await readTextChecked(markPath);
+  if (markRead.kind === 'unreadable') {
+    setStatus(`这一章的标记文件读不出来（${markRead.error.slice(0, 80)}）：${markPath}——**先备份它再重新标记**，本次不会覆盖它`, 'err');
+    S.markFileBroken.add(markPath);
   }
-  if (saved !== null) {
+  if (markRead.kind === 'ok') {
+    const saved = markRead.text;
     /* 2026-09-14：**解析失败必须与"文件不存在"分开**。原先两者共用一个 catch，
      * 于是损坏的 _审校标记.json 被当成"空清单"打开，教师接着标、下次保存就整体覆盖——
      * 整章标记全丢且没有任何提示。 */
@@ -428,7 +432,27 @@ async function openRiskPane(): Promise<void> {
   const workDir = typeof cfg['调适工作区'] === 'string' ? cfg['调适工作区'] : '';
   if (!outDir || !workDir) {
     $('pane-risk').innerHTML =
-      '<div class="empty"><b>这本书还没有调适项目配置</b><br/>风险队列靠 <code>调适项目_*.json</code> 定位产物目录与调适工作区。<br/><span style="font-size:12px">写法见 docs/快速开始.md 第 2 节</span></div>';
+      '<div class="empty"><b>这本书还没有调适项目配置</b><br/>风险队列与「采纳 / 直改」都靠 <code>调适项目_*.json</code> 定位产物目录与调适工作区。<br/>' +
+      '<button id="rp-mk-proj" style="margin-top:8px">一键在这本书里生成 调适项目_*.json</button><br/>' +
+      '<span style="font-size:12px">生成后把几项路径换成你自己的真实文件即可（写法见 docs/快速开始.md 第 2 节）</span></div>';
+    document.getElementById('rp-mk-proj')?.addEventListener('click', async () => {
+      const btn = document.getElementById('rp-mk-proj') as HTMLButtonElement | null;
+      if (btn) btn.disabled = true;
+      try {
+        const made = await createProjectConfig(dir);
+        if (!made) {
+          toast('这本书的目录名取不到，没有生成任何文件', 'err');
+          if (btn) btn.disabled = false;
+          return;
+        }
+        toast(`已生成 ${made.path}${made.todo.length ? `——还需填：${made.todo.join('、')}` : ''}`, 'ok');
+        await openRiskPane();
+      } catch (e) {
+        toast(`生成失败：${String(e)}`, 'err');
+        setStatus(`生成 调适项目_*.json 失败：${String(e)}`, 'err');
+        if (btn) btn.disabled = false;
+      }
+    });
     return;
   }
   // 与 datapanel 共用同一套 IO（Tauri 下是 read_text_file/write_text_file）——
