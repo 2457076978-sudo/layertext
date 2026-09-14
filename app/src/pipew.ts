@@ -14,6 +14,7 @@ import { restoreAllMarkDom, renderSidebar, scheduleSave } from './review.js';
 import { CHANGELOG_HEADER, newMarkId, type FileSession, type Mark } from './types.js';
 import { parseSpecifiedReplacement } from '../../src/core/pendingqueue.js';
 import { S as _S } from './state.js';
+import { readTextChecked } from './fsx.js';
 import {
   annotatedHeadOf,
   glossOutOfVocab,
@@ -1027,7 +1028,17 @@ export async function propagateWordAction(s: FileSession, op: 'annotate' | 'unan
     if (!kids.length) return;
 
     const names = await invoke<string[]>('list_dir', { dir });
+    /* 2026-09-14 **加确认**（Wayne 拍板"可以改正文，但每次都要教师确认"）。
+     * 原先这里是**自动写**：上级教师点一下「加注中文」，下级 A→M/B 的正文就被改了，
+     * 他既没看见改了哪些文件，也没有任何一次点头。改正文的按钮必须先给教师看要改什么。
+     * 做法：先按"同一套命名表"挑目标、逐个算出命中处数，列出来问一次，再写；
+     * 写之前每个文件留 `_原始备份.md`（与 persistEdit 同一口径）。
+     * `rewrite` 类**不在此列**——它只写下级待办清单，不动正文。 */
+    const plan: { tag: string; path: string; text: string; hits: number }[] = [];
+    const unreadable: string[] = [];
     let touched = 0;
+    /* 记进账、随后渲染出来（`appswallow` 认的就是这个形状）。 */
+    const failedFiles: string[] = [];
     for (const kid of kids) {
       const tag2 = naming[kid];
       if (!tag2) continue;
@@ -1035,7 +1046,12 @@ export async function propagateWordAction(s: FileSession, op: 'annotate' | 'unan
       const target = candidates.at(-1); // 同层多版本取字典序最新（日期新、_工序化 排后）
       if (!target) continue;
       const targetPath = `${dir}/${target}`;
-      const text = await invoke<string>('read_text_file', { path: targetPath });
+      const rd = await readTextChecked(targetPath);
+      if (rd.kind !== 'ok') {
+        unreadable.push(`${tag2} ${target}`);
+        continue;
+      }
+      const text = rd.text;
       if (op === 'rewrite') {
         // 跨层机器改写有风险：只记待办，交下级教师过目
         const todoDir = `${dir}/_待复核`;
@@ -1052,38 +1068,66 @@ export async function propagateWordAction(s: FileSession, op: 'annotate' | 'unan
       }
       const r = applyWordActionToText(text, word, op, zh);
       if (!r.changed) continue;
-      await invoke('write_text_file', { path: targetPath, content: r.text });
-      touched++;
-      /* 变更日志 R18（下级章目录自己的日志，与 R16 去标注/R17 英语释义同表同口径） */
-      try {
-        const date = new Date().toLocaleDateString('sv-SE');
-        const logPath = `${dir}/变更日志_AI审核.csv`;
-        let csv = '';
-        try {
-          csv = await invoke<string>('read_text_file', { path: logPath });
-        } catch {
-          /* 有意兜底：首次写表 */
+      /* 只**算**，不写。写盘统一挪到教师确认之后（见下）。 */
+      plan.push({ tag: tag2, path: targetPath, text: r.text, hits: 1 });
+    }
+    if (unreadable.length) setStatus(`层级传播：${unreadable.length} 个下级文件读不出来，已跳过（${unreadable.slice(0, 3).join('、')}）`, 'err');
+    if (plan.length) {
+      const lines = plan.map((p) => `· ${p.tag} ${baseName(p.path)}`).join('\n');
+      if (
+        !window.confirm(
+          `把这次「${word}」的${op === 'annotate' ? '加注' : '去标注'}同步到下级读者正文？\n\n${lines}\n\n合计 ${plan.length} 个文件（只插/剥中文注释，英文原句不动）。每个文件写前会留一份 _原始备份.md。`,
+        )
+      ) {
+        setStatus(`层级传播已取消（${plan.length} 个下级文件未写入）`, '');
+      } else {
+        for (const p of plan) {
+          try {
+            const backup = `${p.path.replace(/\.md$/i, '')}_原始备份.md`;
+            const bak = await readTextChecked(backup);
+            if (bak.kind === 'unreadable') throw new Error(`原始备份 ${backup} 读不出来，未改动`);
+            if (bak.kind === 'missing') {
+              const cur = await readTextChecked(p.path);
+              if (cur.kind === 'ok') await invoke('write_text_file', { path: backup, content: cur.text });
+            }
+            await invoke('write_text_file', { path: p.path, content: p.text });
+            touched++;
+          } catch (e) {
+            failedFiles.push(`${baseName(p.path)}（${String(e)}）`);
+          }
         }
-        if (!csv.trim()) csv = CHANGELOG_HEADER.join(',') + '\n';
-        const detail = op === 'annotate' ? `${word}（${zh}）` : word;
-        csv +=
-          [
-            'R1',
-            date,
-            `标准${simplifyMaxLen()}词`,
-            '',
-            '',
-            detail,
-            op === 'annotate' ? detail.slice(0, detail.indexOf('（')) : detail,
-            'R18',
-            `层级传播：上级 ${myTag} 的${op === 'annotate' ? '加注' : '去标注'}决定自动落实到本层`,
-            '层级传播',
-          ]
-            .map(csvCell)
-            .join(',') + '\n';
-        await invoke('write_text_file', { path: logPath, content: csv });
-      } catch {
-        /* 有意兜底：日志失败不拦正文 */
+        /* 变更日志 R18（下级章目录自己的日志，与 R16 去标注/R17 英语释义同表同口径）。
+         * 只给**真写成功**的那些文件记账——失败的不许留"已落实"的痕。 */
+        if (touched) {
+          try {
+            const date = new Date().toLocaleDateString('sv-SE');
+            const logPath = `${dir}/变更日志_AI审核.csv`;
+            let csv = '';
+            const rd = await readTextChecked(logPath);
+            if (rd.kind === 'ok') csv = rd.text;
+            else if (rd.kind === 'unreadable') throw new Error(rd.error);
+            if (!csv.trim()) csv = CHANGELOG_HEADER.join(',') + '\n';
+            const detail = op === 'annotate' ? `${word}（${zh}）` : word;
+            csv +=
+              [
+                'R1',
+                date,
+                `标准${simplifyMaxLen()}词`,
+                '',
+                '',
+                detail,
+                op === 'annotate' ? detail.slice(0, detail.indexOf('（')) : detail,
+                'R18',
+                `层级传播：上级 ${myTag} 的${op === 'annotate' ? '加注' : '去标注'}决定落实到本层（教师已确认）`,
+                '层级传播',
+              ]
+                .map(csvCell)
+                .join(',') + '\n';
+            await invoke('write_text_file', { path: logPath, content: csv });
+          } catch (e) {
+            toast(`下级正文已改，但变更日志没写上：${String(e)}——这次传播不会出现在台账里`, 'err');
+          }
+        }
       }
     }
     if (touched)
@@ -1091,9 +1135,10 @@ export async function propagateWordAction(s: FileSession, op: 'annotate' | 'unan
         `层级传播：${kids
           .map((k) => naming[k])
           .filter(Boolean)
-          .join('/')} 层已${op === 'rewrite' ? '记录待办' : '自动落实'}「${word}」（${touched} 个文件）`,
+          .join('/')} 层已${op === 'rewrite' ? '记录待办' : '落实'}「${word}」（${touched} 个文件）`,
         'ok',
       );
+    if (failedFiles.length) setStatus(`层级传播部分失败：${failedFiles.join('；')}`, 'err');
   } catch {
     /* 有意兜底：传播是增强路径：项目没配层级/文件枚举失败都静默——主操作已成功 */
   }

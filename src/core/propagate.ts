@@ -12,13 +12,14 @@
  * 变更后由调用方全量重放（本模块提供 descendantsOf 与 applyWordAction 两个纯函数，
  * 文件枚举/写入由调用方做——引擎不做 IO）。
  *
- * ⚠ **尚未接线**（2026-09-14 复核）：本模块是 2026-09-13 拍板的能力规格，纯函数齐全、
- * 也有单测，但**全仓没有任何地方调用它**（只有 `tests/propagate.test.ts`）。
- * 也就是说：它**不是一道正在生效的机制**——现在不会因为上级加了注就去改下级文件。
- * 接线前要定两件事（都是产品/数据决定，不是技术决定）：
- *   ① 教师在哪个操作之后触发跨层传播（点一下按钮，还是每次加注都自动？）；
- *   ② 允许写哪些文件——传播会改**别的层级**的正文，那是数据改动，得有明确的授权口径。
- * 在那之前，请勿把它当成"已经在保护下级读者"。
+ * **已接线**（2026-09-14 晚）：触发点是「加注中文」这个动作之后——
+ * `app/src/pipew.ts` 的 `applyZhAnnotations` 跑完，会调 `offerPropagation()`：
+ * 列出各下级层要改的文件与命中处数，**教师确认后**才写。
+ * 两件当初待定的产品决定，现在定成这样：
+ *   ① 触发点 = 「加注中文」之后**每次都问**（不自动写），「换词」类仍只待办、不动下级正文；
+ *   ② 允许写哪些文件 = **只写同章目录下的 `原文_<下级层标签>_*.md`**（正文产物正本），
+ *      备份/工作稿/标记文件都不在范围内；每次写之前留 `_原始备份.md` 并落变更日志。
+ * 决策依据：Wayne 2026-09-14 明确"可以改正文，但每次都要教师确认"。
  */
 
 /** 资产类别：决定传播策略 */
@@ -114,4 +115,52 @@ export function tierKeyOfTag(tag: string, naming: Readonly<Record<string, string
     if (t === tag) return key;
   }
   return null;
+}
+
+/** 一个待传播的目标文件：层键、层标签、完整路径。 */
+export interface PropagationTarget {
+  tier: string;
+  tag: string;
+  path: string;
+}
+
+/**
+ * 从"当前这一层的文件"出发，挑出**它全部下级层**的同章文件（纯函数；不读不写）。
+ *
+ * 用途：上级教师确认的词级操作要传播到下级读者文本，传播对象就是这些文件。
+ * 判定全部用同一套命名表（项目配置的 `产物命名`），不在这里另写一套 `A层85` 字面量——
+ * 换一本书、换一套命名依然成立。
+ *
+ * 返回顺序按 `descendantsOf` 的层级顺序，便于界面按"先 M 后 B"列出来给教师看。
+ */
+export function descendantTierFiles(tree: ReaderTree, naming: Readonly<Record<string, string>>, fromTag: string, files: readonly string[]): PropagationTarget[] {
+  const fromTier = tierKeyOfTag(fromTag, naming);
+  if (!fromTier) return [];
+  const wanted = new Map<string, string>(); // tier → tag
+  for (const tier of descendantsOf(tree, fromTier)) {
+    const tag = naming[tier];
+    if (tag) wanted.set(tier, tag);
+  }
+  if (!wanted.size) return [];
+  const out: PropagationTarget[] = [];
+  for (const path of files) {
+    /* 只认"正文产物"：`原文_<tag>_…md`。
+     * 用 `原文_` 前缀而不是"文件名里含 tag"——后者会把碰巧带同名字段的文件也卷进来。 */
+    if (!/(^|\/)原文_/.test(path)) continue;
+    if (!/\.(md|txt)$/i.test(path)) continue;
+    /* 还要排掉同目录下的**派生物**：`_工作稿.md`（app 写的工作副本）与 `_原始备份.md`
+     * （首改前留的原始版）。它们与正本同层、文件名里同样带层标签，只有后缀不同——
+     * 传播把它们一起改了，等于**污染备份、并把工作稿当成第二份正本**。
+     * 这条由 `tests/propagate.test.ts` 钉住（第一版就是被它当场抓出来的）。 */
+    if (/_(工作稿|原始备份)\.(md|txt)$/i.test(path)) continue;
+    const tag = tierTagOfFilename(path, naming);
+    if (!tag) continue;
+    const tier = tierKeyOfTag(tag, naming);
+    if (!tier || !wanted.has(tier)) continue;
+    if (out.some((t) => t.path === path)) continue;
+    out.push({ tier, tag, path });
+  }
+  const order = [...wanted.keys()];
+  out.sort((a, b) => order.indexOf(a.tier) - order.indexOf(b.tier) || a.path.localeCompare(b.path));
+  return out;
 }

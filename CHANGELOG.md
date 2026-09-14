@@ -4,6 +4,40 @@
 1.0.0 之前的版本号为开发期里程碑（当时 `package.json` 未同步递增，本文件按里程碑整理，2026-09-06 校准）。
 面向教师的通俗版功能说明见 [README](README.md) 与 [docs/PRD.md](docs/PRD.md)。
 
+## [未发布] - 2026-09-14（codex/total-optimization · 第十二轮：跨层传播补确认 + 引擎侧挑选函数同步）
+
+Wayne 拍板：三个"未接线"模块都接，触发点由 agent 定；**可以改正文，但每次都要教师确认**。
+主仓把三条逐个收口（第 108–110 项，理由见主仓 CHANGELOG）。
+
+**分支上这一条要说清楚：这里本来就有一份，而且它在跑——只是跑法不对。**
+
+本分支早就有一份 `propagateWordAction`（`app/src/pipew.ts`），在「加注中文」与「词汇简化」
+之后**自动**调用：上级教师点一下，下级 M/B 的正文立刻被改写，
+**没有确认、没有备份、只在日志里留一行**。它被调用着，所以"未接线"这个判断对分支不成立；
+但按这一轮拍的口径，它是错的——改别人层级的正文必须先让教师看见要改什么。
+
+这一轮把分支那份改成与主仓同一口径：
+
+- 先按项目的「产物命名」挑出下级层目标、逐个算出会不会命中（`list_dir` 返回全路径，
+  `原文_<下级层标签>_*.md`）；
+- **列出来问一次**（`window.confirm`，逐文件列出），取消就一个字不改；
+- 确认后每个文件**写前留 `_原始备份.md`**，再写正文；
+- 变更日志只给**真写成功**的文件记账（失败的不许留"已落实"的痕）；
+- 读不出来的文件点名跳过，写失败的点名报出。
+
+**引擎侧与测试同步**：`src/core/propagate.ts` 新增 `descendantTierFiles`（挑目标，
+排掉 `_工作稿.md` / `_原始备份.md` 这类派生物——第一版漏了，被新用例当场抓出：
+"A 的下级是 M、B" 实得 `['M','M','M','B']`）；`tests/propagate.test.ts` 补 3 条；
+`tests/candidate.test.ts` 补 1 条守卫（`applyUndo` 不许回来——撤销的正路是
+`candidatesFromEvents` 的全量重建，不是增量扣证据）。
+
+**主仓另外接了一条**（分支上没有对应入口）：`docast.ts` 的 `applyRepairs` 接到
+质检报告页的「⑤ 标注体检」卡（预览逐条 diff → 确认 → `persistEdit`）。
+
+**验证**：本 worktree `npm run verify` 全绿（preflight 43 + 根/app typecheck + lint 0 warning +
+**1013 项：1012 通过 / 0 失败 / 1 跳过**）；Rust gate（`cargo fmt` / `cargo clippy --all-targets -- -D warnings` /
+6 测试）全绿。
+
 ## [未发布] - 2026-09-14（codex/total-optimization · 第十一轮同步：新模块 fsx.ts + Rust describe_path + 一键建配置 + 恢复保存入口）
 
 主仓第十一轮把上一轮结尾列的"还没解决"做掉了（第 101–107 项，逐条理由见主仓 CHANGELOG）。
