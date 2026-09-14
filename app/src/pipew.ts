@@ -660,7 +660,7 @@ export async function showSyncMarksDialog(): Promise<void> {
       } catch {
         /* 有意兜底：这个版本还没有标记文件＝它还没审过（缺失文件本来就是报错的），从空集合开始。 */
       }
-      plans.push({ name: n, path, plan: syncMarksToMd(syncable, md, existing, newMarkId) });
+      plans.push({ name: baseName(n), path, plan: syncMarksToMd(syncable, md, existing, newMarkId) });
     } catch (e) {
       /* 跳过的版本要**点名**：不点名的话，下面"将新建 N 条"读起来像"所有版本都同步到了"，
        * 而实际有一个版本连读都没读到——教师会以为它已经领到待办了。 */

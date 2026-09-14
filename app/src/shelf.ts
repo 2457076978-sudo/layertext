@@ -311,13 +311,18 @@ function renderShelfGrid(el: HTMLElement, books: ShelfBook[], covers: Map<string
     chip.classList.toggle('cur', active);
   });
   bindShelfCards(el, books);
+  /* 2026-09-14 修（**死按钮**）：`#shelf-demo` 与 `#shelf-add` 的 DOM 由**本函数**重建，
+   * 而监听原先只在 `bindShelfChrome` 里绑过一次。搜索框敲一个字、切一次视图、点一下分组 chip——
+   * 这三条都会重跑本函数，之后这两个按钮**再没有任何监听**：不弹框、不报错、不 toast，
+   * 纯粹点了没反应，只有回到书架首页才恢复。改成跟着这次重建一起绑。 */
+  el.querySelector('#shelf-demo')?.addEventListener('click', () => loadBuiltinDemo());
+  el.querySelector('#shelf-add')?.addEventListener('click', () => void addBookToShelf());
 }
 
-/** 骨架上的固定交互：继续上次 / 示例 / 添加 / 搜索 / 视图 / 分组条 */
+/** 骨架上的固定交互：继续上次 / 搜索 / 视图 / 分组条
+ *  （示例与添加两个按钮的 DOM 由 `renderShelfGrid` 重建，绑定也在那边） */
 function bindShelfChrome(el: HTMLElement, books: ShelfBook[], covers: Map<string, string | null>): void {
   document.getElementById('shelf-resume')?.addEventListener('click', () => void resumeLastSession());
-  document.getElementById('shelf-demo')?.addEventListener('click', () => loadBuiltinDemo());
-  document.getElementById('shelf-add')?.addEventListener('click', () => void addBookToShelf());
   const q = document.getElementById('shelf-q') as HTMLInputElement | null;
   q?.addEventListener('input', () => {
     S.shelfQ = q.value;

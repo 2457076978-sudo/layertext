@@ -606,14 +606,16 @@ export async function renderRiskPane(
       ${historyBar}
     </div>`;
 
-  if (!file.队列.length) {
-    el.innerHTML = `${head}<div class="empty">队列为空——本层没有机器点得出来的风险，可直接抽样阅读。<br/><span style="font-size:12px">${esc(POSITIONING_LINE)}</span></div>`;
-    return { ok: true, message: '队列为空' };
-  }
-  if (!left.length) {
-    el.innerHTML = `${head}<div class="empty">队列已全部处理完（共 ${stat.total} 条）。历史决定一条没删，可随时回头改。</div>`;
-    return { ok: true, message: '已全部处理' };
-  }
+  /* 2026-09-14 修（**画出来却点不动**）：原先这两条是 `return`，而 head 里带着
+   * 「暂停/继续」「我做完了」与「看我判过的」里的撤销键——它们被渲染出来，却因为
+   * 绑定循环在下面、被 return 跳过，**一个监听都没有**。而"这层我判完了"恰恰是最想回头
+   * 撤销一条的时刻。现在只记一个空态 HTML，让下面的绑定循环照常跑完
+   * （没有卡片时那几组 querySelectorAll 自然为空；groups 是空数组，card/groupHtml 只是定义）。 */
+  const emptyHtml = !file.队列.length
+    ? `<div class="empty">队列为空——本层没有机器点得出来的风险，可直接抽样阅读。<br/><span style="font-size:12px">${esc(POSITIONING_LINE)}</span></div>`
+    : !left.length
+      ? `<div class="empty">队列已全部处理完（共 ${stat.total} 条）。历史决定一条没删，可随时回头改。</div>`
+      : null;
 
   const flashBar = flash ? `<div class="rq-flash">⚠ ${esc(flash.text)} <span style="color:var(--muted)">（${esc(flash.hint ?? '这一条仍在待办里，正文没有改动')}）</span></div>` : '';
   const card = (it: RiskItem): string => `
@@ -667,7 +669,7 @@ export async function renderRiskPane(
     </section>`;
   };
 
-  el.innerHTML = `${head}${flashBar}<div class="rq-list">${groups.map(groupHtml).join('')}</div>`;
+  el.innerHTML = emptyHtml ? `${head}${emptyHtml}` : `${head}${flashBar}<div class="rq-list">${groups.map(groupHtml).join('')}</div>`;
 
   /* 「我做完了」：**一天只记一条**（与 session-open 同一条纪律）——
    * 重复记会让"完成时间"变成"最后一次点它的时间"。 */
@@ -780,6 +782,7 @@ export async function renderRiskPane(
       });
     });
   }
+  if (emptyHtml) return { ok: true, message: !file.队列.length ? '队列为空' : '已全部处理' };
   return { ok: true, message: `待办 ${left.length} 条` };
 }
 

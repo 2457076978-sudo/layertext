@@ -170,6 +170,11 @@ function setReaderLineHeight(v: number): void {
 
 /** 班级多人定制面板：工具栏不再常驻，入口在 质检 菜单 与 设置 弹层 */
 export function toggleClsPanel(): void {
+  /* 2026-09-14 修 —— **这个面板从功能引入起就打不开**：
+   * `#cls-panel` 由 `renderClsPanel()` 惰性创建，而这里在调它**之前**就 `if (!p) return`——
+   * 于是第一次点永远命不中，也就永远没有第一次创建。两个入口（设置里的「选择班级…」、
+   * 原生菜单「班级多人定制…」）走的都是这条死路，连带的关闭/刷新/清空与所有班级勾选框全部不可达。 */
+  if (!document.getElementById('cls-panel')) renderClsPanel();
   const p = document.getElementById('cls-panel') as HTMLElement | null;
   if (!p) return;
   const show = p.style.display === 'none' || !p.style.display;
@@ -482,6 +487,9 @@ function renderSettings(): void {
   document.getElementById('set-autorew')?.addEventListener('change', (e) => {
     S.appConfig.autoRewriteOnMark = (e.target as HTMLInputElement).checked;
     void saveConfig();
+    /* 2026-09-14：这里原先不刷顶部模式胶囊——改完关掉设置，胶囊仍显示旧模式，
+     * 而 reader.ts 读的是新值：**界面说的和程序做的相反**。 */
+    updateModePill();
     toast('已保存');
   });
 }

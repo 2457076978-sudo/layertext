@@ -177,7 +177,13 @@ fn base64_encode(data: &[u8]) -> String {
 
 #[tauri::command]
 fn write_text_file(path: String, content: String) -> Result<(), String> {
-    let p = std::path::Path::new(&path);
+    atomic_write(&path, content.as_bytes())
+}
+
+/// **原子写**（2026-09-14 从 write_text_file 抽出，save_app_config 共用）：
+/// 先写同目录临时文件再 rename，避免截断式写留下半份。
+fn atomic_write(path: &str, bytes: &[u8]) -> Result<(), String> {
+    let p = std::path::Path::new(path);
     if let Some(dir) = p.parent() {
         let _ = std::fs::create_dir_all(dir);
     }
@@ -195,7 +201,7 @@ fn write_text_file(path: String, content: String) -> Result<(), String> {
     let write = || -> std::io::Result<()> {
         use std::io::Write;
         let mut f = std::fs::File::create(&tmp)?;
-        f.write_all(content.as_bytes())?;
+        f.write_all(bytes)?;
         // 先落盘再 rename：否则断电后可能 rename 了一个"还没写完"的文件
         f.sync_all()?;
         Ok(())
@@ -608,7 +614,15 @@ fn save_app_config(config: String) -> Result<(), String> {
 
 #[tauri::command]
 fn load_app_config() -> Result<String, String> {
-    Ok(std::fs::read_to_string(config_path()?).unwrap_or_else(|_| "{}".into()))
+    // 2026-09-14：原先一律 unwrap_or_else(|_| "{}".into())——权限/IO 失败被**伪装成
+    // "这台机器从没配过"**，前端那条"设置读不出来、先别动设置"的告警因此几乎永不触发，
+    // 随后任意一次 saveConfig() 就把默认值写回去、**真配置被覆盖**。
+    // 现在：NotFound → "{}"（真的是第一次用）；其他 IO 错误如实上报。
+    match std::fs::read_to_string(config_path()?) {
+        Ok(s) => Ok(s),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok("{}".into()),
+        Err(e) => Err(format!("读设置文件失败（{}）：{e}", config_path()?)),
+    }
 }
 
 fn open_help(app: &tauri::AppHandle, label: &str, title: &str, url: &str, w: f64, h: f64) {

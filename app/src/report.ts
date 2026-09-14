@@ -321,7 +321,9 @@ async function aiPlotPoints(s: FileSession): Promise<void> {
     setStatus('AI 摘要点失败：' + e, 'err');
   } finally {
     btn.disabled = false;
-    btn.textContent = '<svg class="ico"><use href="#i-sparkle"/></svg>AI 摘情节要点';
+    /* 2026-09-14：原先用 textContent 写含 <svg> 的字符串——不做 HTML 解析，
+     * 第一次点完按钮上就显示字面量标签。改回 innerHTML。 */
+    btn.innerHTML = '<svg class="ico"><use href="#i-sparkle"/></svg>AI 摘情节要点';
   }
 }
 
@@ -883,7 +885,12 @@ export async function renderDossierPane(): Promise<void> {
 }
 
 async function exportChapterDossier(d: DossierData): Promise<void> {
-  if (!S.currentBookDir) return;
+  /* 2026-09-14：原先静默 return——直接「打开文件…」开的章节不设 currentBookDir，
+   * 档案页却照常画出这两个导出按钮，点下去什么都不发生。 */
+  if (!S.currentBookDir) {
+    setStatus('这一章不是从书架打开的，没有"书"的上下文——档案要先从书架进入一本书再导出', 'err');
+    return;
+  }
   try {
     const dir = `${S.currentBookDir}/审校档案`;
     const path = `${dir}/${dossierFileName(d.章名, new Date().toLocaleDateString('sv-SE'))}`;
@@ -897,7 +904,10 @@ async function exportChapterDossier(d: DossierData): Promise<void> {
 
 /** 全书档案：各章（指标+台账+标记+门禁）串卷 + 头部汇总（对照节仅章档案有，全书不逐章对齐） */
 async function exportBookDossier(): Promise<void> {
-  if (!S.currentBookDir) return;
+  if (!S.currentBookDir) {
+    setStatus('这一章不是从书架打开的，没有"书"的上下文——全书档案要先从书架进入一本书再导出', 'err');
+    return;
+  }
   try {
     const chapters = await tocChapters();
     if (chapters.length === 0) {

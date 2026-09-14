@@ -109,7 +109,12 @@ export function runFind(): void {
   if (cnt) cnt.textContent = findHits.length ? `${findHits.length} 句命中` : '无命中';
 }
 export function jumpFind(dir: 1 | -1): void {
-  if (findHits.length === 0) return;
+  /* 2026-09-14：原先直接 return——查找框为空时 runFind 会把 #find-count 清空，
+   * 此时点 ↑/↓ 屏幕上一个像素都不变（零反馈）。 */
+  if (findHits.length === 0) {
+    toast('先在查找框里输入要查的内容');
+    return;
+  }
   findPos = (findPos + dir + findHits.length) % findHits.length;
   const el = findHits[findPos];
   el.scrollIntoView({ block: 'center', behavior: 'smooth' });

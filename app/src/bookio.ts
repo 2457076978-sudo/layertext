@@ -128,9 +128,28 @@ export async function exportDocx(): Promise<void> {
       ],
     });
     const buf = await Packer.toBuffer(doc);
-    const out = s.sourcePath
-      ? s.sourcePath.slice(0, s.sourcePath.lastIndexOf('/')) + '/' + s.fileName.replace(/\.(md|txt|markdown|docx|aiff|mp3)$/i, '') + '.docx'
-      : (await invoke<string>('reports_dir')) + '/示例导出.docx';
+    /* 2026-09-14 修（**会覆盖教师原件**）：目标路径原先就是 `<源目录>/<同基名>.docx`。
+     * 两种情况会**正好命中源文件本身**：① 这一章本来就是从 `第一章.docx` 打开的
+     * （`fileName` 就是原名）；② 会话是 `第一章.md`，而同目录另有教师自己的 `第一章.docx`。
+     * 而写入走的是 `write_file_base64` → Rust 的 `std::fs::write`：**不查存在、不备份、非原子**，
+     * 也不经 `persistEdit`（所以 `_原始备份.md` 那套完全不生效）。结果是原件被一份 App 生成的
+     * 纯文本 docx 原地替换、排版图片全丢、无法撤销——而界面上只显示一条"已导出 Word 版"的成功提示。
+     * 现在：目标若已存在（含等于源文件）就**另起一个带 `_LayerText导出` 的名字**，绝不覆盖。 */
+    const base = s.fileName.replace(/\.(md|txt|markdown|docx|aiff|mp3)$/i, '');
+    const dir = s.sourcePath ? s.sourcePath.slice(0, s.sourcePath.lastIndexOf('/')) : await invoke<string>('reports_dir');
+    let out = `${dir}/${base}.docx`;
+    if (s.sourcePath) {
+      let taken = out === s.sourcePath;
+      if (!taken) {
+        try {
+          await invoke<string>('read_text_file', { path: out });
+          taken = true;
+        } catch {
+          /* 有意兜底：读不到＝这个路径还没有文件，可以安全写（缺失文件本来就是报错的） */
+        }
+      }
+      if (taken) out = `${dir}/${base}_LayerText导出.docx`;
+    }
     await invoke('write_file_base64', { path: out, b64: bufToB64((buf.buffer as ArrayBuffer).slice(buf.byteOffset, buf.byteOffset + buf.byteLength)) });
     setStatus('已导出 Word 版：' + out, 'saved');
     void invoke('reveal_path', { path: out });

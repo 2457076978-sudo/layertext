@@ -4,6 +4,32 @@
 1.0.0 之前的版本号为开发期里程碑（当时 `package.json` 未同步递增，本文件按里程碑整理，2026-09-06 校准）。
 面向教师的通俗版功能说明见 [README](README.md) 与 [docs/PRD.md](docs/PRD.md)。
 
+## [未发布] - 2026-09-14（codex/total-optimization · 按钮审计：同步主仓那一批"点了没用"的入口，并补两处分支漏项）
+
+来源：Wayne"我怕某个 button 设置在那其实没有用"。主仓已按「静态 26 个入口 × 运行时 123 个
+生成按钮 × 25 处 `invoke` 参数名」逐条追到落点并修完一批；本分支是 **App 开发位**，
+`app/` 下十几个文件与主仓已有实质分叉（`pipew.ts` +317 行、`datapanel.ts` +164 行、
+`pure.ts` +82 行…），所以**不是整文件覆盖**——每条都写成"锚点必须恰好出现 N 次，对不上就报错退出"，
+逐条断言后落地。落点清单与逐条理由见主仓 CHANGELOG 第九轮（第 71–85 项）。
+
+**本分支独有、或主仓那边不存在/修法不同的**
+
+| 位置 | 问题 | 修法 |
+| --- | --- | --- |
+| `app/src/review.ts` `scheduleSave` | `S.markFileBroken` 在 `main.ts` 里被写进去，**分支上却没有任何地方读它**——守卫等于不存在：`_审校标记.json` 解析失败后，内存里的空清单照样写回盘上，**整章标记被静默覆盖** | 落盘前加 `if (S.markFileBroken.has(session.markPath)) { scream(...); return; }` |
+| `app/src/bookio.ts` `exportDocx` | 分支此前**只跟了主仓修法的一半**（正则补 `.docx`/`.aiff`/`.mp3`），没跟"目标路径可能正是教师原件"那一半——原件会被一份 App 生成的纯文本 docx 原地替换、排版图片全丢，而写入走的是不查存在、不备份、非原子的 `write_file_base64` | 目标已存在（含等于源文件）就另起 `<基名>_LayerText导出.docx`，绝不覆盖 |
+| `app/src-tauri/src/main.rs` | `save_app_config` 用的是裸 `std::fs::write`，与同文件 `write_text_file` 的原子落盘不是一套；`load_app_config` 把"读不了"当成"没配置" | 抽出 `atomic_write` 两处共用；`load_app_config` 区分 `ErrorKind::NotFound`（返回 `{}`）与其他 IO 错误（`Err` 并带上路径） |
+
+**返工 1（如实记）**：`shelf.ts` 那条补丁的锚点选在了 `renderShelfGrid` 的**函数尾**，
+结果把结尾的 `}` 与 `bindShelfCards(el, books);` 一起复制了一遍。
+分支 `tsc` 当场报 `app/src/shelf.ts(323,1): error TS1128`，删掉重复块后恢复。
+教训：**锚点选在"函数尾"就必须把右括号算进断言**，否则补丁会静默地贴歪——
+这一条比它修的那个 bug 更值得记。
+
+**验证**：本 worktree `npm run verify` 全绿（preflight 43 + 根/app typecheck + lint 0 warning +
+**1000 项：999 通过 / 0 失败 / 1 跳过**）；`USER=runner npm run verify` 同样全绿（复现 CI 条件）；
+Rust gate（`cargo fmt` / `cargo clippy --all-targets -- -D warnings` / 6 测试）全绿。
+
 ## [未发布] - 2026-09-13（codex/total-optimization · 文档骨架：项目总说明 + 架构地图 + AGENTS.md，三者进门禁）
 
 > 来源：Wayne"我怕每一次他都要顾一遍整个文件的架构"＋"再更新一个项目总说明"。

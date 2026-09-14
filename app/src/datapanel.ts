@@ -863,8 +863,35 @@ export async function renderDataPane(bookDir: string): Promise<void> {
   el.querySelector('#dp-filter')?.addEventListener('input', (e) => {
     panelState.filter = (e.target as HTMLInputElement).value;
     resetRows();
-    void renderDataPane(bookDir);
+    void renderDataPane(bookDir).then(() => {
+      /* 2026-09-14 修（**筛选框每敲一个字符就丢焦点**）：renderDataPane 到 el.innerHTML 之间
+       * 没有 await，输入框节点被同步销毁，activeElement 变回 BODY。重渲染后把焦点与光标还回去。 */
+      const f2 = el.querySelector('#dp-filter') as HTMLInputElement | null;
+      if (f2) {
+        const n = f2.value.length;
+        f2.focus();
+        try {
+          f2.setSelectionRange(n, n);
+        } catch {
+          /* 有意兜底：某些输入类型不支持 setSelectionRange，聚焦本身才是关键 */
+        }
+      }
+    });
   });
+  /* 专名表每行的「删除」：**原先一个监听都没有**（只渲染、没绑定），配套的
+   * deleteProperLine 也因此全仓无调用者——有实现、无入口。照 CSV 那套补上。 */
+  el.querySelectorAll('[data-dp-del]').forEach((b) =>
+    b.addEventListener('click', async () => {
+      const word = (b as HTMLElement).dataset.dpDel ?? '';
+      if (!word) return;
+      const r = deleteProperLine(st.text, word);
+      if (r.error) {
+        alert(r.error);
+        return;
+      }
+      await doSave(r.text, `删除专名 ${word}`);
+    }),
+  );
   el.querySelector('#dp-add')?.addEventListener('click', async () => {
     const inp = el.querySelector('#dp-new') as HTMLInputElement;
     const r = upsertProperLine(st.text, inp.value);

@@ -530,7 +530,16 @@ async function runBatch(): Promise<void> {
   }
   // 恢复对话框为可再次选择状态
   ($('bt-pick') as unknown as HTMLButtonElement).disabled = false;
-  ($('bt-start') as unknown as HTMLButtonElement).style.display = '';
+  /* 2026-09-14 修（**跑完一次后「开始简化」永久灰死**）：这里原先只恢复 style.display，
+   * 而进进度态时设过的 bt-start.disabled = true 与被隐藏的两个 fld **从来没复位**，
+   * 唯一会重新启用的 refreshStart() 挂在勾选框 change 上、而容器正被隐藏着。 */
+  const startBtn = $('bt-start') as unknown as HTMLButtonElement;
+  const nChecked = $('bt-list').querySelectorAll('[data-bt]:checked').length;
+  startBtn.disabled = nChecked === 0;
+  startBtn.textContent = nChecked ? `开始简化（${nChecked} 章）` : '先在上方勾选章节';
+  startBtn.style.display = '';
+  ($('bt-list-fld') as HTMLElement).style.display = '';
+  ($('bt-inst-fld') as HTMLElement).style.display = '';
   ($('bt-cancel') as HTMLElement).style.display = 'none';
   $('bt-progress').style.display = 'none';
   batchAbort = null;

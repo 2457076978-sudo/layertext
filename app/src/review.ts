@@ -50,6 +50,14 @@ export function scheduleSave(session: FileSession, onStatus: (s: 'dirty' | 'save
   review.updatedAt = Date.now();
   clearTimeout((session as FileSession & { _t?: ReturnType<typeof setTimeout> })._t);
   (session as FileSession & { _t?: ReturnType<typeof setTimeout> })._t = setTimeout(async () => {
+    /* 2026-09-14：这一章的标记文件当初**解析失败**（内容还在盘上，只是读不懂）——
+     * 那就绝不能把内存里的空清单写回去，那是拿"整章标记"换一次静默覆盖。
+     * 本分支原先只在 `main.ts` 里把 `markPath` 塞进 `S.markFileBroken`，
+     * 却**没有任何地方读它**：守卫等于不存在，损坏文件照样被空表覆盖。 */
+    if (S.markFileBroken.has(session.markPath)) {
+      scream(`${session.markPath} 读不进来（内容可能已损坏），本次**不覆盖**它；请先备份再重标`, onStatus);
+      return;
+    }
     try {
       await invoke('write_text_file', {
         path: session.markPath,
