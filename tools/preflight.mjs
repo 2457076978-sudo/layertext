@@ -4,13 +4,21 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 const root = process.cwd();
-const dirs = ['tools/af_pipeline'];
+/* 2026-09-14：`tools/` 顶层原来一个脚本都不查（`fidelity`/`reinforce_plan`/`check_versions`…
+ * 10 个），只管 `tools/af_pipeline/`。这条路只跑 `node --check` 与一条正则，**不执行脚本**，
+ * 所以扩大覆盖面是零风险的。 */
+const dirs = ['tools', 'tools/af_pipeline'];
 const files = dirs.flatMap((d) =>
   readdirSync(join(root, d))
     .filter((f) => f.endsWith('.mjs'))
     .map((f) => join(d, f)),
 );
 const failures = [];
+/* 清单为空 = 门禁**看起来在跑其实什么都没守**（目录改名、过滤写错都会这样）。
+ * 原先没有这条断言：目录被清空会打印 "✓ 0 pipeline scripts syntax-checked" 并退出 0。 */
+if (files.length < 20) {
+  failures.push(`只扫到 ${files.length} 个 .mjs（预期 ≥20）——门禁看不见自己该守的东西了，先修扫描`);
+}
 for (const file of files) {
   const syntax = spawnSync(process.execPath, ['--check', file], { encoding: 'utf8' });
   if (syntax.status !== 0) failures.push(`${file}: syntax ${syntax.stderr.trim()}`);

@@ -7,7 +7,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { $, setStatus, toast, pop } from './uikit.js';
 import { activeSession, persistEdit, renderAll } from './main.js';
 import { scheduleSaveLastSession } from './shelf.js';
-import { csvCell, remapMarks } from './pure.js';
+import { csvCell, remapMarks, redoStep, undoStep } from './pure.js';
 import { scheduleSave } from './review.js';
 import { CHANGELOG_HEADER } from './types.js';
 import { simplifyMaxLen } from './ai.js';
@@ -26,9 +26,14 @@ export function scrollNow(): number {
   return scrollEl()?.scrollTop ?? 0;
 }
 
-/* ---- 撤销 / 重做 ---- */
-async function applyMdSnapshot(s: FileSession, md: string, label: string): Promise<void> {
-  await persistEdit(s, md);
+/* ---- 撤销 / 重做 ----
+ *
+ * 栈的**所有权**（2026-09-14 定）：`persistEdit` 负责"记一次新编辑"，
+ * 而撤销/重做**自己**负责移动栈元素，调用 `persistEdit` 时必须
+ * `recordHistory: false`——否则它会把刚压进 redo 的项清空（重做永远没得做）。
+ */
+async function applyMdSnapshot(s: FileSession, md: string, label: string, opts: { recordHistory?: boolean } = {}): Promise<void> {
+  await persistEdit(s, md, opts);
   s.md = md;
   s.review.warns = []; // 快照级回退：所有句位置已变，复核角标整体失效清空
   remapMarks(s.review.marks, s.md); // 正文变了标记跟着重对齐（撤销/查找替换曾是欠账：标记错位不修）
@@ -39,23 +44,41 @@ async function applyMdSnapshot(s: FileSession, md: string, label: string): Promi
 }
 export async function doUndo(): Promise<void> {
   const s = activeSession();
-  if (!s?.undoStack?.length) {
+  if (!s) return;
+  const step = undoStep(s.undoStack ?? [], s.redoStack ?? [], s.md);
+  if (!step) {
     toast('没有可撤销的更改');
     return;
   }
-  const prev = s.undoStack.pop()!;
-  (s.redoStack ??= []).push(s.md);
-  await applyMdSnapshot(s, prev, '↩︎ 已撤销');
+  /* 2026-09-14：**先写盘、成功了再动栈**。原先先 pop/push 再 await，写盘失败时
+   * `s.md` 不变但栈已经动过——撤销历史静默少一版、redo 多一条幽灵项。
+   * 而且 `persistEdit` 必须 `recordHistory: false`：它默认会 `redoStack = []`，
+   * 那会把刚压进去的重做项清空（重做于是永远没得做）。 */
+  try {
+    await applyMdSnapshot(s, step.md, '↩︎ 已撤销', { recordHistory: false });
+  } catch (e) {
+    setStatus(`撤销没做成：${String(e)}——稿子没变，撤销记录也原样留着`, 'err');
+    return;
+  }
+  s.undoStack = step.undo;
+  s.redoStack = step.redo;
 }
 export async function doRedo(): Promise<void> {
   const s = activeSession();
-  if (!s?.redoStack?.length) {
+  if (!s) return;
+  const step = redoStep(s.undoStack ?? [], s.redoStack ?? [], s.md);
+  if (!step) {
     toast('没有可重做的更改');
     return;
   }
-  const next = s.redoStack.pop()!;
-  (s.undoStack ??= []).push(s.md);
-  await applyMdSnapshot(s, next, '↪︎ 已重做');
+  try {
+    await applyMdSnapshot(s, step.md, '↪︎ 已重做', { recordHistory: false });
+  } catch (e) {
+    setStatus(`重做没做成：${String(e)}——稿子没变，重做记录也原样留着`, 'err');
+    return;
+  }
+  s.undoStack = step.undo;
+  s.redoStack = step.redo;
 }
 
 /* ---- 查找 / 替换 ---- */

@@ -49,11 +49,22 @@ export interface SourceRef {
   bytes: number;
 }
 
+/**
+ * 文本的**真实字节数**（UTF-8）。
+ *
+ * 2026-09-14：原先两处（这里与 `bundle.ts` 的 `buildBundle`）都写 `text.length`——
+ * 那数的是 **UTF-16 码元**，中文产物会**低报约三分之一**，而清单/包里
+ * "清单说有 N 字节"那句话是给教师看的。唯一的**功能性**用途是 `bytes === 0` 判空文件
+ * （两种算法在那里结果相同），所以这不影响任何校验结论，只影响那句人读的话。
+ * `TextEncoder` 在 Node 22 与浏览器里都是全局，不必引依赖。
+ */
+export const byteLenOf = (text: string): number => new TextEncoder().encode(text).length;
+
 export const refOf = (name: string, path: string, text: string): SourceRef => ({
   name,
   path,
   hash: contentHash(text),
-  bytes: text.length,
+  bytes: byteLenOf(text),
 });
 
 /* ────────────────────── ① LexiconSnapshot ────────────────────── */

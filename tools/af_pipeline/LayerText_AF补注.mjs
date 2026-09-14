@@ -100,7 +100,16 @@ const wc = (t) => (t.match(/[A-Za-z][A-Za-z'-]*/g) ?? []).length;
 /* ⚠ 本脚本仍走 DeepSeek（读 App 的 AI 设置与 layertext.apikey）——与三档生成/精修/两轮调适
  * 已切 ChatECNU 不一致（09-12 换源时漏了它）。本批不动供应商（换源是行为变更，另批处理），
  * 但调用已入台账：谁在用哪家、花多少，_运行/token台账.jsonl 里看得见。 */
-const CFG = JSON.parse(readFileSync(`${process.env.HOME}/.layertext.json`, 'utf-8'));
+/* 2026-09-14：包 try 并给默认值（与 `会话改写.mjs` 同一写法）。原先裸 `JSON.parse`，
+ * 任何没装 App、没有 `~/.layertext.json` 的机器（CI、新教师、HOME 未设）**加载期**就抛
+ * ENOENT 栈回溯，人看到的是堆栈而不是"缺什么配置"。 */
+const CFG = (() => {
+  try {
+    return JSON.parse(readFileSync(`${process.env.HOME}/.layertext.json`, 'utf-8'));
+  } catch {
+    return { baseUrl: 'https://api.deepseek.com' };
+  }
+})();
 const KEY = () => keychainGet('layertext.apikey'); /* 惰性：Linux/CI 无 security 命令，导入期不查钥匙串 */
 const { openLedger } = await import('./LayerText_AF调用台账.mjs');
 const LEDGER = await openLedger(P, '补注');

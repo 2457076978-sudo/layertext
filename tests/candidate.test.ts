@@ -12,10 +12,10 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import type { DecisionEvent } from '../src/core/decision.js';
-import {
-  candidatesFromEvents, reusable, promote, rejectCandidate, applyUndo,
-  defaultScopeFor, familiesFromCandidates, scopeRank, SCOPE_ORDER,
-} from '../src/core/candidate.js';
+import { candidatesFromEvents, reusable, promote, rejectCandidate, defaultScopeFor, familiesFromCandidates, scopeRank, SCOPE_ORDER } from '../src/core/candidate.js';
+/* 撤销指针的**唯一**格式（`itemId@timestamp`）——测试也用生产的那个函数，
+ * 免得再出现"测试自己写死了一种格式、生产用另一种"的假绿。 */
+import { eventRef } from '../src/core/workbench.js';
 
 const ev = (over: Partial<DecisionEvent>): DecisionEvent => ({
   schemaVersion: 1,
@@ -42,19 +42,16 @@ test('最小有效范围：证据分布决定默认档位', () => {
   assert.equal(defaultScopeFor({ chapters: ['第一章'], books: ['AF'], tiers: ['A'], count: 2 }, 'gloss-entry'), 'chapter', '同章同类两次=本章');
   assert.equal(defaultScopeFor({ chapters: ['第一章', '第三章'], books: ['AF'], tiers: ['A'], count: 3 }, 'gloss-entry'), 'book-tier', '同书同层=本书同层');
   assert.equal(defaultScopeFor({ chapters: ['第一章', '第三章'], books: ['AF'], tiers: ['A', 'M'], count: 4 }, 'gloss-entry'), 'book', '同书跨层=本书');
-  assert.equal(defaultScopeFor({ chapters: ['c1', 'c2'], books: ['AF', 'Alice'], tiers: ['A'], count: 3 }, 'gloss-entry'), 'book', '跨书默认也只到本书——升班级必须教师显式确认（同班/同词义/同类用途）');
+  assert.equal(
+    defaultScopeFor({ chapters: ['c1', 'c2'], books: ['AF', 'Alice'], tiers: ['A'], count: 3 }, 'gloss-entry'),
+    'book',
+    '跨书默认也只到本书——升班级必须教师显式确认（同班/同词义/同类用途）',
+  );
 });
 
 test('人物/情节类资产自动范围封顶本书——永不自动跨书', () => {
-  assert.equal(
-    defaultScopeFor({ chapters: ['c1', 'c2'], books: ['AF', 'Alice'], tiers: ['A'], count: 3 }, 'plot-protection'),
-    'book',
-    '跨书证据也只升到本书',
-  );
-  assert.equal(
-    defaultScopeFor({ chapters: ['c1', 'c2'], books: ['AF', 'Alice'], tiers: ['A'], count: 3 }, 'proper-name-rule'),
-    'book',
-  );
+  assert.equal(defaultScopeFor({ chapters: ['c1', 'c2'], books: ['AF', 'Alice'], tiers: ['A'], count: 3 }, 'plot-protection'), 'book', '跨书证据也只升到本书');
+  assert.equal(defaultScopeFor({ chapters: ['c1', 'c2'], books: ['AF', 'Alice'], tiers: ['A'], count: 3 }, 'proper-name-rule'), 'book');
 });
 
 test('聚合：同类决定聚成候选，能指回决定事件；误报→词汇口径、编辑→改写偏好', () => {
@@ -71,14 +68,14 @@ test('聚合：同类决定聚成候选，能指回决定事件；误报→词�
   assert.ok(gloss.sourceDecisionIds.length === 2, '指回决定事件');
   assert.ok(cands.some((c) => c.kind === 'lexicon-entry' && c.key === 'blame'));
   assert.ok(cands.some((c) => c.kind === 'rewrite-rule' && c.key === 'SENT-01'));
-  assert.ok(cands.every((c) => c.status === 'candidate'), '聚合产物默认候选，不是批准');
+  assert.ok(
+    cands.every((c) => c.status === 'candidate'),
+    '聚合产物默认候选，不是批准',
+  );
 });
 
 test('消费侧：只有 approved 且范围达标的资产可复用', () => {
-  let cands = candidatesFromEvents([
-    ev({ decision: 'accept', after: '统治', chapter: 'c1', book: 'AF', tier: 'A' }),
-    ev({ decision: 'accept', after: '统治', chapter: 'c2', book: 'AF', tier: 'A' }),
-  ]);
+  let cands = candidatesFromEvents([ev({ decision: 'accept', after: '统治', chapter: 'c1', book: 'AF', tier: 'A' }), ev({ decision: 'accept', after: '统治', chapter: 'c2', book: 'AF', tier: 'A' })]);
   assert.equal(cands[0]!.proposedScope, 'book-tier', '两章证据先落本书同层');
   assert.equal(reusable(cands, 'chapter').length, 0, '候选期不可复用');
   cands = promote(cands, cands[0]!.id, 'chapter');
@@ -88,13 +85,19 @@ test('消费侧：只有 approved 且范围达标的资产可复用', () => {
   assert.equal(reusable(cands, 'chapter').length, 0);
 });
 
-test('撤销降低证据：approved 也降回 candidate；证据清零转 rejected', () => {
-  const e1 = ev({ decision: 'accept', after: '统治', chapter: 'c1', book: 'AF', tier: 'A' });
-  let cands = candidatesFromEvents([e1]);
-  cands = promote(cands, cands[0]!.id);
-  cands = applyUndo(cands, e1.eventId!);
-  assert.equal(cands[0]!.evidenceCount, 0);
-  assert.equal(cands[0]!.status, 'rejected', '证据清零=候选作废');
+test('撤销降低证据：撤销过的那条不计入证据，confidence 跟着降（走**生产路径**重建，不是增量扣）', () => {
+  /* 2026-09-14：原先这条测的是 `applyUndo`——一个**没有生产调用点**、且口径与重建路径
+   * 相冲突的增量函数（它把证据清零的候选标成 rejected，而重建路径的结论是"根本不成候选"）。
+   * 那个函数已删；这里改成测**真正在跑**的那条路：同一键两条证据、其中一条被撤销。 */
+  const e1 = ev({ decision: 'accept', after: '统治', chapter: 'c1', book: 'AF', tier: 'A', timestamp: '2026-09-12T10:00:00.000Z', itemId: 'x1' });
+  const e2 = ev({ decision: 'accept', after: '统治', chapter: 'c1', book: 'AF', tier: 'A', timestamp: '2026-09-12T10:05:00.000Z', itemId: 'x2' });
+  const withUndo = candidatesFromEvents([e1, e2, ev({ decision: 'undo', undoOf: eventRef(e1), before: '', after: '', chapter: 'c1', book: 'AF', tier: 'A' })]);
+  const c = withUndo.find((x) => x.key === 'tyrannise')!;
+  assert.equal(c.evidenceCount, 1, '撤销过的那条不计入证据');
+  assert.ok(c.confidence < 1, `撤销要进 confidence 的分母，实得 ${c.confidence}`);
+  assert.equal(c.sourceDecisionIds.includes(e1.eventId!), false, '被撤销的决定不该再当证据来源');
+  const clean = candidatesFromEvents([e1, e2]).find((x) => x.key === 'tyrannise')!;
+  assert.ok(c.confidence < clean.confidence, `有撤销的置信度必须低于没有撤销的（${c.confidence} vs ${clean.confidence}）`);
 });
 
 test('策略族：只有出过证据的层有动作，其余层留白（跨层=变换不是复制）', () => {
@@ -127,7 +130,11 @@ test('证据按独立位置去重：同一段处理两遍只算一个证据（�
 
 test('回流红线：撤销与执行失败不产生正证据', () => {
   const e1 = ev({ decision: 'accept', after: '统治', chapter: 'c1', book: 'AF', tier: 'A', timestamp: '2026-09-12T10:00:00.000Z', itemId: 'x1' });
-  const undo = ev({ decision: 'undo', undoOf: 'x1\u00012026-09-12T10:00:00.000Z', before: '', after: '', chapter: 'c1', book: 'AF', tier: 'A' });
+  /* 2026-09-14：这里原先写的是 `x1\u00012026-09-12T…`——**测试自己把错误的引用格式写死了**，
+   * 于是它一直在为那个 bug 背书：全仓生产的 `undoOf` 一律是 `eventRef` 的
+   * `itemId + '@' + timestamp`（workbench / productmetrics / teacherexperiment / app 决定按钮），
+   * 只有这里（和已修掉的 candidate.ts）用 `\u0001`。用真实格式，这条红线才真的在守东西。 */
+  const undo = ev({ decision: 'undo', undoOf: eventRef(e1), before: '', after: '', chapter: 'c1', book: 'AF', tier: 'A' });
   const failed = ev({ decision: 'rejected', before: 'a', after: 'b', chapter: 'c1', book: 'AF', tier: 'A' });
   const cands = candidatesFromEvents([e1, undo, failed]);
   const gloss = cands.find((c) => c.key === 'tyrannise');

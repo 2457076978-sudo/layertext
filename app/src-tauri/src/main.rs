@@ -356,9 +356,21 @@ fn list_local_examples() -> Result<Vec<String>, String> {
     Ok(out)
 }
 
-/// 列出书稿文件夹中的章节文件（.md/.txt/.docx；_ 开头的配置与词库、既有产物（简化/工作稿/备份/质检报告）除外）
+/// 列出文件夹中的条目（**返回完整绝对路径**）。
+///
+/// 默认只收书稿类扩展名（.md/.txt/.markdown/.docx），并排除 `_` 开头的配置与既有产物。
+/// `exts` 是给**配置类**调用方（班级分组、`调适项目_*.json`）开的口子：
+/// 传 `["json"]` 就按它过滤。这样书稿侧（批处理、书架）不会因为放开 .json
+/// 而把配置当成章节列出来，配置侧也不必再靠一个"永远返回空表"的过滤器假装在工作。
 #[tauri::command]
-fn list_dir(dir: String) -> Result<Vec<String>, String> {
+fn list_dir(dir: String, exts: Option<Vec<String>>) -> Result<Vec<String>, String> {
+    let allow: Vec<String> = match exts {
+        Some(v) if !v.is_empty() => v
+            .into_iter()
+            .map(|x| x.trim_start_matches('.').to_lowercase())
+            .collect(),
+        _ => vec!["md".into(), "txt".into(), "markdown".into(), "docx".into()],
+    };
     let mut out = Vec::new();
     if let Ok(entries) = std::fs::read_dir(&dir) {
         for e in entries.flatten() {
@@ -376,7 +388,7 @@ fn list_dir(dir: String) -> Result<Vec<String>, String> {
                 .and_then(|x| x.to_str())
                 .unwrap_or("")
                 .to_lowercase();
-            if !(ext == "md" || ext == "txt" || ext == "markdown" || ext == "docx") {
+            if !allow.contains(&ext) {
                 continue;
             }
             if name.starts_with('_')
@@ -947,12 +959,43 @@ mod tests {
         ] {
             std::fs::write(dir.join(name), b"x").unwrap();
         }
-        let got: Vec<String> = list_dir(dir.to_string_lossy().to_string())
+        let got: Vec<String> = list_dir(dir.to_string_lossy().to_string(), None)
             .unwrap()
             .iter()
             .map(|p| p.rsplit('/').next().unwrap().to_string())
             .collect();
         assert_eq!(got, vec!["notes.txt", "第一章.md"]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// `exts` 是给配置类调用方的口子：传 `["json"]` 才能看见 `.json`，
+    /// 书稿侧不传就仍是"只有书稿扩展名"——放开 .json 不会让批处理把配置当章节列出来。
+    #[test]
+    fn list_dir_exts_can_ask_for_json() {
+        let dir = std::env::temp_dir().join(format!("lt_listdir_json_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        for name in ["第一章.md", "调适项目_X.json", "班级A.json"] {
+            std::fs::write(dir.join(name), b"x").unwrap();
+        }
+        let names = |v: Vec<String>| -> Vec<String> {
+            v.iter()
+                .map(|p| p.rsplit('/').next().unwrap().to_string())
+                .collect()
+        };
+        assert_eq!(
+            names(list_dir(dir.to_string_lossy().to_string(), None).unwrap()),
+            vec!["第一章.md"],
+            "默认口径不该看见 .json"
+        );
+        /* `list_dir` 末尾会 `out.sort()`，而中文名的排序**不该由测试来假定**（跟 locale/字节序有关）。
+         * 两边都排序再比，测的是"返回了哪几个"而不是"以什么顺序返回"。 */
+        let mut got =
+            names(list_dir(dir.to_string_lossy().to_string(), Some(vec!["json".into()])).unwrap());
+        got.sort();
+        let mut want = vec!["调适项目_X.json".to_string(), "班级A.json".to_string()];
+        want.sort();
+        assert_eq!(got, want, "显式要 json 时才返回");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

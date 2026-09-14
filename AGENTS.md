@@ -32,7 +32,10 @@
 - `app/public/_fixture/`（UI 走查夹具）、`tests/fixtures/replay/`（回放夹具）、`tools/_af_*`
 - 学生数据：成绩、班级画像、学号、名册——**碰它们之前先读 `docs/数据红线与使用者须知.md`**
 - 本机绝对路径（`/Users/...`）不要写进代码/测试/文档；需要真实路径时**从环境变量取，取不到就跳过**
-  （成例：`LAYERTEXT_AF_DIR`、`LAYERTEXT_REPLAY_DIR`）
+  （成例：`LAYERTEXT_AF_DIR` = 真项目的**调适工作区**、`LAYERTEXT_REPLAY_DIR` = 回放夹具目录）
+  - **"跳过"必须是 `t.skip()`，不是 `return`**：node:test 把"用例函数正常返回"记为 **pass**，
+    写 `if (!existsSync(p)) return;` 等于把守卫变成永远绿的空炮（`tests/studentversion.test.ts`
+    这条 ★ 守卫就这么空跑了很久，2026-09-14 修）。跳过要说出口。
 
 **发布包里也不许有学生数据**——`src/core/bundle.ts` 有白名单 + 黑名单双重拦截，
 改动它就是在改一道数据红线，别顺手放松。

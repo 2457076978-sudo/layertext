@@ -102,8 +102,9 @@ const CH_IDS = arg('--chapters', '')
   ? arg('--chapters')
       .split(',')
       .map((x) => Number(x.trim()))
-      .filter((n) => n >= 1 && n <= 10)
-  : CN.slice(0, Number(P.章数 ?? 10)).map((_, i) => i + 1);
+      /* `<= 10` 原先写死了十章：换一本 12 章的书，`--chapters 11` 会被**静默丢掉**。 */
+      .filter((n) => n >= 1 && n <= CN.length)
+  : CN.map((_, i) => i + 1);
 const TOOL_ROUNDS = Number(arg('--tool-rounds', '2')); // 「查词」往返上限
 const QC_ROUNDS = Number(arg('--qc-rounds', '2')); // 本地复检回流上限
 /** 会话滚动窗口：保留最近多少「段」的逐段对话（0 = 不滚动，全历史）。
@@ -171,6 +172,14 @@ const apiKey = () => {
 };
 
 const { gateSegment, normalizeSegmentBody } = await import(`${distOf(REPO)}/src/core/segmentgate.js`);
+/* 2026-09-14：**判定线**从引擎取，不用 `T.maxLen`。两者不是一个数：
+ * `T.maxLen`（A20/M16/B14）是**生成目标**（写进提示词让模型照着写），
+ * 而拦截用的检查线是 `SENT_LEN_CHECK`（A20/M17/B14）——2026-09-12 的
+ * 「判定线统一：按 17 词拦截、按 20 词点名……统一到检查线这一把」说的就是它。
+ * 这里原先拿 16 当检查线，于是同一句 17 词的 M 层英文：
+ * 在本脚本判 SENT-01 blocker，在 `工序化生成`/`两轮调适`/`补注` 里判通过——
+ * 同一份稿子换个脚本结论就翻。 */
+const { SENT_LEN_CHECK } = await import(`${distOf(REPO)}/src/core/adaptcheck.js`);
 const { makeCovers, dedupeAnnotations } = await import(`${distOf(REPO)}/src/core/annot.js`);
 const { LOOKUP_TOOL, collectLookups, formatLookupAnswer } = await import(`${distOf(REPO)}/src/core/lookuptool.js`);
 const { makeResolver } = await import(`${distOf(REPO)}/src/core/manifest.js`);
@@ -636,7 +645,7 @@ function verifySegment(text, seg, target, srcOov, markerId, annotatedSoFar) {
   //   门禁问的是「**本段该注的词**注了没有」，不是「本段出现的超纲词注了没有」。
   const covers = makeCovers(annotatedSoFar ?? []);
   const mustNow = union.filter((w) => !covers(w));
-  const verdict = gateSegment({ text: body, source: seg, target, maxLen: T.maxLen, oov: mustNow, dict: DICT, markerId });
+  const verdict = gateSegment({ text: body, source: seg, target, maxLen: SENT_LEN_CHECK[TIER] ?? T.maxLen, oov: mustNow, dict: DICT, markerId });
   verdict.srcOov = srcOov;
   verdict.outOov = outOov;
   verdict.alreadyAnnotatedElsewhere = union.filter((w) => covers(w));
@@ -824,7 +833,7 @@ for (const { i } of chSegs) {
     continue;
   }
   const md = readFileSync(src, 'utf-8');
-  const chLine = md.match(/^## Chapter \w+.*$/m)?.[0] ?? `## Chapter ${['One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten'][i - 1]}`;
+  const chLine = md.match(/^## Chapter \w+.*$/m)?.[0] ?? `## Chapter ${['One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten'][i - 1] ?? i}`;
   const header = md.slice(0, md.indexOf(chLine)) || '';
   const segList = segmentList(md); // [{id:'P07', text:'[P07] …'}]——段号是稳定 ID
   const srcText = (k) => segList[k].text;

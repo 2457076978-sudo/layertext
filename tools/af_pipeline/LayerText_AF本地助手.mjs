@@ -222,7 +222,7 @@ async function cmdRewrite() {
     process.exit(2);
   }
   const srcPath = join(SRC_BASE, ch, '原文_规范化.md');
-  const prodPath = findProduct(join(OUT_BASE, ch), tag);
+  const prodPath = findProduct(SHARED.chapterDirOf(OUT_BASE, ch), tag);
   if (!existsSync(srcPath) || !prodPath) {
     console.error(`✗ 缺文件：${existsSync(srcPath) ? '' : srcPath} ${prodPath ? '' : `（缺 ${tag} 产物）`}`);
     process.exit(2);
@@ -410,7 +410,12 @@ async function cmdFormat() {
 }
 
 /* ────────────────────────── 入口 ────────────────────────── */
-if (!KEY) {
+/* 2026-09-14：这道 Key 检查原先无条件拦在**所有子命令之前**，而 `格式` 是纯代码转换
+ * （文件头与 USAGE 都明说"不调模型，跟本地模型毫无关系"）。结果没装 oMLX/没配 key 的机器上
+ * 连 `格式 --in x.csv --to json` 都用不了，提示还是"读不到 oMLX 的 API Key"——
+ * 说的和要的完全不是一回事。现在只拦真正要调模型的三个子命令。 */
+const NEEDS_MODEL = CMD === '释词' || CMD === '改写' || CMD === '文案';
+if (NEEDS_MODEL && !KEY) {
   console.error('✗ 读不到 oMLX 的 API Key：设置环境变量 OMLX_API_KEY，或确认 ~/.omlx/settings.json 里有 auth.api_key');
   process.exit(2);
 }

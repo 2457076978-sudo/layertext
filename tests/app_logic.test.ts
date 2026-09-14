@@ -2,7 +2,7 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { applyRewriteTo, findOriginalFlex, hasProseChinese, normalizeAndSplitChapters, normWs, normalizeZhNotes, parseAiJson, withRetry } from '../app/src/pure.js';
+import { applyRewriteTo, baseName, findOriginalFlex, hasProseChinese, normalizeAndSplitChapters, normWs, normalizeZhNotes, parseAiJson, redoStep, undoStep, withRetry } from '../app/src/pure.js';
 import { buildBookReportMd, planBatchChapters, filterTargets, mergeTargets, type BatchProgressFile, type BookReportRow, type ClassTarget } from '../app/src/bookpure.js';
 
 test('withRetry：网络错误自动重试后成功', async () => {
@@ -233,7 +233,6 @@ test('planCompaction：assistant.tool_calls 与其 tool 结果不被拆开（都
 });
 
 /* ---------- 全书批处理（O2） ---------- */
-
 
 test('planBatchChapters：进度文件里 done 的章标记已完成（续跑跳过），其余可跑', () => {
   const progress: BatchProgressFile = {
@@ -483,4 +482,53 @@ test('hasProseChinese：合法生词注释放行，成句中文说明拒收', ()
 test('normalizeZhNotes：半角括号注释统一为全角紧贴', () => {
   assert.equal(normalizeZhNotes('The cows lowed (哞哞叫), the sheep bleated (咩咩叫).'), 'The cows lowed（哞哞叫）, the sheep bleated（咩咩叫）.');
   assert.equal(normalizeZhNotes('see Chapter 3 (notes) and row (连续)'), 'see Chapter 3 (notes) and row（连续）');
+});
+
+/* ---------- 撤销 / 重做：栈怎么动（2026-09-14 补） ---------- */
+
+test('★ 撤销之后必须**攒得下重做**：先在的稿进 redo，undo 退一格', () => {
+  /* 这条守的是一个真发生过的缺陷：`persistEdit` 每次都会 `redoStack = []`，
+   * 而 `doUndo` 原先在调它**之前**就把当前稿压进了 redo——压完立刻被清空，
+   * 于是**重做永远没得做**，同时当前稿又被塞回 undo，撤销退化成"来回切"。 */
+  const r = undoStep(['v1', 'v2'], [], 'v3');
+  assert.deepEqual(r, { undo: ['v1'], redo: ['v3'], md: 'v2' }, '退到 v2，v3 进重做栈');
+  assert.deepEqual(redoStep(r!.undo, r!.redo, r!.md), { undo: ['v1', 'v2'], redo: [], md: 'v3' }, '重做回到 v3');
+});
+
+test('撤销/重做：空栈返回 null（调用方据此提示"没有可撤销的更改"）', () => {
+  assert.equal(undoStep([], ['v3'], 'v2'), null);
+  assert.equal(redoStep(['v1'], [], 'v2'), null);
+});
+
+test('撤销/重做**不改入参**（栈是调用方的，纯函数只返回新值）', () => {
+  const undo = ['v1', 'v2'];
+  const redo: string[] = [];
+  const r = undoStep(undo, redo, 'v3');
+  assert.deepEqual(undo, ['v1', 'v2'], '原 undo 栈不许被改动');
+  assert.deepEqual(redo, [], '原 redo 栈不许被改动');
+  assert.notEqual(r!.undo, undo, '返回的是新数组');
+});
+
+test('往返一致：撤 3 步再重做 3 步，回到原稿且两栈复原', () => {
+  let undo = ['v0', 'v1', 'v2'];
+  let redo: string[] = [];
+  let md = 'v3';
+  for (let i = 0; i < 3; i++) {
+    const s = undoStep(undo, redo, md)!;
+    ({ undo, redo, md } = s);
+  }
+  assert.equal(md, 'v0');
+  for (let i = 0; i < 3; i++) {
+    const s = redoStep(undo, redo, md)!;
+    ({ undo, redo, md } = s);
+  }
+  assert.equal(md, 'v3', '重做回到最新一版');
+  assert.deepEqual(undo, ['v0', 'v1', 'v2']);
+  assert.deepEqual(redo, []);
+});
+
+test('baseName：完整路径取文件名，裸名原样返回（后端 list_dir 给的是绝对路径）', () => {
+  assert.equal(baseName('/a/b/第一章.md'), '第一章.md');
+  assert.equal(baseName('第一章.md'), '第一章.md');
+  assert.equal(baseName('/a/b/'), '');
 });

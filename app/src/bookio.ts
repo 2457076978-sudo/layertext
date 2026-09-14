@@ -59,7 +59,10 @@ export async function loadBookConfig(dir: string): Promise<boolean> {
       S.vocabName = cfg.vocabName ?? '本书词库';
     }
     if (cfg.terms) S.termsText = cfg.terms;
-    S.properRows = cfg.proper ?? [];
+    /* 相邻字段都有守卫，只有这条没有——而 `saveBookConfig` 在没有专名表时写的正是 `null`。
+     * 后果：教师刚导入的专名表会在下一次打开同目录任一章节时被**静默清空**，
+     * ⑧专名一致性检查与 aiflow 的 properNames 一起失效（2026-09-14）。 */
+    if (cfg.proper) S.properRows = cfg.proper;
     if (cfg.instructions) S.appConfig.instructions = cfg.instructions;
     if (cfg.rewrite)
       S.rewriteRules = { replacements: cfg.rewrite.replacements ?? [], viewpoint: cfg.rewrite.viewpoint ?? 'keep', viewpointName: cfg.rewrite.viewpointName ?? '', extra: cfg.rewrite.extra ?? '' };
@@ -128,7 +131,10 @@ export async function exportDocx(): Promise<void> {
     });
     const buf = await Packer.toBuffer(doc);
     const out = s.sourcePath
-      ? s.sourcePath.slice(0, s.sourcePath.lastIndexOf('/')) + '/' + s.fileName.replace(/\.(md|txt|markdown)$/i, '') + '.docx'
+      ? /* 2026-09-14：正则原先只剥 md/txt/markdown——而 `.docx` 打开的会话 `fileName` 就是
+         * `第一章.docx`，导出会得到 `第一章.docx.docx`；更糟的是同目录另有教师的
+         * `第一章.docx` 时，算出来的目标**就是那份原始 Word**，会被无备份无确认地覆盖。 */
+        s.sourcePath.slice(0, s.sourcePath.lastIndexOf('/')) + '/' + s.fileName.replace(/\.(md|txt|markdown|docx|aiff|mp3)$/i, '') + '.docx'
       : (await invoke<string>('reports_dir')) + '/示例导出.docx';
     await invoke('write_file_base64', { path: out, b64: bufToB64((buf.buffer as ArrayBuffer).slice(buf.byteOffset, buf.byteOffset + buf.byteLength)) });
     setStatus('已导出 Word 版：' + out, 'saved');
@@ -285,14 +291,22 @@ export function showRewritePop(): void {
     const s = activeSession();
     if (!s) return;
     const before = s.md;
-    s.md = applyRewrite(s.md);
-    if (s.md === before) {
+    /* 2026-09-14：**先算出来，别急着写回 `s.md`**。原先这里是
+     *   `s.md = applyRewrite(s.md); … persistEdit(s, s.md)`
+     * ——两个实参是同一个引用，于是 `persistEdit` 里 `newMd !== s.md` 恒为 false：
+     * ① 不 push 撤销快照（这条路径 ⌘Z 撤不回来）；
+     * ② 更要命的是它写 `<章>_原始备份.md` 时用的正是 `s.md`，也就是**改写后**的正文——
+     *    教师想"整体还原"会还原成被替换的版本，备份本身是废的。
+     * 等到 `persistEdit` 成功之后再赋值，备份与快照拿到的才是真正的"改前"。 */
+    const next = applyRewrite(s.md);
+    if (next === before) {
       $('rw-out').textContent = '无可替换内容（或原词已清零）';
       return;
     }
     void (async () => {
       try {
-        const savedTo = await persistEdit(s, s.md);
+        const savedTo = await persistEdit(s, next);
+        s.md = next;
         renderReader(s);
         attachInlineSuggestions();
         renderSidebar(s, sidebarHandlers);

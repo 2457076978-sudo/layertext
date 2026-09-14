@@ -24,6 +24,12 @@
  *    但教师点过的决定不能因为"重算"就消失——按稳定 ID 把 `status` 带过来。
  */
 
+/* 层级标签与哈希本体都从 `manifest.ts` 取**唯一那一份**（2026-09-14）。
+ * 本文件原先自己抄了一份 `TAG = {A:'A层85',…}` 和一份 FNV 循环：
+ * `manifest.TIER_TAG` 的注释明写"原来在 7 个脚本和 App 面板各抄一份…唯一口径"，
+ * 而这里就是漏改的第 8 处——改一处不改另一处，队列 ID 与路径解析就会分叉。 */
+import { contentHash, tierTagOf } from './manifest.js';
+
 export type PendingKind = 'annotate' | 'restore';
 /** `dict` = 教师词典正本已有释义；`model` = 本地模型带句填的候选；`canon` = 来自正本核对（词本身是正本词） */
 export type PendingSource = 'dict' | 'model' | 'canon';
@@ -67,15 +73,15 @@ export interface PendingQueue {
   updatedAt: string;
 }
 
-const TAG: Record<string, string> = { A: 'A层85', M: 'M层75', B: 'B层60' };
-
-/** 层写法归一：`A` → `A层85`；已经是 tag 的原样返回；认不出就原样（**不猜**）。 */
+/** 层写法归一：`A` → `A层85`；已经是 tag 的原样返回；认不出就原样（**不猜**）。
+ *  标签表来自 `manifest.tierTagOf`（唯一口径），不在这里维护第二份。 */
 export function normalizeTier(t: string): string {
   const s = String(t ?? '').trim();
-  if (TAG[s]) return TAG[s]!;
+  const tagged = tierTagOf(s);
+  if (tagged !== s) return tagged;
   if (/^(A层85|M层75|B层60)$/.test(s)) return s;
   const m = s.match(/^([AMB])层/);
-  return m ? (TAG[m[1]!] ?? s) : s;
+  return m ? tierTagOf(m[1]!) : s;
 }
 
 /**
@@ -87,15 +93,7 @@ export function normalizeTier(t: string): string {
  */
 export function pendingIdOf(p: { tier: string; chapter: string; para: string; word: string }): string {
   const s = [normalizeTier(p.tier), p.chapter, p.para, p.word.toLowerCase()].join('\u0001');
-  let h1 = 0x811c9dc5;
-  let h2 = 0x01000193;
-  for (let i = 0; i < s.length; i++) {
-    const c = s.charCodeAt(i);
-    h1 = Math.imul(h1 ^ c, 0x01000193) >>> 0;
-    h2 = Math.imul(h2 ^ (c + i), 0x85ebca6b) >>> 0;
-  }
-  h2 = Math.imul(h2 ^ (h1 >>> 13), 0xc2b2ae35) >>> 0;
-  return `pq-${(h1.toString(16).padStart(8, '0') + h2.toString(16).padStart(8, '0')).slice(0, 12)}`;
+  return `pq-${contentHash(s).slice(0, 12)}`;
 }
 
 /** 补注候选队列的一项 → 待确认项（管线 `LayerText_AF补注候选.mjs` 的产物）。 */
@@ -139,7 +137,8 @@ export function fromCanonRow(r: { tier: string; chapter: string; para: string; w
 /**
  * 合并两路 → 一条队列。
  *
- * - 去重按**稳定 ID**（层|章|段|词|种类）；同 ID 保留先来的（补注优先——它带模型候选与出处句）
+ * - 去重按**稳定 ID**（层|章|段|词）；同 ID 保留**正本核对**那一条（与下方 `pendingIdOf` 的
+ *   "正本 > 补注"同一条纪律——2026-09-14 修正：这句话原先写成"补注优先"，与实现相反）
  * - `previous` 里已决定的条目：把 `status`/`decidedAt` 带回来（**重算队列不许抹掉教师的决定**）
  * - 排序：★加注词 → 正本 → 补注；同档按章、段——教师从上往下扫，先看判据最硬的
  */

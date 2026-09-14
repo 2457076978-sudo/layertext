@@ -958,3 +958,39 @@ export function toggleParaBookmark(list: { pi: number; text: string; ts: number 
 
 export { alignSentencePairs, signalsOf, lostSignals } from '../../src/core/align.js';
 export type { AlignSentRef, AlignRow } from '../../src/core/align.js';
+
+/**
+ * 完整路径 → 文件名（`/a/b/c.md` → `c.md`；本来就没有 `/` 时原样返回）。
+ *
+ * 2026-09-14 加：后端 `list_dir` 返回的是**完整绝对路径**（Rust 侧 `p.to_string_lossy()`），
+ * 而好几处调用点把它当**裸文件名**用——拼路径（`${dir}/${f}` → `/a/b//a/b/c.md`）、
+ * 比扩展名、当章节名显示给教师看。四条链路因此静默失效：
+ * 跨版本标记同步、跨章已注词账本、`调适项目_*.json` 探测、目录名当章节名。
+ * 统一走这一个函数，不要再各写一遍 `slice(lastIndexOf('/') + 1)`。
+ */
+export function baseName(p: string): string {
+  const i = p.lastIndexOf('/');
+  return i >= 0 ? p.slice(i + 1) : p;
+}
+
+/* ---------- 撤销 / 重做的**栈移动**（纯逻辑，不碰 DOM / IO） ---------- */
+
+/**
+ * 撤销一步：弹出 undo 栈顶、把当前稿压进 redo 栈。没得撤返回 `null`。
+ *
+ * 2026-09-14 抽出来，因为原先这段逻辑埋在 `edit.ts` 的 `doUndo` 里、和 DOM/IO 缠在一起，
+ * **没有任何测试守着这条不变式**——而它当时是错的：`persistEdit` 每次都会 `redoStack = []`，
+ * 于是 `doUndo` 刚压进去的重做项被紧接着清空，**重做永远没得做**；
+ * 同时当前稿又被塞回 undo 栈，撤销退化成"来回切"。
+ * 纯函数化之后，"栈怎么动"这件事可以在 node 下直接断言。
+ */
+export function undoStep(undo: readonly string[], redo: readonly string[], cur: string): { undo: string[]; redo: string[]; md: string } | null {
+  if (!undo.length) return null;
+  return { undo: undo.slice(0, -1), redo: [...redo, cur], md: undo[undo.length - 1]! };
+}
+
+/** 重做一步：弹出 redo 栈顶、把当前稿压回 undo 栈。没得重做返回 `null`。 */
+export function redoStep(undo: readonly string[], redo: readonly string[], cur: string): { undo: string[]; redo: string[]; md: string } | null {
+  if (!redo.length) return null;
+  return { undo: [...undo, cur], redo: redo.slice(0, -1), md: redo[redo.length - 1]! };
+}

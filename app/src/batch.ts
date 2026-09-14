@@ -518,7 +518,12 @@ async function runBatch(): Promise<void> {
       setStatus('书级报告写入失败：' + e, 'err');
     }
   }
-  if (!canceled) {
+  /* 2026-09-14：原先只判 `!canceled`——**有章节失败**时也照样把进度删掉，
+   * 而那正是最需要续跑的情形。上面第 492 行的注释与界面文案（"中断可续跑：已完成的章
+   * 下次自动跳过"）都承诺了续跑，删掉进度后重开对话框读不到进度 → `progress=null` →
+   * 全部章节默认勾选 → 重复烧 token 并覆盖当天同名产物。 */
+  const hasFailed = rows.some((r) => r.status === 'failed');
+  if (!canceled && !hasFailed) {
     try {
       await invoke('remove_file', { path: `${batchDir}/${BATCH_PROGRESS_FILE}` });
     } catch {

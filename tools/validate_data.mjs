@@ -25,7 +25,10 @@ const SCHEMA_VERSION = '1';
 function detectType(file, text) {
   const n = basename(file);
   const head = text.slice(0, 2000);
-  const firstLine = head.split('\n')[0].replace(/^\uFEFF/, '').trim();
+  const firstLine = head
+    .split('\n')[0]
+    .replace(/^\uFEFF/, '')
+    .trim();
   // ① 内容嗅探（不依赖文件名）
   if (head.trimStart().startsWith('{')) {
     if (head.includes('"groups"') || head.includes('"targets"')) return '分层';
@@ -41,7 +44,10 @@ function detectType(file, text) {
   if (extname(file) === '.txt') {
     if (/专名/.test(n)) return '专名';
     // 一行一名、且规模像"专名表"（课标1600 那种整册词表不算，它是词表不是专名表）
-    const lines = head.split('\n').map((x) => x.trim()).filter((x) => x && !x.startsWith('#'));
+    const lines = head
+      .split('\n')
+      .map((x) => x.trim())
+      .filter((x) => x && !x.startsWith('#'));
     if (lines.length && lines.length <= 400 && lines.every((l) => /^[a-z][a-z '-]*$/.test(l))) return '专名';
   }
   return null;
@@ -64,19 +70,34 @@ const ERR = (kind, where, msg) => ({ kind, where, msg });
 /** 宽容 CSV 解析（处理 BOM、引号内逗号、CRLF） */
 function parseCsv(text) {
   const rows = [];
-  let row = [], cell = '', inQ = false;
+  let row = [],
+    cell = '',
+    inQ = false;
   const src = text.replace(/^\uFEFF/, '');
   for (let i = 0; i < src.length; i++) {
     const c = src[i];
     if (inQ) {
-      if (c === '"') { if (src[i + 1] === '"') { cell += '"'; i++; } else inQ = false; }
-      else cell += c;
+      if (c === '"') {
+        if (src[i + 1] === '"') {
+          cell += '"';
+          i++;
+        } else inQ = false;
+      } else cell += c;
     } else if (c === '"') inQ = true;
-    else if (c === ',') { row.push(cell); cell = ''; }
-    else if (c === '\n') { row.push(cell); rows.push(row); row = []; cell = ''; }
-    else if (c !== '\r') cell += c;
+    else if (c === ',') {
+      row.push(cell);
+      cell = '';
+    } else if (c === '\n') {
+      row.push(cell);
+      rows.push(row);
+      row = [];
+      cell = '';
+    } else if (c !== '\r') cell += c;
   }
-  if (cell !== '' || row.length) { row.push(cell); rows.push(row); }
+  if (cell !== '' || row.length) {
+    row.push(cell);
+    rows.push(row);
+  }
   return rows.filter((r) => r.some((v) => v.trim() !== ''));
 }
 
@@ -84,7 +105,10 @@ const isPosInt = (v) => Number.isInteger(Number(v)) && Number(v) > 0;
 const REQUIRED_META = ['schema版本'];
 
 function checkMeta(meta, errs, where) {
-  if (!meta || typeof meta !== 'object') { errs.push(ERR('缺失', where, '_meta 不存在（规范要求每个 JSON 数据文件带 _meta）')); return; }
+  if (!meta || typeof meta !== 'object') {
+    errs.push(ERR('缺失', where, '_meta 不存在（规范要求每个 JSON 数据文件带 _meta）'));
+    return;
+  }
   for (const k of REQUIRED_META) if (meta[k] === undefined) errs.push(ERR('必填缺失', `${where}._meta.${k}`, '缺少字段'));
   if (meta.schema版本 !== undefined && String(meta.schema版本) !== SCHEMA_VERSION) {
     errs.push(ERR('版本不匹配', `${where}._meta.schema版本`, `实际 ${meta.schema版本}，本校验器支持 ${SCHEMA_VERSION}`));
@@ -93,18 +117,25 @@ function checkMeta(meta, errs, where) {
 
 /* ────────────────────────── 各类型校验 ────────────────────────── */
 function validateVocab(text) {
-  const errs = [], warns = [];
+  const errs = [],
+    warns = [];
   const rows = parseCsv(text);
   if (!rows.length) return { errs: [ERR('空文件', '词库', '无内容')], warns, summary: {} };
   const hdr = rows[0].map((h) => h.trim());
   const need = ['词', '类型', '来源册'];
   for (const k of need) if (!hdr.includes(k)) errs.push(ERR('表头缺失', `词库.表头`, `缺少必填列「${k}」，实际列：${hdr.join(',')}`));
-  const iWord = hdr.indexOf('词'), iType = hdr.indexOf('类型'), iBook = hdr.indexOf('来源册'), iGloss = hdr.indexOf('释义');
-  const seen = new Map();   // 词 → Set(释义)
+  const iWord = hdr.indexOf('词'),
+    iType = hdr.indexOf('类型'),
+    iBook = hdr.indexOf('来源册'),
+    iGloss = hdr.indexOf('释义');
+  const seen = new Map(); // 词 → Set(释义)
   rows.slice(1).forEach((r, k) => {
     const line = k + 2;
     const w = (r[iWord] ?? '').trim();
-    if (!w) { errs.push(ERR('必填缺失', `词库 第${line}行.词`, '为空')); return; }
+    if (!w) {
+      errs.push(ERR('必填缺失', `词库 第${line}行.词`, '为空'));
+      return;
+    }
     const key = w.toLowerCase();
     if (seen.has(key)) warns.push(ERR('重复条目', `词库 第${line}行.词`, `「${w}」重复出现（同一词来自多个来源册时常见；但会让释义查询结果不确定，建议合并）`));
     else seen.set(key, new Set());
@@ -121,12 +152,20 @@ function validateVocab(text) {
 }
 
 function validateGroups(text) {
-  const errs = [], warns = [];
+  const errs = [],
+    warns = [];
   let d;
-  try { d = JSON.parse(text); } catch (e) { return { errs: [ERR('解析失败', '分层', `JSON 无法解析：${e.message}`)], warns, summary: {} }; }
+  try {
+    d = JSON.parse(text);
+  } catch (e) {
+    return { errs: [ERR('解析失败', '分层', `JSON 无法解析：${e.message}`)], warns, summary: {} };
+  }
   checkMeta(d._meta, errs, '分层');
   const groups = d.groups;
-  if (!Array.isArray(groups)) { errs.push(ERR('结构错误', '分层.groups', '必须是数组（规范 v1：不再用 targets）')); return { errs, warns, summary: {} }; }
+  if (!Array.isArray(groups)) {
+    errs.push(ERR('结构错误', '分层.groups', '必须是数组（规范 v1：不再用 targets）'));
+    return { errs, warns, summary: {} };
+  }
   const ids = new Set();
   groups.forEach((g, i) => {
     const p = `分层.groups[${i}]`;
@@ -136,7 +175,10 @@ function validateGroups(text) {
     for (const k of need) {
       if (g[k] === undefined || g[k] === '') errs.push(ERR('必填缺失', `${p}.${k}`, '缺少字段'));
     }
-    if (g.id) { if (ids.has(g.id)) errs.push(ERR('重复', `${p}.id`, `「${g.id}」重复`)); ids.add(g.id); }
+    if (g.id) {
+      if (ids.has(g.id)) errs.push(ERR('重复', `${p}.id`, `「${g.id}」重复`));
+      ids.add(g.id);
+    }
     if (g.类型 && !['组', '人'].includes(g.类型)) errs.push(ERR('取值非法', `${p}.类型`, `「${g.类型}」，允许：组 / 人`));
     if (g.句长上限 !== undefined && !isPosInt(g.句长上限)) errs.push(ERR('类型错误', `${p}.句长上限`, `须为正整数，实际「${g.句长上限}」`));
     if (g.成员数 !== undefined && !isPosInt(g.成员数)) errs.push(ERR('类型错误', `${p}.成员数`, `须为正整数，实际「${g.成员数}」`));
@@ -151,11 +193,19 @@ function validateGroups(text) {
 }
 
 function validateProfile(text) {
-  const errs = [], warns = [];
+  const errs = [],
+    warns = [];
   let d;
-  try { d = JSON.parse(text); } catch (e) { return { errs: [ERR('解析失败', '画像', `JSON 无法解析：${e.message}`)], warns, summary: {} }; }
+  try {
+    d = JSON.parse(text);
+  } catch (e) {
+    return { errs: [ERR('解析失败', '画像', `JSON 无法解析：${e.message}`)], warns, summary: {} };
+  }
   checkMeta(d._meta, errs, '画像');
-  if (!Array.isArray(d.students)) { errs.push(ERR('结构错误', '画像.students', '必须是数组（规范 v1）')); return { errs, warns, summary: {} }; }
+  if (!Array.isArray(d.students)) {
+    errs.push(ERR('结构错误', '画像.students', '必须是数组（规范 v1）'));
+    return { errs, warns, summary: {} };
+  }
   const layers = { A: 0, M: 0, B: 0 };
   d.students.forEach((s, i) => {
     const p = `画像.students[${i}]`;
@@ -171,31 +221,42 @@ function validateProfile(text) {
 }
 
 function validateBookCsv(text, kind) {
-  const errs = [], warns = [];
+  const errs = [],
+    warns = [];
   const rows = parseCsv(text);
   if (!rows.length) return { errs: [ERR('空文件', kind, '无内容（新书可从空表头开始，但需有表头）')], warns, summary: {} };
   const hdr = rows[0].map((h) => h.trim());
   if (kind === '知识库') {
     for (const k of ['类型', '词', '值']) if (!hdr.includes(k)) errs.push(ERR('表头缺失', `${kind}.表头`, `缺少「${k}」，实际：${hdr.join(',')}`));
-    const iT = hdr.indexOf('类型'), iW = hdr.indexOf('词');
+    const iT = hdr.indexOf('类型'),
+      iW = hdr.indexOf('词');
     const seen = new Set();
     rows.slice(1).forEach((r, k) => {
-      const line = k + 2, t = (r[iT] ?? '').trim(), w = (r[iW] ?? '').trim().toLowerCase();
+      const line = k + 2,
+        t = (r[iT] ?? '').trim(),
+        w = (r[iW] ?? '').trim().toLowerCase();
       if (!['加注词', '换词倾向'].includes(t)) errs.push(ERR('取值非法', `${kind} 第${line}行.类型`, `「${t}」，允许：加注词 / 换词倾向`));
       if (!w) errs.push(ERR('必填缺失', `${kind} 第${line}行.词`, '为空'));
       if (w && w !== w.toLowerCase()) warns.push(ERR('建议小写', `${kind} 第${line}行.词`, `「${w}」应小写`));
       // 2026-09-10 统一口径：同型同词重复 = 错误（面板也是这么判的，2026-09-10 之前这里只给警告，
       // 于是"知识库里 harness 有两条不同释义"在命令行看着没事、在 App 里却直接冻结整个标签页）
-      if (w) { const key = `${t}:${w}`; if (seen.has(key)) errs.push(ERR('重复', `${kind} 第${line}行`, `「${t}:${w}」已出现（同型同词只能有一行）`)); seen.add(key); }
+      if (w) {
+        const key = `${t}:${w}`;
+        if (seen.has(key)) errs.push(ERR('重复', `${kind} 第${line}行`, `「${t}:${w}」已出现（同型同词只能有一行）`));
+        seen.add(key);
+      }
     });
     return { errs, warns, summary: { 条目数: rows.length - 1 } };
   }
   // 词典
   for (const k of ['词', '释义', '来源']) if (!hdr.includes(k)) errs.push(ERR('表头缺失', `${kind}.表头`, `缺少「${k}」，实际：${hdr.join(',')}`));
-  const iW = hdr.indexOf('词'), iZ = hdr.indexOf('释义');
+  const iW = hdr.indexOf('词'),
+    iZ = hdr.indexOf('释义');
   const byWord = new Map();
   rows.slice(1).forEach((r, k) => {
-    const line = k + 2, w = (r[iW] ?? '').trim().toLowerCase(), z = (r[iZ] ?? '').trim();
+    const line = k + 2,
+      w = (r[iW] ?? '').trim().toLowerCase(),
+      z = (r[iZ] ?? '').trim();
     if (!w) errs.push(ERR('必填缺失', `${kind} 第${line}行.词`, '为空'));
     if (!z) errs.push(ERR('必填缺失', `${kind} 第${line}行.释义`, '为空'));
     if (!byWord.has(w)) byWord.set(w, new Set());
@@ -208,8 +269,12 @@ function validateBookCsv(text, kind) {
 }
 
 function validateProper(text) {
-  const errs = [], warns = [];
-  const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
+  const errs = [],
+    warns = [];
+  const lines = text
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean);
   if (!lines.length) errs.push(ERR('空文件', '专名', '无内容'));
   const seen = new Set();
   lines.forEach((l, i) => {
@@ -252,12 +317,21 @@ for (const t of targets) {
   if (statSync(t).isDirectory()) {
     for (const f of readdirSync(t)) {
       if (!/\.(csv|json|txt)$/i.test(f)) continue;
-      if (shouldSkip(f)) { skipped.push(f); continue; }
+      if (shouldSkip(f)) {
+        skipped.push(f);
+        continue;
+      }
       const full = join(t, f);
       let ty;
       try {
         ty = forcedType ?? detectType(full, readFileSync(full, 'utf-8'));
-      } catch { continue; }
+      } catch (e) {
+        /* 2026-09-14：原先这里 `continue` 一走了之——文件**既没进结果、也没进 skipped**，
+         * 于是"读不出来"与"这里本来就没有它"在报告里长得一模一样，**目录扫描会悄悄漏检**。
+         * 现在如实记进 skipped（它是"没查成"，不是"查过没问题"）。 */
+        skipped.push(`${f}（读不出来：${String(e).slice(0, 60)}）`);
+        continue;
+      }
       if (ty) files.push({ full, ty });
       else skipped.push(f);
     }
@@ -272,7 +346,9 @@ if (asJson) {
 } else {
   for (const r of results) {
     const mark = r.errs.length ? '✗' : '✓';
-    const sum = Object.entries(r.summary ?? {}).map(([k, v]) => `${k} ${v}`).join('｜');
+    const sum = Object.entries(r.summary ?? {})
+      .map(([k, v]) => `${k} ${v}`)
+      .join('｜');
     console.log(`${mark} [${r.type}] ${basename(r.file)}${sum ? '  —— ' + sum : ''}`);
     r.errs.forEach((e, i) => console.log(`    ${i + 1}. [${e.kind}] ${e.where}：${e.msg}`));
     r.warns.forEach((e) => console.log(`    ⚠ [${e.kind}] ${e.where}：${e.msg}`));

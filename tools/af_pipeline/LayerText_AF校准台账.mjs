@@ -147,11 +147,15 @@ async function cmdImport() {
       if (known.has(e.id) || liveKeys.has(e.id)) continue; // 幂等：同一条账只记一次
       known.set(e.id, e);
       liveKeys.add(e.id);
+      /* 2026-09-14：`mkdirSync` 原先在**循环之后**（第 154 行）——新工作区里
+       * `_运行/` 还不存在时，扫到的第一条标记就会让这次 append 抛 ENOENT，
+       * 而它在循环里、没人接，整个导入半途而废（前面已写进去的倒是没事）。
+       * 建目录必须在第一次 append 之前。 */
+      mkdirSync(dirname(LEDGER), { recursive: true });
       appendFileSync(LEDGER, toCalibrationLine(e), 'utf-8');
       added += 1;
     }
   }
-  mkdirSync(dirname(LEDGER), { recursive: true });
   console.log(`\n扫过标记 ${scanned} 条 → **新增台账事件 ${added} 条**（已有 ${known.size - added} 条不动，重复导入不会重复记账）`);
   if (skipped.length) {
     console.log(`\n⚠ 跳过 ${skipped.length} 处（不静默吞）：`);

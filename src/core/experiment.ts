@@ -296,6 +296,9 @@ export function segmentFirstResponses(logText: string): Map<string, string> {
     try {
       o = JSON.parse(line) as typeof o;
     } catch {
+      /* 有意兜底：会话日志里混进坏行（手改过、写了一半）是可能的，跳过它继续读后面的。
+       * 这里**不**像 `decision.ts`/`workbench.ts` 的同类解析那样返回 `badLines` 计数——
+       * 本函数只回答"每段的第一轮响应是什么"，坏行会由调用方在别处按"缺首轮响应"报出来。 */
       continue;
     }
     if (o.t !== 'msg') continue;

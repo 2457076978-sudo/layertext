@@ -321,11 +321,15 @@ export function serializeDoc(ast: DocAst): string {
 
 /* ────────────────────── 编辑操作（都走 span 下标，不重新格式化整段） ────────────────────── */
 
-/** 在指定段里把某个词的注释改成另一个释义（找不到则不改，返回 false） */
-export function setSense(ast: DocAst, segId: string, word: string, zh: string): boolean {
+/** 在指定段里把某个词的注释改成另一个释义（找不到则不改，返回 false）。
+ *
+ *  `at`（可选）= 目标 span 的 `start` 偏移。同一段里同一个词可能出现多次、释义还不一样，
+ *  只按词找**永远只会命中第一处**；给了 `at` 才精确到那一处。
+ *  （2026-09-14 加：`applyRepairs` 原先按词找，于是"第二处释义不一致"报修好了、实际一个字符没改。） */
+export function setSense(ast: DocAst, segId: string, word: string, zh: string, at?: number): boolean {
   const seg = ast.segments.find((s) => s.id === segId);
   if (!seg) return false;
-  const hit = seg.spans.find((s): s is AnnotationSpan => s.kind === 'annotation' && s.word.toLowerCase() === word.toLowerCase());
+  const hit = seg.spans.find((s): s is AnnotationSpan => s.kind === 'annotation' && s.word.toLowerCase() === word.toLowerCase() && (at === undefined || s.start === at));
   if (!hit) return false;
   seg.raw = seg.raw.slice(0, hit.start) + `${hit.word}（${zh}）` + seg.raw.slice(hit.end);
   seg.spans = spansOf(seg.raw);
@@ -363,19 +367,37 @@ export function revertInSegment(ast: DocAst, segId: string, from: string, to: st
 }
 
 /** 文档级修复：能确定性修的就修（嵌套注释扁平成一层、同词多义统一为首次出现的释义）。
- *  返回改了什么；改不动的留给 `issues` 里的人。 */
+ *  返回改了什么；改不动的留给 `issues` 里的人。
+ *
+ *  ⚠ **尚未接线**（2026-09-14 复核）：全仓只有 `tests/docast.test.ts` 调 `applyRepairs`/`repairDoc`，
+ *  App 与管线都没接。**它不是一道正在生效的防御**——生产里真在跑的是
+ *  `flattenNestedAnnotations`（`LayerText_AF修复_20260910.mjs` 用它做扁平化那一半）。
+ *  要接线得先定两件事：App 在什么时机调它、改完教师正文之后这条改动算谁的决定。 */
 export function applyRepairs(ast: DocAst): { nested: number; senses: number; remaining: DocIssue[] } {
   let nested = 0;
   let senses = 0;
   // ① 同词多义：以**首次出现**的释义为正（与"一个词全篇只注一次"的正本一致）
   const canonical = new Map<string, string>();
   for (const seg of ast.segments) {
-    for (const s of seg.spans) {
-      if (s.kind !== 'annotation') continue;
+    /* 2026-09-14 修（原先**报修好了、实际一个字符没改**）：
+     *  · `for (const s of seg.spans)` 手里是**旧数组**，而 `setSense` 会把 `seg.spans` 重算；
+     *  · `setSense` 只按词找，**永远改该段第一处**——第二处不一致时，改的是本来就对的那处，
+     *    却照样把 `senses` 加了 1。
+     *  改法要**两趟**，缺一不可：
+     *   ① 左→右扫一遍定"正"（"首次出现的释义为正"这条规矩不能因为遍历方向变了就变），
+     *      顺手记下哪些 span 需要改；
+     *   ② 从**右往左**改（`setSense` 会重算 `seg.spans`，先改左边会把右边 span 的 start 挤歪）。
+     *  第一版我只做了 ②，于是"正"变成了最右边那个——被下面那条三处同词的用例当场抓住。 */
+    const anns = seg.spans.filter((s): s is AnnotationSpan => s.kind === 'annotation').sort((a, b) => a.start - b.start);
+    const toFix: AnnotationSpan[] = [];
+    for (const s of anns) {
       const k = s.word.toLowerCase();
       const zh = canonical.get(k);
       if (zh === undefined) canonical.set(k, s.zh);
-      else if (zh !== s.zh && setSense(ast, seg.id, s.word, zh)) senses++;
+      else if (zh !== s.zh) toFix.push(s);
+    }
+    for (const s of toFix.reverse()) {
+      if (setSense(ast, seg.id, s.word, canonical.get(s.word.toLowerCase())!, s.start)) senses++;
     }
   }
   // ② 嵌套注释扁平化
@@ -415,7 +437,8 @@ export function flattenNestedAnnotations(md: string): { md: string; nested: numb
   return { md: nested ? serializeDoc(ast) : md, nested };
 }
 
-/** 文本级便捷入口：解析 → 修复 → 序列化（幂等；干净的文档逐字节不变） */
+/** 文本级便捷入口：解析 → 修复 → 序列化（幂等；干净的文档逐字节不变）。
+ *  ⚠ **尚未接线**，理由同 `applyRepairs` 上的说明。 */
 export function repairDoc(md: string): { md: string; changed: boolean; nested: number; senses: number; issues: DocIssue[] } {
   const ast = parseDoc(md);
   const r = applyRepairs(ast);

@@ -16,7 +16,10 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # 必须 ≥ 22.13：测试硬要求 node:sqlite（≥22.5），eslint 要求 ^22.13。
+          # 这里曾经钉的是 20——"发布门禁：全量测试"在 Node 20 上必红，
+          # 于是 tauri build 与创建 Release 两步永远跑不到，打 tag 发不出包。
+          node-version: 22
           cache: npm
 
       - uses: dtolnay/rust-toolchain@stable

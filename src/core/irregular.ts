@@ -32,8 +32,14 @@ old older oldest well better best badly worse worst
 
 /** 不规则名词复数 → 单数（hit() 先查此表再剥后缀） */
 export const IRR_NOUN: Record<string, string> = {
-  men: 'man', sheep: 'sheep', beasts: 'beast', tidings: 'tiding',
-  teeth: 'tooth', feet: 'foot', geese: 'goose', children: 'child',
+  men: 'man',
+  sheep: 'sheep',
+  beasts: 'beast',
+  tidings: 'tiding',
+  teeth: 'tooth',
+  feet: 'foot',
+  geese: 'goose',
+  children: 'child',
 };
 
 /** 被动语态假阳性豁免（负向先行断言，接在 be 动词之后）：
@@ -66,12 +72,69 @@ export const THAT_EXEMPT =
  * 豁免实际由 THAT_EXEMPT 的代词/名词先行词表承担）。此处同样仅导出不使用，
  * 保持与 Python 版行为一致；是否启用留待产品层决策（见 docs/M1-对照测试报告.md）。
  */
-export const COGNITIVE_LOOKBEHIND =
-  ['said', 'agreed', 'knew', 'thought', 'believed', 'hoped', 'sure', 'afraid', 'explained', 'remembered',
-   'saw', 'heard', 'felt', 'found', 'meant', 'declared', 'announced', 'reported', 'cried', 'shouted',
-   'whispered', 'asked', 'wondered', 'learned', 'forgot', 'promised', 'noticed', 'watched', 'showed',
-   'proved', 'seemed', 'appeared', 'denied', 'doubted']
+export const COGNITIVE_LOOKBEHIND = [
+  'said',
+  'agreed',
+  'knew',
+  'thought',
+  'believed',
+  'hoped',
+  'sure',
+  'afraid',
+  'explained',
+  'remembered',
+  'saw',
+  'heard',
+  'felt',
+  'found',
+  'meant',
+  'declared',
+  'announced',
+  'reported',
+  'cried',
+  'shouted',
+  'whispered',
+  'asked',
+  'wondered',
+  'learned',
+  'forgot',
+  'promised',
+  'noticed',
+  'watched',
+  'showed',
+  'proved',
+  'seemed',
+  'appeared',
+  'denied',
+  'doubted',
+]
   .map((w) => `(?<!${w})`)
   .join('');
 
 export const IRR: Set<string> = new Set(IRR_RAW.trim().split(/\s+/));
+
+/* ────────────────────── 句法黑名单：唯一正则源 ────────────────────── */
+
+/**
+ * 这四个类别（被动 / 定语从句 / 过去完成 / 倒装过去完成）的模式串。
+ *
+ * **为什么要集中在这里**：`qc.ts` 要的是**全文计数**（带 `/g` 的 `count`），
+ * `risks.ts` 要的是**逐句判定**（不带 `/g` 的 `test`）——需求不同，于是两边各抄了一份
+ * 长得一样的正则。`risks.ts` 的注释一直写着"与 qc.ts 共用同一套正则与豁免表"，
+ * 但那是**写在注释里的承诺，不是代码里的事实**：任何一边改了豁免词或一个字符，
+ * 另一边就悄悄漂移，结果是"审校面板着色的句子"和"报表里的数字"指向不同的句。
+ * 注释里那句"含 R12-inv-case 修复"就是这么来的——**为修一个 bug 要改两处，漏一处就漂**。
+ *
+ * 现在：模式串只有这一份，两边各自决定要不要加 `g`。改规则只改这里。
+ */
+export const PAT_PASSIVE_BE = String.raw`\b(?:was|were|is|are|be|been|being)\s+${FAKE}\w+ed\b`;
+export const PAT_PASSIVE_IRR = String.raw`\b(?:was|were)\s+(?:${PASSIVE_IRR})\b`;
+export const PAT_PASSIVE_BY = String.raw`,\s*\w+ed\s+by\s`;
+export const PAT_RELCL_WHO_WHICH = String.raw`,?\s+(?:who|which)\s+\w+`;
+export const PAT_RELCL_THAT = String.raw`\b[a-z]+\s+that\s+(?!${THAT_EXEMPT})[a-z]+(?:ed|s|ing)\b`;
+export const PAT_PASTPERF_PARTICIPLE = String.raw`\bhad\s+${HAD_ADVERBS}${FAKE}(\w+ed)\b`;
+export const PAT_PASTPERF_IRR = String.raw`\bhad\s+${HAD_ADVERBS}(?:${PART_LIST})\b`;
+/** R12 倒装过去完成。注意：原型 Python 版此处仅小写触发词，句首大写
+ *  （Never/Hardly/No sooner had …）会漏检——而其注释示例恰为大写句首。
+ *  此为与原版唯一的有意分歧（R12-inv-case 修复），参照版已同步，见对照报告。 */
+export const PAT_PASTPERF_INVERSION = String.raw`\b(?:[Nn]ever|[Hh]ardly|[Ss]carcely|[Ss]eldom|[Nn]o sooner)\s+had\s+\w+\s+\w+(?:ed|en)\b`;

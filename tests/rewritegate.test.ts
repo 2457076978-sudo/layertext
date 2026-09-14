@@ -12,10 +12,17 @@ import { test } from 'node:test';
 import { buildAppPolicy, gateBadge, loadBookDict, loadLedger, setGateIo, type GateIo } from '../app/src/rewritegate.js';
 import { checkRewrite } from '../src/core/rewrite.js';
 
+/** 假 IO。
+ *
+ *  **目录项按裸文件名写**，`listDir` 像真后端那样补成完整路径再返回——
+ *  Rust 侧 `list_dir` 返回的是 `p.to_string_lossy()`（**绝对路径**）。
+ *  2026-09-14 之前这个假 IO 直接返回裸名，于是把"调用方把完整路径当裸文件名用"
+ *  这个错误契约固化了下来：`loadLedger` 里 `\`${d}/${f}\`` 拼出 `/a/b//a/b/c.md`，
+ *  生产环境读不到、被兜底吞掉，而测试全绿。 */
 function memIo(files: Record<string, string>, dirs: Record<string, string[]> = {}): void {
   const io: GateIo = {
     read: (p) => (p in files ? Promise.resolve(files[p]!) : Promise.reject(new Error('no file: ' + p))),
-    listDir: (d) => (d in dirs ? Promise.resolve(dirs[d]!) : Promise.reject(new Error('no dir: ' + d))),
+    listDir: (d) => (d in dirs ? Promise.resolve(dirs[d]!.map((n) => `${d.replace(/\/+$/, '')}/${n}`)) : Promise.reject(new Error('no dir: ' + d))),
   };
   setGateIo(io);
 }
@@ -40,10 +47,7 @@ test('账本只扫本书的章节文件（台账/报告等 .md 不算）', async
 });
 
 test('账本扫上层各章目录（产物常见的两级结构）', async () => {
-  memIo(
-    { '/book/第二章/原文_A层85.md': 'A clover（三叶草） here.' },
-    { '/book/第二章': ['原文_A层85.md'], '/book': ['第一章', '第二章'] },
-  );
+  memIo({ '/book/第二章/原文_A层85.md': 'A clover（三叶草） here.' }, { '/book/第二章': ['原文_A层85.md'], '/book': ['第一章', '第二章'] });
   const r = await loadLedger({ currentText: '', sourcePath: '/book/第一章/原文_A层85.md' });
   assert.equal(r.words.has('clover'), true, '上一级下别的章也要扫到（全篇一词一注）');
 });
@@ -98,8 +102,14 @@ test('组装策略：专名并进已知词、词典裁成局部切片、账本�
 test('没读到词典要留痕（不假装查过同词同义）', async () => {
   memIo({});
   const { notes } = await buildAppPolicy({
-    currentText: '', sourcePath: null, known: KNOWN, properNames: [],
-    config: null, tier: 'A', maxLen: 20, involved: [],
+    currentText: '',
+    sourcePath: null,
+    known: KNOWN,
+    properNames: [],
+    config: null,
+    tier: 'A',
+    maxLen: 20,
+    involved: [],
   });
   assert.match(notes.join('｜'), /没读到统一词典/);
 });
@@ -108,14 +118,21 @@ test('端到端：App 策略切片 + 同一个 checkRewrite → 抓住"改写引
   memIo({ '/p/dict.csv': '词,释义,来源\nbarn,谷仓\n' });
   const { policy } = await buildAppPolicy({
     currentText: 'The boy ran to the barn（谷仓）.',
-    sourcePath: null, known: KNOWN, properNames: [],
-    config: { 书级: { 词典: '/p/dict.csv' } }, tier: 'A', maxLen: 20,
+    sourcePath: null,
+    known: KNOWN,
+    properNames: [],
+    config: { 书级: { 词典: '/p/dict.csv' } },
+    tier: 'A',
+    maxLen: 20,
     involved: ['tremendous'],
   });
   const req = { source: 'The boy ran to the barn.', scope: 'sentence' as const, tier: 'A', bookVersion: 'v1' };
   const bad = checkRewrite(req, policy, 'The boy ran to a tremendous structure.');
   assert.equal(bad.status, 'blocked', '这正是改造前会被静默写进正文的那类候选');
-  assert.equal(bad.checks.blockers.some((p) => p.ruleId === 'ANNO-01'), true);
+  assert.equal(
+    bad.checks.blockers.some((p) => p.ruleId === 'ANNO-01'),
+    true,
+  );
   const ok = checkRewrite(req, policy, 'The boy ran to a tremendous（巨大的） structure.');
   assert.equal(ok.status, 'candidate', ok.blockedReasons.join('；'));
 });
@@ -125,14 +142,15 @@ test('端到端：跨章重复注会被抓住（账本来自全篇）', async ()
   const { policy } = await buildAppPolicy({
     // 打开的这章没有 barn 的注释，但账本里有（模拟"第 1 章注过"）
     currentText: 'The boy ran to the barn（谷仓）.',
-    sourcePath: null, known: KNOWN, properNames: [],
-    config: { 书级: { 词典: '/p/dict.csv' } }, tier: 'A', maxLen: 20, involved: ['barn'],
+    sourcePath: null,
+    known: KNOWN,
+    properNames: [],
+    config: { 书级: { 词典: '/p/dict.csv' } },
+    tier: 'A',
+    maxLen: 20,
+    involved: ['barn'],
   });
-  const r = checkRewrite(
-    { source: 'The boy ran to the barn.', scope: 'sentence', tier: 'A', bookVersion: 'v1' },
-    policy,
-    'The boy ran to the barn（谷仓） again.',
-  );
+  const r = checkRewrite({ source: 'The boy ran to the barn.', scope: 'sentence', tier: 'A', bookVersion: 'v1' }, policy, 'The boy ran to the barn（谷仓） again.');
   const hit = r.checks.warns.find((x) => x.ruleId === 'ANNO-02');
   assert.ok(hit, '全篇一词一注：账本里的词再注必须被抓');
   assert.deepEqual(hit.detail?.words, ['barn']);

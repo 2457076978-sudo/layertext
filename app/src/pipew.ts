@@ -25,6 +25,7 @@ import {
   stripMarkdownNoise,
   morphMismatch,
   syncMarksToMd,
+  baseName,
   type SyncPlan,
 } from './pure.js';
 import { extractParas, sentsOf, splitChapter } from '../../src/core/textpipe.js';
@@ -218,7 +219,8 @@ export async function applyWordSimplifications(s: FileSession, marks: Mark[]): P
       }
     }
     if (!hits.length || base < 0) continue;
-    let repl = simple;
+    const replBase = simple; // 形态计算的**基准**：循环里不许改写它（见下）
+    let repl = simple; // 循环后的展示形态 = 最左侧那一处的形态
     let n = 0;
     let firstReplaced = '';
     // 倒序替换（防位移）；已带中文注释的出现处跳过（教师已处理，别让注释悬空）
@@ -226,7 +228,11 @@ export async function applyWordSimplifications(s: FileSession, marks: Mark[]): P
       const at = base + hits[i].at;
       const matched = hits[i].matched;
       if (s.md.slice(at + matched.length, at + matched.length + 1) === '（') continue;
-      let r = repl;
+      /* 2026-09-14：基准必须是**不变的** `replBase`。原先 `let r = repl;`——而 `repl`
+       * 会在首次迭代（倒序循环＝最右侧那处）末尾被写成带首字母大写的形态，
+       * 于是它左侧所有**小写**出现处都被替换成大写词并落盘：
+       * `the commandments were read aloud. Commandments mattered.` → `the Rules were … Rules mattered.` */
+      let r = replBase;
       if (/^[A-Z]/.test(matched)) r = r.charAt(0).toUpperCase() + r.slice(1); // 保首字母大写形态
       if (morphMismatch(matched, r)) morphWarn.push(`${matched}→${r}`); // AI 边界 #17：词尾形态类不一致，提示复核不拦截
       s.md = s.md.slice(0, at) + r + s.md.slice(at + matched.length);
@@ -512,10 +518,14 @@ export async function siblingVersionFiles(sourcePath: string): Promise<{ name: s
     listError = String(e);
     return [];
   }
+  /* 2026-09-14：`list_dir` 给的是**完整路径**，原先把它当裸文件名再拼一次目录，
+   * 得到 `/a/b//a/b/c.md`（不存在）——读不到就被兜底吞掉，最后对教师说
+   * "同目录没找到可用的其他版本文件"，而目录里明明有；台账里还会留下
+   * "已传播到 /a/b//a/b/c.md" 这种假记录。 */
   return names
-    .filter((n) => /\.md$/i.test(n) && `${dir}/${n}` !== sourcePath)
+    .filter((n) => /\.md$/i.test(n) && n !== sourcePath)
     .filter((n) => !/质检报告|审校档案|全书简化|基准|AI修订|分层初稿|工作稿|原始备份|词句卡/.test(n))
-    .map((n) => ({ name: n, path: `${dir}/${n}` }));
+    .map((n) => ({ name: baseName(n), path: n }));
 }
 
 /**
@@ -598,11 +608,11 @@ export async function showSyncMarksDialog(): Promise<void> {
     setStatus('读取章节目录失败：' + e, 'err');
     return;
   }
-  const targets = names.filter((n) => /\.md$/i.test(n) && `${dir}/${n}` !== s.sourcePath).filter((n) => !/质检报告|审校档案|全书简化|基准|AI修订|分层初稿|工作稿|原始备份|词句卡/.test(n));
+  const targets = names.filter((n) => /\.md$/i.test(n) && n !== s.sourcePath).filter((n) => !/质检报告|审校档案|全书简化|基准|AI修订|分层初稿|工作稿|原始备份|词句卡/.test(n));
   const plans: SyncTargetPlan[] = [];
   const skippedTargets: string[] = [];
   for (const n of targets) {
-    const path = `${dir}/${n}`;
+    const path = n;
     try {
       const md = await readTextSmart(path);
       let existing: Mark[] = [];

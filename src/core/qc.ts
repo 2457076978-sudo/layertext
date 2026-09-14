@@ -12,9 +12,9 @@
 
 import { chineseOutsideAnnotations, parseAnnotations } from './annot.js';
 import { annotatableOf } from './segmentgate.js';
-import { FAKE, HAD_ADVERBS, IRR, PASSIVE_IRR, PART_LIST, THAT_EXEMPT } from './irregular.js';
+import { IRR, PAT_PASSIVE_BE, PAT_PASSIVE_IRR, PAT_PASSIVE_BY, PAT_RELCL_WHO_WHICH, PAT_RELCL_THAT, PAT_PASTPERF_PARTICIPLE, PAT_PASTPERF_IRR, PAT_PASTPERF_INVERSION } from './irregular.js';
 import type { Lexicon } from './lexicon.js';
-import { extractParas, hit, pendHit, sentsOf, splitChapter, tokenizeTxt, cardGlossWords } from './textpipe.js';
+import { extractParas, hit, pendHit, sentsOf, splitChapter, tokenizeTxt, cardGlossWords, containsWord } from './textpipe.js';
 
 export type Tier = 'A' | 'B' | 'M';
 
@@ -46,42 +46,42 @@ export interface QcResult {
   paraCount: number;
   sentCount: number;
   tokenCount: number;
-  coverage: number;        // ① 词表覆盖率（注释后口径）
-  newWordRate: number;     // ② 生词率（词型口径）
-  avgLenRaw: number;       // ③ 平均句长（原始值，展示时再舍入）
-  avgLenNarrRaw: number;   // ③ 平均句长（去歌词）
-  maxLen: number;          // ④ 单句最长
-  over20: number;          // ④ 超 20 词句数
-  passive: number;         // ⑤ 被动式计数（叙事区）
-  relcl: number;           // ⑥ 定语从句计数（叙事区）
-  pastperf: number;        // ⑦ 过去完成计数（叙事区）
+  coverage: number; // ① 词表覆盖率（注释后口径）
+  newWordRate: number; // ② 生词率（词型口径）
+  avgLenRaw: number; // ③ 平均句长（原始值，展示时再舍入）
+  avgLenNarrRaw: number; // ③ 平均句长（去歌词）
+  maxLen: number; // ④ 单句最长
+  over20: number; // ④ 超 20 词句数
+  passive: number; // ⑤ 被动式计数（叙事区）
+  relcl: number; // ⑥ 定语从句计数（叙事区）
+  pastperf: number; // ⑦ 过去完成计数（叙事区）
   propConsistent: boolean; // ⑧ 专名-术语表一致
-  thatCheck: number;       // that 从句待人工复核
-  pendingHits: number;     // ⑨ 待定词 token 命中（保守口径风险）
-  oov: string[];           // OOV 词（未去重）
+  thatCheck: number; // that 从句待人工复核
+  pendingHits: number; // ⑨ 待定词 token 命中（保守口径风险）
+  oov: string[]; // OOV 词（未去重）
   gates: { passiveOk: boolean; relclOk: boolean }; // A 层解禁门
   // ---- ⑪ 加注覆盖率（2026-09-10 新增）：该注的词注了没有 ----
   annotationCoverage: number; // 已注词型 / 应注词型（0-1）
-  annotatable: number;        // 应注词型数（OOV 去重、去两字母词）
-  annotated: number;          // 已注词型数
-  annotMissing: string[];     // 未注词型清单（闸门报警与补注工具的依据）
+  annotatable: number; // 应注词型数（OOV 去重、去两字母词）
+  annotated: number; // 已注词型数
+  annotMissing: string[]; // 未注词型清单（闸门报警与补注工具的依据）
   // ---- ⑪b 注释结构（2026-09-11 按审查报告第③条改为 token 级解析） ----
-  annotationTotal: number;     // 注释总处数
-  annotationExtra: number;     // 重复注释（第 2 次起）处数
-  annotationConflict: number;  // 与统一词典释义冲突的注释处数（同形异义假通过的现场）
-  annotationFormOnly: number;  // 靠词形/连字符归一才命中、字面查不到的 OOV 数（原先会假失败）
-  chineseOutside: number;      // 注释之外混入中文的片段数（格式红线）
+  annotationTotal: number; // 注释总处数
+  annotationExtra: number; // 重复注释（第 2 次起）处数
+  annotationConflict: number; // 与统一词典释义冲突的注释处数（同形异义假通过的现场）
+  annotationFormOnly: number; // 靠词形/连字符归一才命中、字面查不到的 OOV 数（原先会假失败）
+  chineseOutside: number; // 注释之外混入中文的片段数（格式红线）
   // ---- ⑩ 复现指标（feature/reinforce；仅当 reinforceWords 提供时存在，保证旧报告 schema 不变） ----
-  reinforceQueue?: number;     // 队列词数
-  reinforceHits?: number;      // 命中队列的词种数
-  reinforceTokens?: number;    // 命中 token 总次数（重复强度）
+  reinforceQueue?: number; // 队列词数
+  reinforceHits?: number; // 命中队列的词种数
+  reinforceTokens?: number; // 命中 token 总次数（重复强度）
   reinforceHitList?: string[]; // 命中词清单
   // ---- ⑩b 复现豁免的分账（审查报告第④条：复现词并入已知会掩盖本应教学注释的词，
   //      保留该取舍，但必须单独报告"原始 OOV"和"复现豁免 OOV"） ----
-  rawOov?: string[];           // 不并入复现队列时的 OOV 词型（原始口径）
+  rawOov?: string[]; // 不并入复现队列时的 OOV 词型（原始口径）
   rawOovCount?: number;
   reinforceExemptOov?: string[]; // 被复现队列豁免掉的 OOV（原始口径有、现行口径没有）
-  rawNewWordRate?: number;     // 原始口径生词率
+  rawNewWordRate?: number; // 原始口径生词率
 }
 
 function count(re: RegExp, t: string): number {
@@ -102,7 +102,8 @@ export function pyRound1(x: number): number {
   const c = rest.length ? rest[0] : '0';
   if (c > '5') n = scaled + 1;
   else if (c === '5') {
-    if (/[1-9]/.test(rest.slice(1))) n = scaled + 1; // 超过半 → 进
+    if (/[1-9]/.test(rest.slice(1)))
+      n = scaled + 1; // 超过半 → 进
     else n = scaled % 2 === 0 ? scaled : scaled + 1; // 恰半 → 半偶
   }
   return (sign * n) / 10;
@@ -114,46 +115,40 @@ export function runQc(md: string, lex: Lexicon, opts: QcOptions): QcResult {
 
   const songMarker = opts.songMarker ?? 'Beasts of England';
   const allSents: string[] = [];
-  const songSents: string[] = [];
+  /* 2026-09-14：歌篇句改成按**下标**标记，不再按**文本**做集合。
+   * 原先 `songSet = new Set(songSents)` + `!songSet.has(sentence)`——
+   * 只要叙事区里有一句与歌篇**逐字相同**（副歌被复述、或引语里重复演唱），
+   * 那一句也会被当成歌篇踢出叙事句法统计与平均句长：
+   * 「去歌词后平均句长」这个数会**悄悄少算**，而界面上看起来完全正常。 */
+  const songIdx = new Set<number>();
   for (const p of paras) {
     const isSong = p.includes(songMarker);
     const ss = sentsOf(p, isSong);
-    if (isSong) songSents.push(...ss);
+    if (isSong) for (let k = 0; k < ss.length; k++) songIdx.add(allSents.length + k);
     allSents.push(...ss);
   }
   if (allSents.length === 0) throw new Error('未切分出任何句子（正文区缺少 [P01] 段落标记？）');
 
   const wc = (s: string) => s.split(/\s+/).filter(Boolean).length;
   const lens = allSents.map(wc);
-  const songSet = new Set(songSents);
-  const lensNarr = lens.filter((_, i) => !songSet.has(allSents[i]));
+  const lensNarr = lens.filter((_, i) => !songIdx.has(i));
   const lensN = lensNarr.length ? lensNarr : lens;
 
   // ---- 句法黑名单计数（叙事区 = 非歌篇；直接引语整体豁免；锚点替换豁免） ----
-  let txtNarr = allSents.filter((s) => !songSet.has(s)).join(' ');
+  let txtNarr = allSents.filter((_, i) => !songIdx.has(i)).join(' ');
   txtNarr = txtNarr.replace(/"[^"]*"/g, ' ');
   (opts.anchors ?? []).forEach((a, i) => {
     txtNarr = txtNarr.split(a).join(`LAYERTEXT-ANCHOR-${i}`);
   });
 
-  const passiveBase =
-    count(new RegExp(String.raw`\b(?:was|were|is|are|be|been|being)\s+${FAKE}\w+ed\b`, 'g'), txtNarr) +
-    count(new RegExp(String.raw`\b(?:was|were)\s+(?:${PASSIVE_IRR})\b`, 'g'), txtNarr);
-  const relclWhoWhich = count(/,?\s+(?:who|which)\s+\w+/g, txtNarr);
-  const thatRelcl = count(
-    new RegExp(String.raw`\b[a-z]+\s+that\s+(?!${THAT_EXEMPT})[a-z]+(?:ed|s|ing)\b`, 'g'),
-    txtNarr,
-  );
+  // 句法黑名单的模式串只在 irregular.ts 定义一次（`PAT_*`），这里只负责加 `/g` 计数。
+  const passiveBase = count(new RegExp(PAT_PASSIVE_BE, 'g'), txtNarr) + count(new RegExp(PAT_PASSIVE_IRR, 'g'), txtNarr);
+  const relclWhoWhich = count(new RegExp(PAT_RELCL_WHO_WHICH, 'g'), txtNarr);
+  const thatRelcl = count(new RegExp(PAT_RELCL_THAT, 'g'), txtNarr);
   const relcl = relclWhoWhich + thatRelcl;
   const thatCheck = count(/\b\w+\s+that\s+\w+(?:s|ed|ing)?\b/g, txtNarr);
-  const pastperf =
-    count(new RegExp(String.raw`\bhad\s+${HAD_ADVERBS}${FAKE}(\w+ed)\b`, 'g'), txtNarr) +
-    count(new RegExp(String.raw`\bhad\s+${HAD_ADVERBS}(?:${PART_LIST})\b`, 'g'), txtNarr) +
-    // R12 倒装过去完成。注意：原型 Python 版此处仅小写触发词，句首大写
-    // （Never/Hardly/No sooner had …）会漏检——而其注释示例恰为大写句首。
-    // 此为与原版唯一的有意分歧（R12-inv-case 修复），参照版已同步，见对照报告。
-    count(/\b(?:[Nn]ever|[Hh]ardly|[Ss]carcely|[Ss]eldom|[Nn]o sooner)\s+had\s+\w+\s+\w+(?:ed|en)\b/g, txtNarr);
-  const passive = passiveBase + count(/,\s*\w+ed\s+by\s/g, txtNarr);
+  const pastperf = count(new RegExp(PAT_PASTPERF_PARTICIPLE, 'g'), txtNarr) + count(new RegExp(PAT_PASTPERF_IRR, 'g'), txtNarr) + count(new RegExp(PAT_PASTPERF_INVERSION, 'g'), txtNarr);
+  const passive = passiveBase + count(new RegExp(PAT_PASSIVE_BY, 'g'), txtNarr);
 
   // ---- 词句卡首列词条并入已知（注释后口径）；已学词集（复现队列）同样并入 ----
   const gloss = cardGlossWords(card);
@@ -197,14 +192,21 @@ export function runQc(md: string, lex: Lexicon, opts: QcOptions): QcResult {
   for (const w of reinforceList) {
     const single = new Set([w]);
     const n = toks.reduce((acc, t) => acc + (hit(t, single) ? 1 : 0), 0);
-    if (n > 0) { reinforceHits++; reinforceTokens += n; reinforceHitList.push(w); }
+    if (n > 0) {
+      reinforceHits++;
+      reinforceTokens += n;
+      reinforceHitList.push(w);
+    }
   }
 
   // ---- ⑧ 专名一致性（正文专名 ⊆ 词句卡，免检名单除外） ----
+  //  2026-09-13：两侧都从 `includes`（子串）改成 `containsWord`（整词）。
+  //  子串口径下 `Box` 会被 `BoxerCode` 假命中：正文侧会凭空多出一个"出现过的专名"，
+  //  卡侧又会把本该报的不一致抹平——两边同错，报表还是绿的。
   const cardText = card;
   const exempt = new Set(opts.propExempt ?? []);
-  const propInText = (opts.propCheckList ?? []).filter((w) => txt.includes(w));
-  const propConsistent = propInText.every((w) => cardText.includes(w) || exempt.has(w));
+  const propInText = (opts.propCheckList ?? []).filter((w) => containsWord(txt, w));
+  const propConsistent = propInText.every((w) => containsWord(cardText, w) || exempt.has(w));
 
   const chno = opts.chno ?? null;
   return {
@@ -250,12 +252,8 @@ export function runQc(md: string, lex: Lexicon, opts: QcOptions): QcResult {
           // 保留"复现词并入已知"的取舍，但让"本应教学注释却被豁免"这件事可被单独审计。
           rawOov: [...new Set(toks.filter((t) => !hit(t, knownRaw) && t.length > 1))],
           rawOovCount: new Set(toks.filter((t) => !hit(t, knownRaw) && t.length > 1)).size,
-          reinforceExemptOov: [
-            ...new Set(toks.filter((t) => !hit(t, knownRaw) && hit(t, known) && t.length > 1)),
-          ],
-          rawNewWordRate: new Set(toks).size
-            ? new Set(toks.filter((t) => !hit(t, knownRaw) && t.length > 1)).size / new Set(toks).size
-            : 0,
+          reinforceExemptOov: [...new Set(toks.filter((t) => !hit(t, knownRaw) && hit(t, known) && t.length > 1))],
+          rawNewWordRate: new Set(toks).size ? new Set(toks.filter((t) => !hit(t, knownRaw) && t.length > 1)).size / new Set(toks).size : 0,
         }
       : {}),
   };

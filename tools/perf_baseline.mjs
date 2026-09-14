@@ -19,8 +19,16 @@ const { sentenceRisks } = await mod('dist/src/core/risks.js');
 const { renderDiffPane } = await mod('dist/app/src/widgets.js');
 const { normalizeAndSplitChapters } = await mod('dist/app/src/pure.js');
 
-const afDefault = join(ROOT, '../../01-教学工作/名著阅读工作区_AnimalFarm/调适工作区/第一章/原文基线_清理对齐版.md');
+/* 2026-09-14：默认输入原先写死一条**跨仓库的相对路径**（`../../01-教学工作/…`）——
+ * 本机成立，换机器/换目录即断，而它正是"不传参就跑不动"的那类默认值。
+ * 按 AGENTS.md 的既定口径改成从环境变量取；取不到就**说清楚并退出**，不猜。 */
+const afDir = process.env.LAYERTEXT_AF_DIR;
+const afDefault = afDir ? join(afDir, '第一章/原文基线_清理对齐版.md') : '';
 const argPath = process.argv[2] && !process.argv[2].startsWith('--') ? process.argv[2] : afDefault;
+if (!argPath) {
+  console.error('✗ 没给输入文件，也没设 LAYERTEXT_AF_DIR（真项目调适工作区）。用法：node tools/perf_baseline.mjs <章节.md> [--out 报告.md]');
+  process.exit(2);
+}
 const outIdx = process.argv.indexOf('--out');
 const outPath = outIdx > 0 ? process.argv[outIdx + 1] : null;
 

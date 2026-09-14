@@ -22,12 +22,18 @@ const VOCAB = join(root, 'examples/vocab/sample_teaching_vocab.csv');
 const OUT = join(root, 'docs/M1-对照测试报告.md');
 const PY = process.env.PYTHON ?? 'python3';
 
-const texts = process.argv.length > 2
-  ? process.argv.slice(2)
-  : readdirSync(join(root, 'examples/texts')).filter((f) => f.endsWith('.md')).sort()
-      .map((f) => join(root, 'examples/texts', f));
+const texts =
+  process.argv.length > 2
+    ? process.argv.slice(2)
+    : readdirSync(join(root, 'examples/texts'))
+        .filter((f) => f.endsWith('.md'))
+        .sort()
+        .map((f) => join(root, 'examples/texts', f));
 
-interface Cmp { ok: boolean; note?: string }
+interface Cmp {
+  ok: boolean;
+  note?: string;
+}
 
 function cmpField(a: unknown, b: unknown): Cmp {
   if (Array.isArray(a) || Array.isArray(b)) {
@@ -46,12 +52,11 @@ function cmpField(a: unknown, b: unknown): Cmp {
 }
 
 function pyRun(text: string): Record<string, unknown> {
-  const tmp = join(tmpdir(), `layertext_ref_${basename(text)}.json`);
-  execFileSync(
-    PY,
-    [REF, text, '--tier', 'M', '--wordlist', WORDLIST, '--vocab', VOCAB, '--out', tmp],
-    { encoding: 'utf-8' },
-  );
+  /* 2026-09-14：临时文件名原先只带 `basename(text)`——两个同名输入（不同目录，或两次并发）
+   * 会**互相覆盖**同一个临时文件，后写的那次读到的是别人的结果，而对照脚本照样报"一致"。
+   * 加上 pid 与时间戳，把这条静默串扰断掉。 */
+  const tmp = join(tmpdir(), `layertext_ref_${basename(text)}.${process.pid}.${Date.now()}.json`);
+  execFileSync(PY, [REF, text, '--tier', 'M', '--wordlist', WORDLIST, '--vocab', VOCAB, '--out', tmp], { encoding: 'utf-8' });
   return JSON.parse(readFileSync(tmp, 'utf-8'));
 }
 
@@ -70,10 +75,16 @@ function fmt(v: unknown): string {
 }
 
 let pyVersion = '';
-try { pyVersion = execFileSync(PY, ['--version'], { encoding: 'utf-8' }).trim(); } catch { /* 留空 */ }
+try {
+  pyVersion = execFileSync(PY, ['--version'], { encoding: 'utf-8' }).trim();
+} catch {
+  /* 留空 */
+}
 
 const sections: string[] = [];
-let total = 0, pass = 0, failedTexts = 0;
+let total = 0,
+  pass = 0,
+  failedTexts = 0;
 const notes: string[] = [];
 
 for (const text of texts) {
@@ -82,9 +93,12 @@ for (const text of texts) {
   const lines = [`| 字段 | Python 参照版 | TypeScript 引擎 | 一致 |`, `|---|---|---|---|`];
   let okAll = true;
   for (const k of Object.keys(py)) {
-    const a = py[k], b = ts[k];
+    const a = py[k],
+      b = ts[k];
     const { ok, note } = cmpField(a, b);
-    total++; if (ok) pass++; else okAll = false;
+    total++;
+    if (ok) pass++;
+    else okAll = false;
     if (note) notes.push(`${basename(text)} · ${k}：${note}`);
     lines.push(`| ${k} | ${fmt(a)} | ${fmt(b)} | ${ok ? '✅' : '❌'} |`);
   }

@@ -87,7 +87,9 @@ for (const tier of TIERS) {
     fromCanonRow(r, (w, para) => {
       const key = r.chapter;
       if (!products.has(key)) {
-        const f = join(OUT_BASE, r.chapter, `原文_${tier}_${DATE}_工序化.md`);
+        /* 章目录走共享解析（run 布局下产物在 `_运行/<runId>/正文/<章>/`）；
+         * 原先直接拼 legacy 路径，读不到就静默当空产物——产出空队列而不报错。 */
+        const f = join(SHARED.chapterDirOf(OUT_BASE, r.chapter), `原文_${tier}_${DATE}_工序化.md`);
         products.set(key, existsSync(f) ? readFileSync(f, 'utf-8') : '');
       }
       return sentenceOf(products.get(key), w, para);

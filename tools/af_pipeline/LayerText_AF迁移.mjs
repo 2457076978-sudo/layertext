@@ -417,6 +417,9 @@ function collectFiles(root, descend, depth = 0, out = []) {
   try {
     entries = readdirSync(root, { withFileTypes: true });
   } catch {
+    /* 有意兜底：目录不存在/不可读时返回**已经收上来的那些**，让整趟迁移不至于因为
+     * 一个子目录而全灭。代价写明：这一步是"尽力而为"，收不全不会有任何提示——
+     * 调用方拿到的是一份**可能不完整**的清单，迁移前请自己确认目录都在。 */
     return out;
   }
   for (const e of entries) {
@@ -657,7 +660,8 @@ if (legacyLogDirs.length) {
   console.log('\n【不搬·旧日志】');
   console.log(' 会话/决定/版本日志在调适工作区（不在产物目录里），文件名里只有层级、没有教师，');
   console.log(' 同层两位教师写的就是同一批文件名——本工具**不认领**它们（认领就是替别人做主）：');
-  for (const d of legacyLogDirs) console.log(`   · ${d}（${(readdirSync(d) ?? []).length} 个文件，留在原处）`);
+  /* `readdirSync` 永不返回 null，原先的 `?? []` 是死代码（2026-09-14 去掉）。 */
+  for (const d of legacyLogDirs) console.log(`   · ${d}（${readdirSync(d).length} 个文件，留在原处）`);
   console.log(`   新布局下新日志会写进 ${rel(PRIVATE_DIR)}/{会话,决定,版本}/；旧日志要一起搬请手工来。`);
 }
 

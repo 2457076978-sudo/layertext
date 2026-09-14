@@ -212,7 +212,11 @@ async function executeTool(name: string, argsJson: string): Promise<string> {
         };
         S.suggestions.push(g);
         renderSuggestions();
-        await acceptSuggestion(g, { scene: '助手直改', outcome: '直改' });
+        /* 2026-09-14：`acceptSuggestion` 在四个失败分支都返回 false，这里原先**丢掉返回值**
+         * 就宣布"已直接应用并写入工作稿"。结合 `调适项目_*.json` 探测失效那条，
+         * 这条路径当时是**必然失败、必然谎报**：状态行报错，模型却转告教师"改好了"。 */
+        const ok = await acceptSuggestion(g, { scene: '助手直改', outcome: '直改' });
+        if (!ok) return '**没有写进正文**（原因见状态行）——不要对教师说已经改好了，先说明失败原因。';
         return `已直接应用并写入工作稿（引擎复核：${risk.passive || risk.relcl || risk.pastperf || risk.overlong ? '仍命中黑名单/超长，建议教师复核' : '通过'}）。正文已实时更新。`;
       }
       case 'propose_revision': {
@@ -328,12 +332,16 @@ async function sendChat(): Promise<void> {
     }
     statusEl.textContent = `就绪 ${usageTotal} · 对话 ${S.chatMsgs.filter((m) => m.role === 'user').length} 轮（已自动保存）`;
     scheduleChatSave();
-    void maybeCompactChat();
   } catch (e) {
     statusEl.textContent = '出错：' + e;
   } finally {
     S.chatBusy = false;
     ($('chat-send') as unknown as HTMLButtonElement).disabled = false;
+    /* 2026-09-14：这行原先在 `try` 里（`scheduleChatSave()` 之后），而 `S.chatBusy = false`
+     * 在 `finally` 里——调用瞬间 `chatBusy` 恒为 true，`maybeCompactChat` 的
+     * `if (!plan.need || S.chatBusy) return;` 必然提前返回，**对话历史自动压缩从未执行过**。
+     * 移到 `finally` 里、清掉 busy 之后再调，才是它本来要的时序。 */
+    void maybeCompactChat();
   }
 }
 

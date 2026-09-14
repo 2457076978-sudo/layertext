@@ -94,14 +94,28 @@ const TIER_INFO = {
   M: { tag: 'M层75', ratio: 0.75, maxLen: 16 },
   B: { tag: 'B层60', ratio: 0.6, maxLen: 14 },
 };
-const CN = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十'];
+/* 2026-09-14：**不再手抄十个**——原数组超过十章时 `CN[10] === undefined`，
+ * 于是第 11 章会拼出 `第undefined章`（脚本照常报成功），`--chapters 11` 也被静默丢掉。
+ * ⚠ 这里**没有**改用 `SHARED.chapterNames(P)`：`P` 要到主流程（本文件后半）才载入，
+ *  在模块顶层引用它就是 TDZ（仓库有冒烟守卫专抓这个）；而 `runCheck()` 走的是样本副本、
+ *  有它自己局部的 `P`。真实的章名清单（含项目自定义）仍以 `chapterNames(P)` 为准，
+ *  这里只负责「第 N 章」的回显与反解，所以用一张够长的通用数字表。
+ *  （超过 20 章仍会退化成阿拉伯数字——`chName` 的 `?? ci` 保证它至少是句人话。） */
+const CN = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十', '十一', '十二', '十三', '十四', '十五', '十六', '十七', '十八', '十九', '二十'];
 /* 章号 → 章名。**超范围也要给出人话**：`--chapters 99` 报错时写成"第undefined章"
  * 是没法看的——报错本身要能读，否则等于没报。 */
 const chName = (ci) => `第${CN[ci - 1] ?? ci}章`;
 const chNum = (ch) => CN.indexOf(String(ch).replace(/^第|章$/g, '')) + 1;
 /** `--partial 10` / `--partial 3,10` → 章号数组（过滤非法值并去重排序——口径输入先归一） */
 const parsePartial = (raw) =>
-  [...new Set(String(raw ?? '').split(',').map((x) => Number(x.trim())).filter((n) => Number.isInteger(n) && n >= 1 && n <= CN.length))].sort((a, b) => a - b);
+  [
+    ...new Set(
+      String(raw ?? '')
+        .split(',')
+        .map((x) => Number(x.trim()))
+        .filter((n) => Number.isInteger(n) && n >= 1 && n <= CN.length),
+    ),
+  ].sort((a, b) => a - b);
 const tierArgs = (s) =>
   String(s)
     .split(',')
@@ -373,6 +387,13 @@ async function computeConclusions(root, { 章过滤 = null, 层过滤 = null, pa
           text: body,
           source: srcSegs[k],
           target: Math.round(wc(srcSegs[k]) * info.ratio),
+          /* ⚠ 2026-09-14：这里**故意**仍用 `info.maxLen`（M=16），没跟 `会话改写`/`风险队列`/`三档复核`
+           * 一起改成引擎检查线（M=17）。理由：本工具的职责是**复现冻结当时的数**，
+           * 冻结基线是在 16 这把尺下定下来的；换成 17 会让 `--check` 与
+           * `tests/replay.test.ts` 当场对不上（实测两处红）。
+           * 要用新尺子，正确的次序是"先有意地重新冻结一次基线，再让本行跟上"——
+           * 重新冻结会覆写仓库外的 `~/Documents/LayerText配置/回放夹具_真项目/期望结论.json`，
+           * 那是验收正本，不该附在缺陷修复里顺手做掉。 */
           maxLen: info.maxLen,
           oov: annotatableOf(q.oov),
           dict: DICT,
@@ -393,8 +414,15 @@ async function computeConclusions(root, { 章过滤 = null, 层过滤 = null, pa
         章: ch,
         completeness: isPartial ? 'partial' : 'complete',
         段数: srcSegs.length,
-        原文词数: qSrc.words,
-        产物词数: qOut.words,
+        /* 2026-09-14 修（并**重新冻结**了基线）：这三个字段名原先都是错的——
+         * `QcResult` 里没有 `words`（叫 `tokenCount`），过去完成是**全小写**的 `pastperf`。
+         * 取到的永远是 `undefined`，而 `JSON.stringify` 会直接丢掉这些键：
+         * 冻结出来的《期望结论.json》里**从来没有**原文词数/产物词数/过去完成，
+         * 对账两边都缺、永远比不出差异——这三个数没有任何东西在守。
+         * 修名字会让 `--check` 与冻结基线对不上，所以同一批里**有意**重冻了一次
+         * （见 CHANGELOG：新旧基线逐字段比对过，只多了这三个键）。 */
+        原文词数: qSrc.tokenCount,
+        产物词数: qOut.tokenCount,
         生词率: Number((qOut.newWordRate * 100).toFixed(1)),
         原文生词率: Number((qSrc.newWordRate * 100).toFixed(1)),
         应注词型: qOut.annotatable,
@@ -404,7 +432,7 @@ async function computeConclusions(root, { 章过滤 = null, 层过滤 = null, pa
         平均句长: Number(qOut.avgLenNarrRaw.toFixed(1)),
         被动: qOut.passive,
         定语从句: qOut.relcl,
-        过去完成: qOut.pastPerf,
+        过去完成: qOut.pastperf,
         超长句: qOut.over20,
       };
       分章记录[ch] = {
@@ -610,7 +638,10 @@ for (const t of tiers) {
   const w = out.全书定位[t];
   if (c?.质检) console.log(` ${t} 层（第一章）：篇幅 ${c.篇幅比}｜超长句 ${c.超长句总数} 句｜加注覆盖率 ${c.质检.加注覆盖率}%｜生词率 ${c.质检.原文生词率}% → ${c.质检.生词率}%`);
   if (out.定位两条轴[t]) console.log(`        第一章两条轴：阅读负荷下降 ${out.定位两条轴[t].阅读负荷下降}%｜理解支架覆盖率 ${out.定位两条轴[t].理解支架覆盖率}%`);
-  if (w) console.log(`        全书两条轴（${w.章数} 章${w.排除章?.length ? `，partial 未计入：${w.排除章.join('、')}` : ''}）：阅读负荷下降 ${w.阅读负荷下降}%｜理解支架覆盖率 ${w.理解支架覆盖率}%（${w.已注词型}/${w.应注词型} 词型）`);
+  if (w)
+    console.log(
+      `        全书两条轴（${w.章数} 章${w.排除章?.length ? `，partial 未计入：${w.排除章.join('、')}` : ''}）：阅读负荷下降 ${w.阅读负荷下降}%｜理解支架覆盖率 ${w.理解支架覆盖率}%（${w.已注词型}/${w.应注词型} 词型）`,
+    );
   const 每章 = Object.entries(out.分章[t]).map(([ch, r]) => `${ch} ${r.质检.加注覆盖率}%(${r.质检.已注词型}/${r.质检.应注词型})`);
   if (每章.length) console.log(`        每章加注覆盖率：${每章.join('｜')}`);
 }

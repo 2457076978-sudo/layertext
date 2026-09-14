@@ -127,12 +127,17 @@ const {
 const { buildLexiconSnapshot, contentHash, refOf } = await import(`${distOf(REPO)}/src/core/manifest.js`);
 const { segmentList } = SHARED;
 const { runQc } = await import(`${distOf(REPO)}/src/core/qc.js`);
+/* 应注词的**唯一口径**（与 `qc` 的 `annotatableOf` 同源）。 */
+const { ANNOTATABLE_MIN_LEN } = await import(`${distOf(REPO)}/src/core/segmentgate.js`);
 const LEX = await SHARED.loadLexicon(P);
 const DICT = SHARED.loadDict(P.词典路径);
 
 const oovOf = (text) => {
   const md = `## Chapter One\n\n${text}\n`;
-  return [...new Set(runQc(md, LEX, { tier: TIER, fileName: 'seg.md', dict: DICT }).oov)].filter((w) => w.length > 2);
+  /* 2026-09-14：`> 2` 是**内联的第二份**应注词判定阈值。引擎的唯一口径是
+   * `segmentgate.ANNOTATABLE_MIN_LEN`（=3，与 `> 2` 同值）。数值当前一致，
+   * 但引擎改阈值时这里不会跟着变——所以改成从引擎取。 */
+  return [...new Set(runQc(md, LEX, { tier: TIER, fileName: 'seg.md', dict: DICT }).oov)].filter((w) => w.length >= ANNOTATABLE_MIN_LEN);
 };
 
 const ch = CN[CH - 1];

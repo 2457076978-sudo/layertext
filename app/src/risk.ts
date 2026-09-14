@@ -389,6 +389,14 @@ export async function appendDecision(paths: ProjectPaths, tier: string, event: D
   if (!io) throw new Error('面板 IO 未注入');
   const identity = id ?? (await loadRunIdentity(paths, { teacher: event.teacherId, tier: TAGS[tier] ?? tier }));
   const path = pathsFor(paths, identity, tier).decision();
+  /* 2026-09-14：同文件另一个追加点（`appendWorkbenchMarker`）走的是 `io.append`，
+   * 而这里仍是"读全文 → 拼一行 → 写全文"。两个决定按钮里有一个是 `void appendDecision(...)`
+   * 不 await 的，连续快速点两张卡时后写覆盖先写——**丢一整条决定事件**。
+   * 决定日志是"已决/待办"的正本，丢了那条卡会回到待办，误报率/撤销率的分母也跟着偏。 */
+  if (io.append) {
+    await io.append(path, toDecisionLine(event));
+    return;
+  }
   let prev: string;
   try {
     prev = await io.read(path);

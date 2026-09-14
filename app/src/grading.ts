@@ -363,7 +363,9 @@ async function pickClassDir(): Promise<void> {
       const name = tr.dataset.cg!;
       const a = details.get(name);
       if (!a) return;
-      renderSingleReport(name, '', a, []);
+      /* 2026-09-14：第二个实参原先是**字面量空串**，而它就是学生正文——
+       * AI 批改收到空原文（白花一次调用），批改稿的逐段循环整段不执行、批注全落不下去。 */
+      renderSingleReport(name, a.md, a, []);
     }),
   );
   out.querySelector('#cg-export')?.addEventListener('click', async () => {

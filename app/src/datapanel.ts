@@ -10,11 +10,15 @@
  *  - 纯逻辑（parse/validate/upsert/delete）：可在 node 下直接测试，不依赖 Tauri
  *  - DOM 渲染（renderDataPane）：依赖 invoke 与页面容器
  */
+import { baseName } from './pure.js';
 /** IO 注入点 —— 纯逻辑（parse/validate/upsert/delete）完全不依赖它，
  *  因此可以在 node 下直接测试，不必启动 App。生产环境走 Tauri。 */
 export interface PanelIo {
   read(path: string): Promise<string>;
   write(path: string, content: string): Promise<void>;
+  /** 列目录。`exts` 指定要哪几种扩展名（后端默认只给书稿类，`.json` 要显式点名）；
+   *  返回的是**完整绝对路径**（见 `baseName` 的注释），比对文件名请先 `baseName`。 */
+  listDir(dir: string, exts?: string[]): Promise<string[]>;
   /** 追加一行变更日志到指定文件（不存在则创建）。
    *  2026-09-10 修复：原先调用 `append_log(name, line)`，而 Rust 侧签名是 `append_log(lines: String)`
    *  —— 参数名对不上，调用必然失败，还被 catch 静默吞掉；而且那个命令写的是**错误日志**，
@@ -43,9 +47,9 @@ export let io: PanelIo = {
     const head = prev.startsWith('\uFEFF') ? prev : '\uFEFF' + prev;
     await io.write(logPath, head.replace(/\n*$/, '\n') + line + '\n');
   },
-  async listDir(dir) {
+  async listDir(dir: string, exts?: string[]) {
     const mod = await import('@tauri-apps/api/core');
-    return mod.invoke<string[]>('list_dir', { dir });
+    return mod.invoke<string[]>('list_dir', { dir, ...(exts ? { exts } : {}) });
   },
 };
 
@@ -69,9 +73,17 @@ export async function findProjectConfig(bookDir: string): Promise<ProjectHit | n
   }
   for (const d of dirs) {
     try {
-      const files = await io.listDir(d);
-      const hit = files.find((f) => /^调适项目_.+\.json$/.test(f));
-      if (hit) return { config: JSON.parse(await io.read(`${d}/${hit}`)) as ProjectConfig, dir: d };
+      /* 2026-09-14：两处都修。
+       *  ① 后端默认**不返回 `.json`**（`list_dir` 只收书稿扩展名），所以这里永远空表——
+       *     数据面板恒显示"这本书还没有数据资产配置"、风险队列恒"没有调适项目配置"，
+       *     而 AI 建议的「采纳」要经 `adoptRewrite` 读这份配置，于是**写正文 100% 失败**。
+       *     现在显式要 `['json']`。
+       *  ② `list_dir` 返回的是**完整路径**，原先拿 `^调适项目_.+\.json$` 去匹配整串
+       *     （锚定在开头，永远不中），再用 `${d}/${hit}` 拼一次。现在按 `baseName` 判名、
+       *     直接用返回的路径读。 */
+      const files = await io.listDir(d, ['json']);
+      const hit = files.find((f) => /^调适项目_.+\.json$/.test(baseName(f)));
+      if (hit) return { config: JSON.parse(await io.read(hit)) as ProjectConfig, dir: d };
     } catch {
       /* 有意兜底：这一层没有/读不了就继续试下一层（章目录 → 书根），
        * 全部试完返回 null，面板会显示"这本书还没有数据资产配置"并给出建法。 */
@@ -426,7 +438,17 @@ export interface PanelState {
 /** 项目配置：字段名→值（值为字符串或嵌套对象）。取值处显式转换。 */
 export type ProjectConfig = Record<string, unknown>;
 
-export const panelState: PanelState & { project: ProjectConfig | null; projectDir: string | null } = { active: 'vocab', tables: {}, filter: '', log: [], project: null, projectDir: null };
+export const panelState: PanelState & { project: ProjectConfig | null; projectDir: string | null; bookDir: string | null } = {
+  active: 'vocab',
+  tables: {},
+  filter: '',
+  log: [],
+  project: null,
+  projectDir: null,
+  /** 缓存**属于哪本书**。没有它时（2026-09-14 之前），`bookDir` 在首次加载后就被忽略，
+   *  切书会沿用上一本的项目配置——列的、写的都是**上一本书的绝对路径**。 */
+  bookDir: null,
+};
 
 /** 表格一次渲染多少行（词库 3600+ 行全量入 DOM 会拖慢输入与滚动）。
  *  2026-09-11 加：默认 200 行，底部「显示更多」每次再加 400。 */
@@ -518,6 +540,18 @@ export async function renderDataPane(bookDir: string): Promise<void> {
   const el = document.getElementById('pane-data');
   if (!el) return;
 
+  /* 2026-09-14：缓存必须**按书失效**。`panelState` 是模块级全局，全仓没有任何地方在切书时清空它，
+   * 而 `bookDir` 原先在首次加载之后就被完全忽略——打开书 A 再打开书 B，列的是 A 的词库/词典，
+   * 保存还会经 `getPath(project, …)` 写进 **A 的绝对路径**。
+   * 这一条此前被"`调适项目_*.json` 永远探测不到"遮住了（`panelState.project` 恒 null），
+   * 修好探测的那一刻它就会变成活 bug，所以一起修。 */
+  if (panelState.project && panelState.bookDir !== bookDir) {
+    panelState.project = null;
+    panelState.projectDir = null;
+    panelState.bookDir = null;
+    panelState.tables = {};
+    panelState.log = [];
+  }
   if (!panelState.project) {
     const found = bookDir ? await findProjectConfig(bookDir) : null;
     if (!found) {
@@ -541,6 +575,7 @@ export async function renderDataPane(bookDir: string): Promise<void> {
     }
     panelState.project = found.config;
     panelState.projectDir = found.dir;
+    panelState.bookDir = bookDir;
     await loadAll(DATA_KINDS, found.config);
   }
   const project = panelState.project;

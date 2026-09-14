@@ -16,7 +16,7 @@
  * 台账：_运行/token台账.jsonl（批次 0 的调用台账，scene=工序化生成:工序名）
  */
 import { readFileSync, mkdirSync, existsSync, writeFileSync } from 'node:fs';
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 
 const SHARED = await import('./LayerText_AF词表与词典.mjs');
@@ -67,8 +67,9 @@ const dry = argv.includes('--dry');
 let tiers = argv.filter((a) => /^[AMB]$/.test(a));
 if (argv.includes('ALL')) tiers = ['A', 'M', 'B']; /* ALL 曾是空实现（过滤后落入默认 ['A']，批量只跑了 A 层——2026-09-12 夜实跑教训） */
 if (!tiers.length) tiers = ['A'];
-let chapters = argv.filter((a) => /^\d/.test(a)).flatMap((a) => a.split(',').map(Number));
-if (!chapters.length) chapters = [7];
+/* 章号解析走共享模块（2026-09-13）：原先这里自己写了 `/^\d/` + `Number`，
+ * `1A` 会静默变成 `NaN` 并拼出 `…/undefined/…` 的错路径。共享实现会当场拒绝并退出。 */
+const chapters = SHARED.parseChapters(argv, [7]);
 
 let LEX = null;
 try {
@@ -139,7 +140,16 @@ async function localGlosses(words, ctxOf) {
    * 同形形容词词条「不名一文」；表层与基式两词条的义项并集一起进 Lesk 由语境裁决） */
   const lookups = [...new Set(words.flatMap((w) => [w, ...expandForms(w)]).map((w) => w.toLowerCase()))];
   try {
-    const raw = execSync(`swift "${join(REPO, 'tools/af_pipeline/dict_senses.swift')}" ${lookups.join(',')}`, {
+    /* 2026-09-13：`execSync` 拼字符串改 `execFileSync` + 数组传参。
+     * 说明白：**这条当时并没有可利用的注入**——词是从 `stagescan.oovOfSeg` 来的，
+     * 那里的词表正则只收"字母开头、后接字母/撇号/连字符"的 token，
+     * `;`、`$`、反引号根本进不了这个列表，
+     * `expandForms` 也只做字母增删。但"能拼出 shell 命令"这件事本身不该留在代码里：
+     * 将来谁把参数来源换成项目配置或教师输入，它就真成了洞，而那次改动不会有人复查这一行。
+     * 逗号连接保持**一个**参数：`dict_senses.swift` 收的是
+     * `CommandLine.arguments.dropFirst().joined(separator: " ")` 再按逗号切分，
+     * 拆成多个 argv 会把整份词表读成一个词。 */
+    const raw = execFileSync('swift', [join(REPO, 'tools/af_pipeline/dict_senses.swift'), lookups.join(',')], {
       encoding: 'utf-8',
       timeout: 60_000,
       maxBuffer: 8 * 1024 * 1024,
@@ -237,6 +247,10 @@ if (dry) {
 }
 
 const results = [];
+/* 2026-09-14：逐章失败原先只打一行 `✗`，脚本照样 `exit 0`——而 `管线.mjs` 正是用
+ * `r.status === 0` 判断这一步成没成，于是断网跑一整本书也算"成功"，还会盖章 `--ok 1`。
+ * 现在把失败记下来，收尾时非零退出。 */
+const failures = [];
 for (const tk of tiers) {
   const t = TIERS[tk];
   for (const i of chapters) {
@@ -411,6 +425,7 @@ for (const tk of tiers) {
         );
     } catch (e) {
       console.error(`  ✗ ${ch} 失败：${String(e).slice(0, 200)}`);
+      failures.push(`${tk}/${ch}`);
     }
   }
 }
@@ -424,3 +439,7 @@ for (const r of results) {
 }
 const st = LEDGER.flush();
 if (st.calls) console.log(`台账：调用 ${st.calls}（成功 ${st.ok}）｜入 ${st.in}${st.cached ? `（缓存命中 ${st.cached}）` : ''}｜出 ${st.out} token —— _运行/token台账.jsonl`);
+if (failures.length) {
+  console.error(`\n✗ ${failures.length} 个层/章失败：${failures.join('、')}——本步不算成功（管线据此判断成败）`);
+  process.exit(1);
+}

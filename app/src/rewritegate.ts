@@ -17,6 +17,7 @@
  */
 
 import { annotationLedgerOf, policySlice, type RewritePolicy } from '../../src/core/rewrite.js';
+import { baseName } from './pure.js';
 import { parseDictCsv } from '../../src/core/dictmerge.js';
 import { IRR } from '../../src/core/irregular.js';
 
@@ -32,7 +33,11 @@ let gio: GateIo = {
   },
   async listDir(dir) {
     const mod = await import('@tauri-apps/api/core');
-    return mod.invoke('list_dir', { path: dir });
+    /* 2026-09-14：这里原先传 `{ path: dir }`，而 Rust 侧是 `fn list_dir(dir: String)`
+     * （app/src-tauri/src/main.rs）——参数名对不上，每次调用都因缺必填键被 Tauri 拒绝，
+     * 再被 `loadLedger` 的兜底吞掉。后果是**跨章"已注词账本"永远只覆盖当前章**，
+     * 而这个模块存在的意义正是防"跨章重复加注"。全仓其它调用点都传 `{ dir }`。 */
+    return mod.invoke('list_dir', { dir });
   },
 };
 
@@ -87,8 +92,12 @@ export async function loadLedger(input: { currentText: string; sourcePath?: stri
     }
     for (const f of files) {
       if (read >= LEDGER_SCAN_LIMIT.files || bytes >= LEDGER_SCAN_LIMIT.bytes) return;
-      if (!looksLikeChapter(f)) continue;
-      const full = `${d}/${f}`;
+      /* 2026-09-14：`gio.listDir` 给的是**完整路径**。原先 `looksLikeChapter(f)` 判的是整串、
+       * `full = \`${d}/${f}\`` 又拼了一次目录（`/a/b//a/b/c.md`），读必然失败、被兜底吞掉——
+       * 于是**跨章"已注词账本"永远只覆盖当前章**，而这个模块存在的意义正是防跨章重复加注；
+       * 它还会在 notes 里写"扫了 1 个文件"，读起来像成功。 */
+      if (!looksLikeChapter(baseName(f))) continue;
+      const full = f;
       if (full === src) continue;
       try {
         const t = await gio.read(full);
@@ -110,7 +119,8 @@ export async function loadLedger(input: { currentText: string; sourcePath?: stri
     const ups = await gio.listDir(parent);
     for (const sub of ups) {
       if (read >= LEDGER_SCAN_LIMIT.files || bytes >= LEDGER_SCAN_LIMIT.bytes) break;
-      await tryDir(`${parent}/${sub}`);
+      /* `ups` 里已经是完整路径（后端给的），不能再拼一次 `${parent}/`。 */
+      await tryDir(sub);
     }
   } catch {
     /* 有意兜底：没有上一级可扫（书稿根目录本身就是顶层）——这不是错误，

@@ -36,10 +36,10 @@ const toRefs = (md) => {
     return [];
   }
 };
-const words = (t) => new Set((t.toLowerCase().match(/[a-z][a-z'-]{2,}/g) ?? []));
-const notesOf = (md) => (md.match(/[A-Za-z][A-Za-z'-]*（[^（）]{1,20}）/g) ?? []);
+const words = (t) => new Set(t.toLowerCase().match(/[a-z][a-z'-]{2,}/g) ?? []);
+const notesOf = (md) => md.match(/[A-Za-z][A-Za-z'-]*（[^（）]{1,20}）/g) ?? [];
 
-function chapterLedger(tier, tag, i) {
+function chapterLedger(tag, i) {
   const ch = CN[i - 1];
   const src = readFileSync(join(SRC_BASE, ch, '原文_规范化.md'), 'utf-8');
   const out = readFileSync(RR(tag).any('正文', { chapter: ch }), 'utf-8');
@@ -63,16 +63,30 @@ function chapterLedger(tier, tag, i) {
    * 它曾让 A 层第 7/8/9 章 2% 的缺口完全隐形。现在并排给出 ⑪加注覆盖率（已注词型 / 应注词型）。 */
   let cover = { annotationCoverage: 1, annotated: 0, annotatable: 0 };
   try {
-    const q = runQc(out, LEX, { tier: tier, fileName: 'ledger.md', dict: DICT });
+    /* 2026-09-14：`tier` 收的是**层级标签**（`A层85`），不是层级对象。
+     * 原先调用方传的是 `AI_TIERS` 里的整个对象（`{key,tag,label,ratio,maxLen}`），
+     * 于是 `gates.passiveOk/relclOk` 这些按 tier 解禁的判定拿到的是个对象——无意义值。
+     * 覆盖率/加注数不依赖 tier，所以数字没受影响，但这是一个"看着有、其实没有"的判定。 */
+    const q = runQc(out, LEX, { tier: tag, fileName: 'ledger.md', dict: DICT });
     cover = { annotationCoverage: q.annotationCoverage, annotated: q.annotated, annotatable: q.annotatable };
   } catch {
     /* 产物还没成型（缺 [P##] 等）——台账照出，覆盖率留空 */
   }
   return {
-    ch, rows: rows.length, kept: kept.length, rewritten: rewritten.length, sigLost: sigLost.length,
-    lost, added, rewrites, notes: notesOf(out).length,
-    coverage: cover.annotationCoverage, annotated: cover.annotated, annotatable: cover.annotatable,
-    srcWords: wc(src), outWords: wc(out),
+    ch,
+    rows: rows.length,
+    kept: kept.length,
+    rewritten: rewritten.length,
+    sigLost: sigLost.length,
+    lost,
+    added,
+    rewrites,
+    notes: notesOf(out).length,
+    coverage: cover.annotationCoverage,
+    annotated: cover.annotated,
+    annotatable: cover.annotatable,
+    srcWords: wc(src),
+    outWords: wc(out),
   };
 }
 
@@ -84,15 +98,26 @@ const AI_TIERS = [
 // ── 层级/章节过滤（2026-09-10 补）：原先无条件处理三档全章，
 //    于是"只生成一层试跑"跑到后面几步必因找不到文件而崩。
 const argv = process.argv.slice(2);
-const argOf = (n, d) => { const i = argv.indexOf(n); return i >= 0 ? argv[i + 1] : d; };
+const argOf = (n, d) => {
+  const i = argv.indexOf(n);
+  return i >= 0 ? argv[i + 1] : d;
+};
 const TAGS_ALL = { A: 'A层85', M: 'M层75', B: 'B层60' };
-const TAGS = (argOf('--tier', 'A,M,B')).split(',').map((x) => x.trim().toUpperCase())
-  .map((k) => TAGS_ALL[k]).filter(Boolean);
-const CN_ALL = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十'];
+const TAGS = argOf('--tier', 'A,M,B')
+  .split(',')
+  .map((x) => x.trim().toUpperCase())
+  .map((k) => TAGS_ALL[k])
+  .filter(Boolean);
+/* 2026-09-14：章名清单改从共享模块取（不再自抄一份写死十章的 `['一'…'十']`），
+ * `<= 10` 的章号过滤也跟着改成 `<= 章数`。 */
+const CN_ALL = chapterNames(P);
 /** 章号（数字，1 起）：路径与台账都按它取中文章名 */
 const CHAPTER_IDS = argOf('--chapters', '')
-  ? argOf('--chapters').split(',').map((x) => Number(x.trim())).filter((n) => n >= 1 && n <= 10)
-  : CN_ALL.slice(0, Number(P.章数 ?? 10)).map((_, i) => i + 1);
+  ? argOf('--chapters')
+      .split(',')
+      .map((x) => Number(x.trim()))
+      .filter((n) => n >= 1 && n <= CN_ALL.length)
+  : CN_ALL.map((_, i) => i + 1);
 const { makeResolver } = await import(`${distOf(REPO)}/src/core/manifest.js`);
 const { atomicWriteFileSync: writeAtomic } = await import(`${distOf(REPO)}/src/core/files.js`);
 /* 正文与产物一律**原子写**（先写同目录临时文件再 rename）。
@@ -109,30 +134,49 @@ const { atomicWriteFileSync: writeAtomic } = await import(`${distOf(REPO)}/src/c
  * 身份也走共享的那一个入口：两位教师并发时不再互相读到对方的 runId。 */
 /* 身份从命令行取。**刻意不复用各脚本自己的参数助手**：它们的定义位置各不相同
  * （有的还是 `args.includes` 风格），在这一段引用会在定义之前求值。 */
-const argRun = (n, d) => { const i = process.argv.indexOf(n); return i >= 0 ? process.argv[i + 1] : d; };
+const argRun = (n, d) => {
+  const i = process.argv.indexOf(n);
+  return i >= 0 ? process.argv[i + 1] : d;
+};
 const TEACHER = argRun('--teacher', process.env.LAYERTEXT_TEACHER ?? process.env.USER ?? 'unknown');
-const RUN = await (await import('./LayerText_AF词表与词典.mjs')).readRunIdentity(
-  { out: OUT_BASE, work: P.调适工作区 },
-  { teacher: TEACHER, tier: TAGS[0] },
-  { runId: argRun('--run', undefined) },
-);
+const RUN = await (await import('./LayerText_AF词表与词典.mjs')).readRunIdentity({ out: OUT_BASE, work: P.调适工作区 }, { teacher: TEACHER, tier: TAGS[0] }, { runId: argRun('--run', undefined) });
 if (RUN.warning) console.warn(`\n⚠ ${RUN.warning}`);
 /** 按层级标签取解析器（多层脚本与单层脚本共用同一种写法） */
 const RR = (tag) => makeResolver(RUN.layout, { out: OUT_BASE, work: P.调适工作区 }, { runId: RUN.runId, tier: tag, date: DATE });
 const R = RR(TAGS[0]);
 const TIERS = AI_TIERS.filter((t) => TAGS.includes(t.tag));
-const overview = ['# AF 三档重制 · 原文对照台账总览', '', `生成：${new Date().toLocaleString('zh-CN')}｜对齐口径：完全相同句 LCS 锚点 + 改写句 Jaccard≥0.45 配对（LayerText 引擎 alignSentencePairs）`, ''];
+const overview = [
+  '# AF 三档重制 · 原文对照台账总览',
+  '',
+  `生成：${new Date().toLocaleString('zh-CN')}｜对齐口径：完全相同句 LCS 锚点 + 改写句 Jaccard≥0.45 配对（LayerText 引擎 alignSentencePairs）`,
+  '',
+];
 for (const t of TIERS) {
-  const lines = [`# ${t.label} · 原文对照台账`, '', `产物：重制三版/第X章/原文_${t.tag}_${DATE}.md｜对齐基准：原文规范化版（245 段）`, '',
-    '| 章 | 对齐句 | 原样保留 | 改写 | 数字/专名缺失 | 删句 | **加注覆盖率（已注/应注）** | 加注处数（旧口径·仅参考） | 篇幅 |', '|---|---|---|---|---|---|---|---|---|'];
+  const lines = [
+    `# ${t.label} · 原文对照台账`,
+    '',
+    `产物：重制三版/第X章/原文_${t.tag}_${DATE}.md｜对齐基准：原文规范化版（245 段）`,
+    '',
+    '| 章 | 对齐句 | 原样保留 | 改写 | 数字/专名缺失 | 删句 | **加注覆盖率（已注/应注）** | 加注处数（旧口径·仅参考） | 篇幅 |',
+    '|---|---|---|---|---|---|---|---|---|',
+  ];
   const totals = { rows: 0, kept: 0, rewritten: 0, sigLost: 0, lost: 0, notes: 0, sw: 0, ow: 0, annotated: 0, annotatable: 0 };
   for (const ci of CHAPTER_IDS) {
-    const L = chapterLedger(tier_tag(t), t.tag, ci);
-    totals.rows += L.rows; totals.kept += L.kept; totals.rewritten += L.rewritten; totals.sigLost += L.sigLost;
-    totals.lost += L.lost.length; totals.notes += L.notes; totals.sw += L.srcWords; totals.ow += L.outWords;
-    totals.annotated += L.annotated; totals.annotatable += L.annotatable;
+    const L = chapterLedger(t.tag, ci);
+    totals.rows += L.rows;
+    totals.kept += L.kept;
+    totals.rewritten += L.rewritten;
+    totals.sigLost += L.sigLost;
+    totals.lost += L.lost.length;
+    totals.notes += L.notes;
+    totals.sw += L.srcWords;
+    totals.ow += L.outWords;
+    totals.annotated += L.annotated;
+    totals.annotatable += L.annotatable;
     const cov = L.annotatable ? `${(L.coverage * 100).toFixed(0)}%（${L.annotated}/${L.annotatable}）` : '—';
-    lines.push(`| ${L.ch} | ${L.rows} | ${L.kept} | ${L.rewritten} | ${L.sigLost} | ${L.lost.length} | **${cov}** | ${L.notes} | ${L.srcWords}→${L.outWords}（${((L.outWords / L.srcWords) * 100).toFixed(0)}%） |`);
+    lines.push(
+      `| ${L.ch} | ${L.rows} | ${L.kept} | ${L.rewritten} | ${L.sigLost} | ${L.lost.length} | **${cov}** | ${L.notes} | ${L.srcWords}→${L.outWords}（${((L.outWords / L.srcWords) * 100).toFixed(0)}%） |`,
+    );
     // 章内明细：删句与改写样例
     lines.push('', `<details><summary>${L.ch} 明细（改写 ${L.rewritten} 句的词级变更 · 删句 ${L.lost.length}）</summary>`, '');
     if (L.sigLost.length) {
@@ -150,15 +194,17 @@ for (const t of TIERS) {
     }
     lines.push('', '</details>', '');
   }
-  lines.push('', `**${t.label} 合计**：对齐 ${totals.rows} 句｜原样保留 ${totals.kept}（${((totals.kept / totals.rows) * 100).toFixed(0)}%）｜改写 ${totals.rewritten}（${((totals.rewritten / totals.rows) * 100).toFixed(0)}%）｜数字专名缺失 ${totals.sigLost}｜删句 ${totals.lost}｜**加注覆盖率 ${totals.annotatable ? ((totals.annotated / totals.annotatable) * 100).toFixed(0) : '—'}%（${totals.annotated}/${totals.annotatable} 词型）**｜加注处数 ${totals.notes}（旧口径，仅参考）｜篇幅 ${totals.sw}→${totals.ow}（${((totals.ow / totals.sw) * 100).toFixed(0)}%）`, '');
+  lines.push(
+    '',
+    `**${t.label} 合计**：对齐 ${totals.rows} 句｜原样保留 ${totals.kept}（${((totals.kept / totals.rows) * 100).toFixed(0)}%）｜改写 ${totals.rewritten}（${((totals.rewritten / totals.rows) * 100).toFixed(0)}%）｜数字专名缺失 ${totals.sigLost}｜删句 ${totals.lost}｜**加注覆盖率 ${totals.annotatable ? ((totals.annotated / totals.annotatable) * 100).toFixed(0) : '—'}%（${totals.annotated}/${totals.annotatable} 词型）**｜加注处数 ${totals.notes}（旧口径，仅参考）｜篇幅 ${totals.sw}→${totals.ow}（${((totals.ow / totals.sw) * 100).toFixed(0)}%）`,
+    '',
+  );
   const p = RR(t.tag).any('台账');
   writeAtomic(p, lines.join('\n'), 'utf-8');
-  overview.push(`- [${t.label}](台账_${t.tag}_${DATE}.md)：保留句 ${totals.kept}/${totals.rows}，改写 ${totals.rewritten}，删句 ${totals.lost}，加注覆盖率 ${totals.annotatable ? ((totals.annotated / totals.annotatable) * 100).toFixed(0) : '—'}%`);
+  overview.push(
+    `- [${t.label}](台账_${t.tag}_${DATE}.md)：保留句 ${totals.kept}/${totals.rows}，改写 ${totals.rewritten}，删句 ${totals.lost}，加注覆盖率 ${totals.annotatable ? ((totals.annotated / totals.annotatable) * 100).toFixed(0) : '—'}%`,
+  );
   console.log(`✓ ${p}`);
 }
 writeAtomic(R.any('汇总报告', { name: '台账总览' }), overview.join('\n'), 'utf-8');
 console.log('✓ 台账总览');
-
-function tier_tag(t) {
-  return t;
-}

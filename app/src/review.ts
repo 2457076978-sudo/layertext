@@ -9,10 +9,34 @@
  */
 
 import { invoke } from '@tauri-apps/api/core';
+import { S } from './state.js';
 import { WORD_TYPES, SENT_TYPES, GATES, typeLabel, type FileSession, type Mark } from './types.js';
 import { planRevisionTask, revisionTaskPreview } from '../../src/core/adaptcheck.js';
 
 const SAVE_DEBOUNCE_MS = 600;
+
+/**
+ * 失败出口的**兜底播报器**（2026-09-14 加）。
+ *
+ * 为什么不是直接 `import { setStatus } from './uikit.js'`：本模块在 **node 可测路径**上
+ * （`phrase_mark` / `review_dom` 两组用例直接 import 它），而 `uikit.js` 顶层就有
+ * `window.addEventListener(...)`——一引进来，两组用例在收集期就 `ReferenceError: window is not defined`，
+ * 直接少了 15 项测试。仓库的既定口径是"响应式纯逻辑优先，不许塞进 DOM 依赖里"，
+ * 所以这里走**注入**（与 `ai.ts` 的 `setAiUi` 同一个套路），由 DOM 侧的 `main.ts` 装上。
+ *
+ * 为什么需要它：全仓 15 处 `scheduleSave(s, () => undefined)` 把 `onStatus` 的出口**掐掉了**，
+ * 而 `onStatus('error')` 是标记落盘唯一的失败出口——书目录只读/磁盘满/卷被卸载时，
+ * 写 `_审校标记.json` 会完全无声地失败，教师继续标记、关掉 App 整章标记全丢。
+ * `dirty`/`saved` 是外观，可以听调用方的；`error` 必须自己也能说出口。
+ */
+let reportSaveError: ((msg: string) => void) | null = null;
+export function setMarkSaveErrorReporter(fn: (msg: string) => void): void {
+  reportSaveError = fn;
+}
+const scream = (msg: string, onStatus: (s: 'dirty' | 'saved' | 'error', detail?: string) => void): void => {
+  onStatus('error', msg);
+  reportSaveError?.(msg);
+};
 
 export function scheduleSave(session: FileSession, onStatus: (s: 'dirty' | 'saved' | 'error', detail?: string) => void): void {
   session.dirty = true;
@@ -21,6 +45,12 @@ export function scheduleSave(session: FileSession, onStatus: (s: 'dirty' | 'save
   review.updatedAt = Date.now();
   clearTimeout((session as FileSession & { _t?: ReturnType<typeof setTimeout> })._t);
   (session as FileSession & { _t?: ReturnType<typeof setTimeout> })._t = setTimeout(async () => {
+    /* 2026-09-14：这一章的标记文件当初**解析失败**（内容还在盘上，只是读不懂）——
+     * 那就绝不能把内存里的空清单写回去，那是拿"整章标记"换一次静默覆盖。 */
+    if (S.markFileBroken.has(session.markPath)) {
+      scream(`${session.markPath} 读不进来（内容可能已损坏），本次**不覆盖**它；请先备份再重标`, onStatus);
+      return;
+    }
     try {
       await invoke('write_text_file', {
         path: session.markPath,
@@ -29,7 +59,9 @@ export function scheduleSave(session: FileSession, onStatus: (s: 'dirty' | 'save
       session.dirty = false;
       onStatus('saved', session.markPath);
     } catch (e) {
-      onStatus('error', String(e));
+      /* 2026-09-14：**失败出口不能被调用方掐掉**（15 处传的是 `() => undefined`）。
+       * `tests/appswallow.test.ts` 按 catch 的词法形状判定，看不到"出口被调用点掐掉"这一层。 */
+      scream(`标记保存失败：${String(e)}——**这一章的标记还没落盘**，先别关窗口`, onStatus);
     }
   }, SAVE_DEBOUNCE_MS);
 }
@@ -272,7 +304,10 @@ function adaptTargetOf(sourcePath: string | null): { tierKey: string; tag: strin
   const outRoot = dir.slice(0, dir.lastIndexOf('/'));
   if (!chapDir || !outRoot) return null;
   return {
-    tierKey: m[1]![0], tag: m[1]!, chapDir, outRoot,
+    tierKey: m[1]![0],
+    tag: m[1]!,
+    chapDir,
+    outRoot,
     feedbackPath: `${outRoot}/_运行/调适反馈_${m[1]}_${chapDir}.json`,
     taskPath: `${outRoot}/_运行/调适任务单_${m[1]}_${chapDir}.json`,
   };
@@ -289,7 +324,11 @@ function adaptFeedbackBox(session: FileSession): string {
     </div>`;
 }
 
-interface AdaptTaskFile { task: ReturnType<typeof planRevisionTask>; confirmed: boolean; confirmedAt?: string }
+interface AdaptTaskFile {
+  task: ReturnType<typeof planRevisionTask>;
+  confirmed: boolean;
+  confirmedAt?: string;
+}
 
 /** 任务单预览：教师先看「系统准备怎么改」，点开始修订才落 confirmed——先确认后执行 */
 function renderAdaptTaskPreview(target: { taskPath: string }, taskFile: AdaptTaskFile): void {
@@ -310,7 +349,9 @@ function renderAdaptTaskPreview(target: { taskPath: string }, taskFile: AdaptTas
       taskFile.confirmedAt = new Date().toISOString();
       void invoke('write_text_file', { path: target.taskPath, content: JSON.stringify(taskFile, null, 2) })
         .then(() => renderAdaptTaskPreview(target, taskFile))
-        .catch((e: unknown) => { go.textContent = '确认失败：' + String(e).slice(0, 50); });
+        .catch((e: unknown) => {
+          go.textContent = '确认失败：' + String(e).slice(0, 50);
+        });
     });
   }
   const edit = document.getElementById('adapt-task-edit');
@@ -333,7 +374,9 @@ function bindAdaptFeedback(session: FileSession): void {
   if (target) {
     void invoke<string>('read_text_file', { path: target.taskPath })
       .then((json) => renderAdaptTaskPreview(target, JSON.parse(json) as AdaptTaskFile))
-      .catch(() => { /* 有意兜底：任务单文件还不存在=教师没写过反馈的正常初始态，预览区不显示 */ });
+      .catch(() => {
+        /* 有意兜底：任务单文件还不存在=教师没写过反馈的正常初始态，预览区不显示 */
+      });
   }
   btn.addEventListener('click', () => {
     const ta = document.getElementById('adapt-fb') as HTMLTextAreaElement | null;

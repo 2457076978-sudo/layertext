@@ -29,6 +29,7 @@
  */
 
 import { makeCovers, parseAnnotations } from './annot.js';
+import { contentHash } from './manifest.js';
 import { annotatableOf, gateSegment, normalizeSegmentBody, stripLookup, type GateProblem, type SegmentVerdict } from './segmentgate.js';
 import { hit, sentsOf, tokenizeTxt } from './textpipe.js';
 
@@ -114,19 +115,11 @@ export function annotationLedgerOf(...texts: string[]): Set<string> {
 
 /* ────────────────────── 契约核心 ────────────────────── */
 
-/** 稳定 traceId（FNV-1a 双通道，与 manifest 的 contentHash 同法，浏览器与 Node 结果一致） */
+/** 稳定 traceId（与 manifest 的 `contentHash` **同一份实现**，浏览器与 Node 结果一致）。
+ *  2026-09-14：原先手抄了一遍 FNV 循环——全仓这样的拷贝一度有 5 份。 */
 export function traceIdOf(req: RewriteRequest, scope: RewriteScope = req.scope): string {
   const parts = [req.bookVersion, scope, req.tier, req.source, req.intent ?? '', req.promptVersion ?? ''];
-  let h1 = 0x811c9dc5;
-  let h2 = 0x01000193;
-  const s = parts.join('\u0001');
-  for (let i = 0; i < s.length; i++) {
-    const c = s.charCodeAt(i);
-    h1 = Math.imul(h1 ^ c, 0x01000193) >>> 0;
-    h2 = Math.imul(h2 ^ (c + i), 0x85ebca6b) >>> 0;
-  }
-  h2 = Math.imul(h2 ^ (h1 >>> 13), 0xc2b2ae35) >>> 0;
-  return (h1.toString(16).padStart(8, '0') + h2.toString(16).padStart(8, '0')).slice(0, 16);
+  return contentHash(parts.join('\u0001'));
 }
 
 /** 策略缺了什么（**可见地缺**，不假装查过） */
@@ -155,10 +148,7 @@ export function checkRewrite(req: RewriteRequest, policy: RewritePolicy, revised
   /* ★ sentence scope 的差异（见文件头注释）：
    *   只把**这次改写新引入**的超纲词算作"该注"。
    *   segment scope 保持原语义：这一段出现的超纲词（去掉别处已注的）都该注。 */
-  const mustNow =
-    scope === 'sentence'
-      ? revOov.filter((w) => !srcOov.includes(w)).filter((w) => !covers(w))
-      : [...new Set([...srcOov, ...revOov])].filter((w) => !covers(w));
+  const mustNow = scope === 'sentence' ? revOov.filter((w) => !srcOov.includes(w)).filter((w) => !covers(w)) : [...new Set([...srcOov, ...revOov])].filter((w) => !covers(w));
 
   // 别处已注、这里又注 → 交给门禁统一算进 ANNO-02（全篇一词一注）
   const reannotated = [...new Set(parseAnnotations(body).list.map((a) => a.key))].filter((k) => covers(k));
@@ -191,14 +181,7 @@ export function checkRewrite(req: RewriteRequest, policy: RewritePolicy, revised
  * 从 LexiconSnapshot 那一类**全量**素材造策略（管线用）。
  * 管线付得起 19.6k tokens 的开场，所以这里给的是完整约束。
  */
-export function fullPolicy(input: {
-  tier: string;
-  maxLen: number;
-  known: Iterable<string>;
-  annotated?: Iterable<string>;
-  dict?: Map<string, string>;
-  target?: number;
-}): RewritePolicy {
+export function fullPolicy(input: { tier: string; maxLen: number; known: Iterable<string>; annotated?: Iterable<string>; dict?: Map<string, string>; target?: number }): RewritePolicy {
   return { ...input };
 }
 
