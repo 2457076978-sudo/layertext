@@ -2,7 +2,23 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { applyRewriteTo, baseName, findOriginalFlex, hasProseChinese, normalizeAndSplitChapters, normWs, normalizeZhNotes, parseAiJson, redoStep, undoStep, withRetry } from '../app/src/pure.js';
+import {
+  applyRewriteTo,
+  baseName,
+  failoverKeyAccounts,
+  failoverRowKind,
+  findOriginalFlex,
+  hasProseChinese,
+  normalizeAndSplitChapters,
+  normWs,
+  normalizeZhNotes,
+  parseAiJson,
+  partitionFailoverRows,
+  redoStep,
+  undoStep,
+  withRetry,
+  type FailoverRowDraft,
+} from '../app/src/pure.js';
 import { buildBookReportMd, planBatchChapters, filterTargets, mergeTargets, type BatchProgressFile, type BookReportRow, type ClassTarget } from '../app/src/bookpure.js';
 
 test('withRetry：网络错误自动重试后成功', async () => {
@@ -531,4 +547,56 @@ test('baseName：完整路径取文件名，裸名原样返回（后端 list_dir
   assert.equal(baseName('/a/b/第一章.md'), '第一章.md');
   assert.equal(baseName('第一章.md'), '第一章.md');
   assert.equal(baseName('/a/b/'), '');
+});
+
+/* ---------- 备用供应商：分拣与钥匙串账号（2026-09-14） ----------
+ *
+ * 为什么单独守这两条：
+ *  · `partitionFailoverRows` 的前身是埋在 `settings.ts` 收集函数里的一句 `.filter()`，
+ *    过滤器写在收集函数里 → 下游永远看不见被过滤掉的行 → "有一行没填齐"在界面上
+ *    根本没有机会被说出来。我第一次改的时候还是空炮（拆了 allFb/fbs 却没删那个 filter），
+ *    被审计子代理当场抓出。这条用例钉的就是"半成品必须能到达判定点"。
+ *  · `failoverKeyAccounts` 是"读 Key / 写 Key / 删 Key"三处的**同一份判据**。
+ *    原先读取侧写的是"稳定账号取不到就回落下标账号"，于是「清」按钮删掉 `fb:<id>` 之后，
+ *    同一把 Key 立刻从 `fb0` 被读了回来——按钮是个假动作；删过行之后还会串到别家的 Key。
+ */
+
+const fbRow = (o: Partial<FailoverRowDraft>): FailoverRowDraft => ({ id: 'x', name: '', baseUrl: '', model: '', key: '', ...o });
+
+test('failoverRowKind：地址+模型都有才算一行；整行全空是空行；其余是半填', () => {
+  assert.equal(failoverRowKind(fbRow({ baseUrl: 'https://a/v1', model: 'm' })), 'complete');
+  assert.equal(failoverRowKind(fbRow({})), 'blank');
+  assert.equal(failoverRowKind(fbRow({ baseUrl: 'https://a/v1' })), 'half');
+  assert.equal(failoverRowKind(fbRow({ model: 'm' })), 'half');
+  // 只填了名字 / 只填了 Key，同样是"教师真的想配"——也要点名
+  assert.equal(failoverRowKind(fbRow({ name: '智谱备用' })), 'half');
+  assert.equal(failoverRowKind(fbRow({ key: 'sk-x' })), 'half');
+});
+
+test('partitionFailoverRows：半填的行**必须能被调用方看见**（不许在收集阶段就被吃掉）', () => {
+  const rows = [fbRow({ baseUrl: 'https://a/v1', model: 'm' }), fbRow({}), fbRow({ baseUrl: 'https://b/v1' }), fbRow({ model: 'n' })];
+  const { keep, half } = partitionFailoverRows(rows);
+  assert.equal(keep.length, 1, '只有完整的那一行才进配置');
+  assert.deepEqual(
+    half.map((r) => r.baseUrl || r.model),
+    ['https://b/v1', 'n'],
+    '两行半填的都要出现在 half 里，调用方据此点名',
+  );
+});
+
+test('failoverKeyAccounts：有 id 就只认稳定账号，绝不回落下标', () => {
+  const withId = failoverKeyAccounts('fb-abc', 0);
+  assert.deepEqual(withId, { stable: 'fb:fb-abc', legacy: 'fb0' });
+  // 没有 id（老配置，升级后还没保存过）：只能走下标账号
+  assert.deepEqual(failoverKeyAccounts(undefined, 2), { stable: null, legacy: 'fb2' });
+});
+
+test('failoverKeyAccounts：删掉一行之后，下标账号的归属会变——所以有 id 时不能再用它', () => {
+  /* 场景：三行（下标 0/1/2），删掉第 0 行之后，原来的第 1 行变成下标 0。
+   * 如果读取侧还"稳定账号取不到就回落下标"，这一行会读到**被删那家**的 Key。
+   * 这条断言把"有 id 就不回落下标"这条纪律钉住。 */
+  const rowAfterDelete = { id: 'fb-B' };
+  const { stable, legacy } = failoverKeyAccounts(rowAfterDelete.id, 0);
+  assert.equal(stable, 'fb:fb-B');
+  assert.equal(legacy, 'fb0', '下标 0 现在属于被删掉的 A 家——所以读取侧不许用它');
 });

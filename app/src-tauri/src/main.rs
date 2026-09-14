@@ -11,6 +11,22 @@ fn read_text_file(path: String) -> Result<String, String> {
     std::fs::read_to_string(&path).map_err(|e| e.to_string())
 }
 
+/// 这个路径**到底怎么了**：`"missing"`（不存在）/ `"exists"`（在）。
+///
+/// 存在的理由：`read_text_file` 只回一句 `e.to_string()`，前端分不出
+/// "文件不存在"（正常，例如第一次用还没有 `_审校标记.json`）与"文件在、但读不出来"
+/// （权限/占位/磁盘问题——这时把内存里的空数据写回去就是**覆盖教师的数据**）。
+/// 全仓多处只能把这个区别写成"有意兜底"的注释，风险自认。加这一条命令之后，
+/// 前端可以：**不存在 → 静默按"没有"处理；读失败 → 说出口并拒绝覆盖**。
+#[tauri::command]
+fn describe_path(path: String) -> Result<String, String> {
+    match std::fs::metadata(&path) {
+        Ok(_) => Ok("exists".to_string()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok("missing".to_string()),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
 /// 构建指纹（版权举证用）：git commit + 构建时间，由 build.rs 编译期注入。
 /// 官方 Release 每个构建唯一；盗版者自行重编译的指纹与官方发布记录对不上。诊断包含此字段。
 #[tauri::command]
@@ -888,6 +904,7 @@ fn main() {
             list_local_examples,
             list_dir,
             list_cover_images,
+            describe_path,
             remove_file,
             reveal_path,
             save_api_key,

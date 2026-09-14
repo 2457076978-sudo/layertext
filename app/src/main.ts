@@ -11,11 +11,12 @@ import { unzipSync, strFromU8 } from 'fflate';
 import { chnoFromPath, tagFromPath, normalizeAndSplitChapters, parseAiJson, routeSelection, decodeAuto } from './pure.js';
 import { parseEpubChapters, epubChapterMd } from './bookpure.js';
 import { renderModePill, switchView as switchViewDom, bindViewTabs, type ViewName } from './widgets.js';
-import { findProjectConfig, io as panelIo, renderDataPane } from './datapanel.js';
+import { createProjectConfig, findProjectConfig, io as panelIo, renderDataPane } from './datapanel.js';
 import { teacherIdOf } from '../../src/core/teachers.js';
 import { renderRiskPane, setRiskIo, TAGS as RISK_TAGS } from './risk.js';
 import { S, esc } from './state.js';
 import { $, setStatus, toast, pop, hidePop } from './uikit.js';
+import { readTextChecked } from './fsx.js';
 import { showSyncMarksDialog, syncPop, hideSyncPop } from './pipew.js';
 import { aiSuggest, renderSuggestions, attachInlineSuggestions, logSuggestion, focusNextSuggestion, suggestionByEl, acceptSuggestion } from './aiflow.js';
 import { showDraftPop, showBatchPop, closeDraftPop, closeBatchPop, batchPop } from './batch.js';
@@ -111,13 +112,16 @@ export async function addSession(md: string, fileName: string, sourcePath: strin
   }
   const markPath = await markPathFor(sourcePath, fileName);
   const review = newReviewState(fileName);
-  let saved: string | null = null;
-  try {
-    saved = await invoke<string>('read_text_file', { path: markPath });
-  } catch {
-    /* 有意兜底：这一章还没审过＝没有标记文件，是常态（`read_text_file` 对缺失文件是报错的）。 */
+  /* `fsx.readTextChecked` 把"还没审过"（没有这个文件，常态）与"文件在但读不出来"
+   * （权限/占位——这时把空清单写回去就是整章标记全丢）分开了。
+   * `markFileBroken` 会拦住后一种情况的保存。 */
+  const markRead = await readTextChecked(markPath);
+  if (markRead.kind === 'unreadable') {
+    setStatus(`这一章的标记文件读不出来（${markRead.error.slice(0, 80)}）：${markPath}——**先备份它再重新标记**，本次不会覆盖它`, 'err');
+    S.markFileBroken.add(markPath);
   }
-  if (saved !== null) {
+  if (markRead.kind === 'ok') {
+    const saved = markRead.text;
     /* 2026-09-14：**解析失败必须与"文件不存在"分开**。原先两者共用一个 catch，
      * 于是损坏的 `_审校标记.json` 被当成"空清单"打开，教师接着标、下次保存就整体覆盖——
      * 整章标记全丢且没有任何提示。这里宁可把这一章按"没有标记"打开，也要**当场说出来**，
@@ -131,7 +135,7 @@ export async function addSession(md: string, fileName: string, sourcePath: strin
         review.bookmarks = Array.isArray(parsed.bookmarks) ? parsed.bookmarks : [];
       }
     } catch (e) {
-      setStatus(`这一章的标记文件读不进来（${String(e).slice(0, 60)}）：${markPath}——**先备份它再重新标记**，本次不会覆盖它`, 'err');
+      setStatus(`这一章的标记文件解析不了（${String(e).slice(0, 60)}）：${markPath}——**先备份它再重新标记**，本次不会覆盖它`, 'err');
       S.markFileBroken.add(markPath);
     }
   }
@@ -369,7 +373,26 @@ async function openRiskPane(): Promise<void> {
   const workDir = typeof cfg['调适工作区'] === 'string' ? cfg['调适工作区'] : '';
   if (!outDir || !workDir) {
     $('pane-risk').innerHTML =
-      '<div class="empty"><b>这本书还没有调适项目配置</b><br/>风险队列靠 <code>调适项目_*.json</code> 定位产物目录与调适工作区。<br/><span style="font-size:12px">写法见 docs/快速开始.md 第 2 节</span></div>';
+      '<div class="empty"><b>这本书还没有调适项目配置</b><br/>风险队列与「采纳 / 直改」都靠 <code>调适项目_*.json</code> 定位产物目录与调适工作区。<br/>' +
+      '<button id="rp-mk-proj" style="margin-top:8px">一键在这本书里生成 调适项目_*.json</button><br/>' +
+      '<span style="font-size:12px">生成后把几项占位路径换成你自己的真实路径即可（写法见 docs/快速开始.md 第 2 节）</span></div>';
+    document.getElementById('rp-mk-proj')?.addEventListener('click', async () => {
+      const btn = document.getElementById('rp-mk-proj') as HTMLButtonElement | null;
+      if (btn) btn.disabled = true;
+      try {
+        const made = await createProjectConfig(dir);
+        if (!made) {
+          toast('模板读不出来（内置模板损坏），没有生成任何文件', 'err');
+          if (btn) btn.disabled = false;
+          return;
+        }
+        toast(`已生成 ${made.path}${made.todo.length ? `——还需填：${made.todo.join('、')}` : ''}`, 'ok');
+        await openRiskPane();
+      } catch (e) {
+        toast(`生成失败：${String(e)}`, 'err');
+        if (btn) btn.disabled = false;
+      }
+    });
     return;
   }
   // 与 datapanel 共用同一套 IO（Tauri 下是 read_text_file/write_text_file）——
@@ -799,13 +822,16 @@ export async function persistEdit(s: FileSession, newMd: string, opts: { recordH
     const dir = s.sourcePath.slice(0, s.sourcePath.lastIndexOf('/'));
     const base = s.fileName.replace(/\.(md|txt|markdown)$/i, '');
     const backup = `${dir}/${base}_原始备份.md`;
-    try {
-      await invoke<string>('read_text_file', { path: backup });
-    } catch {
-      /* 有意兜底：读不到＝还没有备份，写一份（这是"首次改动前留原始版"的正常路径）。
-       * 风险写明：若备份其实存在、只是读不出来，这一写会把真原始版换成当前的 s.md；
-       * 后端没给错误码分不出来，只能接受，并靠"有备份就不覆盖"把概率压到最小。 */
+    /* 2026-09-14：这条分支原先写的是"读不到＝还没有备份，写一份"，
+     * 并把"备份其实存在、只是读不出来"的风险**自认下来**（注释里明写的）。
+     * 那笔风险的代价是：真原始版被当前正文替换掉，而"原始备份"正是教师最后的退路。
+     * 现在用 `fsx` 问清楚：**确实不存在**才写；**存在但读不出来**就中止这一次改动——
+     * 宁可这一次不改，也不拿教师唯一的原始版去赌。 */
+    const bak = await readTextChecked(backup);
+    if (bak.kind === 'missing') {
       await invoke('write_text_file', { path: backup, content: s.md });
+    } else if (bak.kind === 'unreadable') {
+      throw new Error(`原始备份 ${backup} 读不出来（${bak.error}）——为免把这份唯一的原始版覆盖掉，本次改动**没有执行**；请先确认该文件`);
     }
     await invoke('write_text_file', { path: s.sourcePath, content: newMd });
     return s.sourcePath;

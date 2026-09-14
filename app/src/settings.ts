@@ -13,6 +13,7 @@ import { showVocabEditor } from './pipew.js';
 import { scheduleHeatRail } from './edit.js';
 import { AI_PROVIDERS, aiErrHuman, loadConfig, reloadPrompts, saveConfig, simplifyMaxLen } from './ai.js';
 import { filterTargets, type ClassTarget } from './bookpure.js';
+import { failoverKeyAccounts, partitionFailoverRows } from './pure.js';
 
 /* ---------- 班级多人定制（折叠多选栏，feature/reinforce） ---------- */
 
@@ -258,7 +259,11 @@ export function showAiSettings(): void {
      * 而读取侧（`ai.ts` 的 `activeTargets`）是"钥匙串里有就用钥匙串的"——
      * 于是"把输入框清空再保存"**并不能**让这一行退回用主 Key，旧 Key 照旧生效。
      * 少这一个按钮，教师在界面上就没有任何办法把那把 Key 拿掉
-     * （只能自己去"钥匙串访问"里删 `layertext.apikey.fb:<id>`）。 */
+     * （只能自己去"钥匙串访问"里删 `layertext.apikey.fb:<id>`）。
+     *
+     * 第一版这个按钮是**假动作**：`ai.ts` 当时写的是"稳定账号取不到就回落下标账号"，
+     * 删掉 `fb:<id>` 之后立刻从 `fb0` 把同一把 Key 读了回来——toast 说"已删除"，实际照旧在用。
+     * 现在判据统一在 `pure.failoverKeyAccounts`：**有 id 就不再回落下标**（见 ai.ts 的迁移）。 */
     div.querySelector('.fb-clear')!.addEventListener('click', async () => {
       const id = (div as HTMLElement).dataset.fbId ?? '';
       const inp = div.querySelector('.fb-key') as HTMLInputElement;
@@ -286,7 +291,24 @@ export function showAiSettings(): void {
       key: (r.querySelector('.fb-key') as HTMLInputElement).value.trim(),
     }));
   $('ai-fb-add').addEventListener('click', () => addFbRow());
-  for (const f of S.appConfig.failover ?? []) addFbRow(f.name ?? '', f.baseUrl ?? '', f.model ?? '', '', f.id ?? '');
+  /* 2026-09-14：老配置的行**没有稳定 id**，Key 存在按下标的老账号（`fb0`/`fb1`）里。
+   * 这里给它们新分配 id 的**同时**把老 Key 搬过去——这时下标还有意义，搬完就再也不用它了
+   * （`ai.ts` 现在"有 id 就不回落下标"）。搬到一半失败也认：老配置没有 id 时仍走老路径，
+   * 不会"备用全失效"。整段是异步的，不阻塞面板渲染。 */
+  (S.appConfig.failover ?? []).forEach((f, i) => {
+    addFbRow(f.name ?? '', f.baseUrl ?? '', f.model ?? '', '', f.id ?? '');
+    if (f.id) return;
+    void (async () => {
+      try {
+        const legacy = await invoke<string>('load_api_key', { account: failoverKeyAccounts(undefined, i).legacy });
+        const row = fbRows.querySelectorAll('.rw-row')[i] as HTMLElement | undefined;
+        const stable = row?.dataset.fbId;
+        if (legacy && stable) await invoke('save_api_key', { key: legacy, account: `fb:${stable}` });
+      } catch {
+        /* 有意兜底：搬不动不改行为——这一行仍按老账号（`fb<i>`）读，最坏是"没搬成功"。 */
+      }
+    })();
+  });
 
   void (async () => {
     await loadConfig();
@@ -330,9 +352,9 @@ export function showAiSettings(): void {
        * 用的是**过滤后**的 N——教师明明填了两行，界面说保存了一个，另一个不见了，
        * 且没有任何提示。现在改成：整行全空＝只是没用的空行，静默跳过；
        * **填了一半的必须点名**，并且不谎报"已保存"。 */
-      const allFb = collectFb();
-      const fbs = allFb.filter((f) => f.baseUrl && f.model);
-      const halfFilled = allFb.filter((f) => !(f.baseUrl && f.model) && (f.name || f.baseUrl || f.model || f.key));
+      /* 分拣是**纯逻辑**，抽到 `pure.ts` 并单测——原先它跟那句 `.filter()` 一起埋在
+       * 收集函数里，过滤器把半成品在到达判定点之前就吃掉了，"点名"根本无从谈起。 */
+      const { keep: fbs, half: halfFilled } = partitionFailoverRows(collectFb());
       S.appConfig.failover = fbs.length ? fbs.map((f) => ({ id: f.id, name: f.name, baseUrl: f.baseUrl, model: f.model })) : undefined;
       await saveConfig();
       const k = cur.value.trim();

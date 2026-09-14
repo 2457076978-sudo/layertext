@@ -973,6 +973,62 @@ export function baseName(p: string): string {
   return i >= 0 ? p.slice(i + 1) : p;
 }
 
+/* ---------- 备用供应商（纯逻辑：分拣 + 钥匙串账号，读/写/删共用一套判据） ---------- */
+
+/** 设置面板那一排"备用供应商"输入框收上来的原始值。 */
+export interface FailoverRowDraft {
+  id: string;
+  name: string;
+  baseUrl: string;
+  model: string;
+  key: string;
+}
+
+/** 一行备用供应商，**算不算一行**。
+ *  判据是"地址 + 模型都要有"——缺一个就没法发请求，留着它只会在运行期炸。
+ *  但"半填"与"整行全空"必须分开：整行全空只是教师点了一下「＋ 添加备用」又没填，
+ *  静默丢掉是对的；**半填是教师真的想配但没配完**，丢掉必须说出口。 */
+export function failoverRowKind(r: FailoverRowDraft): 'complete' | 'half' | 'blank' {
+  if (r.baseUrl && r.model) return 'complete';
+  return r.name || r.baseUrl || r.model || r.key ? 'half' : 'blank';
+}
+
+/** 把面板上收来的行分成"要保存的"与"没填齐、要当场点名的"。
+ *  2026-09-14 抽出并单测：原先这段判定跟 `.filter()` 一起埋在 `settings.ts` 的
+ *  收集函数里——过滤器写在收集函数里，**下游就永远看不见被过滤掉的东西**，
+ *  于是"有一行没填齐"这件事根本没有机会被说出来（改过一次还是空炮，见 CHANGELOG）。 */
+export function partitionFailoverRows(rows: readonly FailoverRowDraft[]): { keep: FailoverRowDraft[]; half: FailoverRowDraft[] } {
+  const keep: FailoverRowDraft[] = [];
+  const half: FailoverRowDraft[] = [];
+  for (const r of rows) {
+    const k = failoverRowKind(r);
+    if (k === 'complete') keep.push(r);
+    else if (k === 'half') half.push(r);
+  }
+  return { keep, half };
+}
+
+/* ---------- 备用供应商的钥匙串账号（纯逻辑：读、写、删必须用同一套判据） ---------- */
+
+/**
+ * 备用供应商在钥匙串里的账号名。
+ *
+ * 历史：2026-09-14 之前用的是**行下标**（`fb0`/`fb1`…）。删掉一行，剩下的行就会读到
+ * **被删那家**的 Key —— 鉴权失败，而报错文案还会让教师去怀疑自己填的 Key。
+ * 之后改成稳定 id（`fb:<id>`）。旧账号不能一删了之（升级后没再打开过设置面板的教师
+ * 会"备用全失效"），所以两边都要认得。
+ *
+ * 但**回落是有毒的**：`fb<i>` 里的下标是**保存那一刻**的，删过行之后它就属于别人了。
+ * 于是规则定死在这里，读/写/删三处共用：
+ *   · **有 id**（这份配置被新版本保存过）→ 只认 `fb:<id>`，绝不回落下标；
+ *   · **没有 id**（老配置，升级后还没保存过）→ 只能认 `fb<i>`。
+ * 老 Key 由 `ai.ts` 的 `migrateFailoverKeys()` 在首次使用前搬到稳定账号上，
+ * 所以"有 id 之后就不再回落下标"不会丢 Key。
+ */
+export function failoverKeyAccounts(id: string | undefined, index: number): { stable: string | null; legacy: string } {
+  return { stable: id ? `fb:${id}` : null, legacy: `fb${index}` };
+}
+
 /* ---------- 撤销 / 重做的**栈移动**（纯逻辑，不碰 DOM / IO） ---------- */
 
 /**

@@ -8,9 +8,19 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
-  DATA_KINDS, parseCsv, toTable, fromTable, validateText, validateUnit,
-  upsertRow, deleteRow, deleteRowAt, upsertProperLine, deleteProperLine,
-  setIo, newErrors,
+  DATA_KINDS,
+  parseCsv,
+  toTable,
+  fromTable,
+  validateText,
+  validateUnit,
+  upsertRow,
+  deleteRow,
+  deleteRowAt,
+  upsertProperLine,
+  deleteProperLine,
+  setIo,
+  newErrors,
   type DataKind,
 } from '../app/src/datapanel.js';
 
@@ -132,10 +142,19 @@ test('save：写前校验不过则拒绝写入（面板不能产出非法数据�
   let wrote = false;
   const store: Record<string, string> = { '/tmp/x.csv': '\uFEFF词,释义,来源\n' };
   setIo({
-    async read(p) { return store[p] ?? ''; },
-    async write(p, c) { wrote = true; store[p] = c; },
-    async appendLog() { /* noop */ },
-    async listDir() { return []; },
+    async read(p) {
+      return store[p] ?? '';
+    },
+    async write(p, c) {
+      wrote = true;
+      store[p] = c;
+    },
+    async appendLog() {
+      /* noop */
+    },
+    async listDir() {
+      return [];
+    },
   });
   const DP = await import('../app/src/datapanel.js');
   const bad = '\uFEFF词,释义,来源\nmajestic,威严的,教师知识库\nmajestic,宏大的,归一\n';
@@ -149,15 +168,22 @@ test('save：合法数据写入成功并留痕', async () => {
   const store: Record<string, string> = {};
   const logs: string[] = [];
   setIo({
-    async read(p) { return store[p] ?? ''; },
-    async write(p, c) { store[p] = c; },
-    async appendLog(_n, line) { logs.push(line); },
-    async listDir() { return []; },
+    async read(p) {
+      return store[p] ?? '';
+    },
+    async write(p, c) {
+      store[p] = c;
+    },
+    async appendLog(_n, line) {
+      logs.push(line);
+    },
+    async listDir() {
+      return [];
+    },
   });
   const DP = await import('../app/src/datapanel.js');
   const good = '\uFEFF词,释义,来源\nmajestic,威严的,教师知识库\n';
-  const r = await DP.save(K.dict!, { 书级: { 词典: '/tmp/y.csv' } }, good, '新增 majestic',
-    { existingErrs: [], logDir: '/ws' });
+  const r = await DP.save(K.dict!, { 书级: { 词典: '/tmp/y.csv' } }, good, '新增 majestic', { existingErrs: [], logDir: '/ws' });
   assert.equal(r.ok, true, r.error);
   assert.ok(store['/tmp/y.csv']!.includes('majestic'));
   assert.equal(logs.length, 1, '应留一行变更日志');
@@ -177,10 +203,18 @@ test('save：文件里已有历史错误时，仍允许编辑（只拦新错误�
   const store: Record<string, string> = {};
   const logs: string[] = [];
   setIo({
-    async read(p) { return store[p] ?? ''; },
-    async write(p, c) { store[p] = c; },
-    async appendLog(p, line) { logs.push(`${p}|${line}`); },
-    async listDir() { return []; },
+    async read(p) {
+      return store[p] ?? '';
+    },
+    async write(p, c) {
+      store[p] = c;
+    },
+    async appendLog(p, line) {
+      logs.push(`${p}|${line}`);
+    },
+    async listDir() {
+      return [];
+    },
   });
   const DP = await import('../app/src/datapanel.js');
   // 知识库：两条 harness 不同释义 = 历史问题（正是 harness 那条真数据的形状）
@@ -188,8 +222,7 @@ test('save：文件里已有历史错误时，仍允许编辑（只拦新错误�
   const existing = DP.validateText(K.kb!, text);
   assert.ok(existing.length > 0, '这份数据本来就该判有问题');
   const after = text + '加注词,windmill,风车,1\n';
-  const r = await DP.save(K.kb!, { 书级: { 知识库: '/tmp/kb.csv' } }, after, '新增 windmill',
-    { existingErrs: existing, logDir: '/ws' });
+  const r = await DP.save(K.kb!, { 书级: { 知识库: '/tmp/kb.csv' } }, after, '新增 windmill', { existingErrs: existing, logDir: '/ws' });
   assert.equal(r.ok, true, r.error);
   assert.match(r.warned ?? '', /历史问题/);
   assert.ok(store['/tmp/kb.csv']!.includes('windmill'));
@@ -200,16 +233,23 @@ test('save：文件里已有历史错误时，仍允许编辑（只拦新错误�
 test('save：新引入的错误仍然拦下（放开历史问题不等于不校验）', async () => {
   let wrote = false;
   setIo({
-    async read() { return ''; },
-    async write() { wrote = true; },
-    async appendLog() { /* noop */ },
-    async listDir() { return []; },
+    async read() {
+      return '';
+    },
+    async write() {
+      wrote = true;
+    },
+    async appendLog() {
+      /* noop */
+    },
+    async listDir() {
+      return [];
+    },
   });
   const DP = await import('../app/src/datapanel.js');
   const bad = '\uFEFF类型,词,值,来源数\n加注词,harness,马具,1\n加注词,harness,挽具,1\n加注词,,风车,1\n';
   const existing = DP.validateText(K.kb!, '\uFEFF类型,词,值,来源数\n加注词,harness,马具,1\n加注词,harness,挽具,1\n');
-  const r = await DP.save(K.kb!, { 书级: { 知识库: '/tmp/kb2.csv' } }, bad, '新增空词',
-    { existingErrs: existing, logDir: '/ws' });
+  const r = await DP.save(K.kb!, { 书级: { 知识库: '/tmp/kb2.csv' } }, bad, '新增空词', { existingErrs: existing, logDir: '/ws' });
   assert.equal(r.ok, false);
   assert.match(r.error!, /写前校验未通过/);
   assert.equal(wrote, false);
@@ -246,10 +286,18 @@ test('parseCsv 空文件返回空数组', () => {
 
 test('findProjectConfig：在书目里找到 调适项目_*.json', async () => {
   setIo({
-    async read(_p) { return JSON.stringify({ 书名: 'X', 词库: '/tmp/v.csv' }); },
-    async write() { /* noop */ },
-    async appendLog() { /* noop */ },
-    async listDir(dir) { return dir === '/book' ? ['调适项目_X.json', '其他.md'] : []; },
+    async read(_p) {
+      return JSON.stringify({ 书名: 'X', 词库: '/tmp/v.csv' });
+    },
+    async write() {
+      /* noop */
+    },
+    async appendLog() {
+      /* noop */
+    },
+    async listDir(dir) {
+      return dir === '/book' ? ['调适项目_X.json', '其他.md'] : [];
+    },
   });
   const DP = await import('../app/src/datapanel.js');
   const hit = await DP.findProjectConfig('/book');
@@ -259,10 +307,18 @@ test('findProjectConfig：在书目里找到 调适项目_*.json', async () => {
 
 test('findProjectConfig：找不到时逐级向上一层再试', async () => {
   setIo({
-    async read() { return JSON.stringify({ 书名: 'Y' }); },
-    async write() { /* noop */ },
-    async appendLog() { /* noop */ },
-    async listDir(dir) { return dir === '/book' ? ['调适项目_Y.json'] : []; },
+    async read() {
+      return JSON.stringify({ 书名: 'Y' });
+    },
+    async write() {
+      /* noop */
+    },
+    async appendLog() {
+      /* noop */
+    },
+    async listDir(dir) {
+      return dir === '/book' ? ['调适项目_Y.json'] : [];
+    },
   });
   const DP = await import('../app/src/datapanel.js');
   const hit = await DP.findProjectConfig('/book/调适工作区');
@@ -272,10 +328,18 @@ test('findProjectConfig：找不到时逐级向上一层再试', async () => {
 
 test('findProjectConfig：都没有则返回 null', async () => {
   setIo({
-    async read() { return ''; },
-    async write() { /* noop */ },
-    async appendLog() { /* noop */ },
-    async listDir() { return ['readme.md']; },
+    async read() {
+      return '';
+    },
+    async write() {
+      /* noop */
+    },
+    async appendLog() {
+      /* noop */
+    },
+    async listDir() {
+      return ['readme.md'];
+    },
   });
   const DP = await import('../app/src/datapanel.js');
   assert.equal(await DP.findProjectConfig('/nothing'), null);
@@ -293,14 +357,70 @@ test('getPath：书级数据在 书级.* 下也能取到（回归）', async () 
 
 test('findProjectConfig：向上三层能找到（书开的是 调适工作区/ 时要用到）', async () => {
   setIo({
-    async read() { return JSON.stringify({ 书名: 'Z' }); },
-    async write() { /* noop */ },
-    async appendLog() { /* noop */ },
+    async read() {
+      return JSON.stringify({ 书名: 'Z' });
+    },
+    async write() {
+      /* noop */
+    },
+    async appendLog() {
+      /* noop */
+    },
     // 只在第三层有
-    async listDir(dir) { return dir === '/ws' ? ['调适项目_Z.json'] : ['其他.md']; },
+    async listDir(dir) {
+      return dir === '/ws' ? ['调适项目_Z.json'] : ['其他.md'];
+    },
   });
   const DP = await import('../app/src/datapanel.js');
   const hit = await DP.findProjectConfig('/ws/调适工作区/第三章');
   assert.equal(hit?.config['书名'], 'Z');
   assert.equal(hit?.dir, '/ws');
+});
+
+/* ══════ 2026-09-14：一键生成 调适项目_*.json（采纳失败的出口） ══════
+ *
+ * 背景：没有这份配置时，"采纳 / 直改"**100% 被拒**（这是设计如此——没有版本与追溯的去处
+ * 就不该写正文）。但原先界面上只教"复制模板"那条命令，等于要求教师开终端、还得知道仓库在哪。
+ * 现在 App 里能一键生成。这条用例钉两件事：
+ *  ① 能从书目录推出来的路径必须**真的填进去**（不是把模板原样抄一遍）；
+ *  ② 猜不出来的那几项必须**如实列为待办**——它们指向教师自己机器上的文件，
+ *     悄悄留个占位符而不告诉他，等于让他拿着一份坏配置去用。
+ */
+test('createProjectConfig：能推的路径填好、猜不到的如实列成待办', async () => {
+  const store: Record<string, string> = {};
+  setIo({
+    async read(p) {
+      return store[p] ?? '';
+    },
+    async write(p, c) {
+      store[p] = c;
+    },
+    async appendLog() {
+      /* noop */
+    },
+    async listDir() {
+      return [];
+    },
+  });
+  const DP = await import('../app/src/datapanel.js');
+  const made = await DP.createProjectConfig('/Users/某某/我的书');
+  assert.ok(made, '模板读不出来时返回 null；这里应当成功');
+  assert.equal(made!.path, '/Users/某某/我的书/调适项目_我的书.json');
+
+  const cfg = JSON.parse(store[made!.path]!) as Record<string, unknown>;
+  assert.equal(cfg['书名'], '我的书');
+  assert.equal(cfg['调适工作区'], '/Users/某某/我的书/调适工作区');
+  assert.equal(cfg['产物目录'], '/Users/某某/我的书/调适工作区/重制三版');
+  assert.equal(cfg['原文目录'], '/Users/某某/我的书/调适工作区/原文重制_M50');
+
+  /* 模板里带"（…）"的占位项必须全部出现在待办里，且推出来的那几项**不在**待办里 */
+  assert.ok(made!.todo.length > 0, '模板本来就有猜不出来的路径，待办不该是空的');
+  assert.ok(made!.todo.includes('引擎目录'), '引擎目录指向 LayerText 本体，必须让教师自己填');
+  assert.ok(
+    made!.todo.some((t) => t.startsWith('书级.')),
+    '书级下的词库/专名表/知识库/词典都要点名',
+  );
+  for (const filled of ['书名', '工作区', '调适工作区', '原文目录', '产物目录']) {
+    assert.ok(!made!.todo.includes(filled), `${filled} 已经填好了，不该出现在待办里`);
+  }
 });

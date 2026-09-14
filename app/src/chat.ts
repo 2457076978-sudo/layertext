@@ -6,6 +6,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { S, esc } from './state.js';
 import { $, setStatus } from './uikit.js';
+import { readTextChecked } from './fsx.js';
 import { activeSession } from './main.js';
 import { buildLexiconNow } from './lexicon.js';
 import { renderReportPane } from './report.js';
@@ -51,14 +52,19 @@ function scheduleChatSave(): void {
 }
 
 export async function restoreChat(): Promise<void> {
-  let saved: string | null = null;
-  try {
-    const dir = await invoke<string>('reports_dir');
-    saved = await invoke<string>('read_text_file', { path: `${dir}/AI会话.json` });
-  } catch {
-    /* 有意兜底：会话文件还不存在＝第一次用（`read_text_file` 对缺失文件是报错的），没有历史可恢复。 */
+  const dir = await invoke<string>('reports_dir');
+  /* `fsx.readTextChecked` 把"文件不存在"（第一次用，正常）与"文件在但读不出来"
+   * （权限/占位——这时把空对话写回去就是覆盖教师的记录）分开了。
+   * 在这之前两者共用一个 catch，注释只能写"有意兜底"，风险自认。 */
+  const r = await readTextChecked(`${dir}/AI会话.json`);
+  if (r.kind === 'missing') return;
+  if (r.kind === 'unreadable') {
+    chatFileBroken = true;
+    const st = document.getElementById('chat-status');
+    if (st) st.textContent = `⚠ 上次的对话记录读不出来（${r.error.slice(0, 60)}）——已保留文件、本轮**不会覆盖**它；需要的话先把 AI会话.json 复制走`;
+    return;
   }
-  if (saved === null) return;
+  const saved = r.text;
   /* 2026-09-14：**解析失败必须与"文件不存在"分开**（与 `main.ts` 打开章节时同一条口径）。
    * 原先两者共用一个 catch，于是损坏的 `AI会话.json` 被静默当成"没有对话"，
    * 下一次自动保存就把它整体覆盖——教师攒了几十轮的审校对话**一句话都不剩，且没有任何提示**。
@@ -272,8 +278,18 @@ async function executeTool(name: string, argsJson: string): Promise<string> {
 
 export function chatRender(): void {
   const log = $('chat-log');
+  /* 2026-09-14：**"暂停保存"必须有一个恢复入口**（与 `_审校标记.json` 那条同一条纪律）。
+   * 上次的 `AI会话.json` 读不出来时自动保存会被挂起，免得拿空对话把它盖掉——
+   * 这是对的，但原先教师处理完只能重启 App，而 `#chat-status` 里那句提示是会滚走/被覆盖的。 */
+  const brokenHtml = chatFileBroken
+    ? `<div class="chat-msg" style="border:1px solid var(--err,#c62828);border-radius:8px;padding:6px 8px;font-size:12px;line-height:1.7">
+        ⚠ 上次的对话记录读不出来，本轮<b>暂停自动保存</b>（避免覆盖它）。
+        <button id="chat-resume-save" style="font-size:12px;margin-top:4px">我已备份好，恢复保存</button>
+      </div>`
+    : '';
   log.innerHTML =
-    S.chatMsgs.length === 0
+    brokenHtml +
+    (S.chatMsgs.length === 0
       ? '<div class="chat-empty">与 AI 实时交流——它能调用本地工具（跑质检/查句子/列标记/提修订候选），所有验证由本机 QC 引擎完成。</div>'
       : S.chatMsgs
           .map((m) => {
@@ -287,7 +303,13 @@ export function chatRender(): void {
               .join('');
             return `<div class="chat-msg assistant">${toolsHtml}<div class="bubble" ${m.content === '' ? 'id="chat-cur"' : ''}>${esc(m.content)}</div></div>`;
           })
-          .join('');
+          .join(''));
+  document.getElementById('chat-resume-save')?.addEventListener('click', () => {
+    chatFileBroken = false;
+    setStatus('已恢复自动保存——正在把当前对话写回盘上…');
+    scheduleChatSave();
+    chatRender();
+  });
   log.scrollTop = log.scrollHeight;
 }
 

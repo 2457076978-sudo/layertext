@@ -11,6 +11,7 @@
  *  - DOM 渲染（renderDataPane）：依赖 invoke 与页面容器
  */
 import { baseName } from './pure.js';
+import { setStatus } from './state.js';
 /** IO 注入点 —— 纯逻辑（parse/validate/upsert/delete）完全不依赖它，
  *  因此可以在 node 下直接测试，不必启动 App。生产环境走 Tauri。 */
 export interface PanelIo {
@@ -63,6 +64,60 @@ export interface ProjectHit {
 
 /** 在某本书的根目录里找 调适项目_*.json（数据面板靠它知道各数据文件在哪）。
  *  找不到则逐级向上再试，方便 调适工作区/ 这类层级。 */
+/** App 自己产出的调适项目配置里会带哪些键。
+ *  形状与 `templates/调适项目_模板.json` 对齐，但**值由这里算**：
+ *  模板里有大量"（书名）"这类占位字符串，直接抄一份等于把一份坏配置交给教师；
+ *  这里只写能从书目录推出来的路径，其余一律 `null` 并逐项列进待办。 */
+const PROJECT_CONFIG_KEYS = ['书名', '工作区', '调适工作区', '原文目录', '产物目录', '词库', '教材单元库', '教材进度', '书级', '分层正本', '产物命名', '日期', '模型', '引擎目录'] as const;
+
+/**
+ * 在这本书的根目录**建一份 `调适项目_<名>.json`**。
+ *
+ * 为什么要有这个入口：没有这份配置时，AI 建议的「采纳 / 直改」**100% 被拒**
+ * （`adoptRewrite` 要靠它定位版本日志与决定日志的去处——这是设计如此，不是 bug）。
+ * 原先界面上只教"复制模板"那条命令，等于要求教师开终端、还得知道仓库在哪。
+ *
+ * 只填**能从书目录推出来**的那几项（工作区 / 调适工作区 / 原文目录 / 产物目录），
+ * 其余（词库 / 专名表 / 知识库 / 词典 / 分层正本 / 引擎目录）一律 `null` 并如实列成待办——
+ * 它们指向这台机器上的真实文件，**猜不得**，悄悄留个占位符等于让教师拿着一份坏配置去用。
+ * 返回 `null` 表示书目录本身取不到名字（调用方据此拒绝。）
+ */
+export async function createProjectConfig(bookDir: string): Promise<{ path: string; todo: string[] } | null> {
+  const name = baseName(bookDir.replace(/\/+$/, '')) || '我的书';
+  const path = `${bookDir}/调适项目_${name}.json`;
+  const work = `${bookDir}/调适工作区`;
+  const cfg: Record<string, unknown> = Object.fromEntries(PROJECT_CONFIG_KEYS.map((k) => [k, null]));
+  Object.assign(cfg, {
+    _meta: {
+      schema版本: '1',
+      数据版本: 'v1',
+      名称: `${name}分层调适项目`,
+      生成: new Date().toLocaleDateString('sv-SE'),
+      说明: '由 App「库」页一键生成。下面值为 null 的几项指向你机器上的真实文件，请逐项填绝对路径；写法见 docs/快速开始.md 第 2 节，或照 templates/调适项目_模板.json 补齐其余字段。',
+    },
+    书名: name,
+    工作区: work,
+    调适工作区: work,
+    原文目录: `${work}/原文重制_M50`,
+    产物目录: `${work}/重制三版`,
+    产物命名: { A: 'A层85', M: 'M层75', B: 'B层60' },
+    日期: new Date().toLocaleDateString('sv-SE'),
+    书级: { 专名表: null, 知识库: null, 词典: null },
+  });
+  /* 待办 = 所有仍为 null 的项（含 `书级.` 下的子项）。**从刚生成出来的这份配置里算**，
+   * 不是另写一份清单——否则清单会跟配置各自漂走。 */
+  const todo: string[] = [];
+  for (const [k, v] of Object.entries(cfg)) {
+    if (k === '_meta') continue;
+    if (v === null || v === undefined) todo.push(k);
+    else if (typeof v === 'object' && !Array.isArray(v)) {
+      for (const [k2, v2] of Object.entries(v as Record<string, unknown>)) if (v2 === null || v2 === undefined) todo.push(`${k}.${k2}`);
+    }
+  }
+  await io.write(path, JSON.stringify(cfg, null, 1));
+  return { path, todo };
+}
+
 export async function findProjectConfig(bookDir: string): Promise<ProjectHit | null> {
   // 向上找三层：配置常放在书的上一级（如 名著阅读工作区/调适项目_X.json，而书开的是 调适工作区/）
   const dirs: string[] = [];
@@ -567,10 +622,35 @@ export async function renderDataPane(bookDir: string): Promise<void> {
           ② 打开它，把 词库 / 书级.专名表 / 书级.知识库 / 书级.词典 / 分层正本 换成你的绝对路径<br>
           ③ 重新打开这本书，「库」页就会列出这些文件（写法见 <code>docs/快速开始.md</code> 第 2 节）
         </div>
+        <div class="dp-note">
+          <b>或者，不离开 App 也能建：</b><br>
+          <button id="dp-mk-proj" class="primary">一键在这本书里生成 调适项目_*.json</button>
+          <span class="dim" style="font-size:12px">生成后仍要按提示把几项路径换成你自己机器上的真实文件——那几项指向你的知识文件，猜不得。</span>
+        </div>
         <div class="dp-note dp-derived">小白也能用的一条命令（在本机终端里跑）：<br>
-          <code>node &lt;引擎目录&gt;/tools/af_pipeline/LayerText_AF补注.mjs --dry</code> 用来看加注缺口；
-          项目配置本身必须手写或复制模板——它记录的是**你这台机器上的路径**。</div>
+          <code>node &lt;引擎目录&gt;/tools/af_pipeline/LayerText_AF补注.mjs --dry</code> 用来看加注缺口。</div>
       </div>`;
+      /* 有书目录才谈得上"在这本书里生成"（内置示例没有书目录）。 */
+      if (bookDir) {
+        el.querySelector('#dp-mk-proj')?.addEventListener('click', async () => {
+          const btn = el.querySelector('#dp-mk-proj') as HTMLButtonElement | null;
+          if (btn) btn.disabled = true;
+          try {
+            const made = await createProjectConfig(bookDir);
+            if (!made) {
+              alert('这本书的目录名取不到，没有生成任何文件。');
+              if (btn) btn.disabled = false;
+              return;
+            }
+            alert(`已生成：${made.path}\n\n` + (made.todo.length ? `还需要你把这几项填成真实路径：\n· ${made.todo.join('\n· ')}\n\n` : '') + '填好后重开这本书，数据面板与风险队列就会生效。');
+            await renderDataPane(bookDir);
+          } catch (e) {
+            alert(`生成失败：${String(e)}`);
+            setStatus(`生成 调适项目_*.json 失败：${String(e)}`, 'err');
+            if (btn) btn.disabled = false;
+          }
+        });
+      }
       return;
     }
     panelState.project = found.config;

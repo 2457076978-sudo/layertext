@@ -6,6 +6,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, WidthType } from 'docx';
 import { S, esc, globalInstructionsCaptured, globalInstructionsValue, rememberGlobalInstructions } from './state.js';
+import { readTextChecked } from './fsx.js';
 import { $, setStatus } from './uikit.js';
 import { activeSession, persistEdit } from './main.js';
 import { renderReader, sidebarHandlers } from './reader.js';
@@ -76,14 +77,14 @@ function resetBookScopeIfNew(dir: string): void {
   resetBookScope();
 }
 
-/** 读一个可选文件：读不到就是"没有这一项"（`read_text_file` 对缺失文件是报错的）。 */
+/** 读一个可选文件：**只有确实不存在**才返回 null；"在但读不出来"抛出去。
+ *  两种情况原先共用一个 catch（注释写的是"有意兜底，风险写明"）——现在用
+ *  `fsx.readTextChecked` 问清楚：不存在＝这一项没有；读不了＝必须让教师知道。 */
 async function readIfExists(path: string): Promise<string | null> {
-  try {
-    return await invoke<string>('read_text_file', { path });
-  } catch {
-    /* 有意兜底：缺文件是常态，调用方按"这一项没有"处理。 */
-    return null;
-  }
+  const r = await readTextChecked(path);
+  if (r.kind === 'ok') return r.text;
+  if (r.kind === 'missing') return null;
+  throw new Error(`${path} 读不出来：${r.error}`);
 }
 
 /** 书目录里的 `_词库.csv`（词库编辑器的落盘位置）——有它就以它为准。 */
@@ -100,21 +101,44 @@ export async function loadBookConfig(dir: string): Promise<boolean> {
    * 可是全仓**没有任何地方把它读回来**：教师编辑完、重启 App、再打开这本书，
    * 词库当作没配过——一个"保存成功"的按钮，存下来的东西谁也读不回来。
    * 顺序放在 JSON 配置之前读、之后应用，让 `_词库.csv` 覆盖 JSON 里那份 `vocabCsv`（与设置页口径一致）。 */
-  const vocabCsv = await readIfExists(`${dir}/_词库.csv`);
-  let raw: string;
+  let vocabCsv: string | null = null;
   try {
-    raw = await invoke<string>('read_text_file', { path: `${dir}/${BOOK_CONFIG}` });
-  } catch {
-    /* 有意兜底：这本书没有配置＝绝大多数书的常态（`read_text_file` 对缺失文件是报错的）。
-     * 代价写明：配置损坏与"没配过"在这里分不出，都会退到"没有本书配置"。
-     * 但**换书时必须先把上一本书的配置清掉**——否则"没有本书配置"会变成"沿用上一本书的配置"。 */
+    vocabCsv = await readIfExists(`${dir}/_词库.csv`);
+  } catch (e) {
+    /* 文件**在**却读不出来：不能当成"这本书没有词库"（那会让教师以为词库丢了，
+     * 更坏的是他再保存一次就会把读不出来的那份覆盖掉）。说出口，本次不加载它。 */
+    setStatus(`${e instanceof Error ? e.message : String(e)}——本次按"这本书没有词库"打开；**没有覆盖它**，请先确认该文件`, 'err');
+  }
+  /* `readTextChecked` 自己把 invoke 的失败收进返回值的三态里，**不 reject**——不用再套一层 catch。 */
+  const bookCfg = await readTextChecked(`${dir}/${BOOK_CONFIG}`);
+  if (bookCfg.kind === 'missing') {
+    /* 这本书没有配置＝绝大多数书的常态。但**换书时必须先把上一本书的配置清掉**——
+     * 否则"没有本书配置"会变成"沿用上一本书的配置"。 */
     resetBookScopeIfNew(dir);
     lastBookConfigDir = dir;
     applyVocabCsv(vocabCsv);
     return Boolean(vocabCsv);
   }
+  if (bookCfg.kind === 'unreadable') {
+    /* 2026-09-14：**读不出来必须与"没配过"分开**（`fsx` 把这件事问清楚了）。
+     * 原先两者共用一句 catch，于是"文件在、但读不出来"被静默当成"这本书没有配置"——
+     * 教师明明配过词库与改写规则，打开书却什么都没生效，且一个字都不提示。
+     * 现在说出口，并按"没有本书配置"处理（换书已清，不会残留上一本）。 */
+    resetBookScopeIfNew(dir);
+    lastBookConfigDir = dir;
+    applyVocabCsv(vocabCsv);
+    setStatus(`这本书的配置读不出来（${bookCfg.error.slice(0, 80)}）：${dir}/${BOOK_CONFIG}——本次按"没有本书配置"打开，且**没有覆盖它**，请检查该文件`, 'err');
+    return Boolean(vocabCsv);
+  }
   try {
-    const cfg = JSON.parse(raw) as { vocabCsv?: string | null; vocabName?: string; terms?: string | null; proper?: string[] | null; instructions?: string | null; rewrite?: typeof S.rewriteRules };
+    const cfg = JSON.parse(bookCfg.text) as {
+      vocabCsv?: string | null;
+      vocabName?: string;
+      terms?: string | null;
+      proper?: string[] | null;
+      instructions?: string | null;
+      rewrite?: typeof S.rewriteRules;
+    };
     resetBookScopeIfNew(dir);
     lastBookConfigDir = dir;
     if (cfg.vocabCsv) {
@@ -132,15 +156,12 @@ export async function loadBookConfig(dir: string): Promise<boolean> {
       S.rewriteRules = { replacements: cfg.rewrite.replacements ?? [], viewpoint: cfg.rewrite.viewpoint ?? 'keep', viewpointName: cfg.rewrite.viewpointName ?? '', extra: cfg.rewrite.extra ?? '' };
     return Boolean(cfg.vocabCsv || vocabCsv || cfg.terms || cfg.proper?.length || cfg.rewrite);
   } catch (e) {
-    /* 2026-09-14：**解析失败必须与"没配过"分开**。原先两者共用上面那个 catch，
-     * 于是损坏的 `_本书配置.json` 被静默当成"这本书没有配置"——
-     * 教师明明配过词库与改写规则，打开书却什么都没生效，且一个字都不提示。
-     * 现在说出口，并按"没有本书配置"处理（换书已清，不会残留上一本）。
+    /* JSON **语法**坏了（文件读到了、解析不了）：同样说出口，并按"没有本书配置"处理。
      * `_词库.csv` 是独立的另一份，仍然应用它。 */
     resetBookScopeIfNew(dir);
     lastBookConfigDir = dir;
     applyVocabCsv(vocabCsv);
-    setStatus(`这本书的配置读不进来（${String(e).slice(0, 60)}）：${dir}/${BOOK_CONFIG}——本次按"没有本书配置"打开，请检查该文件`, 'err');
+    setStatus(`这本书的配置解析不了（${String(e).slice(0, 60)}）：${dir}/${BOOK_CONFIG}——本次按"没有本书配置"打开，且**没有覆盖它**，请检查该文件`, 'err');
     return Boolean(vocabCsv);
   }
 }
