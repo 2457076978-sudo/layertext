@@ -59,7 +59,8 @@ export async function loadBookConfig(dir: string): Promise<boolean> {
       S.vocabName = cfg.vocabName ?? '本书词库';
     }
     if (cfg.terms) S.termsText = cfg.terms;
-    S.properRows = cfg.proper ?? [];
+    /* 相邻字段都有守卫，只有这条没有——而 saveBookConfig 在没有专名表时写的正是 null。 */
+    if (cfg.proper) S.properRows = cfg.proper;
     if (cfg.instructions) S.appConfig.instructions = cfg.instructions;
     if (cfg.rewrite)
       S.rewriteRules = { replacements: cfg.rewrite.replacements ?? [], viewpoint: cfg.rewrite.viewpoint ?? 'keep', viewpointName: cfg.rewrite.viewpointName ?? '', extra: cfg.rewrite.extra ?? '' };
@@ -128,7 +129,7 @@ export async function exportDocx(): Promise<void> {
     });
     const buf = await Packer.toBuffer(doc);
     const out = s.sourcePath
-      ? s.sourcePath.slice(0, s.sourcePath.lastIndexOf('/')) + '/' + s.fileName.replace(/\.(md|txt|markdown)$/i, '') + '.docx'
+      ? s.sourcePath.slice(0, s.sourcePath.lastIndexOf('/')) + '/' + s.fileName.replace(/\.(md|txt|markdown|docx|aiff|mp3)$/i, '') + '.docx'
       : (await invoke<string>('reports_dir')) + '/示例导出.docx';
     await invoke('write_file_base64', { path: out, b64: bufToB64((buf.buffer as ArrayBuffer).slice(buf.byteOffset, buf.byteOffset + buf.byteLength)) });
     setStatus('已导出 Word 版：' + out, 'saved');
@@ -285,14 +286,18 @@ export function showRewritePop(): void {
     const s = activeSession();
     if (!s) return;
     const before = s.md;
-    s.md = applyRewrite(s.md);
-    if (s.md === before) {
+    /* 2026-09-14：**先算出来，别急着写回 s.md**。原先 s.md = applyRewrite(s.md) 之后再
+     * persistEdit(s, s.md)，两个实参同一个引用 → newMd !== s.md 恒 false：
+     * ① 不 push 撤销快照；② "原始备份"写的是**改写后**正文，整体还原会还原成被替换的版本。 */
+    const next = applyRewrite(s.md);
+    if (next === before) {
       $('rw-out').textContent = '无可替换内容（或原词已清零）';
       return;
     }
     void (async () => {
       try {
-        const savedTo = await persistEdit(s, s.md);
+        const savedTo = await persistEdit(s, next);
+        s.md = next;
         renderReader(s);
         attachInlineSuggestions();
         renderSidebar(s, sidebarHandlers);

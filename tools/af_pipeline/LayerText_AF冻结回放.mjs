@@ -94,7 +94,11 @@ const TIER_INFO = {
   M: { tag: 'M层75', ratio: 0.75, maxLen: 16 },
   B: { tag: 'B层60', ratio: 0.6, maxLen: 14 },
 };
-const CN = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十'];
+/* 2026-09-14：不再手抄十个——原数组超过十章时 CN[10] === undefined，
+ * 第 11 章会拼出 第undefined章（脚本照常报成功），--chapters 11 也被静默丢掉。
+ * 这里没有改用 chapterNames(P)：P 要到主流程才载入，顶层引用即 TDZ（有冒烟守卫），
+ * runCheck() 又有它自己局部的 P。真实的章名清单仍以 chapterNames(P) 为准。 */
+const CN = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十', '十一', '十二', '十三', '十四', '十五', '十六', '十七', '十八', '十九', '二十'];
 /* 章号 → 章名。**超范围也要给出人话**：`--chapters 99` 报错时写成"第undefined章"
  * 是没法看的——报错本身要能读，否则等于没报。 */
 const chName = (ci) => `第${CN[ci - 1] ?? ci}章`;
@@ -400,8 +404,11 @@ async function computeConclusions(root, { 章过滤 = null, 层过滤 = null, pa
         章: ch,
         completeness: isPartial ? 'partial' : 'complete',
         段数: srcSegs.length,
-        原文词数: qSrc.words,
-        产物词数: qOut.words,
+        /* 2026-09-14 修（并**重新冻结**了基线）：字段名原先都是错的——QcResult 里没有 words（叫 tokenCount），
+         * 过去完成是**全小写**的 pastperf。取到的永远是 undefined，JSON.stringify 直接丢键：
+         * 基线里从来没有这三个数，对账两边都缺、永远比不出差异。 */
+        原文词数: qSrc.tokenCount,
+        产物词数: qOut.tokenCount,
         生词率: Number((qOut.newWordRate * 100).toFixed(1)),
         原文生词率: Number((qSrc.newWordRate * 100).toFixed(1)),
         应注词型: qOut.annotatable,
@@ -411,7 +418,7 @@ async function computeConclusions(root, { 章过滤 = null, 层过滤 = null, pa
         平均句长: Number(qOut.avgLenNarrRaw.toFixed(1)),
         被动: qOut.passive,
         定语从句: qOut.relcl,
-        过去完成: qOut.pastPerf,
+        过去完成: qOut.pastperf,
         超长句: qOut.over20,
       };
       分章记录[ch] = {

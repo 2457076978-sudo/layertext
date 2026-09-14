@@ -128,7 +128,10 @@ export function studentVersionOf(md: string, opts: StudentVersionOptions = {}): 
    * 就看那一行上的段标记。 */
   const placeholders = kept
     .filter((l) => PLACEHOLDER_RE.test(l))
-    .map((l) => ({ comment: (COMMENT_RE.exec(l) ?? [''])[0], segId: /\[(P\d+)\]/.exec(l)?.[1] ?? null }));
+    /* 用 `match` 而不是 `exec`：`COMMENT_RE` 带 `/g`，而 `exec` 会**跨行累计 `lastIndex`**——
+     * 对第二行起就不是从头找，拿到的可能是空串或别人的片段（2026-09-14 修）。
+     * 目前 `comment` 只被赋值、没人读，所以还没有可见后果；但这是"下一个用它的人会踩"的那种坑。 */
+    .map((l) => ({ comment: l.match(COMMENT_RE)?.[0] ?? '', segId: /\[(P\d+)\]/.exec(l)?.[1] ?? null }));
 
   /* ── ④ 段标记 ── */
   let markers = 0;
@@ -152,9 +155,7 @@ export function studentVersionOf(md: string, opts: StudentVersionOptions = {}): 
   const blockers: string[] = [];
   if (placeholders.length) {
     /* **不能默默删掉**。学生版里少一段，在成品里长得跟"这一段本来就没有"一模一样。 */
-    const where = placeholders
-      .map((p) => p.segId ?? '（段号未知）')
-      .slice(0, 8);
+    const where = placeholders.map((p) => p.segId ?? '（段号未知）').slice(0, 8);
     blockers.push(
       `这一章有 ${placeholders.length} 段没通过门禁（${where.join('、')}${placeholders.length > 8 ? ' 等' : ''}）——` +
         `学生版**不能发**：删掉它们之后，学生看到的是一段读得通的序列，而中间少了整整一段，` +
@@ -176,11 +177,7 @@ export function studentVersionOf(md: string, opts: StudentVersionOptions = {}): 
     comments: comments.length,
     sections: droppedSections,
   };
-  const bits = [
-    `去内部说明 ${removed.frontMatterLines} 行`,
-    `去段标记 ${removed.markers} 个`,
-    `去注释 ${removed.comments} 条`,
-  ];
+  const bits = [`去内部说明 ${removed.frontMatterLines} 行`, `去段标记 ${removed.markers} 个`, `去注释 ${removed.comments} 条`];
   if (removed.sections.length) bits.push(`去小节「${removed.sections.join('、')}」`);
   const summary = blockers.length ? `${bits.join('｜')}｜⚠ ${blockers.length} 个原因不能发布` : bits.join('｜');
 

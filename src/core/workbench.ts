@@ -19,7 +19,8 @@
  * 那个断言就只能靠 sleep 来写，测起来是假绿。
  */
 
-import { DECISION_LABEL, type DecisionEvent, type DecisionKind } from './decision.js';
+import { DECISION_LABEL, eventRefOf, type DecisionEvent, type DecisionKind } from './decision.js';
+import { contentHash } from './manifest.js';
 import { SESSION_OPEN } from './productmetrics.js';
 import { groupQueue, sessionState, type GroupOptions, type RiskItem } from './riskqueue.js';
 
@@ -49,8 +50,10 @@ export function dayOf(at: string | Date): string {
  */
 export const TERMINAL_KINDS: DecisionKind[] = ['accept', 'reject', 'false-positive', 'edit'];
 
-/** 撤销指针：`itemId + '@' + timestamp`（同一个项可以被改主意多次，要指得准） */
-export const eventRef = (e: DecisionEvent): string => `${e.itemId}@${e.timestamp}`;
+/** 撤销指针：`itemId + '@' + timestamp`（同一个项可以被改主意多次，要指得准）。
+ *  2026-09-14：实现收到 `decision.eventRefOf`——这个格式是**全仓唯一**的，
+ *  而 `candidate.ts` 曾经自己拼 `itemId + \u0001 + timestamp`，于是撤销一次都没命中过。 */
+export const eventRef = eventRefOf;
 
 /** 被撤销事件指向过的那些事件（`undoOf` 指过的）。撤销**不删历史**，只是让它不算数。 */
 export function undoneEventRefs(events: DecisionEvent[]): Set<string> {
@@ -216,20 +219,15 @@ export interface WorkbenchMarker {
   note?: string;
 }
 
-/** 稳定短摘要。做法与 `decision.ts` 的 `eventIdOf` 同一套（不引依赖、稳定、短），
- *  但**不复用它的实现**：那个是对 (itemId, decision, teacherId, timestamp) 定 ID 的，
- *  语义不同，共用一个函数只会让以后改其中一边时误伤另一边。 */
+/** 稳定短摘要（前 12 位十六进制）。
+ *
+ *  2026-09-14：原先这里是**又一份手抄的 FNV 循环**，注释还写着"不复用它的实现"。
+ *  那句话的理由（`eventIdOf` 与 `digestOf` 语义不同、不该共用一个 **ID 函数**）是对的，
+ *  但它被拿来当了"哈希本体也各写一遍"的借口——全仓这样的拷贝一度有 **5 份**：
+ *  `manifest` / `decision` / `calibration` / `rewrite` / `workbench` / `pendingqueue`。
+ *  输入契约各不相同，**哈希本体的实现只该有一份**：这里改成调 `contentHash`（结果逐字不变）。 */
 export function digestOf(parts: string[]): string {
-  const s = parts.join('\u0001');
-  let h1 = 0x811c9dc5;
-  let h2 = 0x01000193;
-  for (let i = 0; i < s.length; i++) {
-    const c = s.charCodeAt(i);
-    h1 = Math.imul(h1 ^ c, 0x01000193) >>> 0;
-    h2 = Math.imul(h2 ^ (c + i), 0x85ebca6b) >>> 0;
-  }
-  h2 = Math.imul(h2 ^ (h1 >>> 13), 0xc2b2ae35) >>> 0;
-  return (h1.toString(16).padStart(8, '0') + h2.toString(16).padStart(8, '0')).slice(0, 12);
+  return contentHash(parts.join('\u0001')).slice(0, 12);
 }
 
 export interface WorkbenchMarkerInput {

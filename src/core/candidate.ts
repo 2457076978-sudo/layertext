@@ -10,7 +10,8 @@
  * 本模块在事件之上加一层**候选资产**：
  *   candidatesFromEvents 把同类决定聚成 LearningCandidate（evidenceCount、
  *   proposedScope 由证据分布推导）；范围只升不降靠教师显式 promote；
- *   撤销决定降低证据（applyUndo）。落库与注入都只消费 approved 资产（reusable）。
+ *   撤销决定**不产生正证据**：重建时撤销过的那条不计入证据，并进 `confidence` 的分母
+ *   （见 `undoneIds`/`g.undos`）。落库与注入都只消费 approved 资产（reusable）。
  *
  * 范围纪律（方案 §6.2）：
  *   · 最小有效范围：一次局部替换=当前句；同章同类≥2=本章；同书同层=本书同层；
@@ -23,6 +24,7 @@
  */
 
 import type { DecisionEvent } from './decision.js';
+import { eventRef } from './workbench.js';
 
 /* ────────────────────── 范围 ────────────────────── */
 
@@ -53,12 +55,12 @@ export function reusable<T extends { status: string; proposedScope: CandidateSco
 /* ────────────────────── 候选资产 ────────────────────── */
 
 export type AssetKind =
-  | 'gloss-entry'       // 释义事实：tyrannise 统一释义
-  | 'lexicon-entry'     // 词汇事实：误报/学生会 → 词表口径
-  | 'rewrite-rule'      // 改写偏好：同类 before→after 反复出现
-  | 'plot-protection'   // 情节保护：这句不能删（承载事件）
-  | 'proper-name-rule'  // 专名写法
-  | 'prompt-example';   // 提示词案例（远期：好改写回灌 few-shot）
+  | 'gloss-entry' // 释义事实：tyrannise 统一释义
+  | 'lexicon-entry' // 词汇事实：误报/学生会 → 词表口径
+  | 'rewrite-rule' // 改写偏好：同类 before→after 反复出现
+  | 'plot-protection' // 情节保护：这句不能删（承载事件）
+  | 'proper-name-rule' // 专名写法
+  | 'prompt-example'; // 提示词案例（远期：好改写回灌 few-shot）
 
 /** 这些类别的事实属于这本书的世界——自动范围封顶"本书"，永不自动跨书 */
 const BOOK_CAPPED: ReadonlySet<AssetKind> = new Set(['plot-protection', 'proper-name-rule']);
@@ -73,7 +75,7 @@ export interface LearningCandidate {
   before?: string;
   after?: string;
   proposedScope: CandidateScope;
-  /** 采纳证据条数（撤销会减——applyUndo） */
+  /** 采纳证据条数（**撤销过的那条不计入**——重建路径如此，不是"先加再减"） */
   evidenceCount: number;
   /** 采纳/(采纳+撤销)：撤销多的候选该降级而不是晋级 */
   confidence: number;
@@ -100,13 +102,15 @@ interface Group {
   positions: Set<string>;
 }
 
-/** 一条事件是否已被后续 undo 作废（undoOf 指回 itemId+timestamp） */
-const undoneIds = (events: readonly DecisionEvent[]): Set<string> =>
-  new Set(
-    events
-      .filter((e) => e.decision === 'undo' && e.undoOf)
-      .map((e) => e.undoOf!),
-  );
+/** 一条事件是否已被后续 undo 作废（`undoOf` 指回 `itemId@timestamp`）。
+ *
+ *  2026-09-14：这里原先自己拼的是 `itemId + \u0001 + timestamp`，而全仓写 `undoOf` 的
+ *  唯一格式是 `workbench.eventRef` 的 `itemId + '@' + timestamp`（`productmetrics.refOf`、
+ *  `teacherexperiment.refOf`、`app/src/risk.ts undoDecision` 都跟它一致）。
+ *  于是 `undone.has(...)` **一次都没命中过**：被撤销的决定照旧留在
+ *  `sourceDecisionIds` 里当证据，`undos` 恒为 0、`confidence` 恒为 1，
+ *  "撤销多的候选该降级"这条不变式从未生效。现在改用那份唯一实现。 */
+const undoneIds = (events: readonly DecisionEvent[]): Set<string> => new Set(events.filter((e) => e.decision === 'undo' && e.undoOf).map((e) => e.undoOf!));
 
 /** 证据分布 → 默认最小有效范围（方案证据表的代码化）。
  *  2026-09-12 Wayne 审查修正：跨书证据**默认不升班级级**——"次数"是策略不是证明，
@@ -116,8 +120,9 @@ export function defaultScopeFor(dist: { chapters: string[]; books: string[]; tie
   let scope: CandidateScope;
   if (dist.books.length > 1) scope = 'book';
   else if (dist.chapters.length > 1) scope = dist.tiers.length > 1 ? 'book' : 'book-tier';
-  else if (dist.count >= 2) scope = 'chapter';              // 同章同类≥2（独立位置去重后）
-  else scope = 'sentence';                                  // 一次局部替换停在当前句
+  else if (dist.count >= 2)
+    scope = 'chapter'; // 同章同类≥2（独立位置去重后）
+  else scope = 'sentence'; // 一次局部替换停在当前句
   if (BOOK_CAPPED.has(kind) && scopeRank(scope) > scopeRank('book')) scope = 'book';
   return scope;
 }
@@ -125,8 +130,7 @@ export function defaultScopeFor(dist: { chapters: string[]; books: string[]; tie
 /** 一条事件的独立位置键：同一段被重复处理会产生多条事件，但那是**一个位置**的
  *  证据（2026-09-12 Wayne 审查：同章改两次可能只是同一句被处理两遍——次数是
  *  策略不是证据）。有 segIndex 用 (书|章|段位)，没有则退 itemId。 */
-const positionKeyOf = (e: DecisionEvent): string =>
-  e.segIndex != null ? `${e.book ?? ''}|${e.chapter ?? ''}|${e.segIndex}` : `${e.book ?? ''}|${e.chapter ?? ''}|${e.itemId}`;
+const positionKeyOf = (e: DecisionEvent): string => (e.segIndex != null ? `${e.book ?? ''}|${e.chapter ?? ''}|${e.segIndex}` : `${e.book ?? ''}|${e.chapter ?? ''}|${e.itemId}`);
 
 /** 聚合决定事件 → 候选资产。证据按**独立位置**去重；撤销不算正证据（confidence 里扣）。
  *  与 buildProposals 的分工：提议管"入库那一步"（教师确认即写），
@@ -142,7 +146,7 @@ export function candidatesFromEvents(events: readonly DecisionEvent[]): Learning
     if (e.tier === 'A' || e.tier === 'M' || e.tier === 'B') {
       g.tierActions[e.tier] = { after: e.after }; // 同层多证据取最新
     }
-    if (undone.has(`${e.itemId}\u0001${e.timestamp}`)) {
+    if (undone.has(eventRef(e))) {
       g.undos++;
       return;
     }
@@ -197,11 +201,7 @@ export function candidatesFromEvents(events: readonly DecisionEvent[]): Learning
 
 /** 教师显式晋级/批准（范围可以维持或升档；升档必须来自这个调用，别处不许改 scope） */
 export function promote(candidates: LearningCandidate[], id: string, scope?: CandidateScope, note?: string): LearningCandidate[] {
-  return candidates.map((c) =>
-    c.id === id && c.status === 'candidate'
-      ? { ...c, status: 'approved' as const, proposedScope: scope ?? c.proposedScope, note: note ?? c.note }
-      : c,
-  );
+  return candidates.map((c) => (c.id === id && c.status === 'candidate' ? { ...c, status: 'approved' as const, proposedScope: scope ?? c.proposedScope, note: note ?? c.note } : c));
 }
 
 /** 拒绝候选——**或撤回批准**（教师改主意是常态：批过的资产也要能收回）。 */
@@ -209,20 +209,22 @@ export function rejectCandidate(candidates: LearningCandidate[], id: string, not
   return candidates.map((c) => (c.id === id && c.status !== 'rejected' && c.status !== 'superseded' ? { ...c, status: 'rejected' as const, note: note ?? c.note } : c));
 }
 
-/** 新证据到了：同键候选证据 +1；撤销事件落到哪个键就扣哪个键（evidenceCount 减、confidence 降） */
-export function applyUndo(candidates: LearningCandidate[], undoneDecisionId: string): LearningCandidate[] {
-  return candidates.map((c) => {
-    if (!c.sourceDecisionIds.includes(undoneDecisionId)) return c;
-    const evidenceCount = Math.max(0, c.evidenceCount - 1);
-    return {
-      ...c,
-      evidenceCount,
-      confidence: Number(Math.max(0, c.confidence - 0.2).toFixed(2)),
-      status: evidenceCount === 0 ? 'rejected' : c.status === 'approved' ? 'candidate' : c.status,
-      note: `${c.note ?? ''}｜撤销一条证据`.replace(/^\|/, ''),
-    };
-  });
-}
+/**
+ * ⚠ **已删除：`applyUndo`**（2026-09-14）。
+ *
+ * 它原先在这里，作用是"给已有的候选列表增量扣一条证据"。删掉的两个理由：
+ *
+ *  ① **没有生产调用点**：全仓只有 `tests/candidate.test.ts` 调它。而真正的入口
+ *     （`LayerText_AF决定汇总.mjs`）是 `candidatesFromEvents(allEvents)`——**每次全量重建**，
+ *     撤销在重建里已经算过了（见 `undoneIds` 与 `g.undos`）。
+ *  ② **它的口径与生产路径不一致**：`applyUndo` 在证据清零时把候选标成 `rejected`，
+ *     而重建路径给的结论是**根本不成候选**（`tests/candidate.test.ts` 那条
+ *     "回流红线：撤销与执行失败不产生正证据" 就是钉这个的）。
+ *     两个都留着，等于同一件事有两套答案，而只有一套在跑。
+ *
+ * 留着它比删掉更危险：下一个想"把撤销接进来"的人会照它写，然后在**已经扣过一次**的
+ * 候选上再扣一次。增量语义要做的话得先定清楚它和全量重建谁说了算。
+ */
 
 /* ────────────────────── 跨层策略族 ────────────────────── */
 
@@ -248,16 +250,12 @@ export function familiesFromCandidates(candidates: readonly LearningCandidate[])
     if ((c.kind !== 'gloss-entry' && c.kind !== 'rewrite-rule') || !c.tierActions) continue;
     if (!byTerm.has(c.key)) byTerm.set(c.key, {});
     const family = byTerm.get(c.key)!;
-    for (const [tier, act] of Object.entries(c.tierActions) as Array<[('A' | 'M' | 'B'), { after: string }]>) {
+    for (const [tier, act] of Object.entries(c.tierActions) as Array<['A' | 'M' | 'B', { after: string }]>) {
       if (family[tier]) continue;
       /* 层内动作由内容形态决定：中文释义=保留加注（gloss）；英文改写=换成简单说法（rewrite）。
        * 只放该层自己证据支持的动作，其余层留白——绝不跨层复制。 */
-      family[tier] = /[\u4e00-\u9fff]/.test(act.after)
-        ? { action: 'gloss', gloss: act.after }
-        : { action: 'rewrite', rewrite: act.after };
+      family[tier] = /[\u4e00-\u9fff]/.test(act.after) ? { action: 'gloss', gloss: act.after } : { action: 'rewrite', rewrite: act.after };
     }
   }
-  return [...byTerm.entries()]
-    .filter(([, byTier]) => Object.keys(byTier).length > 0)
-    .map(([sourceTerm, byTier]) => ({ concept: sourceTerm, sourceTerm, byTier }));
+  return [...byTerm.entries()].filter(([, byTier]) => Object.keys(byTier).length > 0).map(([sourceTerm, byTier]) => ({ concept: sourceTerm, sourceTerm, byTier }));
 }

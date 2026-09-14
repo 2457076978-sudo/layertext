@@ -61,9 +61,22 @@ function fsrsMain(argv: string[]): void {
     console.error('队列里没有有效词条（首列=词，可选次列=已复现次数）');
     process.exit(2);
   }
+  /* 2026-09-14：`--current-pieces` 传的键名曾经是 `currentPieces`，而 `FsrsOptions` 的字段叫
+   * `currentPolicyPieces`——对象展开不做多余属性检查，`tsc` 一声不吭，于是这个开关
+   * **静默失效**："现行(篇)"永远是默认的 2，而使用者据此得出的对照结论是错的。
+   * 顺带把数值也校验上：`--days-per-piece 0` 会算出 `Infinity`、`abc` 会算出 `NaN`，
+   * 两者原先都会被原样印进表里。 */
+  const positiveFlag = (raw: string, name: string): number => {
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n <= 0) {
+      console.error(`${name} 需要一个正数，实得「${raw}」`);
+      process.exit(2);
+    }
+    return n;
+  };
   const rows = planFsrs(items, {
-    ...(flags['days-per-piece'] ? { daysPerPiece: Number(flags['days-per-piece']) } : {}),
-    ...(flags['current-pieces'] ? { currentPieces: Number(flags['current-pieces']) } : {}),
+    ...(flags['days-per-piece'] ? { daysPerPiece: positiveFlag(flags['days-per-piece'], '--days-per-piece') } : {}),
+    ...(flags['current-pieces'] ? { currentPolicyPieces: positiveFlag(flags['current-pieces'], '--current-pieces') } : {}),
   });
   console.log('词            已复现  FSRS建议(篇)  现行(篇)');
   for (const r of rows) console.log(`${r.word.padEnd(14)}${String(r.hits).padEnd(8)}${String(r.nextPieces).padEnd(15)}${r.currentPieces}${r.nextPieces !== r.currentPieces ? '   ←' : ''}`);
@@ -145,9 +158,7 @@ function main(): void {
   const zipf = bundledTable(BUNDLED_ZIPF);
   const aoa = bundledTable(BUNDLED_AOA);
   const triaged = zipf
-    ? (report['OOV词(去重)'] as string[])
-        .map((w) => triageOov(w, zipf, aoa))
-        .sort((a, b) => TRIAGE_RANK[a.triage] - TRIAGE_RANK[b.triage] || (b.zipf ?? 0) - (a.zipf ?? 0))
+    ? (report['OOV词(去重)'] as string[]).map((w) => triageOov(w, zipf, aoa)).sort((a, b) => TRIAGE_RANK[a.triage] - TRIAGE_RANK[b.triage] || (b.zipf ?? 0) - (a.zipf ?? 0))
     : undefined;
   const outReport = { ...report, ...(triaged ? { OOV分诊: triaged } : {}) };
 

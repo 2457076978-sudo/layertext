@@ -288,3 +288,26 @@ test('声明-实效守卫：声称 changed 却原样返回 → 按被拒重试�
   assert.ok(q!.reason.includes('原样返回'), '隔离原因如实：声明 changed 但未做任何修改');
   assert.equal(r.text.P02, original, '原文保留，没有被伪造的"改动"污染');
 });
+
+test('★ 调用层失败（网络/HTTP）：要重试，重试用尽要隔离——断网不许产出"夹着原文的完成品"', async () => {
+  /* 2026-09-14 修复的回归守卫。修复前的形态：`let callFailed` 只影响
+   * `if (callFailed && attempt >= maxTries) break;`，而 `retryables` 只装
+   * **被门禁拒绝**的段（`blockedThisAttempt`）——调用失败时它是空的，于是循环第一次就 break。
+   * 后果不是"报错"，而是**假交付**：该段保持原文落盘，调用方按
+   * `segs.length - quarantined.length` 报"自动完成 N/N"，全文没有任何一处会红。 */
+  let calls = 0;
+  const r = await runStagePipeline(
+    optsWith(
+      async () => {
+        calls++;
+        throw new Error('HTTP 503: upstream unavailable');
+      },
+      { maxStageTries: 3 },
+    ),
+  );
+  assert.ok(calls >= 3, `调用失败必须重试到 maxStageTries（修复前只调 1 次就 break），实得 ${calls}`);
+  const failed = r.quarantined.filter((x) => x.reason.includes('调用失败'));
+  assert.ok(failed.length >= 1, `调用失败的段必须被隔离，实得 ${JSON.stringify(r.quarantined)}`);
+  assert.equal(failed[0]!.tries, 3, '隔离时机 = 重试用尽，不是第一次失败就放弃');
+  assert.equal(r.text.P02, '[P02] The animals tyrannised the farm and fabricated stories about the harvest.', '未产出的段保持上一版——但它现在被隔离了，不再被算进"自动完成"');
+});

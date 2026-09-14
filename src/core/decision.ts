@@ -20,6 +20,7 @@
  */
 
 import type { GateCategory } from './segmentgate.js';
+import { contentHash } from './manifest.js';
 
 export const DECISION_SCHEMA_VERSION = 1;
 
@@ -83,18 +84,16 @@ export interface DecisionEvent {
 }
 
 /** 稳定事件 ID：同一 (itemId, decision, teacherId, timestamp) 永远同一个。
- *  时间戳精确到毫秒，同一毫秒同一人对同一条做同一个决定才会撞——那本来就是同一条。 */
+ *  时间戳精确到毫秒，同一毫秒同一人对同一条做同一个决定才会撞——那本来就是同一条。
+ *
+ *  2026-09-13：哈希改从 `manifest.ts` 的 `contentHash` 取。原先这里手抄了一份一模一样的
+ *  FNV-1a 128 位变体（连 `0x01000193` / `0x85ebca6b` 两个魔数都逐字相同）——违反
+ *  AGENTS.md 第四节的"同一条判定只许有一份实现"：两边任一处改常量或改混合步骤，
+ *  历史事件的 ID 就会和新算的对不上，而这种漂移不会有任何测试报出来。
+ *  取前 12 位是原有格式，**刻意不变**——已经写进日志的 eventId 必须继续可复算。 */
 export function eventIdOf(input: { itemId: string; decision: string; teacherId: string; timestamp: string }): string {
   const s = `${input.itemId}\u0001${input.decision}\u0001${input.teacherId}\u0001${input.timestamp}`;
-  let h1 = 0x811c9dc5;
-  let h2 = 0x01000193;
-  for (let i = 0; i < s.length; i++) {
-    const c = s.charCodeAt(i);
-    h1 = Math.imul(h1 ^ c, 0x01000193) >>> 0;
-    h2 = Math.imul(h2 ^ (c + i), 0x85ebca6b) >>> 0;
-  }
-  h2 = Math.imul(h2 ^ (h1 >>> 13), 0xc2b2ae35) >>> 0;
-  return `evt-${(h1.toString(16).padStart(8, '0') + h2.toString(16).padStart(8, '0')).slice(0, 12)}`;
+  return `evt-${contentHash(s).slice(0, 12)}`;
 }
 
 export interface MakeDecisionInput extends Omit<DecisionEvent, 'schemaVersion' | 'timestamp'> {
@@ -309,3 +308,26 @@ export function summarizeDecisions(events: DecisionEvent[]): DecisionStat {
     teachers: [...teachers].sort(),
   };
 }
+
+/* ────────────────────── 事件序与引用的**唯一实现** ────────────────────── */
+
+/**
+ * 这四个小函数原先在 `productmetrics.ts` 与 `teacherexperiment.ts` 里**各写了一份**，
+ * 两边的注释还都写着"口径与对方逐字一致，免得两处漂移"——可**注释拦不住漂移**，
+ * 而它们是"撤销率""批量采纳回滚"这类指标的分母口径。2026-09-14 收到这里。
+ */
+/** 撤销指针：`itemId@timestamp`。与 `workbench.eventRef` 同一个格式（那边现在转发到这里）。 */
+export const eventRefOf = (e: DecisionEvent): string => `${e.itemId}@${e.timestamp}`;
+
+/** 是不是一次**批量**操作（当前靠 reason 前缀识别——写侧只有 `makeDecisionEvent` 的调用方会加）。 */
+export const isBatchDecision = (e: DecisionEvent): boolean => /^批量/.test(e.reason ?? '');
+
+/** 事件时间（毫秒）；解析不出来按 `NaN`，排序时由 `orderedByTime` 的回退保证稳定。 */
+export const eventTimeOf = (e: DecisionEvent): number => Date.parse(e.timestamp);
+
+/** 按时间排好的事件（**同刻按原顺序**，保证稳定）。日志是 append-only，读出来可能乱序，不许信传入顺序。 */
+export const orderedByTime = (events: readonly DecisionEvent[]): DecisionEvent[] =>
+  events
+    .map((e, i) => ({ e, i }))
+    .sort((a, b) => eventTimeOf(a.e) - eventTimeOf(b.e) || a.i - b.i)
+    .map((x) => x.e);

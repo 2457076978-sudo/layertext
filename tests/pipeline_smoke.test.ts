@@ -14,10 +14,10 @@
  */
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { readdirSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const DIR = join(REPO, 'tools', 'af_pipeline');
@@ -43,4 +43,46 @@ test('★ 每个管线脚本都冒烟通过：不许以 TDZ / ReferenceError 的
     if (BAD_BINDING.test(out)) offenders.push(`${s}：${out.split('\n').find((l) => BAD_BINDING.test(l)) ?? ''}`);
   }
   assert.deepEqual(offenders, [], `以下脚本以 TDZ / 引用错误的方式死——tsc 查不出、只有真跑才炸的那类，就该在冒烟里炸：\n${offenders.join('\n')}`);
+});
+
+/* ────────────────────── 章号解析：一份实现 + 不许静默产 NaN ────────────────────── */
+
+const CHAPTER_MODULE = pathToFileURL(join(DIR, 'chapterargs.mjs')).href;
+
+/** 在一个干净进程里调 `parseChapters`，返回 `{ 退出码, stdout }`（坏输入会 process.exit） */
+function probeChapters(argv: string[]): { code: number | null; out: string } {
+  const code = `import { parseChapters } from ${JSON.stringify(CHAPTER_MODULE)};
+const r = parseChapters(JSON.parse(process.argv[1]), [1, 2]);
+console.log(JSON.stringify(r));`;
+  const r = spawnSync(process.execPath, ['--input-type=module', '-e', code, JSON.stringify(argv)], {
+    encoding: 'utf-8',
+    timeout: 20_000,
+  });
+  return { code: r.status, out: `${r.stdout ?? ''}${r.stderr ?? ''}` };
+}
+
+test('章号解析：正常输入、逗号分隔、去重、缺省都走同一条路', () => {
+  assert.equal(probeChapters(['--dry', '7']).out.trim(), '[7]');
+  assert.equal(probeChapters(['1,2,10']).out.trim(), '[1,2,10]');
+  assert.equal(probeChapters(['1', '1', '2']).out.trim(), '[1,2]');
+  assert.equal(probeChapters(['--tier', 'A']).out.trim(), '[1,2]', '一个章号都没给 → 用缺省清单');
+});
+
+test('★ 章号解析：`1A` 这种半数字**当场拒绝**，不许变成 NaN 一路拼进路径', () => {
+  /* 修之前的写法是 `/^\d/.test(a)` + `Number(a)`：`1A` 通过过滤、`Number('1A')` 是 NaN，
+   * `chapters` 变成 `[NaN]`，`length` 非 0 于是缺省值不进，后面 `CN[NaN - 1]` 是 `undefined`，
+   * 拼出 `…/undefined/原文_规范化.md`，报错只说"第undefined章 失败"。 */
+  const r = probeChapters(['1A']);
+  assert.equal(r.code, 2, `半数字章号必须退出 2（实测 ${r.code}）：${r.out}`);
+  assert.match(r.out, /1A/u, '报错里必须点名是哪个 token 认不出来');
+  assert.doesNotMatch(r.out, /NaN/u, '不许把 NaN 放进去');
+});
+
+test('★ 章号解析只有一份实现：脚本里不许再手抄"斜杠脱字符反斜杠-d 斜杠" + Number', () => {
+  /* 这条解析原先在 5 个脚本里各抄一份，于是同一个 NaN 洞就有 5 份。
+   * 判据是"源码里出现那份手抄"，不是"某个脚本行为对不对"——防止的是**下一次**复制。 */
+  const handRolled = readdirSync(DIR)
+    .filter((f) => f.endsWith('.mjs') && f !== 'chapterargs.mjs')
+    .filter((f) => /filter\(\(a\) => \/\^\\d\/\.test\(a\)\)/.test(readFileSync(join(DIR, f), 'utf-8')));
+  assert.deepEqual(handRolled, [], `这些脚本又自己写了一份章号解析（应改成 import { parseChapters } 或 SHARED.parseChapters）：\n${handRolled.join('\n')}`);
 });

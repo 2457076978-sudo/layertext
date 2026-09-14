@@ -55,9 +55,22 @@ export const PLOT_NORM = 7.2;
 
 /** 因果连接词（英文叙事里承载因果的显式词） */
 export const CAUSAL_MARKERS = [
-  'because', 'therefore', 'so that', 'as a result', 'thus', 'hence',
-  'in order to', 'so as to', 'if ', 'unless', 'otherwise', 'consequently',
-  'for this reason', 'that is why', 'which meant', 'which made',
+  'because',
+  'therefore',
+  'so that',
+  'as a result',
+  'thus',
+  'hence',
+  'in order to',
+  'so as to',
+  'if ',
+  'unless',
+  'otherwise',
+  'consequently',
+  'for this reason',
+  'that is why',
+  'which meant',
+  'which made',
 ];
 
 export interface PlotBaseline {
@@ -71,8 +84,33 @@ export interface PlotBaseline {
 
 /** 纯功能词：以它开头或结尾的片段不是"可引用的锚点"（`and slavery` 这种） */
 const FUNCTION_WORDS = new Set([
-  'and', 'or', 'of', 'the', 'a', 'an', 'to', 'in', 'on', 'at', 'by', 'from', 'with', 'for',
-  'is', 'are', 'was', 'were', 'be', 'been', 'being', 'that', 'this', 'it', 'as', 'but', 'if',
+  'and',
+  'or',
+  'of',
+  'the',
+  'a',
+  'an',
+  'to',
+  'in',
+  'on',
+  'at',
+  'by',
+  'from',
+  'with',
+  'for',
+  'is',
+  'are',
+  'was',
+  'were',
+  'be',
+  'been',
+  'being',
+  'that',
+  'this',
+  'it',
+  'as',
+  'but',
+  'if',
 ]);
 
 /**
@@ -159,11 +197,7 @@ const levelOf = (score: number): PlotLevel => (score >= 0.55 ? '高' : score >= 
  * `ctx` 只用于"章节转折位置"这一项：章首/章尾各两段是转折最常发生的地方。
  * **位置项是这里最弱的一项**，所以权重给得最低——它只是"值得多看一眼"的提示。
  */
-export function plotSignalOf(
-  sentence: string,
-  baseline: PlotBaseline,
-  ctx: { segIndex?: number; segCount?: number } = {},
-): PlotSignal {
+export function plotSignalOf(sentence: string, baseline: PlotBaseline, ctx: { segIndex?: number; segCount?: number } = {}): PlotSignal {
   const low = sentence.toLowerCase();
   const parts: PlotPart[] = [];
 
@@ -176,7 +210,11 @@ export function plotSignalOf(
   const numHits = sentence.match(/\b\d+\b/g) ?? [];
   parts.push({ label: '数字', hits: [...new Set(numHits)], weight: PLOT_WEIGHTS.number });
 
-  const causalHits = CAUSAL_MARKERS.filter((c) => low.includes(c.trim().toLowerCase()) && low.includes(c.toLowerCase()));
+  /* 只按**原样**匹配。原先写的是 `low.includes(c.trim()…) && low.includes(c…)`——
+   * `trim()` 那半被后半蕴含（含 `'if '` 必然含 `'if'`），对全部条目都不起作用，
+   * 是纯冗余。但它**不能**反过来被当成宽松口径单独用：`'if '` 末尾那个空格是**故意的**，
+   * 去掉就撞上 different / life / gift 这类词里的 `if`，因果信号会被大面积误标（2026-09-14）。 */
+  const causalHits = CAUSAL_MARKERS.filter((c) => low.includes(c.toLowerCase()));
   parts.push({ label: '因果连接词', hits: [...new Set(causalHits.map((c) => c.trim()))], weight: PLOT_WEIGHTS.causal });
 
   const { segIndex, segCount } = ctx;

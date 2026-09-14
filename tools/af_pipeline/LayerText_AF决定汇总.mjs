@@ -33,13 +33,14 @@ const OUT_BASE = P.产物目录;
 const TAGS = { A: 'A层85', M: 'M层75', B: 'B层60' };
 
 const argv = process.argv.slice(2);
-const arg = (n, d) => { const i = argv.indexOf(n); return i >= 0 ? argv[i + 1] : d; };
+const arg = (n, d) => {
+  const i = argv.indexOf(n);
+  return i >= 0 ? argv[i + 1] : d;
+};
 const has = (n) => argv.includes(n);
 
-const { buildProposals, parseDecisionLog, summarizeDecisions, contestedItems, PROPOSAL_LABEL } =
-  await import(`${distOf(REPO)}/src/core/decision.js`);
-const { candidatesFromEvents, promote, SCOPE_LABEL } =
-  await import(`${distOf(REPO)}/src/core/candidate.js`);
+const { buildProposals, parseDecisionLog, summarizeDecisions, contestedItems, PROPOSAL_LABEL } = await import(`${distOf(REPO)}/src/core/decision.js`);
+const { candidatesFromEvents, promote, SCOPE_LABEL } = await import(`${distOf(REPO)}/src/core/candidate.js`);
 /** SQLite 决定索引：JSONL 仍是正本，索引随时可重建（报告 §四：查询"某位教师对某词的所有决定"）。
  *  拿不到 node:sqlite 时自动降级为"不可用"，查询回落 JSONL 全扫。 */
 const { openDecisionStore } = await import(`${distOf(REPO)}/src/core/decisiondb.js`);
@@ -51,27 +52,28 @@ const { atomicWriteFileSync: writeAtomic } = await import(`${distOf(REPO)}/src/c
  * 对教师唯一的一份稿，半份比没有更糟：没有你知道丢了，半份看起来像改坏了，
  * 而它其实已经被毁掉了。rename 在同一文件系统内是原子的：要么旧内容、要么新内容。 */
 
-
 /* 运行身份走**共享的那一个**解析入口（与其它脚本、App 面板同一条规则）。 */
 /* 身份从命令行取。**刻意不复用各脚本自己的参数助手**：它们的定义位置各不相同
  * （有的还是 `args.includes` 风格），在这一段引用会在定义之前求值。 */
-const argRun = (n, d) => { const i = process.argv.indexOf(n); return i >= 0 ? process.argv[i + 1] : d; };
+const argRun = (n, d) => {
+  const i = process.argv.indexOf(n);
+  return i >= 0 ? process.argv[i + 1] : d;
+};
 const TEACHER = argRun('--teacher', process.env.LAYERTEXT_TEACHER ?? process.env.USER ?? 'unknown');
 /* 层列表必须在身份块之前算好（readRunIdentity 要用 TIERS[0]）——原先定义在
  * 第 74 行，真实项目一跑就 ReferenceError（冒烟门禁的坏指针在更早处退出，
  * 这条 TDZ 一直没被看见，2026-09-12 接候选台账时抓到）。 */
-const TIERS = (arg('--tier', 'A')).split(',').map((s) => s.trim().toUpperCase()).filter((t) => TAGS[t]);
-const RUN = await SHARED.readRunIdentity(
-  { out: P.产物目录, work: P.调适工作区 },
-  { teacher: TEACHER, tier: TAGS[TIERS[0]] ?? TIERS[0] },
-  { runId: argRun('--run', undefined) },
-);
+const TIERS = arg('--tier', 'A')
+  .split(',')
+  .map((s) => s.trim().toUpperCase())
+  .filter((t) => TAGS[t]);
+const RUN = await SHARED.readRunIdentity({ out: P.产物目录, work: P.调适工作区 }, { teacher: TEACHER, tier: TAGS[TIERS[0]] ?? TIERS[0] }, { runId: argRun('--run', undefined) });
 if (RUN.warning) console.warn(`\n⚠ ${RUN.warning}`);
 const resolveDecision = (tag) => makeResolver(RUN.layout, { out: P.产物目录, work: P.调适工作区 }, { runId: RUN.runId, tier: tag }).decision();
 /* 本脚本也会写产物（入库提议），所以还需要一个**默认层**的解析器 */
 const R = makeResolver(RUN.layout, { out: OUT_BASE, work: P.调适工作区 }, { runId: RUN.runId, tier: TAGS[TIERS[0]] ?? TIERS[0] });
 
-const DECISION_DIR = join(P.调适工作区, '_决定');   // 索引与落库留痕仍在调适工作区（跟运行无关）
+const DECISION_DIR = join(P.调适工作区, '_决定'); // 索引与落库留痕仍在调适工作区（跟运行无关）
 const INDEX_PATH = join(DECISION_DIR, '决定索引.db');
 
 /* ────────────────────── 读取全部决定（跨层合并统计） ────────────────────── */
@@ -80,7 +82,10 @@ const perTier = {};
 let badLines = 0;
 for (const t of TIERS) {
   const f = resolveDecision(TAGS[t]);
-  if (!existsSync(f)) { perTier[TAGS[t]] = { events: 0, file: f, missing: true }; continue; }
+  if (!existsSync(f)) {
+    perTier[TAGS[t]] = { events: 0, file: f, missing: true };
+    continue;
+  }
   const r = parseDecisionLog(readFileSync(f, 'utf-8'));
   badLines += r.badLines;
   perTier[TAGS[t]] = { events: r.events.length, file: f, missing: false };
@@ -147,13 +152,29 @@ const proposals = buildProposals(allEvents, { minSupport: Number(arg('--min-supp
 const contested = contestedItems(allEvents);
 
 console.log(`\n决定 ${stat.total} 条｜误报率 ${(stat.falsePositiveRate * 100).toFixed(1)}%（规则噪音水平的直接度量）｜教师：${stat.teachers.join('、')}`);
-console.log('分布：' + Object.entries(stat.byDecision).map(([k, v]) => `${k} ${v}`).join('，'));
+console.log(
+  '分布：' +
+    Object.entries(stat.byDecision)
+      .map(([k, v]) => `${k} ${v}`)
+      .join('，'),
+);
 /* 可观测产品指标（v4 报告「系统性偏差」）：不要只报"机器做了什么"，还要报"教师那边结果如何" */
 const pm = productMetrics(allEvents);
 console.log('\n──── 产品指标（量教师那边）────');
 for (const n of pm.notes) console.log(`  ${n}`);
-console.log('按规则：' + Object.entries(stat.byRule).map(([k, v]) => `${k} ${v}`).join('，'));
-if (contested.length) console.log(`⚠ ${contested.length} 个项目被反复改主意（说明规则或词条本身有问题）：${contested.slice(0, 5).map((c) => c.itemId).join('、')}`);
+console.log(
+  '按规则：' +
+    Object.entries(stat.byRule)
+      .map(([k, v]) => `${k} ${v}`)
+      .join('，'),
+);
+if (contested.length)
+  console.log(
+    `⚠ ${contested.length} 个项目被反复改主意（说明规则或词条本身有问题）：${contested
+      .slice(0, 5)
+      .map((c) => c.itemId)
+      .join('、')}`,
+  );
 
 /* ────────────────────── 提议清单 ────────────────────── */
 const lines = [
@@ -217,7 +238,9 @@ function buildCandidateLedger(allEvents) {
   let kept = [];
   try {
     kept = JSON.parse(readFileSync(CAND_PATH, 'utf-8')).candidates ?? [];
-  } catch { /* 首轮没有台账=全部新生成 */ }
+  } catch {
+    /* 首轮没有台账=全部新生成 */
+  }
   const keptById = new Map(kept.map((c) => [c.id, c]));
   const merged = fresh.map((c) => {
     const old = keptById.get(c.id);
@@ -234,8 +257,17 @@ function buildCandidateLedger(allEvents) {
 }
 
 if (has('--candidates')) {
+  /* 2026-09-14：`parseDecisionLog` 收的是**文件内容**（见第 84 行的正确用法），
+   * 这里原先传的是**路径字符串**——它把路径当日志文本解析，一行事件也切不出来。
+   * 而且它返回的是 `{events,badLines}`，`flatMap` 出去的是**对象**不是事件数组。
+   * 两头一起错，结果是回流候选台账恒为空、`--apply` 之后的"晋升 approved"永远找不到候选：
+   * "已批准资产回流"整条链路是死的，**且不报错**（只打印"（0 条）"）。 */
   const allEvents = TIERS.flatMap((tk) => {
-    try { return parseDecisionLog(join(DECISION_DIR, `${TAGS[tk]}.jsonl`)); } catch { return []; }
+    try {
+      return parseDecisionLog(readFileSync(join(DECISION_DIR, `${TAGS[tk]}.jsonl`), 'utf-8')).events;
+    } catch {
+      return [];
+    }
   });
   const cands = buildCandidateLedger(allEvents);
   mkdirSync(dirname(CAND_PATH), { recursive: true });
@@ -244,7 +276,9 @@ if (has('--candidates')) {
   console.log('| 状态 | 类别 | 键 | 默认范围 | 证据 | 层 | 章 |');
   console.log('|---|---|---|---|---|---|---|');
   for (const c of cands.slice(0, 30)) {
-    console.log(`| ${c.status} | ${c.kind} | ${c.key} | ${SCOPE_LABEL[c.proposedScope]} | ${c.evidenceCount}（置信 ${c.confidence}） | ${c.evidenceTiers.join('/')} | ${c.evidenceChapters.slice(0, 3).join('/')} |`);
+    console.log(
+      `| ${c.status} | ${c.kind} | ${c.key} | ${SCOPE_LABEL[c.proposedScope]} | ${c.evidenceCount}（置信 ${c.confidence}） | ${c.evidenceTiers.join('/')} | ${c.evidenceChapters.slice(0, 3).join('/')} |`,
+    );
   }
   console.log('\n晋级（教师显式操作，范围只升不降靠这一步）：改台账里 status 为 approved 并按需调 proposedScope；');
   console.log('消费：工序化生成只吃 approved 且范围覆盖本层的资产（gloss→释义、rewrite-rule→改写偏好）。');
@@ -258,8 +292,14 @@ if (!apply) {
   process.exit(0);
 }
 
-const picked = apply.split(',').map((x) => Number(x.trim())).filter((n) => n >= 1 && n <= proposals.length);
-if (!picked.length) { console.error(`✗ --apply 给不出有效序号（本层共 ${proposals.length} 条提议）`); process.exit(2); }
+const picked = apply
+  .split(',')
+  .map((x) => Number(x.trim()))
+  .filter((n) => n >= 1 && n <= proposals.length);
+if (!picked.length) {
+  console.error(`✗ --apply 给不出有效序号（本层共 ${proposals.length} 条提议）`);
+  process.exit(2);
+}
 if (!has('--yes')) {
   console.error(`\n即将落库 ${picked.length} 条提议：`);
   for (const i of picked) console.error(`  ${i}. [${PROPOSAL_LABEL[proposals[i - 1].kind]}] ${proposals[i - 1].key} → ${proposals[i - 1].value}`);
@@ -271,7 +311,11 @@ if (!has('--yes')) {
  * 这里原来直接用命令行的原样字符串写进入库提议，于是 `Wayne` 与 `wayne`
  * 在台账与提议里是两个人——"谁在何时做了哪条决定"就被拼写切成两半。
  * 走 `resolveTeacher`：归一化 + 名录校验，与清单/指针/决定事件同源。 */
-const teacher = SHARED.resolveTeacher(P, arg('--teacher', process.env.LAYERTEXT_TEACHER ?? process.env.USER ?? 'unknown')).id;
+/* 2026-09-14：`resolveTeacher` 是 **async**，这里原先漏了 `await`——
+ * `teacher` 拿到的是个 Promise，`.id` 是 `undefined`：入库留痕 `_入库.jsonl` 的 `teacherId`
+ * 被 JSON.stringify 直接丢掉，`词表例外.txt` 里写出字面的 `undefined`。
+ * 而这段代码的用意恰恰是"身份只能有一个写法"。 */
+const teacher = (await SHARED.resolveTeacher(P, arg('--teacher', process.env.LAYERTEXT_TEACHER ?? process.env.USER ?? 'unknown'))).id;
 const applied = [];
 for (const i of picked) {
   const p = proposals[i - 1];
@@ -308,7 +352,11 @@ console.log('  （落库留痕：调适工作区/_决定/_入库.jsonl）');
 try {
   const kindMap = { 'dict-entry': 'gloss-entry', 'kb-exception': 'lexicon-entry', 'rewrite-template': 'rewrite-rule' };
   const allEvents2 = TIERS.flatMap((tk) => {
-    try { return parseDecisionLog(join(DECISION_DIR, `${TAGS[tk]}.jsonl`)); } catch { return []; }
+    try {
+      return parseDecisionLog(readFileSync(join(DECISION_DIR, `${TAGS[tk]}.jsonl`), 'utf-8')).events;
+    } catch {
+      return [];
+    }
   });
   let cands = buildCandidateLedger(allEvents2);
   let promotedN = 0;

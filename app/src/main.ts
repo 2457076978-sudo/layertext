@@ -65,7 +65,7 @@ import exampleMd from '../../examples/texts/aesop_tortoise_hare.md?raw';
 import exampleVocab from '../../examples/vocab/sample_teaching_vocab.csv?raw';
 import { runQc, toLegacyReport } from '../../src/core/qc.js';
 import { extractParas, sentsOf, splitChapter } from '../../src/core/textpipe.js';
-import { renderSidebar, scheduleSave, setAfterSidebarRender } from './review.js';
+import { renderSidebar, scheduleSave, setAfterSidebarRender, setMarkSaveErrorReporter } from './review.js';
 import { GATES, newReviewState, type FileSession, type Mark } from './types.js';
 import { markFromReplayed, recordCalibration, replayInto } from './calibrationio.js';
 import { refreshPendingBanner, renderAnnotatePane, setAnnotateIo } from './annotate.js';
@@ -128,17 +128,28 @@ export async function addSession(md: string, fileName: string, sourcePath: strin
   }
   const markPath = await markPathFor(sourcePath, fileName);
   const review = newReviewState(fileName);
+  let saved: string | null = null;
   try {
-    const saved = await invoke<string>('read_text_file', { path: markPath });
-    const parsed = JSON.parse(saved);
-    if (parsed && Array.isArray(parsed.marks)) {
-      review.marks = parsed.marks;
-      review.quota = parsed.quota ?? [];
-      review.gate = parsed.gate ?? {};
-      review.bookmarks = Array.isArray(parsed.bookmarks) ? parsed.bookmarks : [];
-    }
+    saved = await invoke<string>('read_text_file', { path: markPath });
   } catch {
     /* 有意兜底：这一章还没审过＝没有标记文件，是常态（`read_text_file` 对缺失文件是报错的）。 */
+  }
+  if (saved !== null) {
+    /* 2026-09-14：**解析失败必须与"文件不存在"分开**。原先两者共用一个 catch，
+     * 于是损坏的 _审校标记.json 被当成"空清单"打开，教师接着标、下次保存就整体覆盖——
+     * 整章标记全丢且没有任何提示。 */
+    try {
+      const parsed = JSON.parse(saved);
+      if (parsed && Array.isArray(parsed.marks)) {
+        review.marks = parsed.marks;
+        review.quota = parsed.quota ?? [];
+        review.gate = parsed.gate ?? {};
+        review.bookmarks = Array.isArray(parsed.bookmarks) ? parsed.bookmarks : [];
+      }
+    } catch (e) {
+      setStatus(`这一章的标记文件读不进来（${String(e).slice(0, 60)}）：${markPath}——**先备份它再重新标记**，本次不会覆盖它`, 'err');
+      S.markFileBroken.add(markPath);
+    }
   }
   S.sessions.push({ md, fileName, sourcePath, markPath, review, report: null, reportSavedPath: null, dirty: false });
   S.activeIdx = S.sessions.length - 1;
@@ -184,7 +195,10 @@ export async function addSession(md: string, fileName: string, sourcePath: strin
 
 function closeSession(i: number): void {
   S.sessions.splice(i, 1);
-  S.activeIdx = Math.min(S.activeIdx, S.sessions.length - 1);
+  /* 2026-09-14：原先只有 Math.min——关掉**当前标签左边**的标签时数组左移一格而 activeIdx 不动，
+   * 界面会悄悄切到另一个章节：之后的标记 / AI 改写 / 撤销全作用在**错误的文档**上。 */
+  if (i < S.activeIdx) S.activeIdx--;
+  S.activeIdx = Math.max(0, Math.min(S.activeIdx, S.sessions.length - 1));
   renderAll();
 }
 
@@ -859,8 +873,15 @@ export async function appendCsvLine(path: string, header: readonly string[], lin
 /* ---------- 行内修订对照（左栏所见即所得） ---------- */
 
 /** 保存正文改动：默认直接写原稿文件（首次前自动备份原始版）；关闭"直接修改原稿"则写工作稿 */
-export async function persistEdit(s: FileSession, newMd: string): Promise<string> {
-  if (newMd !== s.md) {
+/**
+ * 写盘并**记一次编辑历史**。
+ *
+ * `opts.recordHistory === false` 是给「撤销/重做」用的：那两个动作自己管理 undo/redo 两个栈，
+ * **不能让这里再记一遍**——否则 `redoStack = []` 会把刚压进去的重做项清掉
+ * （重做于是永远没得做）。
+ */
+export async function persistEdit(s: FileSession, newMd: string, opts: { recordHistory?: boolean } = {}): Promise<string> {
+  if (newMd !== s.md && opts.recordHistory !== false) {
     // 文件级撤销栈（≤50 快照；重做栈清空）
     (s.undoStack ??= []).push(s.md);
     if (s.undoStack.length > 50) s.undoStack.shift();
@@ -925,6 +946,9 @@ $('btn-student').addEventListener('click', () => {
 
 /* ---------- 启动序列：配置 → 首启动欢迎 ---------- */
 setAiUi({ onStatus: (s) => setStatus(s, 'dirty') });
+/* 标记落盘的失败出口：15 处调用点传的是 `() => undefined`，所以由这里兜底播报一次
+ * （review.ts 在 node 可测路径上，不能直接依赖 DOM 侧的 uikit.js）。 */
+setMarkSaveErrorReporter((msg) => setStatus(msg, 'err'));
 
 /* ---- 建议键盘流：N 下一条 / Enter 采纳 / X 放弃（逐条过建议不碰鼠标） ---- */
 

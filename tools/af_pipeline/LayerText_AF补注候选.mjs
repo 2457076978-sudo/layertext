@@ -109,7 +109,8 @@ function sentenceOf(md, word, para) {
 }
 
 function productOf(chapter, tag) {
-  const dir = join(OUT_BASE, chapter);
+  /* 章目录走共享解析（run 布局下产物在 `_运行/<runId>/正文/<章>/`）。 */
+  const dir = SHARED.chapterDirOf(OUT_BASE, chapter);
   if (!existsSync(dir)) return null;
   return join(dir, `原文_${tag}_${DATE}_工序化.md`);
 }

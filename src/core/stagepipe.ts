@@ -304,7 +304,9 @@ export async function runStagePipeline(opts: StagePipeOpts): Promise<StagePipeRe
     while (pool.length && attempt < maxTries) {
       attempt++;
       const blockedThisAttempt: GatedBlocked = [];
-      let callFailed = false;
+      /** 本轮**调用层**失败的段（网络/HTTP/解析前就炸）。与"被门禁拒绝"是两回事：
+       *  它们没进 `blockedThisAttempt`，所以修复前既不重试也不隔离（见下面那次修复的注释）。 */
+      const callFailedIds = new Set<string>();
 
       for (const chunk of chunksOf(pool)) {
         const targetOf = (x: PoolItem): number => Math.round(segWords(x.seg.source) * opts.ratio);
@@ -351,9 +353,10 @@ export async function runStagePipeline(opts: StagePipeOpts): Promise<StagePipeRe
             chunk.map((x) => x.seg.id),
           );
         } catch (e) {
-          /* 调用层失败（网络/HTTP）：本批作废，段保持上一版；如实记录，不伪造 patch */
+          /* 调用层失败（网络/HTTP）：本批作废，段保持上一版；如实记录，不伪造 patch。
+           * 记进 `callFailedIds`，由循环尾部决定"重试"还是"隔离"——**不许当没发生**。 */
           problems.push(`第 ${attempt} 次调用失败（${chunk.map((x) => x.seg.id).join(',')}）：${String(e).slice(0, 160)}`);
-          callFailed = true;
+          for (const x of chunk) callFailedIds.add(x.seg.id);
           continue;
         }
         problems.push(...parsed.problems.map((p) => `[${STAGE_LABEL[stage]} 尝试${attempt}] ${p}`));
@@ -386,7 +389,16 @@ export async function runStagePipeline(opts: StagePipeOpts): Promise<StagePipeRe
         blockedThisAttempt.push(...gated.blocked);
       }
 
-      if (callFailed && attempt >= maxTries) break;
+      /* 2026-09-14 修复（假交付）：调用失败的段原先**既不重试也不隔离**。
+       * 旧代码是 `let callFailed` + `if (callFailed && attempt >= maxTries) break;`，
+       * 而 `retryables` 只取"被门禁拒绝的段"（`blockedThisAttempt`）——调用失败时它是空的，
+       * 于是循环立刻 `break`：该段保持**上一版文本**（多半就是还没简化的原文）落盘，
+       * 而调用方按 `segs.length - quarantined.length` 报"自动完成 N/N"。
+       * 断一次网就能产出一份夹着整段原文、且未过任何门禁的"完成品"，只有进度 json 里一行留痕。
+       * 现在：调用失败和"被拒绝"走同一条路——先重试，重试用尽后**隔离**（不再计入自动完成）。 */
+      for (const id of callFailedIds) {
+        blockedThisAttempt.push({ id, ruleIds: [], lostFacts: [], reason: '调用失败（网络/HTTP），本段未产出' });
+      }
       const retryables = attempt < maxTries ? blockedThisAttempt : [];
       if (retryables.length) {
         /* 只重试被拒的段，把拒绝原因带进 issues（第二次尝试的模型看得见自己错在哪） */

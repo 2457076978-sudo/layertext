@@ -78,13 +78,25 @@ const embed = async (texts) => {
   return texts.map((_, i) => Array.from(out[i].data));
 };
 
-/* ── 段落级 ── */
+/* 2026-09-14：数值参数原先直接 `Number(args.x)` 就往下传，没有任何校验。
+ * `--tau abc` / `--gap abc` 会算出 `NaN`，对齐器于是**一对都对不上**：覆盖率打印 0.0%，
+ * 而且把每一句都列成"疑似丢句"；`--risk abc` 则一个 ⚠ 都不标。全程不报错，
+ * 看起来像"这篇稿子丢了一半内容"。现在非法就当场退出，别让它伪装成结论。 */
+const numArg = (raw, name, dflt) => {
+  if (raw === undefined || raw === null || raw === '') return dflt;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) {
+    console.error(`✗ ${name} 需要一个数字，实得「${raw}」`);
+    process.exit(2);
+  }
+  return n;
+};
 const baseParaTexts = [...baseSegs.entries()];
 const simpParaTexts = [...simpSegs.entries()];
 const baseParaVecs = await embed(baseParaTexts.map(([, t]) => t));
 const simpParaVecsRaw = await embed(simpParaTexts.map(([, t]) => t));
 const simpParaVecs = new Map(simpParaTexts.map(([id], i) => [id, simpParaVecsRaw[i]]));
-const paraPairs = paragraphSimilarities(new Map(baseParaTexts.map(([id], i) => [id, baseParaVecs[i]])), simpParaVecs, args.risk ? Number(args.risk) : Infinity);
+const paraPairs = paragraphSimilarities(new Map(baseParaTexts.map(([id], i) => [id, baseParaVecs[i]])), simpParaVecs, numArg(args.risk, '--risk', Infinity));
 const paraScores = paraPairs
   .filter((p) => !Number.isNaN(p.score))
   .map((p) => p.score)
@@ -96,7 +108,7 @@ const baseSents = [...baseSegs].flatMap(([id, t]) => sentsOfSeg(t, id));
 const simpSents = [...simpSegs].flatMap(([id, t]) => sentsOfSeg(t, id));
 const baseVecs = await embed(baseSents.map((s) => s.text));
 const simpVecs = await embed(simpSents.map((s) => s.text));
-const align = smithWatermanAlign(baseVecs, simpVecs, { tau: Number(args.tau), gap: Number(args.gap) });
+const align = smithWatermanAlign(baseVecs, simpVecs, { tau: numArg(args.tau, '--tau', 0.5), gap: numArg(args.gap, '--gap', 0.3) });
 const coverage = baseSents.length ? align.coveredBase.size / baseSents.length : 0;
 
 /* ── 输出 ── */

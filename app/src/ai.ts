@@ -27,6 +27,10 @@ import promptDraft from '../../prompts/system_draft.md?raw';
 import promptAssistant from '../../prompts/system_assistant.md?raw';
 import promptRewriteSentence from '../../prompts/rewrite_sentence.md?raw';
 import promptPlotPoints from '../../prompts/plot_points.md?raw';
+/* 2026-09-14：这三个此前漏登记，loadPrompt 会返回空串——三条链路在发空提示词。 */
+import promptGrading from '../../prompts/grading.md?raw';
+import promptReadingQuiz from '../../prompts/reading_quiz.md?raw';
+import promptReviewMaterial from '../../prompts/review_material.md?raw';
 
 let ui: { onStatus?: (s: string) => void } | null = null;
 export function setAiUi(u: { onStatus?: (s: string) => void }): void {
@@ -40,6 +44,9 @@ const BUNDLED_PROMPTS: Record<string, string> = {
   system_assistant: promptAssistant,
   rewrite_sentence: promptRewriteSentence,
   plot_points: promptPlotPoints,
+  grading: promptGrading,
+  reading_quiz: promptReadingQuiz,
+  review_material: promptReviewMaterial,
 };
 
 /* ---------- 提示词按名加载（改提示词不改代码） ---------- */
@@ -165,8 +172,14 @@ async function activeTargets(): Promise<ProviderTarget[]> {
   const cfg = S.appConfig;
   const fallbackKeys: Record<number, string> = {};
   for (let i = 0; i < (cfg.failover ?? []).length; i++) {
+    const f = cfg.failover![i]!;
     try {
-      fallbackKeys[i] = await invoke<string>('load_api_key', { account: 'fb' + i });
+      /* 2026-09-14：**优先按稳定 id 取**（`fb:<id>`，见 settings.ts 的保存侧）。
+       * 旧配置没有 id，退回下标账号；有 id 但新账号还没写过 Key 时也回落一次，
+       * 这样迁移期两边的 Key 都认，不会出现"升级后备用全失效"。 */
+      let k = f.id ? await invoke<string>('load_api_key', { account: `fb:${f.id}` }) : '';
+      if (!k) k = await invoke<string>('load_api_key', { account: 'fb' + i });
+      fallbackKeys[i] = k ?? '';
     } catch {
       /* 有意兜底：备用供应商的 Key 允许没配（没配就没配，不是错误）。
        * 空串交给 buildTargets，它会退回主 Key 或跳过这一路。 */

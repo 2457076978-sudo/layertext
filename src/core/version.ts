@@ -71,6 +71,25 @@ export interface VersionTarget {
   path?: string;
 }
 
+/**
+ * 批量节点里**每一步**的目标与段前后文本（`VersionNode.targets`）。
+ *
+ * 为什么要有它：`target` 只记了 `okSteps[0]`（第一步）。于是一次 `applyChangeBatch`
+ * 改了 P01+P02 之后，`replaySegment(nodes,'P02')` 返回 `found:false`、
+ * `provenanceOf` 干脆说"P02：本运行没有改动过这一段"——**而它明明被改了**。
+ * "所有发布段可由 sourceVersion + traceId 重放"这句验收话，对批量改过的第 2..N 段不成立，
+ * 而且错的方向是"给出否定性结论"，人查起来毫无线索。
+ *
+ * 只带 `segId` 不够——重放需要每段自己的 `segBase/segBefore/segAfter`，所以一并记下。
+ * 旧节点没有这个字段：`nodeSegEntry` 会回落到 `target`，老数据行为不变。
+ */
+export interface VersionNodeTarget extends VersionTarget {
+  /** 该段第一次被本次运行碰到时的样子（重放起点） */
+  segBase: string;
+  segBefore: string;
+  segAfter: string;
+}
+
 export interface VersionNode {
   schemaVersion: number;
   /** 稳定版本 ID：`v0003-1a2b3c4d`（序号 + 内容哈希前 8 位）。
@@ -84,6 +103,9 @@ export interface VersionNode {
   parentHash: string;
   contentHash: string;
   target: VersionTarget;
+  /** 批量节点（`kind='batch'`）里每一步的目标与段前后文本；单步节点没有这个字段。
+   *  有了它，同一批里的第 2..N 段才追得到、重放得了（见 `VersionNodeTarget`）。 */
+  targets?: VersionNodeTarget[];
   /** 动作类别（`ActionKind`）或 `undo` */
   action: string;
   /** 改动的那一小段文本（`before → after`，进事件 reason，人读） */
@@ -405,10 +427,26 @@ const segRawOf = (doc: string, segId: string): string | null => {
 function segBaseOf(nodes: VersionNode[], segId: string, doc: string, live: boolean): string {
   if (live) {
     for (const n of effectiveNodes(nodes)) {
-      if (n.target.segId === segId) return n.segBase;
+      const e = nodeSegEntry(n, segId);
+      if (e) return e.segBase;
     }
   }
   return segRawOf(doc, segId) ?? '';
+}
+
+/**
+ * 从版本节点里取出**属于 `segId` 的那一条**（含段前后文本与重放起点）；不属于就返回 `null`。
+ *
+ * 2026-09-14 加：批量节点把每一步记在 `targets` 里，单步节点（以及**所有 2026-09-14 之前
+ * 写下的旧节点**）只有 `target`。两条路都在这里收口，调用方不必各判一次——
+ * `replaySegment` / `provenanceOf` / `segBaseOf` 原先各自按 `target.segId` 比对，
+ * 这正是"批量里第 2..N 段查不到"的根因所在。
+ */
+function nodeSegEntry(n: VersionNode, segId: string): { segBase: string; segBefore: string; segAfter: string; target: VersionTarget } | null {
+  const hit = n.targets?.find((t) => t.segId === segId);
+  if (hit) return { segBase: hit.segBase, segBefore: hit.segBefore, segAfter: hit.segAfter, target: hit };
+  if (n.target.segId === segId) return { segBase: n.segBase, segBefore: n.segBefore, segAfter: n.segAfter, target: n.target };
+  return null;
 }
 
 /** `ApplyFailure` → `ChangeRejectKind`（两个枚举同名同义，只是分工不同：一个在纯计算层，一个在事务层）。
@@ -651,6 +689,19 @@ async function runTransaction(io: TxIo, plan: TxPlan, guard: ChangeGuard): Promi
     segBefore: headStep.segBefore,
     segAfter: headStep.segAfter,
     segBase: headStep.segBase,
+    /* 批量时把**每一步**都记下来（2026-09-14）：原先只记 `headStep`，于是同一批里
+     * 第 2..N 段既追不到也重放不了，`provenanceOf` 还会给出"本运行没改过这一段"的
+     * 否定性错结论。单步节点不写这个字段，保持旧数据的形状不变。 */
+    ...(okSteps.length > 1
+      ? {
+          targets: okSteps.map((s) => ({
+            ...s.step.target,
+            segBase: s.segBase,
+            segBefore: s.segBefore,
+            segAfter: s.segAfter,
+          })),
+        }
+      : {}),
     teacherId: args.teacherId,
     sourceVersion: args.sourceVersion,
     timestamp,
@@ -807,10 +858,26 @@ export async function recordOnly(io: TxIo, args: Omit<ApplyChangeArgs, 'action'>
   try {
     doc = await io.read(args.docPath);
   } catch {
-    doc = '';
+    /* 2026-09-14：读不到正文**不能**当成"没有并发问题"。
+     * 原先这里 `doc = ''`，随后 `const base = doc ? … : args.baseVersion` 与
+     * `if (doc && …)` 一起把乐观并发校验**整个跳过**，照样把决定记成"对着当前版本做的"。
+     * 而同一次失败在 `runTransaction` 里是 `not-found` + 拒绝——两条路径对同一件事
+     * 给出两种结论，其中一种是在账上写一句没人核得实的话。
+     * 现在与 `runTransaction` 对齐：拒，并如实说是读不到正文。 */
+    const reason = await recordRejected(io, {
+      decisionPath: args.decisionPath,
+      teacherId: args.teacherId,
+      sourceVersion: args.sourceVersion,
+      itemId: args.target.itemId,
+      ruleId: args.target.ruleId,
+      target: args.target,
+      reason: `读不到正文（${args.docPath}）——无法确认这一条是对着哪一版做的，先不记`,
+      traceId: args.traceId,
+    });
+    return { status: 'rejected', reason, kind: 'not-found', docTouched: false, ...empty };
   }
-  const base = doc ? currentVersionOf(nodes, doc) : args.baseVersion;
-  if (doc && args.baseVersion !== base) {
+  const base = currentVersionOf(nodes, doc);
+  if (args.baseVersion !== base) {
     const reason = await recordRejected(io, {
       decisionPath: args.decisionPath,
       teacherId: args.teacherId,
@@ -889,12 +956,17 @@ export interface SegmentReplay {
  */
 export function replaySegment(nodes: VersionNode[], segId: string): SegmentReplay {
   // 只走**有效链**：被回滚作废的那些改动不该出现在重放里（它们事实上没发生）
-  const chain = effectiveNodes(nodes).filter((n) => n.target.segId === segId);
-  if (!chain.length) return { found: false, chain: [], consistent: true };
-  let cur = chain[0]!.segBase;
-  for (const n of chain) {
-    if (n.segBefore !== cur) return { found: true, text: cur, chain, consistent: false, brokenAt: n.version, node: chain[chain.length - 1] };
-    cur = n.segAfter;
+  // 2026-09-14：改用 `nodeSegEntry`。原先按 `n.target.segId === segId` 过滤，
+  // 而批量节点只把第一步写进 `target`——同一批里的第 2..N 段因此"查无此段"。
+  const entries = effectiveNodes(nodes)
+    .map((n) => ({ n, e: nodeSegEntry(n, segId) }))
+    .filter((x): x is { n: VersionNode; e: NonNullable<ReturnType<typeof nodeSegEntry>> } => x.e !== null);
+  if (!entries.length) return { found: false, chain: [], consistent: true };
+  const chain = entries.map((x) => x.n);
+  let cur = entries[0]!.e.segBase;
+  for (const { n, e } of entries) {
+    if (e.segBefore !== cur) return { found: true, text: cur, chain, consistent: false, brokenAt: n.version, node: chain[chain.length - 1] };
+    cur = e.segAfter;
   }
   return { found: true, text: cur, chain, consistent: true, node: chain[chain.length - 1] };
 }
@@ -914,10 +986,13 @@ export function provenanceOf(nodes: VersionNode[], segId: string): string {
   const r = replaySegment(nodes, segId);
   if (!r.found || !r.node) return `${segId}：本运行没有改动过这一段`;
   const n = r.node;
+  /* 批量节点时取**这一段自己**的 target，不是第一步的——否则汇报的 ruleId/traceId
+   * 是同一批里另一段的（2026-09-14 修）。 */
+  const t = nodeSegEntry(n, segId)?.target ?? n.target;
   return (
     `${segId} 现版本 ${n.version}（父 ${n.parent ?? '—'}）｜第 ${r.chain.length} 次改动｜` +
-    `${n.target.ruleId ?? '—'}｜${n.teacherId}｜${n.timestamp}｜源版本 ${n.sourceVersion}` +
-    `${n.target.traceId ? `｜trace ${n.target.traceId}` : ''}${r.consistent ? '' : '｜⚠ 版本链断了，当前文本不可信'}`
+    `${t.ruleId ?? '—'}｜${n.teacherId}｜${n.timestamp}｜源版本 ${n.sourceVersion}` +
+    `${t.traceId ? `｜trace ${t.traceId}` : ''}${r.consistent ? '' : '｜⚠ 版本链断了，当前文本不可信'}`
   );
 }
 

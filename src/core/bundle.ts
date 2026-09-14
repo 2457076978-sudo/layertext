@@ -28,7 +28,7 @@
  * 纯逻辑：不读文件、不写文件。文件由调用方读进来（IO 在 `tools/` 与 App 两侧各不相同）。
  */
 
-import { artifactIdOf, artifactLabelOf, contentHash, type ArtifactIdentity, type ArtifactKind, type RunArtifact, type RunManifest } from './manifest.js';
+import { artifactIdOf, artifactLabelOf, byteLenOf, contentHash, type ArtifactIdentity, type ArtifactKind, type RunArtifact, type RunManifest } from './manifest.js';
 import type { DecisionEvent } from './decision.js';
 import type { CalibrationEvent } from './calibration.js';
 
@@ -69,6 +69,37 @@ export const STUDENT_DATA_PATTERNS: { pattern: RegExp; what: string }[] = [
 export function studentDataReason(path: string): string | null {
   for (const { pattern, what } of STUDENT_DATA_PATTERNS) {
     if (pattern.test(path)) return `疑似${what}（命中 ${String(pattern)}）——学生数据只留在本机工作区`;
+  }
+  return null;
+}
+
+/**
+ * **按正文内容**认学生数据——补上黑名单只认路径的那一半。
+ *
+ * 2026-09-14：`verifyBundle` 的注释一直写着"按内容与文件名双重判断"、`AGENTS.md` 也写着
+ * "白名单 + 黑名单双重拦截"，但代码里两处都只调了 `studentDataReason(path)`——
+ * **按内容的那一半从来没实现过**。于是本文件第 44-46 行自己举的那个场景（"某份台账里
+ * 贴了班级成绩"）恰好拦不住：台账是白名单种类、路径里一个敏感词都没有，内容却带着整张成绩表。
+ * 测试 `bundle.test.ts` 里那条"哪怕改了名字"用的名字是 `顺手带的_分层.json`，仍然命中的是路径。
+ *
+ * 这里只收**一眼就是学生记录**的形状（学号要跟至少 4 位数字、成绩要跟分数、
+ * 名单要出现两个「姓名：」）。宁可漏一点，也不要把正常的教案/报告误判成学生数据——
+ * 误判会让教师被迫删掉正经内容，最后把这道防线整体关掉。
+ */
+export const STUDENT_DATA_CONTENT_PATTERNS: { pattern: RegExp; what: string }[] = [
+  { pattern: /学\s*号\s*[:：]?\s*\d{4,}/, what: '学号' },
+  { pattern: /考\s*号\s*[:：]?\s*\d{4,}/, what: '考号' },
+  { pattern: /成绩\s*[:：]\s*\d{1,3}(?:\.\d+)?\s*分?/, what: '成绩数据' },
+  { pattern: /(及格率|优秀率|平均分|最高分|最低分|班级排名|年级排名)\s*[:：]?\s*\d/, what: '成绩统计' },
+  /* 两个「姓名：」挨得够近 = 一份名单；只出现一次可能只是文档里的举例，不拦 */
+  { pattern: /姓\s*名\s*[:：][^\n]{0,20}\n[\s\S]{0,300}?姓\s*名\s*[:：]/, what: '学生名单' },
+];
+
+/** 内容侧判定（与 `studentDataReason` 同形；没命中返回 null） */
+export function studentDataContentReason(text: string): string | null {
+  for (const { pattern, what } of STUDENT_DATA_CONTENT_PATTERNS) {
+    const m = text.match(pattern);
+    if (m) return `正文疑似${what}（命中「${m[0].replace(/\s+/g, ' ').slice(0, 24)}」）——学生数据只留在本机工作区`;
   }
   return null;
 }
@@ -221,7 +252,8 @@ export function buildBundle(input: BundleInput): PublishBundle {
   const allowed = new Set<string>(PUBLISHABLE_KINDS);
 
   for (const f of input.files) {
-    const student = studentDataReason(f.path);
+    /* 路径名与正文内容**都要过**（2026-09-14 补上后半截，见 `studentDataContentReason`）。 */
+    const student = studentDataReason(f.path) ?? studentDataContentReason(f.text);
     if (student) {
       excluded.push({ path: f.path, reason: student });
       continue;
@@ -233,7 +265,9 @@ export function buildBundle(input: BundleInput): PublishBundle {
     /* 没值的字段**不写上去**，而不是写成 undefined：
      * 包描述要能 JSON 存盘再读回来，而 `undefined` 过一趟 JSON 就没了——
      * 于是一份包"存盘前"和"读回来后"形状不同，任何 deepEqual 都会莫名其妙地失败。 */
-    const entry: BundleEntry = { path: f.path, kind: f.kind, bytes: f.text.length, hash: contentHash(f.text) };
+    /* 2026-09-14：`bytes` 用**真实字节数**（原先 `f.text.length` 是 UTF-16 码元，
+     * 中文会低报约三分之一——见 `manifest.byteLenOf`）。 */
+    const entry: BundleEntry = { path: f.path, kind: f.kind, bytes: byteLenOf(f.text), hash: contentHash(f.text) };
     /* 身份：条目自己带的优先（它来自清单里那条登记），没有就按 `kind/层级/章节` 算。
      * 两条路得到的是同一个值——身份是算出来的，不是发出来的。 */
     const id = f.id || artifactIdOf(f);
@@ -356,7 +390,8 @@ export function verifyBundle(bundle: PublishBundle, received: { path: string; te
   const declared = new Set(bundle.entries.map((e) => e.path));
   for (const r of received) {
     // 夹带学生数据：**换名字也要认出来**（按内容与文件名双重判断）
-    const byName = studentDataReason(r.path);
+    // 2026-09-14：内容那一半此前没有实现，只有名字在拦——现在两半都在。
+    const byName = studentDataReason(r.path) ?? studentDataContentReason(r.text);
     if (byName) {
       problems.push({ kind: 'student-data', path: r.path, message: `收到的包里有不该出包的东西：${byName}` });
       continue;

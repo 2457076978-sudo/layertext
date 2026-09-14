@@ -19,12 +19,19 @@ const BASE = P.原文目录;
  * 它产出的是"供其它脚本当输入用"的规范化原文，从不参与运行私有目录那套隔离。
  * 把它硬塞进 `Resolver` 只会给源树编一套并不存在的 ArtifactKind。
  * 真正需要经 `Resolver` 的是**产物**那几类，那几类别的脚本已经全部改过去了。 */
-const VOCAB = P.词库;
 const DATE = P.日期;
 const MIN_CHAPTER_RATIO = 0.5; // 章级下限：产物 ≥ 原文 50%
 const SEG_KEEP = 0.85; // 段级守恒线：单段 < 原段 85% 触发重试
 
-const CFG = JSON.parse(readFileSync(`${process.env.HOME}/.layertext.json`, 'utf-8'));
+/* 2026-09-14：包 try 并给默认值（与 `会话改写.mjs` 同一写法）——原先裸 `JSON.parse`，
+ * 缺 `~/.layertext.json` 的机器在**加载期**就崩，报的是堆栈不是"缺什么配置"。 */
+const CFG = (() => {
+  try {
+    return JSON.parse(readFileSync(`${process.env.HOME}/.layertext.json`, 'utf-8'));
+  } catch {
+    return { baseUrl: 'https://api.deepseek.com' };
+  }
+})();
 const MODEL = 'deepseek-chat'; // 非思考型（v4-flash 思考型在复杂指令下会把推理/续写混入正文——09-09 与本次第一章实跑双重实证）
 import { keychainGet } from './keychain.mjs';
 const KEY = () => keychainGet('layertext.apikey'); /* 惰性：Linux/CI 无 security 命令，导入期不查钥匙串 */
@@ -33,9 +40,12 @@ const KEY = () => keychainGet('layertext.apikey'); /* 惰性：Linux/CI 无 secu
 const SHARED = await import('./LayerText_AF词表与词典.mjs');
 
 const { splitChapter } = await import(`${distOf(REPO)}/src/core/textpipe.js`);
-const { buildLexicon } = await import(`${distOf(REPO)}/src/core/lexicon.js`);
 const { runQc } = await import(`${distOf(REPO)}/src/core/qc.js`);
-const LEX = buildLexicon({ vocabCsvTexts: [readFileSync(VOCAB, 'utf-8')] });
+/* 2026-09-14：词表口径与全项目统一。原先自己 `buildLexicon({vocabCsvTexts})`——
+ * 只喂了本书词库，**没喂内置课标 1600/补录，也没喂专名**，于是课标词被判成超纲：
+ * 生词率虚高、加注跑到 pig/sheep 这类课标词上。这正是 `冻结回放.mjs` 注释里
+ * 写明踩过的坑；其余脚本一律走 `SHARED.loadLexicon(P)`。 */
+const LEX = await SHARED.loadLexicon(P);
 /* 章节名从共享模块取（**不再在 10 个脚本里各抄一份 `['一'…'十']`**）：
  * 那份抄写写死了"十章"，换一本 12 章的书会拼出 `第undefined章` 而**照常报成功**。
  * 现在优先级是「配置 > 原文目录 > 默认（第N章 × 章数）」，
@@ -61,7 +71,11 @@ async function callChat(messages, maxTokens = 2500) {
   const body = (extra) => JSON.stringify({ model: MODEL, max_tokens: maxTokens, messages, ...extra });
   let resp = await fetch(`${CFG.baseUrl}/chat/completions`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${KEY}` },
+    /* 2026-09-14：这里原先是 `${KEY}`——`KEY` 是第 30 行的 `() => keychainGet(...)`，
+     * 模板串插的是**函数对象本身**，请求头成了 `Bearer () => keychainGet('layertext.apikey')`，
+     * 每次调用必然 401；401 又被 catch 只打一行 `✗`，脚本照样 exit 0。
+     * 同一个仓库里其它脚本写的都是 `KEY()` / `apiKey()`，只有这一处漏了括号。 */
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${KEY()}` },
     body: body({}),
   });
   if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${(await resp.text()).slice(0, 200)}`);
@@ -158,8 +172,8 @@ async function runChapter(i) {
 
 const args = process.argv.slice(2);
 const dry = args.includes('--dry');
-let chapters = args.filter((a) => /^\d/.test(a)).flatMap((a) => a.split(',').map(Number));
-if (!chapters.length) chapters = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+/* 章号解析走共享模块（2026-09-13）：原写法 `/^\d/` + `Number` 会把 `1A` 静默变成 NaN。 */
+const chapters = SHARED.parseChapters(args, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
 if (dry) {
   console.log('计划章：', chapters.join(','));
   process.exit(0);

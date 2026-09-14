@@ -30,7 +30,8 @@ export function planBatchChapters(paths: string[], progress: BatchProgressFile |
   return paths.map((path) => ({
     path,
     name: path.slice(path.lastIndexOf('/') + 1),
-    done: progress?.status[path] === 'done',
+    /* `?.` 只护住 progress，护不住 status——旧格式/半截进度文件会让这里抛 TypeError。 */
+    done: progress?.status?.[path] === 'done',
     segCount: 0,
   }));
 }
@@ -74,7 +75,7 @@ export function buildBookReportMd(rows: BookReportRow[], meta: { book: string; d
       (r) =>
         `| ${r.chapter} | ${r.status === 'failed' ? '（失败）' : r.output} | ${cell(r, (x) => x.segCount)} | ${cell(r, (x) => (x.shrinkPct === undefined ? '—' : x.shrinkPct >= 0 ? `−${x.shrinkPct}%` : `+${-x.shrinkPct}%`))} | ${cell(r, (x) => x.oovRate)} | ${cell(r, (x) => x.avgLen)} | ${cell(r, (x) => x.maxLen)} | ${cell(r, (x) => x.passive)} | ${cell(r, (x) => x.relcl)} | ${cell(r, (x) => x.pastperf)} | ${cell(r, (x) => x.overlong)} | ${cell(r, (x) => (x.ruleLeft === null ? '—（没核到）' : x.ruleLeft))} | ${cell(r, (x) => `${(x.elapsedMs / 1000).toFixed(0)}s`)} | ${cell(r, (x) => x.outTokens)} |`,
     ),
-    `| **合计** | | ${sum((r) => r.segCount)} | | | | ${sum((r) => r.passive)} | ${sum((r) => r.relcl)} | ${sum((r) => r.pastperf)} | ${sum((r) => r.overlong)} | ${sum((r) => r.ruleLeft ?? 0)} | ${(sum((r) => r.elapsedMs) / 1000).toFixed(0)}s | ${sum((r) => r.outTokens)} |`,
+    `| **合计** | | ${sum((r) => r.segCount)} | | | | | ${sum((r) => r.passive)} | ${sum((r) => r.relcl)} | ${sum((r) => r.pastperf)} | ${sum((r) => r.overlong)} | ${sum((r) => r.ruleLeft ?? 0)} | ${(sum((r) => r.elapsedMs) / 1000).toFixed(0)}s | ${sum((r) => r.outTokens)} |`,
     '',
   );
   /* `ruleLeft === null`（没核到）也算"要人工看一眼"：**没核过 ≠ 干净** */

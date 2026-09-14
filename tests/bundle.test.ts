@@ -23,6 +23,7 @@ import {
   publishReadiness,
   renderProvenance,
   studentDataReason,
+  studentDataContentReason,
   verifyBundle,
   type PublishBundle,
 } from '../src/core/bundle.js';
@@ -229,6 +230,45 @@ test('★ 收到的包里**夹带了学生数据**（哪怕改了名字）也要
   const sd = r.problems.find((p) => p.kind === 'student-data');
   assert.ok(sd, `必须报出学生数据：${JSON.stringify(r.problems)}`);
   assert.match(sd.message, /不该出包/);
+});
+
+/* ────────────────────── 学生数据：内容侧（2026-09-14 补） ────────────────────── */
+
+test('★ 白名单种类 + 干净路径，但**正文里贴了成绩**：照样不出包', () => {
+  /* 这正是 bundle.ts 顶部自己举的场景（"某份台账里贴了班级成绩"）。
+   * 2026-09-14 之前只按路径名拦，这一条必定漏——台账是白名单种类、路径里没有敏感词。 */
+  const dirty = { path: '_运行/r1/台账_A层85_2026-09-11.md', kind: '台账' as const, tier: 'A层85', text: '# 台账\n\n| 姓名：张三 | 成绩：85 |\n| 姓名：李四 | 成绩：72 |\n' };
+  assert.equal(studentDataReason(dirty.path), null, '前提：路径名是干净的（不然测的就不是内容侧了）');
+  const b = buildBundle({ manifest: manifest(), files: FILES });
+  const r = buildBundle({ manifest: manifest(), files: [FILES[0]!, dirty] });
+  assert.equal(
+    r.entries.some((e) => e.path === dirty.path),
+    false,
+    '内容带学生数据的台账不许进包',
+  );
+  const ex = r.excluded.find((e) => e.path === dirty.path);
+  assert.ok(ex, `应当出现在排除清单里：${JSON.stringify(r.excluded)}`);
+  assert.match(ex!.reason, /正文疑似/, '排除理由要说明是**内容**命中的，不是名字');
+  assert.ok(b.entries.length > 0, '对照：同一批里没问题的文件照常进包');
+});
+
+test('★ 收到的包里，**名字干净但内容是学生名单**的也要拦下', () => {
+  const b = buildBundle({ manifest: manifest(), files: FILES });
+  const r = verifyBundle(b, [...FILES.map((f) => ({ path: f.path, text: f.text })), { path: '临时笔记.md', text: '学号：20260101 学号：20260102\n' }]);
+  assert.equal(r.ok, false);
+  const sd = r.problems.find((p) => p.kind === 'student-data');
+  assert.ok(sd, `必须报出学生数据：${JSON.stringify(r.problems)}`);
+  assert.match(sd!.message, /学号/);
+});
+
+test('正常教案/报告不会被内容侧误伤（这道防线不该把教师逼得关掉它）', () => {
+  for (const text of [
+    '# 简化报告\n平均句长 12.3 词，超长句 2 句，生词率 6.1%\n',
+    '# 词句卡\n| word | 释义 |\n| --- | --- |\n| barn | 谷仓 |\n',
+    '教后记：这一课学生反应不错，下次可以把「姓名」这个句型再练一遍。\n',
+  ]) {
+    assert.equal(studentDataContentReason(text), null, `不该误伤：${text.slice(0, 30)}`);
+  }
 });
 
 test('夹带了清单之外的普通文件 → 报 extra（清单过期或真的多带了）', () => {

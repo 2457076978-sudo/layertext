@@ -94,8 +94,9 @@ const CH_IDS = arg('--chapters', '')
   ? arg('--chapters')
       .split(',')
       .map((x) => Number(x.trim()))
-      .filter((n) => n >= 1 && n <= 10)
-  : CN.slice(0, Number(P.章数 ?? 10)).map((_, i) => i + 1);
+      /* `<= 10` 原先写死了十章：换一本 12 章的书，`--chapters 11` 会被**静默丢掉**。 */
+      .filter((n) => n >= 1 && n <= CN.length)
+  : CN.map((_, i) => i + 1);
 /** `--partial-chapter 10` / `--partial-chapter 3,10` → 章号数组（去重排序；空串 = 清空声明）。
  *  partial 是**口径声明**不是技术判定（第五轮对照表："要不要排除在全书口径外是口径决定"），
  *  所以只接受显式给的章号，不做任何"段数少就算没写完"的猜测。 */
@@ -294,7 +295,15 @@ function scanArtifacts() {
      * 两种布局下 `rel` 自然不同（run 布局会带上 `_运行/<runId>/`），下游按它复原也在同一套规则里。 */
     for (const [kind, abs] of [
       ['台账', rr.any('台账', { tier: tag, date: DATE })],
-      ['风险队列', rr.any('汇总报告', { name: `风险队列_${tag}`, date: DATE })],
+      /* 2026-09-14：风险队列报告的**人读版**在多层运行时叫 `风险队列_<首层tag>_等`
+       * （见 `风险队列.mjs` 的写入侧），而这里原先只按单层名 `风险队列_<tag>` 找——
+       * 于是 `--tier A,M` 这类多层运行的人读报告**永远不会被登记进清单**，
+       * 发布包因此不含它，而教师以为报告进去了。两种名字都试，取先存在的那个。 */
+      [
+        '风险队列',
+        [`风险队列_${tag}`, `风险队列_${TAGS[TIERS[0]]}_等`].map((name) => rr.any('汇总报告', { name, date: DATE })).find((p) => existsSync(p)) ??
+          rr.any('汇总报告', { name: `风险队列_${tag}`, date: DATE }),
+      ],
     ]) {
       const rel = abs.replace(`${OUT_BASE}/`, '');
       if (!existsSync(abs)) continue;
@@ -305,8 +314,15 @@ function scanArtifacts() {
     if (review) {
       const list = JSON.parse(review).待复核明细 ?? [];
       for (const d of list) {
+        /* 2026-09-14：路径**交给解析器算**，不再手拼 `_待复核/<tag>/…`。
+         * 手拼的那份既没有 `--out` 后缀、也没有运行私有目录，而写入方
+         * （`会话改写.mjs`）走的是 `R.any('待复核', {chapter, segId})`——两种布局下都对不上：
+         * 用了 `--out` 或 `--layout run` 的运行会把一个**不存在的路径**登记进清单，
+         * 于是 `--verify` 报 blocked「产物缺失」，把一次本来正常的运行判成不可交付。 */
+        const ch = d.位置.split(' ')[0];
+        const segId = `第${Number(d.位置.match(/第(\d+)段/)?.[1] ?? 0)}段`;
         push({
-          path: join('_待复核', `${tag}`, `${d.位置.split(' ')[0]}_第${Number(d.位置.match(/第(\d+)段/)?.[1] ?? 0)}段.md`),
+          path: rr.any('待复核', { chapter: ch, segId }).replace(`${OUT_BASE}/`, ''),
           kind: '其他',
           tier: t,
           status: 'needs-review',
@@ -581,6 +597,8 @@ if (has('--verify')) {
   const storeState = SHARED.lexiconStoreState(P);
   console.log(` 词表正本：${describeStoreState(storeState, m)}`);
   if (storeState.mode === 'drift' || storeState.mode === 'broken') {
+    /* 现场词表读不出来时不要吞掉原因：`recordLexiconDrift` 自己会把它记进 `liveError`，
+     * 这里传 null 只是"没预先算过"，两者语义不同（2026-09-14 注明）。 */
     const live = await SHARED.liveLexicon(P).catch(() => null);
     const rec = await SHARED.recordLexiconDrift(P, { state: storeState, liveKnown: live?.known ?? null });
     const diffLine = rec?.payload.wordDiffNote;

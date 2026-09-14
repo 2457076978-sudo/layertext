@@ -155,3 +155,23 @@ test('auxSuitedFor：空批次与超限批次都不交给辅助模型——超�
   assert.equal(auxSuitedFor(cfg, AUX_MAX_WORDS + 1), false, '超一个词就整批退主模型');
   assert.equal(auxSuitedFor({ enabled: false, baseUrl: 'x', model: 'y' }, 3), false, '关掉就一律走主模型');
 });
+
+test('★ manifest 里的每个提示词都要真的被打包进 App（否则发的是空模板）', () => {
+  /* 2026-09-14：`grading` / `reading_quiz` / `review_material` 三个此前漏登记，
+   * 而 `loadPrompt` 取不到就返回 `BUNDLED_PROMPTS[name] ?? ''` —— 也就是**空串**。
+   * 后果不是报错，是「AI 批改建议 / 读后检测题 / 定向复习材料」三条链路发空提示词：
+   * 白花一次 API 调用，教师拿到的是模型自由发挥的产物。这类"漏一行 import"的失效，
+   * 只有把 manifest 与打包表对起来才拦得住。 */
+  const repo = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
+  const manifest = JSON.parse(readFileSync(join(repo, 'prompts', 'manifest.json'), 'utf-8')) as {
+    prompts: Record<string, unknown>;
+  };
+  const names = Object.keys(manifest.prompts);
+  assert.ok(names.length >= 8, `manifest 读不出来（实得 ${names.length} 个）——守卫先要能看见它守的东西`);
+
+  const src = readFileSync(join(repo, 'app', 'src', 'ai.ts'), 'utf-8');
+  const table = src.match(/const BUNDLED_PROMPTS: Record<string, string> = \{([\s\S]*?)\n\};/u);
+  assert.ok(table, '在 app/src/ai.ts 里找不到 BUNDLED_PROMPTS 表——表改名了就把这条守卫一起改');
+  const missing = names.filter((n) => !new RegExp(`^\\s*${n}:`, 'mu').test(table![1]!));
+  assert.deepEqual(missing, [], `这些提示词在 manifest 里登记了、却没被打包进 App（loadPrompt 会给调用方一个空串）：\n  · ${missing.join('\n  · ')}`);
+});

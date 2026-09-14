@@ -13,7 +13,7 @@ import { loadBookConfig } from './bookio.js';
 import { scrollEl, scrollNow } from './edit.js';
 import { saveConfig } from './ai.js';
 import { jumpToBookmark } from './review.js';
-import {} from './pure.js';
+import { baseName } from './pure.js';
 import { buildVersionCards, coverTitlePx, filterShelfBooks, parseWorkspaces, progressPct, shelfGroupsOf, tocItemName, workspaceChipName } from './bookpure.js';
 
 /* ---------- 工作区（书目录 _工作区.json：3 层次=3 工作区，浏览器标签式切换） ---------- */
@@ -563,7 +563,8 @@ export async function tocChapters(): Promise<string[]> {
   if (S.currentBookDir) {
     try {
       const fs = await invoke<string[]>('list_dir', { dir: S.currentBookDir });
-      return fs.filter((f) => /\.(md|txt)$/i.test(f));
+      /* 名字要用 baseName：后端给的是完整路径，直接当章节名会把整条路径显示给教师。 */
+      return fs.filter((f) => /\.(md|txt)$/i.test(f)).map(baseName);
     } catch (e) {
       /* 空表会让目录、看板、档案页一起说"没有章节"（看板那句甚至是"从书架进入一本书"——
        * 而教师明明就在一本书里）。空表可以返回，但真正的错因必须露出来。 */

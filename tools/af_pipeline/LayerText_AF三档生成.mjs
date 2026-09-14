@@ -137,7 +137,9 @@ async function runChapter(i, t) {
   const src = join(SRC_BASE, ch, '原文_规范化.md');
   if (!existsSync(src)) throw new Error(`${ch} 缺规范化原文`);
   const md = readFileSync(src, 'utf-8');
-  const chLine = md.match(/^## Chapter \w+.*$/m)?.[0] ?? `## Chapter ${['One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten'][i - 1]}`;
+  /* 源文没有 `## Chapter …` 时按章序补一个英文标题。原数组只有十个，
+   * 第 11 章会拼出 `## Chapter undefined`（脚本照常报成功）——超出就退回阿拉伯数字。 */
+  const chLine = md.match(/^## Chapter \w+.*$/m)?.[0] ?? `## Chapter ${['One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten'][i - 1] ?? i}`;
   const header = md.slice(0, md.indexOf(chLine)) || '';
   const segs = splitChapter(md).body.match(/\[P\d+\][\s\S]*?(?=\[P\d+\]|$)/g) ?? [];
   if (!segs.length) throw new Error(`${ch} 未找到 [P##] 段落`);
@@ -205,10 +207,13 @@ async function runChapter(i, t) {
 /* ---------- 主流程 ---------- */
 const args = process.argv.slice(2);
 const dry = args.includes('--dry');
-let tiers = args.filter((a) => /^[AMB]$/.test(a));
+/* 2026-09-14：`管线.mjs` 把层级拼成**一个**位置参数传进来（`tiers.join(',')`），
+ * 而这里只认单个字母 `^[AMB]$`——`--tier A,M` 时 `A,M` 匹配不上，于是静默退回
+ * **全部三层**，白白多跑一层、多烧一份全章额度。现在接受逗号分隔。 */
+let tiers = [...new Set(args.filter((a) => /^[AMB](,[AMB])*$/.test(a)).flatMap((a) => a.split(',')))];
 if (!tiers.length) tiers = ['A', 'M', 'B'];
-let chapters = args.filter((a) => /^\d/.test(a)).flatMap((a) => a.split(',').map(Number));
-if (!chapters.length) chapters = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+/* 章号解析走共享模块（2026-09-13）：原写法 `/^\d/` + `Number` 会把 `1A` 静默变成 NaN。 */
+const chapters = SHARED.parseChapters(args, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
 if (dry) {
   console.log('计划：', tiers.join('/'), '章', chapters.join(','));
   process.exit(0);

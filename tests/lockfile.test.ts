@@ -124,3 +124,44 @@ test('★ 活锁（持有者还在）会被挡住并**说清是谁占着**，而
 
   rmSync(root, { recursive: true, force: true });
 });
+
+test('★ 锁文件一旦可见，内容就必须是**完整的**（不能有"先建空文件再写内容"的窗口）', async () => {
+  /* 2026-09-14 补。守的是上一轮修 TOCTOU 时**漏掉的那一半**：
+   * 旧实现是 `openSync(lockPath,'wx')` 建出**空文件**、下一行才 `writeSync` 填内容。
+   * 这中间的窗口里，另一个进程读到空串 → `JSON.parse('')` 抛 → `readLock()` 返回 null
+   * → `lockState(null)` 判成 `'free'` → 走进"陈旧锁"分支**把活锁删掉**并自己抢过来，
+   * 于是两个进程同时进临界区。机器越忙窗口越宽，所以整仓跑 `npm test` 时**偶发红**
+   * （本机实测：整仓 3 次里红 1 次，单跑 4/4 全过）。
+   *
+   * 判据：工人持锁期间**紧循环采样**锁文件，每次采到都必须能解析出持有者。
+   * 修好之后永远成立；旧实现下迟早会采到那个空窗口。 */
+  const root = mkdtempSync(join(tmpdir(), 'lt-lock-atomic-'));
+  const lockPath = join(root, '词典.csv.lock');
+  const seqPath = join(root, 'seq.txt');
+  writeFileSync(seqPath, '', 'utf-8');
+
+  const running = runWorker(lockPath, seqPath, 'w0', 150);
+  const deadline = Date.now() + 3000;
+  while (Date.now() < deadline && !readFileSync(seqPath, 'utf-8').includes('BEGIN')) {
+    await new Promise((r) => setTimeout(r, 2)); // 等工人真的进了临界区再采样
+  }
+  let seen = 0;
+  let empty = 0;
+  while (Date.now() < deadline && !readFileSync(seqPath, 'utf-8').includes('END')) {
+    if (existsSync(lockPath)) {
+      seen++;
+      try {
+        const j = JSON.parse(readFileSync(lockPath, 'utf-8')) as { pid?: number };
+        if (!j?.pid) empty++;
+      } catch {
+        empty++;
+      }
+    }
+  }
+  const r = await running;
+  assert.equal(r.code, 0, `工人应当正常跑完：${r.err}`);
+  assert.ok(seen > 0, '没采到锁文件——测试本身失效了（先修采样）');
+  assert.equal(empty, 0, `锁文件在 ${seen} 次采样里有 ${empty} 次**没有可解析的内容**——"先建空文件再写"的窗口又回来了`);
+
+  rmSync(root, { recursive: true, force: true });
+});

@@ -27,7 +27,7 @@ const { splitChapter, extractParas, sentsOf } = await import(`${distOf(REPO)}/sr
 const { runQc } = await import(`${distOf(REPO)}/src/core/qc.js`);
 const { alignSentencePairs } = await import(`${distOf(REPO)}/src/core/align.js`);
 // 词表/词典集中一份（2026-09-10：三份拷贝各漏 clover/squealer/mollie，才注出"三叶草""告密者"）
-const { makeKnownChecker, loadDict, appendDict, loadLexicon, chapterNames } = await import('./LayerText_AF词表与词典.mjs');
+const { makeKnownChecker, loadDict, appendDict, loadLexicon, chapterNames, parseChapters } = await import('./LayerText_AF词表与词典.mjs');
 /* 章节名从共享模块取（**不再在 10 个脚本里各抄一份 `['一'…'十']`**）：
  * 那份抄写写死了"十章"，换一本 12 章的书会拼出 `第undefined章` 而**照常报成功**。
  * 现在优先级是「配置 > 原文目录 > 默认（第N章 × 章数）」，
@@ -186,10 +186,11 @@ async function refineChapter(tk, tag, i) {
 }
 
 const args = process.argv.slice(2);
-let tiers = args.filter((a) => /^[AMB]$/.test(a));
+/* 同 `三档生成`：`管线.mjs` 传的是 `tiers.join(',')` 一个参数，只认单字母会静默退回三层。 */
+let tiers = [...new Set(args.filter((a) => /^[AMB](,[AMB])*$/.test(a)).flatMap((a) => a.split(',')))];
 if (!tiers.length) tiers = ['A', 'M', 'B'];
-let chapters = args.filter((a) => /^\d/.test(a)).flatMap((a) => a.split(',').map(Number));
-if (!chapters.length) chapters = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+/* 章号解析走共享模块（2026-09-13）：原写法 `/^\d/` + `Number` 会把 `1A` 静默变成 NaN。 */
+const chapters = parseChapters(args, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
 const results = [];
 const failures = [];
 for (const tk of tiers) {

@@ -38,7 +38,7 @@
  *   · App 侧 `app/src/main.ts` 的 `appConfig.teacherId`。
  * 这两处不归一化，"谁在何时做了哪条决定"就仍然会被拼写差异切成两半。
  */
-import { closeSync, openSync, readFileSync, writeFileSync, writeSync, existsSync, readdirSync, mkdirSync, statSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, readdirSync, mkdirSync, statSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { hostname } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -593,7 +593,7 @@ export const REVIEW_PLACEHOLDER = (id, dir) => `[${id}] <!-- 本段未通过复�
  * 改法：每个运行只往自己的私有目录写**增量**（不共享、不可能撞），
  * 合并变成显式的一步（`mergeDictIntoProject`），且是**原子替换 + 基线优先 + 冲突上报**。
  */
-import { renameSync, readdirSync as _readdir, rmSync as _rm } from 'node:fs';
+import { renameSync, linkSync, readdirSync as _readdir, rmSync as _rm } from 'node:fs';
 
 const dictMerge = async () => await import(`${distOf(LTR)}/src/core/dictmerge.js`);
 
@@ -668,31 +668,44 @@ export async function withLock(lockPath, fn, opts = {}) {
   const deadline = Date.now() + waitMs;
   let acquired = false;
   while (!acquired) {
+    /* ★ 2026-09-14：**带着内容原子地占锁**，不再"先建空文件、再写内容"。
+     *
+     * `openSync(lockPath,'wx')` 确实让"创建"这一步是原子的，但**创建出来的文件是空的**，
+     * 内容要等下一行 `writeSync` 才进去。这中间有一个窗口：另一个进程的 `readLock()`
+     * 读到空串 → `JSON.parse('')` 抛 → 返回 `null` → `lockState(null)` 判成 `'free'`，
+     * 于是走进下面的"陈旧锁"分支，把**别人正持有的活锁删掉**并自己抢过来——
+     * 两个进程同时进临界区。这是一个还没修完的 TOCTOU（上一轮只修了"先看再写"那一半）。
+     * 机器越忙窗口越宽：`tests/lockfile.test.ts` 因此在整仓并发下**偶发红**（单跑 4/4 次通过）。
+     *
+     * 现在：先把内容写进**同目录的临时文件**，再用 `linkSync` 建硬链接——
+     * 目标已存在就 `EEXIST`，且**链接成功的那一刻锁文件就已经有完整内容**，没有窗口。
+     * 临时文件与锁同目录，保证同一文件系统（`link` 不跨卷）。 */
+    const tmp = `${lockPath}.${process.pid}.${token}`;
     try {
-      const fd = openSync(lockPath, 'wx');
+      writeFileSync(tmp, mine);
       try {
-        writeSync(fd, mine);
-      } finally {
-        closeSync(fd);
-      }
-      acquired = true;
-    } catch (e) {
-      // 不是"已存在"就是真错误（没权限、路径是目录…）——带上原错误再抛，别把它吞掉
-      if (e?.code !== 'EEXIST') throw new Error(`占锁失败（${lockPath}）：${e?.message ?? e}`, { cause: e });
-      const st = lockState(readLock(), Date.now(), isAlive);
-      if (st === 'held') {
-        if (Date.now() >= deadline) {
-          const who = readLock();
-          throw new Error(
-            `等锁超时（${Math.round(waitMs / 1000)}s）：${lockPath} 被 pid ${who?.pid ?? '?'}@${who?.host ?? '?'} 占着` + `（${who?.at ?? '时间未知'}）——等它跑完，或确认它已经死了再删掉锁文件`,
-            { cause: e },
-          );
+        linkSync(tmp, lockPath);
+        acquired = true;
+      } catch (e) {
+        // 不是"已存在"就是真错误（没权限、路径是目录…）——带上原错误再抛，别把它吞掉
+        if (e?.code !== 'EEXIST') throw new Error(`占锁失败（${lockPath}）：${e?.message ?? e}`, { cause: e });
+        const st = lockState(readLock(), Date.now(), isAlive);
+        if (st === 'held') {
+          if (Date.now() >= deadline) {
+            const who = readLock();
+            throw new Error(
+              `等锁超时（${Math.round(waitMs / 1000)}s）：${lockPath} 被 pid ${who?.pid ?? '?'}@${who?.host ?? '?'} 占着` + `（${who?.at ?? '时间未知'}）——等它跑完，或确认它已经死了再删掉锁文件`,
+              { cause: e },
+            );
+          }
+          await new Promise((r) => setTimeout(r, pollMs));
+          continue;
         }
-        await new Promise((r) => setTimeout(r, pollMs));
-        continue;
+        // 陈旧锁：删掉再抢一轮。删也可能被别人抢先删掉，所以下一轮重新 linkSync 而不是直接写。
+        _rm(lockPath, { force: true });
       }
-      // 陈旧锁：删掉再抢一轮。删也可能被别人抢先删掉，所以下一轮重新 openSync 而不是直接写。
-      _rm(lockPath, { force: true });
+    } finally {
+      _rm(tmp, { force: true });
     }
   }
   try {
@@ -996,8 +1009,13 @@ export async function recordLexiconDrift(P, { state, liveKnown } = {}) {
   const { mods } = engineModsFor(P);
   if (!mods) return null;
   const st = state ?? lexiconStoreState(P);
-  const live = await liveLexicon(P).catch(() => null);
-  const known = liveKnown ?? live?.known ?? null;
+  /* 2026-09-14：现场词表算不出来时**把原因留下来**。原先 `.catch(() => null)` 一吞了事，
+   * 于是 `known` 是 null、`wordDiff`/`wordDiffNote` 都是 null——"到底差的是哪些词"
+   * 这个唯一有价值的信息静默消失，而调用方也分不清"没差异"和"根本没算出来"。 */
+  const liveRes = await liveLexicon(P)
+    .then((v) => ({ v }))
+    .catch((e) => ({ err: String(e).slice(0, 200) }));
+  const known = liveKnown ?? liveRes.v?.known ?? null;
   const payload = {
     at: new Date().toISOString(),
     storePath: storePathOf(P),
@@ -1011,6 +1029,8 @@ export async function recordLexiconDrift(P, { state, liveKnown } = {}) {
     added: st.drift?.added ?? [],
     wordDiff: st.store && known ? mods.store.diffWordSets(st.store.data.known, known) : null,
     wordDiffNote: st.store && known ? mods.store.describeWordDiff(mods.store.diffWordSets(st.store.data.known, known)) : null,
+    /** 现场词表读不出来时的原始错误——**没算出来 ≠ 没差异**，这两个必须分得开 */
+    liveError: liveRes.err ?? null,
     refusal: st.refusal || null,
   };
   const path = join(storeDirOf(P), mods.store.LEXICON_DRIFT_FILE);
@@ -1425,6 +1445,20 @@ export function chapterNames(P) {
   }
   return r.names;
 }
+
+/**
+ * 一章的**产物目录**——同时认两种布局。实现拆到 `chapterdir.mjs`（本文件撞 1000 行门禁），
+ * 这里只转出，调用方照旧写 `SHARED.chapterDirOf(OUT_BASE, ch)`。
+ */
+export { chapterDirOf } from './chapterdir.mjs';
+
+/* ────────────────────── 章号参数 ────────────────────── */
+
+/* 2026-09-13：章号解析拆到 `chapterargs.mjs`。本文件撞了 eslint 的 `max-lines` 1000 行门禁
+ * （`skipComments`/`skipBlankLines` 都开着，注释不顶用），而仓库里上一次的结论是
+ * "prettier 会重展压缩行，拆模块是正解"——所以不靠压缩过关。
+ * 这里只转出，调用方照旧写 `SHARED.parseChapters`，不必多认一个模块名。 */
+export { parseChapters } from './chapterargs.mjs';
 
 /* ────────────────────── 清单本身 ────────────────────── */
 

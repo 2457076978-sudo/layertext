@@ -104,8 +104,8 @@ const has = (n) => argv.includes(n);
 const dry = has('--dry');
 let tiers = argv.filter((a) => /^[AMB]$/.test(a));
 if (!tiers.length) tiers = ['A'];
-let chapters = argv.filter((a) => /^\d/.test(a)).flatMap((a) => a.split(',').map(Number));
-if (!chapters.length) chapters = [7]; // 默认最难章（试运行口径：先拿最难的验证）
+/* 章号解析走共享模块（2026-09-13）：原写法 `/^\d/` + `Number` 会把 `1A` 静默变成 NaN。 */
+const chapters = SHARED.parseChapters(argv, [7]); // 默认最难章（试运行口径：先拿最难的验证）
 
 /* ────────────────────── 词库与教材档位 ────────────────────── */
 let LEX = null;
@@ -269,11 +269,16 @@ async function round1(i, t) {
   const dst = r1PathOf(t, ch);
   const pf = progressFile(t, ch);
   let done = [];
+  /** 已完成段的**正文**（2026-09-14 起随进度一起存）。旧格式的进度文件没有它。 */
+  let savedTexts = {};
   if (existsSync(pf)) {
     try {
-      done = JSON.parse(readFileSync(pf, 'utf-8')).done ?? [];
+      const j = JSON.parse(readFileSync(pf, 'utf-8'));
+      done = [...new Set(j.done ?? [])];
+      savedTexts = j.texts ?? {};
     } catch {
       done = [];
+      savedTexts = {};
     }
   }
   if (done.length === segs.length && existsSync(dst)) {
@@ -282,9 +287,21 @@ async function round1(i, t) {
   }
   mkdirSync(dirname(pf), { recursive: true });
   const system = systemPrompt(t);
-  const out = [...segs];
+  /* 2026-09-14 修复（**假交付**）：续跑必须能**还原已完成段的正文**。
+   * 旧的进度文件只记 `done: number[]`，那些段的文本从没被存下来——于是
+   * `out = [...segs]` 让它们保持**未简化的原文**，循环又因为 `done.includes(k)` 直接跳过，
+   * 最后整篇 join 落盘：初稿里前一半是原文、后一半是 AI 产物，**不报任何异常**，
+   * 还会被下游的复核/台账/发布当成正常初稿继续消费。
+   * 现在：进度文件同时记 `texts`；**旧格式（没有 texts）一律当作"没做完"重跑**——
+   * 宁可多花一次调用，也不产出夹着原文的初稿。 */
+  const out = segs.map((seg, k) => {
+    if (!done.includes(k)) return seg;
+    const t0 = savedTexts[String(k)];
+    return typeof t0 === 'string' && t0 ? t0 : seg;
+  });
+  const skip = new Set(segs.map((_, k) => k).filter((k) => done.includes(k) && typeof savedTexts[String(k)] === 'string' && savedTexts[String(k)]));
   for (let k = 0; k < segs.length; k++) {
-    if (done.includes(k)) continue;
+    if (skip.has(k)) continue;
     const srcW = wc(segs[k]);
     const prevTail = k > 0 ? out[k - 1].slice(-500) : '（本章开头）';
     const user = `前文（已简化，供语气与指代衔接参考）：\n…${prevTail}\n\n请把以下段落改写为${t.label}（原文 ${srcW} 词）：\n${segs[k].trim()}\n输出：保持 [P##] 标记开头，直接输出改写文本。`;
@@ -298,7 +315,8 @@ async function round1(i, t) {
     );
     out[k] = revised;
     done.push(k);
-    writeFileSync(pf, JSON.stringify({ done, round: 1, at: new Date().toISOString() }, null, 1), 'utf-8');
+    savedTexts[String(k)] = revised;
+    writeFileSync(pf, JSON.stringify({ done: [...new Set(done)], texts: savedTexts, round: 1, at: new Date().toISOString() }, null, 1), 'utf-8');
     process.stdout.write(`  ${ch} R1 段 ${k + 1}/${segs.length}（${srcW}→${wc(revised)}）\r`);
   }
   mkdirSync(dirname(dst), { recursive: true });
@@ -406,8 +424,14 @@ async function round2(t, i, feedbackRaw, task = null) {
   else {
     for (let k = 0; k < r1Segs.length; k++) {
       const seg = r1Segs[k];
-      const segId = seg.match(/\[P\d+\]/)?.[0] ?? '';
-      const segFindings = c.findings.filter((f) => f.level === '难度' && (f.segId === segId || f.note.includes('注释拥挤') || f.note.includes('最长句') || f.note.startsWith('归因')));
+      /* 段号**去掉方括号**再比：引擎（`adaptcheck`）给的 `segId` 是 `P03` 形态，
+       * 而 `match(/\[P\d+\]/)` 得到的是 `[P03]`。2026-09-14 之前这里直接拿带括号的去比，
+       * 于是「一句 N 处注释」这类**段级**难度 finding 永远匹配不到自己的段；
+       * 而 `注释拥挤`/`最长句`/`归因` 是**整篇级**（没有 segId），对每一段都成立——
+       * 两个错叠起来：只要全篇有密度或长句问题，第二轮就把**每一段**都标成待复写；
+       * 反之若只有句级问题，则一段都不进。 */
+      const segId = (seg.match(/\[P\d+\]/)?.[0] ?? '').replace(/[[\]]/g, '');
+      const segFindings = c.findings.filter((f) => f.level === '难度' && (f.segId === segId || !f.segId || f.note.includes('注释拥挤') || f.note.includes('最长句') || f.note.startsWith('归因')));
       if (segFindings.length) target.add(k);
       if (fb.dims.includes('词汇')) {
         const hard = [...seg.matchAll(/[A-Za-z][A-Za-z'-]*/g)].map((m) => m[0].toLowerCase()).filter((w) => !isKnownWord(w) || removedByLadder.has(w));
@@ -518,6 +542,9 @@ if (dry) {
 }
 if (!LEX) process.exit(2); // loadLexicon 失败已在上面显式退出；此行防守
 const summary = [];
+/* 2026-09-14：逐章失败原先只打一行 `✗` 就 `exit 0`——管线按退出码判断成败，
+ * 于是整本书全失败也算这一步过了。记下来，收尾非零退出。 */
+const failures = [];
 for (const tk of tiers) {
   const t = TIERS[tk];
   for (const i of chapters) {
@@ -542,8 +569,9 @@ for (const tk of tiers) {
           else
             for (let k = 0; k < c.r1Segs.length; k++) {
               const seg = c.r1Segs[k];
-              const segId = seg.match(/\[P\d+\]/)?.[0] ?? '';
-              if (c.findings.some((f) => f.level === '难度' && (f.segId === segId || f.note.includes('注释拥挤') || f.note.includes('最长句') || f.note.startsWith('归因')))) target.add(k);
+              /* 同 427 行：段号去方括号再比（引擎给 `P03`，`match` 给 `[P03]`）。 */
+              const segId = (seg.match(/\[P\d+\]/)?.[0] ?? '').replace(/[[\]]/g, '');
+              if (c.findings.some((f) => f.level === '难度' && (f.segId === segId || !f.segId || f.note.includes('注释拥挤') || f.note.includes('最长句') || f.note.startsWith('归因')))) target.add(k);
               if (fb.dims.includes('词汇')) {
                 const hard = [...seg.matchAll(/[A-Za-z][A-Za-z'-]*/g)].map((m) => m[0].toLowerCase()).filter((w) => !isKnownWord(w));
                 if (hard.length >= 2) target.add(k);
@@ -618,6 +646,7 @@ for (const tk of tiers) {
       }
     } catch (e) {
       console.error(`  ✗ ${CN[i - 1]} 失败：${String(e).slice(0, 200)}`);
+      failures.push(`${tk}/${CN[i - 1]}`);
     }
   }
 }
@@ -627,3 +656,7 @@ if (summary.length) {
 }
 const st = LEDGER.flush();
 if (st.calls) console.log(`台账：调用 ${st.calls}（成功 ${st.ok}）｜入 ${st.in}${st.cached ? `（缓存命中 ${st.cached}）` : ''}｜出 ${st.out} token —— _运行/token台账.jsonl`);
+if (failures.length) {
+  console.error(`\n✗ ${failures.length} 个层/章失败：${failures.join('、')}——本步不算成功（管线据此判断成败）`);
+  process.exit(1);
+}

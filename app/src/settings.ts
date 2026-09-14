@@ -19,7 +19,10 @@ import { filterTargets, type ClassTarget } from './bookpure.js';
 export async function loadClassGroups(): Promise<void> {
   try {
     const dir = await invoke<string>('class_groups_dir');
-    const files = (await invoke<string[]>('list_dir', { dir })).filter((f) => f.toLowerCase().endsWith('.json'));
+    /* 2026-09-14：必须显式要 `json`——后端 `list_dir` 默认只返回书稿扩展名，
+     * 于是这个 .endsWith('.json') 过滤器**恒得空数组**：classTargets 恒为空、
+     * mergedSelection() 恒 active:false，班级口径整体不生效。 */
+    const files = (await invoke<string[]>('list_dir', { dir, exts: ['json'] })).filter((f) => f.toLowerCase().endsWith('.json'));
     const targets: ClassTarget[] = [];
     const skipped: string[] = [];
     for (const f of files) {
@@ -239,9 +242,11 @@ export function showAiSettings(): void {
 
   /* 备用供应商行（failover）：名称/地址/模型/Key(空=复用主Key) */
   const fbRows = $('ai-fb-rows')!;
-  const addFbRow = (name = '', url = '', model = '', key = '') => {
+  const addFbRow = (name = '', url = '', model = '', key = '', id = '') => {
     const div = document.createElement('div');
     div.className = 'rw-row';
+    /* 稳定 id：Key 存进钥匙串时的账号名由它决定（见 state.ts 的 failover 注释）。 */
+    div.dataset.fbId = id || `fb-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
     div.innerHTML = `<input class="fb-name" value="${esc(name)}" placeholder="名称(如 智谱备用)" style="max-width:90px" />
       <input class="fb-url" value="${esc(url)}" placeholder="API 地址 /v1" />
       <input class="fb-model" value="${esc(model)}" placeholder="模型名" style="max-width:110px" />
@@ -253,6 +258,7 @@ export function showAiSettings(): void {
   const collectFb = () =>
     [...fbRows.querySelectorAll('.rw-row')]
       .map((r) => ({
+        id: (r as HTMLElement).dataset.fbId ?? '',
         name: (r.querySelector('.fb-name') as HTMLInputElement).value.trim(),
         baseUrl: (r.querySelector('.fb-url') as HTMLInputElement).value.trim().replace(/\/+$/, ''),
         model: (r.querySelector('.fb-model') as HTMLInputElement).value.trim(),
@@ -260,7 +266,7 @@ export function showAiSettings(): void {
       }))
       .filter((r) => r.baseUrl && r.model);
   $('ai-fb-add').addEventListener('click', () => addFbRow());
-  for (const f of S.appConfig.failover ?? []) addFbRow(f.name ?? '', f.baseUrl ?? '', f.model ?? '');
+  for (const f of S.appConfig.failover ?? []) addFbRow(f.name ?? '', f.baseUrl ?? '', f.model ?? '', '', f.id ?? '');
 
   void (async () => {
     await loadConfig();
@@ -338,7 +344,7 @@ export function showAiSettings(): void {
       S.appConfig.inPlaceEdit = ($('ai-inplace') as HTMLInputElement).checked;
       S.appConfig.lowThinking = ($('ai-lowthink') as HTMLInputElement).checked;
       const fbs = collectFb();
-      S.appConfig.failover = fbs.length ? fbs.map((f) => ({ name: f.name, baseUrl: f.baseUrl, model: f.model })) : undefined;
+      S.appConfig.failover = fbs.length ? fbs.map((f) => ({ id: f.id, name: f.name, baseUrl: f.baseUrl, model: f.model })) : undefined;
       /* 辅助模型（可选）：关着也把地址/模型留着——下次再开不用重填 */
       const auxOn = ($('aux-on') as HTMLInputElement).checked;
       S.appConfig.aux = {
@@ -351,8 +357,9 @@ export function showAiSettings(): void {
       if (k) await invoke('save_api_key', { key: k });
       const auxKey = ($('aux-key') as HTMLInputElement).value.trim();
       if (auxKey) await invoke('save_api_key', { key: auxKey, account: 'aux' });
-      for (let i = 0; i < fbs.length; i++) {
-        if (fbs[i].key) await invoke('save_api_key', { key: fbs[i].key, account: 'fb' + i });
+      /* 账号用**稳定 id**（`fb:<id>`），不用行下标——删一行不会让剩下的行串到别人的 Key。 */
+      for (const f of fbs) {
+        if (f.key) await invoke('save_api_key', { key: f.key, account: `fb:${f.id}` });
       }
       reloadPrompts();
       const auxNote = !auxOn ? '' : `；辅助模型已启用（${S.appConfig.aux.model}，只跑 ${AUX_MAX_WORDS} 词以内的映射类小活）`;

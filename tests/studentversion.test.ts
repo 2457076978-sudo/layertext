@@ -142,12 +142,17 @@ test('摘要逐项报出动了什么（不静默丢东西）', () => {
   assert.equal(r.summary.includes(String(r.removed.markers)), true);
 });
 
-test('★ 真项目第一章的产物：跑一遍，给出的学生版干净且可发布', () => {
-  /* 真书稿路径从环境变量取（`LAYERTEXT_AF_DIR=<书根>`），**取不到就跳过**——
-     公开仓库里不写作者本机的绝对路径（本仓 source-available，会推到 GitHub），
-     同时这条用例在有真产物的机器上仍然跑得动。 */
-  const p = process.env.LAYERTEXT_AF_DIR ? `${process.env.LAYERTEXT_AF_DIR}/调适工作区/重制三版/第一章/原文_A层85_2026-09-10.md` : '';
-  if (!p || !existsSync(p)) return; // 换机器/没设变量时跳过，而不是假装通过
+test('★ 真项目第一章的产物：跑一遍，给出的学生版干净且可发布', (t) => {
+  /* 2026-09-14：原先写死 `/book/调适工作区/重制三版/…`——一个**谁都没有的路径**（连本机都没有），
+   * 再靠 `if (!existsSync(p)) return;` 当"跳过"。可是 node:test 把"用例函数正常返回"
+   * 记为 **pass**，于是这条 ★ 守卫在任何机器上都**没跑过**，却一直显示为绿；
+   * 注释写的"跳过而不是假装通过"与行为恰好相反。
+   * 现在按 AGENTS.md 的既定口径从 `LAYERTEXT_AF_DIR` 取（= 真项目的调适工作区），
+   * 取不到就 `t.skip()`——**跳过要说出口**，别混在通过里。同仓正例：`atomicwrite.test.ts`。 */
+  const dir = process.env.LAYERTEXT_AF_DIR;
+  if (!dir) return t.skip('未设 LAYERTEXT_AF_DIR（真项目调适工作区不在本机）——本条跳过，不算通过');
+  const p = join(dir, '重制三版', '第一章', '原文_A层85_2026-09-10.md');
+  if (!existsSync(p)) return t.skip(`LAYERTEXT_AF_DIR 下没有 ${p}——本条跳过，不算通过`);
   const md = readFileSync(p, 'utf-8');
   const r = studentVersionOf(md, { title: 'Animal Farm · Chapter One' });
   assert.equal(isPublishable(r), true, `真产物应当能出学生版：${r.blockers.join('；')}`);

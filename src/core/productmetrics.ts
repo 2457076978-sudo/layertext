@@ -26,6 +26,9 @@
  */
 
 import type { DecisionEvent } from './decision.js';
+/* 事件序与引用的**唯一实现**在 `decision.ts`（原先这里和 `teacherexperiment.ts` 各写一份，
+ * 两边注释都写着"逐字一致"——注释拦不住漂移，而它们是撤销率/批量回滚的分母口径）。 */
+import { eventRefOf as refOf, eventTimeOf as timeOf, isBatchDecision as isBatch, orderedByTime as ordered } from './decision.js';
 
 export const SESSION_OPEN = 'session-open';
 /** 前多少次算"开头"（报告点名的 10 次） */
@@ -56,13 +59,7 @@ export interface ProductMetrics {
 
 const isUndo = (e: DecisionEvent): boolean => e.decision === 'undo';
 const isFailure = (e: DecisionEvent): boolean => e.decision === 'rejected';
-const isBatch = (e: DecisionEvent): boolean => /^批量/.test(e.reason ?? '');
-
-const timeOf = (e: DecisionEvent): number => Date.parse(e.timestamp);
-
-/** 按时间排好的事件（同刻按原顺序，保证稳定） */
-const ordered = (events: DecisionEvent[]): DecisionEvent[] =>
-  events.map((e, i) => ({ e, i })).sort((a, b) => timeOf(a.e) - timeOf(b.e) || a.i - b.i).map((x) => x.e);
+/* `isBatch` / `timeOf` / `ordered` / `refOf` 已收进 `decision.ts`（见文件顶部导入注释）。 */
 
 export function productMetrics(events: DecisionEvent[]): ProductMetrics {
   const evs = ordered(events);
@@ -73,16 +70,19 @@ export function productMetrics(events: DecisionEvent[]): ProductMetrics {
   const failures = evs.filter(isFailure).length;
 
   const firstAccept = evs.find((e) => e.decision === 'accept');
-  const timeToFirstAdoptMs =
-    opened && firstAccept ? Math.max(0, timeOf(firstAccept) - timeOf(opened)) : null;
+  const timeToFirstAdoptMs = opened && firstAccept ? Math.max(0, timeOf(firstAccept) - timeOf(opened)) : null;
 
   // 撤销率的分母用"终态决定数"：被撤销的也是决定（只是作废了）
   const undoRate = decisions.length ? undoCount / decisions.length : 0;
 
   const batchAccepts = decisions.filter((e) => e.decision === 'accept' && isBatch(e));
   const accepts = decisions.filter((e) => e.decision === 'accept');
-  const undoneRefs = new Set(evs.filter(isUndo).map((e) => e.undoOf).filter(Boolean) as string[]);
-  const refOf = (e: DecisionEvent): string => `${e.itemId}@${e.timestamp}`;
+  const undoneRefs = new Set(
+    evs
+      .filter(isUndo)
+      .map((e) => e.undoOf)
+      .filter(Boolean) as string[],
+  );
   const rolledBack = batchAccepts.filter((e) => undoneRefs.has(refOf(e))).length;
 
   // 疲劳信号：把决定按时间切成前 N 次与之后，比撤销率
@@ -102,7 +102,7 @@ export function productMetrics(events: DecisionEvent[]): ProductMetrics {
   }
   notes.push(`撤销率 ${(undoRate * 100).toFixed(1)}%（${undoCount}/${decisions.length}）`);
   if (batchAccepts.length) {
-    notes.push(`批量采纳占 ${(batchShareOf(accepts, batchAccepts) * 100).toFixed(0)}%，其中被回退 ${(rolledBack / batchAccepts.length * 100).toFixed(0)}%`);
+    notes.push(`批量采纳占 ${(batchShareOf(accepts, batchAccepts) * 100).toFixed(0)}%，其中被回退 ${((rolledBack / batchAccepts.length) * 100).toFixed(0)}%`);
   } else {
     notes.push('还没有批量采纳——批量入口是否真的省了人工，目前无法回答');
   }
@@ -129,10 +129,8 @@ export function productMetrics(events: DecisionEvent[]): ProductMetrics {
   };
 }
 
-const batchShareOf = (accepts: DecisionEvent[], batch: DecisionEvent[]): number =>
-  accepts.length ? batch.length / accepts.length : 0;
-const applyFailureRateOf = (decisions: DecisionEvent[], failures: number): number =>
-  decisions.length + failures ? failures / (decisions.length + failures) : 0;
+const batchShareOf = (accepts: DecisionEvent[], batch: DecisionEvent[]): number => (accepts.length ? batch.length / accepts.length : 0);
+const applyFailureRateOf = (decisions: DecisionEvent[], failures: number): number => (decisions.length + failures ? failures / (decisions.length + failures) : 0);
 
 /** 界面写"我打开了队列"的那一条事件（只多这一个事件类型）。 */
 export function sessionOpenEvent(input: {

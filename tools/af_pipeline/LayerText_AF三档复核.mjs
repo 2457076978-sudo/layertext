@@ -11,7 +11,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { distOf, loadLexicon } from './LayerText_AF词表与词典.mjs';
+import { distOf, loadLexicon, chapterNames } from './LayerText_AF词表与词典.mjs';
 
 const P = (await import('./LayerText_AF词表与词典.mjs')).loadProject();
 const LTR = P.引擎目录;
@@ -21,29 +21,45 @@ const DATE = P.日期;
 
 const { splitChapter, extractParas, sentsOf } = await import(`${distOf(LTR)}/src/core/textpipe.js`);
 const { runQc } = await import(`${distOf(LTR)}/src/core/qc.js`);
+/* 层句长判定线只有一处口径（`adaptcheck.SENT_LEN_CHECK`），本脚本不再自己写死一个数。 */
+const { SENT_LEN_CHECK } = await import(`${distOf(LTR)}/src/core/adaptcheck.js`);
 // 词表 + 本书专名（专名不计 OOV）——2026-09-10：原先只喂词库，专名被算成生词
 const LEX = await loadLexicon(P);
 
-/** 三档：ratio=目标篇幅占比；maxLen=该层句长上限（超标即违规） */
+/** 三档：ratio=目标篇幅占比；maxLen=**该层句长判定线**（超标即违规）。
+ *  2026-09-14：判定线改用引擎的 `SENT_LEN_CHECK`（A20、M17、B14）——
+ *  这里原先写死 M=16，那是**生成目标**，不是判定线；两把尺混用会让同一句 17 词的 M 层英文
+ *  在本脚本算"超标"、在 `工序化生成`/`两轮调适`/`补注` 里算通过。 */
 const AI_TIERS = [
-  { key: 'A', tag: 'A层85', label: 'A 层（原文 85%）', ratio: 0.85, maxLen: 20 },
-  { key: 'M', tag: 'M层75', label: 'M 层（原文 75%）', ratio: 0.75, maxLen: 16 },
-  { key: 'B', tag: 'B层60', label: 'B 层（原文 60%）', ratio: 0.6, maxLen: 14 },
+  { key: 'A', tag: 'A层85', label: 'A 层（原文 85%）', ratio: 0.85, maxLen: SENT_LEN_CHECK.A ?? 20 },
+  { key: 'M', tag: 'M层75', label: 'M 层（原文 75%）', ratio: 0.75, maxLen: SENT_LEN_CHECK.M ?? 17 },
+  { key: 'B', tag: 'B层60', label: 'B 层（原文 60%）', ratio: 0.6, maxLen: SENT_LEN_CHECK.B ?? 14 },
 ];
 // ── 层级/章节过滤（2026-09-10 补）：原先这三个脚本无条件处理 A/M/B 三档全章，
 //    于是"只生成一层试跑"（如 --tier B --chapters 1）跑到「修复」必因找不到文件而崩，
 //    换一本书/换一个层级试跑直接卡死。现在三个脚本都接受 --tier / --chapters。
 const argv = process.argv.slice(2);
-const argOf = (n, d) => { const i = argv.indexOf(n); return i >= 0 ? argv[i + 1] : d; };
+const argOf = (n, d) => {
+  const i = argv.indexOf(n);
+  return i >= 0 ? argv[i + 1] : d;
+};
 const TAGS_ALL = { A: 'A层85', M: 'M层75', B: 'B层60' };
-const TAGS = (argOf('--tier', 'A,M,B')).split(',').map((x) => x.trim().toUpperCase())
-  .map((k) => TAGS_ALL[k]).filter(Boolean);
-const CN_ALL = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十'];
+const TAGS = argOf('--tier', 'A,M,B')
+  .split(',')
+  .map((x) => x.trim().toUpperCase())
+  .map((k) => TAGS_ALL[k])
+  .filter(Boolean);
+/* 2026-09-14：章名清单改从共享模块取（**不再自抄一份 `['一'…'十']`**，那写死了十章），
+ * `<= 10` 的章号过滤也跟着改成 `<= 章数`——换一本 12 章的书，`--chapters 11` 原先会被**静默丢掉**。 */
+const CN_ALL = chapterNames(P);
 /** 章号（数字，1 起）：路径与台账都按它取中文章名 */
 const CHAPTER_IDS = argOf('--chapters', '')
-  ? argOf('--chapters').split(',').map((x) => Number(x.trim())).filter((n) => n >= 1 && n <= 10)
-  : CN_ALL.slice(0, Number(P.章数 ?? 10)).map((_, i) => i + 1);
-const CH_NAME = (ci) => `第${CN_ALL[ci - 1]}章`;
+  ? argOf('--chapters')
+      .split(',')
+      .map((x) => Number(x.trim()))
+      .filter((n) => n >= 1 && n <= CN_ALL.length)
+  : CN_ALL.map((_, i) => i + 1);
+const CH_NAME = (ci) => CN_ALL[ci - 1] ?? `第${ci}章`;
 const { makeResolver } = await import(`${distOf(LTR)}/src/core/manifest.js`);
 /* ── 路径一律经清单解析（总计划阶段 3「最关键的迁移」）─────────────────────
  * 「把路径解析集中到一个 `Resolver`，**禁止业务代码拼目录**」。
@@ -54,13 +70,12 @@ const { makeResolver } = await import(`${distOf(LTR)}/src/core/manifest.js`);
  * 身份也走共享的那一个入口：两位教师并发时不再互相读到对方的 runId。 */
 /* 身份从命令行取。**刻意不复用各脚本自己的参数助手**：它们的定义位置各不相同
  * （有的还是 `args.includes` 风格），在这一段引用会在定义之前求值。 */
-const argRun = (n, d) => { const i = process.argv.indexOf(n); return i >= 0 ? process.argv[i + 1] : d; };
+const argRun = (n, d) => {
+  const i = process.argv.indexOf(n);
+  return i >= 0 ? process.argv[i + 1] : d;
+};
 const TEACHER = argRun('--teacher', process.env.LAYERTEXT_TEACHER ?? process.env.USER ?? 'unknown');
-const RUN = await (await import('./LayerText_AF词表与词典.mjs')).readRunIdentity(
-  { out: OUT_BASE, work: P.调适工作区 },
-  { teacher: TEACHER, tier: TAGS[0] },
-  { runId: argRun('--run', undefined) },
-);
+const RUN = await (await import('./LayerText_AF词表与词典.mjs')).readRunIdentity({ out: OUT_BASE, work: P.调适工作区 }, { teacher: TEACHER, tier: TAGS[0] }, { runId: argRun('--run', undefined) });
 if (RUN.warning) console.warn(`\n⚠ ${RUN.warning}`);
 /** 按层级标签取解析器（多层脚本与单层脚本共用同一种写法） */
 const RR = (tag) => makeResolver(RUN.layout, { out: OUT_BASE, work: P.调适工作区 }, { runId: RUN.runId, tier: tag, date: DATE });
@@ -71,7 +86,8 @@ const ANN_RE = /([A-Za-z][A-Za-z'-]*)（([^（）]{1,24})）/g;
 
 /** 按本层句长上限统计超标句（引擎 qc 的 over20 是硬编码 20 词，不分层） */
 function overLimit(md, maxLen) {
-  let over = 0, total = 0;
+  let over = 0,
+    total = 0;
   for (const p of extractParas(splitChapter(md).body)) {
     const isSong = p.includes('Beasts of England');
     for (const s of sentsOf(p, isSong)) {
@@ -98,13 +114,28 @@ for (const t of TIERS) {
     const qc = runQc(md, LEX, { tier: t.key, fileName: p.split('/').pop() });
     // 原文也过一遍 QC（同一词表口径）——"阅读负荷下降"要靠它对上产物
     let srcQc = null;
-    try { srcQc = runQc(src, LEX, { tier: t.key, fileName: '原文' }); } catch { /* 原文不成型就算了 */ }
+    try {
+      srcQc = runQc(src, LEX, { tier: t.key, fileName: '原文' });
+    } catch {
+      /* 原文不成型就算了 */
+    }
     const ol = overLimit(md, t.maxLen);
     rows.push({ t, ch, sw, ow, ratio: ow / sw, notes, qc, over: ol.over, sents: ol.total, maxLen: t.maxLen });
-    tot.sw += sw; tot.ow += ow; tot.notes += notes; tot.over += ol.over; tot.over20 += qc.over20;
-    tot.sents += ol.total; tot.nw += qc.newWordRate; tot.srcNw += srcQc?.newWordRate ?? 0; tot.al += qc.avgLenNarrRaw;
-    tot.ann += qc.annotated; tot.annt += qc.annotatable; tot.n += 1;
-    tot.pa += qc.passive; tot.rc += qc.relcl; tot.pp += qc.pastperf;
+    tot.sw += sw;
+    tot.ow += ow;
+    tot.notes += notes;
+    tot.over += ol.over;
+    tot.over20 += qc.over20;
+    tot.sents += ol.total;
+    tot.nw += qc.newWordRate;
+    tot.srcNw += srcQc?.newWordRate ?? 0;
+    tot.al += qc.avgLenNarrRaw;
+    tot.ann += qc.annotated;
+    tot.annt += qc.annotatable;
+    tot.n += 1;
+    tot.pa += qc.passive;
+    tot.rc += qc.relcl;
+    tot.pp += qc.pastperf;
   }
   rows.push({ tierTotal: t, tot });
 }
@@ -118,7 +149,6 @@ const { atomicWriteFileSync: writeAtomic } = await import(`${distOf(LTR)}/src/co
  * writeFileSync 的语义是「截断 → 写」，中途失败会留下**半份正文**——
  * 对教师唯一的一份稿，半份比没有更糟：没有你知道丢了，半份看起来像改坏了，
  * 而它其实已经被毁掉了。rename 在同一文件系统内是原子的：要么旧内容、要么新内容。 */
-
 
 const L = [];
 L.push('# AF 三档重制（85/75/60）· 汇总报告（复核版）', '');
@@ -147,11 +177,15 @@ L.push('|---|---|---|---|---|---|---|---|---|---|---|---|---|');
 for (const r of rows) {
   if (r.tierTotal) {
     const { tierTotal: t, tot } = r;
-    L.push(`| **${t.key}** | **合计** | **${tot.sw}** | **${tot.ow}** | **${((tot.ow / tot.sw) * 100).toFixed(1)}%** | **${Math.round(t.ratio * 100)}%** | **${((tot.nw / (tot.n || 1)) * 100).toFixed(1)}%** | **${(tot.al / (tot.n || 1)).toFixed(1)}** | **${tot.pa}/${tot.rc}/${tot.pp}** | **${tot.over}** | **${tot.over20}** | **${((tot.over / tot.sents) * 100).toFixed(1)}%** | **${tot.notes}** | **${tot.ann}/${tot.annt} = ${((tot.ann / (tot.annt || 1)) * 100).toFixed(0)}%** |`);
+    L.push(
+      `| **${t.key}** | **合计** | **${tot.sw}** | **${tot.ow}** | **${((tot.ow / tot.sw) * 100).toFixed(1)}%** | **${Math.round(t.ratio * 100)}%** | **${((tot.nw / (tot.n || 1)) * 100).toFixed(1)}%** | **${(tot.al / (tot.n || 1)).toFixed(1)}** | **${tot.pa}/${tot.rc}/${tot.pp}** | **${tot.over}** | **${tot.over20}** | **${((tot.over / tot.sents) * 100).toFixed(1)}%** | **${tot.notes}** | **${tot.ann}/${tot.annt} = ${((tot.ann / (tot.annt || 1)) * 100).toFixed(0)}%** |`,
+    );
     continue;
   }
   const off = Math.abs(r.ratio - r.t.ratio) > 0.12 ? ' ⚠偏' : '';
-  L.push(`| ${r.t.key} | ${r.ch} | ${r.sw} | ${r.ow} | ${(r.ratio * 100).toFixed(0)}%${off} | ${Math.round(r.t.ratio * 100)}% | ${(r.qc.newWordRate * 100).toFixed(1)}% | ${r.qc.avgLenNarrRaw.toFixed(1)} | ${r.qc.passive}/${r.qc.relcl}/${r.qc.pastperf} | ${r.over}（≤${r.maxLen}词） | ${r.qc.over20} | ${((r.over / r.sents) * 100).toFixed(1)}% | ${r.notes} | ${r.qc.annotated}/${r.qc.annotatable} = ${(r.qc.annotationCoverage * 100).toFixed(0)}%${r.qc.annotationCoverage < 0.7 ? ' ❌' : ''} |`);
+  L.push(
+    `| ${r.t.key} | ${r.ch} | ${r.sw} | ${r.ow} | ${(r.ratio * 100).toFixed(0)}%${off} | ${Math.round(r.t.ratio * 100)}% | ${(r.qc.newWordRate * 100).toFixed(1)}% | ${r.qc.avgLenNarrRaw.toFixed(1)} | ${r.qc.passive}/${r.qc.relcl}/${r.qc.pastperf} | ${r.over}（≤${r.maxLen}词） | ${r.qc.over20} | ${((r.over / r.sents) * 100).toFixed(1)}% | ${r.notes} | ${r.qc.annotated}/${r.qc.annotatable} = ${(r.qc.annotationCoverage * 100).toFixed(0)}%${r.qc.annotationCoverage < 0.7 ? ' ❌' : ''} |`,
+  );
 }
 L.push('');
 L.push('口径说明：');
@@ -187,9 +221,7 @@ const HARD_FLOOR = 0.7;
 const TIER_TARGET = { A: 0.85, M: 0.82, B: 0.8 };
 const chapterRows = rows.filter((r) => !r.tierTotal);
 const red = chapterRows.filter((r) => r.qc.annotationCoverage < HARD_FLOOR);
-const belowTarget = chapterRows.filter(
-  (r) => r.qc.annotationCoverage < TIER_TARGET[r.t.key] && r.qc.annotationCoverage >= HARD_FLOOR,
-);
+const belowTarget = chapterRows.filter((r) => r.qc.annotationCoverage < TIER_TARGET[r.t.key] && r.qc.annotationCoverage >= HARD_FLOOR);
 console.log('\n════ 加注覆盖率闸门 ════');
 for (const r of chapterRows) {
   const cov = r.qc.annotationCoverage;

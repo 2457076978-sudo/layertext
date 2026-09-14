@@ -141,6 +141,24 @@ export function cardGlossWords(card: string): Set<string> {
   return gloss;
 }
 
+/** 词/短语在文本里**整词**出现（边界匹配，不是子串）。
+ *
+ *  2026-09-13：`qc` 的专名一致性原用 `text.includes(w)` / `cardText.includes(w)`——
+ *  正文里出现 `BoxerCode` 时，检查表里的专名 `Box` 会被判成"正文有、卡里也有"而假通过
+ *  （反向也成立：`Box` 在正文、卡里只有 `BoxerCode`，本该报不一致却报一致）。
+ *  专名可以带空格（`Animal Farm`）或连字符（`Boxer-Code`），所以收尾不能用 `\b`
+ *  （`Mr.` 这类结尾非字母的会漏），改用"两侧不是字母数字"的写法。
+ *  **大小写仍敏感**——原口径就是敏感的，这里只修子串→整词，不顺手改别的语义。
+ *  **不做词形归一**（2026-09-14 记）：卡里写 `Boxers`、检查表写 `Boxer` 时不再算命中
+ *  （`Boxer's` 仍命中，因为撇号是边界）。这是收紧口径的**已知代价**：卡上用了复数形
+ *  会在 ⑧专名一致性 里由"一致"翻成"不一致"。要消掉它得把 `hit()` 的词形还原并进来，
+ *  那会让"整词"退化成"词形家族命中"，把刚修掉的假通过又请回来——所以先留在这里记账。 */
+export function containsWord(haystack: string, word: string): boolean {
+  if (!word) return false;
+  const esc = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(?:^|[^A-Za-z0-9])${esc}(?![A-Za-z0-9])`).test(haystack);
+}
+
 /** 待定词 token 命中（缩窄后缀集，保守口径） */
 export function pendHit(tok: string, pending: Set<string>): boolean {
   const c = [tok];

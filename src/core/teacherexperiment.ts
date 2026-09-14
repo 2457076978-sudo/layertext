@@ -34,7 +34,7 @@
  *     因此可以离线、确定性地测试。
  */
 
-import { eventIdOf, type DecisionEvent, type DecisionKind } from './decision.js';
+import { eventIdOf, eventRefOf as refOf, eventTimeOf as timeOf, isBatchDecision as isBatch, orderedByTime as ordered, type DecisionEvent, type DecisionKind } from './decision.js';
 import { contentHash } from './manifest.js';
 import { EARLY_OPS, SESSION_OPEN } from './productmetrics.js';
 import { assertNoComposite, snapshotChapterOf, type SnapshotChapter } from './experimentrun.js';
@@ -159,20 +159,9 @@ const isAction = (e: DecisionEvent): boolean => !isMarker(e);
 /** 终态决定：落定在稿件上的四种。`rejected`（系统没做成）不算——卡片还在，事情没办成。 */
 const TERMINAL: ReadonlySet<string> = new Set(['accept', 'edit', 'reject', 'false-positive']);
 const isTerminal = (e: DecisionEvent): boolean => !isUndo(e) && TERMINAL.has(e.decision);
-const isBatch = (e: DecisionEvent): boolean => /^批量/.test(e.reason ?? '');
-
-const timeOf = (e: DecisionEvent): number => Date.parse(e.timestamp);
-const refOf = (e: DecisionEvent): string => `${e.itemId}@${e.timestamp}`;
 
 /** 原始事件行 ID：事件自己带了就用它，没带就按 `decision.ts` 的同一条规则现算（不许丢追溯） */
 const rawIdOf = (e: DecisionEvent): string => e.eventId ?? eventIdOf({ itemId: e.itemId, decision: e.decision, teacherId: e.teacherId, timestamp: e.timestamp });
-
-/** 按时间排好的事件（同刻按原顺序）。日志是 append-only，读出来可能乱序，所以不许信传入顺序。 */
-const ordered = (events: DecisionEvent[]): DecisionEvent[] =>
-  events
-    .map((e, i) => ({ e, i }))
-    .sort((a, b) => timeOf(a.e) - timeOf(b.e) || a.i - b.i)
-    .map((x) => x.e);
 
 /** 打开队列那条事件里记的待办条数；没记就是 null（**不是 0**——0 条待办和"没记"是两件事） */
 export function pendingFromOpen(e: DecisionEvent): number | null {

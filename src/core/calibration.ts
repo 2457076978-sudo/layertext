@@ -36,6 +36,7 @@
  * 本模块只做纯逻辑：造事件、解析、折叠、在**当前**文本里重新定位。它从不改正文、不写词库。
  */
 
+import { contentHash } from './manifest.js';
 import { splitChapter, extractParas, sentsOf, tokenizeTxt } from './textpipe.js';
 
 export const CALIBRATION_SCHEMA_VERSION = 1;
@@ -96,18 +97,12 @@ export interface MakeCalibrationInput extends Omit<CalibrationEvent, 'schemaVers
   id?: string;
 }
 
-/** 稳定 ID：FNV 双散列（与 `decision.ts: eventIdOf` 同款，避免再引一套哈希）。 */
+/** 稳定 ID：FNV 双散列，**哈希本体只从 `manifest.ts` 取一份**
+ *  （2026-09-14：原先这里手抄了一遍循环——全仓这样的拷贝一度有 5 份，
+ *  AGENTS.md 第四节的"同一条判定只许有一份实现"说的就是这种）。 */
 export function calibrationIdOf(input: { teacher: string; ts: string; level: string; anchor: string; type: string; action: string }): string {
   const s = [input.teacher, input.ts, input.level, input.anchor.toLowerCase(), input.type, input.action].join('\u0001');
-  let h1 = 0x811c9dc5;
-  let h2 = 0x01000193;
-  for (let i = 0; i < s.length; i++) {
-    const c = s.charCodeAt(i);
-    h1 = Math.imul(h1 ^ c, 0x01000193) >>> 0;
-    h2 = Math.imul(h2 ^ (c + i), 0x85ebca6b) >>> 0;
-  }
-  h2 = Math.imul(h2 ^ (h1 >>> 13), 0xc2b2ae35) >>> 0;
-  return `cal-${(h1.toString(16).padStart(8, '0') + h2.toString(16).padStart(8, '0')).slice(0, 12)}`;
+  return `cal-${contentHash(s).slice(0, 12)}`;
 }
 
 /** 造一条校准事件。时间戳只在缺省时生成（测试可传固定值，保证确定性）。 */

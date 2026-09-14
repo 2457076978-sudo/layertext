@@ -95,7 +95,7 @@ for (const tier of TIERS) {
     fromCanonRow(r, (w, para) => {
       const key = r.chapter;
       if (!products.has(key)) {
-        const f = join(OUT_BASE, r.chapter, `原文_${tier}_${DATE}_工序化.md`);
+        const f = join(SHARED.chapterDirOf(OUT_BASE, r.chapter), `原文_${tier}_${DATE}_工序化.md`); // 章目录走共享解析：run 布局下在 _运行/<runId>/正文/<章>/
         products.set(key, existsSync(f) ? readFileSync(f, 'utf-8') : '');
       }
       return sentenceOf(products.get(key), w, para);
@@ -109,7 +109,7 @@ for (const tier of TIERS) {
   const engineItems = (risk?.队列 ?? [])
     .map((r) =>
       fromRiskItem(r, (w, para) => {
-        const f = join(OUT_BASE, r.chapter, `原文_${tier}_${DATE}_工序化.md`);
+        const f = join(SHARED.chapterDirOf(OUT_BASE, r.chapter), `原文_${tier}_${DATE}_工序化.md`); // 章目录走共享解析：run 布局下在 _运行/<runId>/正文/<章>/
         if (!existsSync(f)) return '';
         return sentenceOf(readFileSync(f, 'utf-8'), w, para);
       }),

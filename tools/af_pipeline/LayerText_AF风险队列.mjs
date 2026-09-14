@@ -46,7 +46,10 @@ const TIER_INFO = {
 };
 
 const argv = process.argv.slice(2);
-const arg = (n, d) => { const i = argv.indexOf(n); return i >= 0 ? argv[i + 1] : d; };
+const arg = (n, d) => {
+  const i = argv.indexOf(n);
+  return i >= 0 ? argv[i + 1] : d;
+};
 const has = (n) => argv.includes(n);
 const SUFFIX = arg('--out', '') ? '_' + arg('--out') : '';
 const BUDGET = Number(arg('--budget', '60'));
@@ -62,23 +65,22 @@ const TEACHER = arg('--teacher', process.env.LAYERTEXT_TEACHER ?? process.env.US
 /* 找运行身份只需要**命令行的** `--tier`（用来定位分片指针），不需要解析后的 `TIERS`——
  * 否则 `RUN` 依赖 `TIERS`、`TIERS` 又依赖 `RUN`，绕成一个环。
  * 命令行没给层时传 `undefined`：`readRunIdentity` 会退回"最近一次"并自行核对。 */
-const RUN = await SHARED.readRunIdentity(
-  { out: OUT_BASE, work: P.调适工作区 },
-  { teacher: TEACHER, tier: arg('--tier', undefined) || undefined },
-  { runId: arg('--run', undefined) },
-);
+const RUN = await SHARED.readRunIdentity({ out: OUT_BASE, work: P.调适工作区 }, { teacher: TEACHER, tier: arg('--tier', undefined) || undefined }, { runId: arg('--run', undefined) });
 if (RUN.warning) console.warn(`\n⚠ ${RUN.warning}`);
 console.log(`运行身份：${RUN.source}｜${RUN.teacher}｜${RUN.runId || '（无）'}`);
 
 const SCOPE = SHARED.scopeOf(P, { tier: arg('--tier', undefined), chapters: arg('--chapters', undefined), runId: RUN.runId });
 const TIERS = SCOPE.tiers.map((t) => t.replace(/^([AMB])层.*$/, '$1')).filter((t) => TIER_INFO[t]);
-const CH_IDS = SCOPE.chapters.length
-  ? SCOPE.chapters
-  : CN.slice(0, Number(P.章数 ?? 10)).map((_, i) => i + 1);
+const CH_IDS = SCOPE.chapters.length ? SCOPE.chapters : CN.slice(0, Number(P.章数 ?? 10)).map((_, i) => i + 1);
 
-if (!TIERS.length) { console.error('✗ --tier 只能是 A / M / B 的组合'); process.exit(2); }
+if (!TIERS.length) {
+  console.error('✗ --tier 只能是 A / M / B 的组合');
+  process.exit(2);
+}
 
 const { gateSegment, GATE_RULES } = await import(`${distOf(REPO)}/src/core/segmentgate.js`);
+/* 判定线用引擎的检查线（A20、M17、B14），不用 `info.maxLen`（那是生成目标 M16）。见 `会话改写.mjs` 同处注释。 */
+const { SENT_LEN_CHECK } = await import(`${distOf(REPO)}/src/core/adaptcheck.js`);
 const { buildRiskQueue, oneHourPlan } = await import(`${distOf(REPO)}/src/core/riskqueue.js`);
 const { parsePlotBaseline, plotLine } = await import(`${distOf(REPO)}/src/core/plotweight.js`);
 const { actionOf } = await import(`${distOf(REPO)}/src/core/riskaction.js`);
@@ -128,8 +130,14 @@ for (const tier of TIERS) {
     const ch = CN[ci - 1];
     const srcPath = join(SRC_BASE, ch, '原文_规范化.md');
     const outPath = makeResolver(RUN.layout, { out: OUT_BASE, work: P.调适工作区 }, { runId: RUN.runId, tier: tag, date: DATE, suffix: SUFFIX }).any('正文', { chapter: ch });
-    if (!existsSync(srcPath)) { unreadable.push(`${ch}：缺规范化原文`); continue; }
-    if (!existsSync(outPath)) { unreadable.push(`${ch}：缺 ${tag} 产物（先去生成）`); continue; }
+    if (!existsSync(srcPath)) {
+      unreadable.push(`${ch}：缺规范化原文`);
+      continue;
+    }
+    if (!existsSync(outPath)) {
+      unreadable.push(`${ch}：缺 ${tag} 产物（先去生成）`);
+      continue;
+    }
     const srcSegs = segmentList(readFileSync(srcPath, 'utf-8'));
     const outMd = readFileSync(outPath, 'utf-8');
     const outById = new Map(segmentList(outMd).map((s) => [s.id, s.text]));
@@ -142,20 +150,28 @@ for (const tier of TIERS) {
     for (const issue of ast.issues) {
       const ruleId = AST_RULE[issue.kind];
       if (!ruleId) continue;
-      const segIdx = Math.max(0, ast.segments.findIndex((x) => x.id === issue.segId));
+      const segIdx = Math.max(
+        0,
+        ast.segments.findIndex((x) => x.id === issue.segId),
+      );
       allSegments.push({
-        book: P.书名, tier, chapter: ch, segIndex: segIdx,
+        book: P.书名,
+        tier,
+        chapter: ch,
+        segIndex: segIdx,
         source: ast.segments[segIdx]?.raw ?? '',
         rewritten: ast.segments[segIdx]?.raw ?? '',
-        problems: [{
-          ruleId,
-          category: GATE_RULES[ruleId].category,
-          severity: GATE_RULES[ruleId].severity,
-          weight: GATE_RULES[ruleId].weight,
-          risk: Number((GATE_RULES[ruleId].weight * GATE_RULES[ruleId].probability).toFixed(2)),
-          message: issue.message,
-          detail: { ...(issue.detail ?? {}), kind: issue.kind, needsHuman: issue.needsHuman },
-        }],
+        problems: [
+          {
+            ruleId,
+            category: GATE_RULES[ruleId].category,
+            severity: GATE_RULES[ruleId].severity,
+            weight: GATE_RULES[ruleId].weight,
+            risk: Number((GATE_RULES[ruleId].weight * GATE_RULES[ruleId].probability).toFixed(2)),
+            message: issue.message,
+            detail: { ...(issue.detail ?? {}), kind: issue.kind, needsHuman: issue.needsHuman },
+          },
+        ],
       });
     }
     srcSegs.forEach((s, k) => {
@@ -167,11 +183,16 @@ for (const tier of TIERS) {
       }
       const target = Math.round(wc(s.text) * info.ratio);
       const oov = [...new Set([...oovOf(s.text), ...oovOf(rewritten)])];
-      const v = gateSegment({ text: rewritten, source: s.text, target, maxLen: info.maxLen, oov, dict: DICT });
+      const v = gateSegment({ text: rewritten, source: s.text, target, maxLen: SENT_LEN_CHECK[tier] ?? info.maxLen, oov, dict: DICT });
       chapterArtifacts[ch] = outPath;
       allSegments.push({
-        book: P.书名, tier, chapter: ch, segIndex: k,
-        source: s.text, rewritten, problems: v.problems,
+        book: P.书名,
+        tier,
+        chapter: ch,
+        segIndex: k,
+        source: s.text,
+        rewritten,
+        problems: v.problems,
       });
     });
   }
@@ -200,7 +221,9 @@ const lines = [
   `# ${P.书名} · 段级风险队列`,
   '',
   `生成：${new Date().toLocaleString('zh-CN')}｜层级：${TIERS.map((t) => TIER_INFO[t].label).join(' / ')}｜章节：${CH_IDS.join(',')}`,
-  `排序口径：**风险 = 概率 × 后果**（${Object.values(GATE_RULES).map((r) => `${r.label} ${(r.weight * r.probability).toFixed(1)}`).join('，')}）`,
+  `排序口径：**风险 = 概率 × 后果**（${Object.values(GATE_RULES)
+    .map((r) => `${r.label} ${(r.weight * r.probability).toFixed(1)}`)
+    .join('，')}）`,
   '',
   '> 「级别」是**规则级别**（约束"生成时能不能算完成"）；本层权威的"没做完"信号是上面那张未完成段落表。',
   '> 拿旧流水线的产物用新门禁重扫时，长度类规则会成片命中——那是**待判断**的偏差，不是废弃。',
@@ -208,7 +231,9 @@ const lines = [
   '## 先看这里',
   '',
   `- 队列共 **${queue.summary.total}** 条（其中不可完成 ${queue.summary.blockers} 条），估时 **${queue.summary.estimatedMinutes} 分钟**`,
-  `- 分类：${Object.entries(queue.summary.byCategory).map(([k, v]) => `${k} ${v}`).join('，')}`,
+  `- 分类：${Object.entries(queue.summary.byCategory)
+    .map(([k, v]) => `${k} ${v}`)
+    .join('，')}`,
   `- ${plan.advice}`,
   '',
   '### 一小时最短路径',
@@ -246,7 +271,7 @@ for (const cat of CAT_ORDER) {
       `- 原文：${it.sourceSentence || '（未定位到原句）'}`,
       `- 改写：${it.rewrittenSentence || '（改写里找不到）'}`,
       `- 上下文：上「${it.context.prev || '—'}」／下「${it.context.next || '—'}」`,
-      `- ${plotLine(it.plot)}`,   // 情节先验：给等级也给依据（只影响排序，不拦任何东西）
+      `- ${plotLine(it.plot)}`, // 情节先验：给等级也给依据（只影响排序，不拦任何东西）
       // 决策栏的文案**跟着规则走**（报告 v4_方向第 2 条：十条规则不能共用三个统一键）
       `- 决策：☐ ${actionOf(it.ruleId).label}  ☐ 退回重写  ☐ 标记误报    理由：________________`,
       `  （${actionOf(it.ruleId).effect}）`,
@@ -261,12 +286,16 @@ if (unreadable.length) {
 
 /* 人读的 Markdown 报告也走解析器。它是**另一个产物**（队列 JSON 在 `_运行/`，报告在产物根），
  * 所以按 `汇总报告` 取；带 `--out` 后缀时同样带上，否则两次试跑会互相覆盖。 */
-const mdPath = makeResolver(RUN.layout, { out: OUT_BASE, work: P.调适工作区 }, {
-  runId: RUN.runId,
-  tier: TAGS[TIERS[0]] ?? TIERS[0],
-  date: DATE,
-  suffix: SUFFIX,
-}).any('汇总报告', { name: `风险队列_${TAGS[TIERS[0]]}${TIERS.length > 1 ? '_等' : ''}` });
+const mdPath = makeResolver(
+  RUN.layout,
+  { out: OUT_BASE, work: P.调适工作区 },
+  {
+    runId: RUN.runId,
+    tier: TAGS[TIERS[0]] ?? TIERS[0],
+    date: DATE,
+    suffix: SUFFIX,
+  },
+).any('汇总报告', { name: `风险队列_${TAGS[TIERS[0]]}${TIERS.length > 1 ? '_等' : ''}` });
 mkdirSync(dirOfPath(mdPath), { recursive: true });
 writeFileSync(mdPath, lines.join('\n'), 'utf-8');
 

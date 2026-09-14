@@ -9,10 +9,32 @@
  */
 
 import { invoke } from '@tauri-apps/api/core';
+import { S } from './state.js';
 import { WORD_TYPES, SENT_TYPES, GATES, typeLabel, type FileSession, type Mark } from './types.js';
 import { planRevisionTask, revisionTaskPreview } from '../../src/core/adaptcheck.js';
 
 const SAVE_DEBOUNCE_MS = 600;
+
+/**
+ * 失败出口的**兜底播报器**（2026-09-14 加）。
+ *
+ * 为什么不直接 `import { setStatus } from './uikit.js'`：本模块在 **node 可测路径**上
+ * （phrase_mark / review_dom 两组用例直接 import 它），而 uikit.js 顶层就有
+ * `window.addEventListener(...)`——一引进来两组用例在收集期就 ReferenceError，
+ * 测试总数从 963 掉到 948。走**注入**（与 ai.ts 的 setAiUi 同一个套路）。
+ *
+ * 为什么需要它：全仓 15 处 `scheduleSave(s, () => undefined)` 把 onStatus 的出口**掐掉了**，
+ * 而它是标记落盘唯一的失败出口——写 _审校标记.json 失败会完全无声，教师继续标记、
+ * 关掉 App 整章标记全丢。dirty/saved 是外观，可以听调用方的；error 必须自己也能说出口。
+ */
+let reportSaveError: ((msg: string) => void) | null = null;
+export function setMarkSaveErrorReporter(fn: (msg: string) => void): void {
+  reportSaveError = fn;
+}
+const scream = (msg: string, onStatus: (s: 'dirty' | 'saved' | 'error', detail?: string) => void): void => {
+  onStatus('error', msg);
+  reportSaveError?.(msg);
+};
 
 /** 侧栏渲染完之后的回调（补注面板拿它把「待确认 N 条」横幅挂上去）。
  *  用注册钩子而不是直接 import：`annotate → reader → review`，直接互相 import 就成环了。 */
@@ -36,7 +58,9 @@ export function scheduleSave(session: FileSession, onStatus: (s: 'dirty' | 'save
       session.dirty = false;
       onStatus('saved', session.markPath);
     } catch (e) {
-      onStatus('error', String(e));
+      /* 2026-09-14：**失败出口不能被调用方掐掉**（15 处传的是 `() => undefined`）。
+       * appswallow.test.ts 按 catch 的词法形状判定，看不到"出口被调用点掐掉"这一层。 */
+      scream(`标记保存失败：${String(e)}——**这一章的标记还没落盘**，先别关窗口`, onStatus);
     }
   }, SAVE_DEBOUNCE_MS);
 }

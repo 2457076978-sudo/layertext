@@ -55,7 +55,13 @@ export const NUM_WORDS: Record<string, string> = {
   twice: '2',
 };
 
-/** 常见句首词（小写）——句首大写不算专名，避免整章误报 */
+/** 常见句首词（小写）——句首大写不算专名，避免整章误报。
+ *
+ *  **只收单词**：唯一的用点是 `signalsOf` 里的 `SENT_STARTERS.has(lower)`，而 `lower`
+ *  来自单 token 的正则匹配（字母开头，后接字母/撇号/连字符）——正则不跨空格，多词短语永远命不中。
+ *  2026-09-13 删掉了 `'one day'` / `'at last'` 两条死条目：它们从加进来那天起就没生效过，
+ *  而且本来也不需要——`one` 与 `at` 已经在表里，句首的 One/At 早被它们挡住了。
+ *  （要支持短语，得改成先剥句首短语再取词，为两条冗余条目不值得。） */
 const SENT_STARTERS = new Set([
   'the',
   'a',
@@ -169,9 +175,7 @@ const SENT_STARTERS = new Set([
   'listen',
   'said',
   'asked',
-  'one day',
   'suddenly',
-  'at last',
 ]);
 
 /** 句子指纹：小写、去标点、压空白——完全相同句的对齐锚点 */

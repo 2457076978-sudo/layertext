@@ -18,7 +18,7 @@
  */
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { distOf, loadProject, makeKnownChecker, loadKbGloss } from './LayerText_AF词表与词典.mjs';
+import { distOf, loadProject, makeKnownChecker, loadKbGloss, chapterNames } from './LayerText_AF词表与词典.mjs';
 
 const P = loadProject();
 const PROPER = P.PROPER;
@@ -31,10 +31,16 @@ const DRY = process.argv.includes('--dry');
 //    于是"只生成一层试跑"（如 --tier B --chapters 1）跑到「修复」必因找不到文件而崩，
 //    换一本书/换一个层级试跑直接卡死。现在三个脚本都接受 --tier / --chapters。
 const argv = process.argv.slice(2);
-const argOf = (n, d) => { const i = argv.indexOf(n); return i >= 0 ? argv[i + 1] : d; };
+const argOf = (n, d) => {
+  const i = argv.indexOf(n);
+  return i >= 0 ? argv[i + 1] : d;
+};
 const TAGS_ALL = { A: 'A层85', M: 'M层75', B: 'B层60' };
-const TAGS = (argOf('--tier', 'A,M,B')).split(',').map((x) => x.trim().toUpperCase())
-  .map((k) => TAGS_ALL[k]).filter(Boolean);
+const TAGS = argOf('--tier', 'A,M,B')
+  .split(',')
+  .map((x) => x.trim().toUpperCase())
+  .map((k) => TAGS_ALL[k])
+  .filter(Boolean);
 const { makeResolver } = await import(`${distOf(P.引擎目录)}/src/core/manifest.js`);
 /* ── 路径一律经清单解析（总计划阶段 3「最关键的迁移」）─────────────────────
  * 「把路径解析集中到一个 `Resolver`，**禁止业务代码拼目录**」。
@@ -45,23 +51,26 @@ const { makeResolver } = await import(`${distOf(P.引擎目录)}/src/core/manife
  * 身份也走共享的那一个入口：两位教师并发时不再互相读到对方的 runId。 */
 /* 身份从命令行取。**刻意不复用各脚本自己的参数助手**：它们的定义位置各不相同
  * （有的还是 `args.includes` 风格），在这一段引用会在定义之前求值。 */
-const argRun = (n, d) => { const i = process.argv.indexOf(n); return i >= 0 ? process.argv[i + 1] : d; };
+const argRun = (n, d) => {
+  const i = process.argv.indexOf(n);
+  return i >= 0 ? process.argv[i + 1] : d;
+};
 const TEACHER = argRun('--teacher', process.env.LAYERTEXT_TEACHER ?? process.env.USER ?? 'unknown');
-const RUN = await (await import('./LayerText_AF词表与词典.mjs')).readRunIdentity(
-  { out: OUT_BASE, work: P.调适工作区 },
-  { teacher: TEACHER, tier: TAGS[0] },
-  { runId: argRun('--run', undefined) },
-);
+const RUN = await (await import('./LayerText_AF词表与词典.mjs')).readRunIdentity({ out: OUT_BASE, work: P.调适工作区 }, { teacher: TEACHER, tier: TAGS[0] }, { runId: argRun('--run', undefined) });
 if (RUN.warning) console.warn(`\n⚠ ${RUN.warning}`);
 /** 按层级标签取解析器（多层脚本与单层脚本共用同一种写法） */
 const RR = (tag) => makeResolver(RUN.layout, { out: OUT_BASE, work: P.调适工作区 }, { runId: RUN.runId, tier: tag, date: DATE });
-const CN_ALL = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十'];
+/* 2026-09-14：章名清单改从共享模块取（不再自抄一份写死十章的 `['一'…'十']`），
+ * `<= 10` 的章号过滤也跟着改成 `<= 章数`。 */
+const CN_ALL = chapterNames(P);
 /** 章号（数字，1 起）：路径与台账都按它取中文章名 */
 const CHAPTER_IDS = argOf('--chapters', '')
-  ? argOf('--chapters').split(',').map((x) => Number(x.trim())).filter((n) => n >= 1 && n <= 10)
-  : CN_ALL.slice(0, Number(P.章数 ?? 10)).map((_, i) => i + 1);
-const CH_NAME = (ci) => `第${CN_ALL[ci - 1]}章`;
-
+  ? argOf('--chapters')
+      .split(',')
+      .map((x) => Number(x.trim()))
+      .filter((n) => n >= 1 && n <= CN_ALL.length)
+  : CN_ALL.map((_, i) => i + 1);
+const CH_NAME = (ci) => CN_ALL[ci - 1] ?? `第${ci}章`;
 
 // 与 QC 同一套已知判定（否则出现「我删了、引擎却还判它生词」，覆盖率两边打架）
 const isKnown = await makeKnownChecker(P);
@@ -70,10 +79,10 @@ const KB_WORDS = new Set(KB.keys());
 
 /** 教师确认过的 KB 释义修正（KB 值在原语境里明显不对的少数例外） */
 const GLOSS_OVERRIDE = new Map([
-  ['stone', '石头'],   // KB: 二十四石=重量单位 —— 本篇为 "a stone in her hoof" 字面义
-  ['hoof', '蹄子'],    // KB: 复数 hoofs/hooves —— 形态说明非释义
-  ['pure', '纯净的'],  // KB: 比较级 purer —— 形态说明非释义
-  ['empty', '空的'],   // KB: 空的，声音 —— 释义串扰
+  ['stone', '石头'], // KB: 二十四石=重量单位 —— 本篇为 "a stone in her hoof" 字面义
+  ['hoof', '蹄子'], // KB: 复数 hoofs/hooves —— 形态说明非释义
+  ['pure', '纯净的'], // KB: 比较级 purer —— 形态说明非释义
+  ['empty', '空的'], // KB: 空的，声音 —— 释义串扰
 ]);
 
 const ANN_RE = /([A-Za-z][A-Za-z'-]*)（([^（）]{1,24})）/g;
@@ -95,7 +104,6 @@ const { atomicWriteFileSync: writeAtomic } = await import(`${distOf(P.引擎目�
  * 对教师唯一的一份稿，半份比没有更糟：没有你知道丢了，半份看起来像改坏了，
  * 而它其实已经被毁掉了。rename 在同一文件系统内是原子的：要么旧内容、要么新内容。 */
 
-
 function flattenNested(md) {
   return flattenNestedAnnotations(md).md;
 }
@@ -104,11 +112,16 @@ function flattenNested(md) {
  *  按位置序号补回真标记；若该行已带真标记（`[P##] [P12] …`）则只删占位符。 */
 function fixMarkers(md) {
   const lines = md.split('\n');
-  let idx = 0, inCard = false, fixed = 0;
+  let idx = 0,
+    inCard = false,
+    fixed = 0;
   for (let i = 0; i < lines.length; i++) {
     if (/^##\s*词句卡/.test(lines[i])) inCard = true;
     if (inCard) continue;
-    if (/^\[P\d+\]\s/.test(lines[i])) { idx++; continue; }
+    if (/^\[P\d+\]\s/.test(lines[i])) {
+      idx++;
+      continue;
+    }
     const bad = lines[i].match(/^\[P#+\]\s*(.*)$/);
     if (!bad) continue;
     idx++;
@@ -122,22 +135,24 @@ function fixMarkers(md) {
 
 /* ── ① 全局统计：同词多义（先在摊平后的文本上统计，否则畸形注释会被漏算） ── */
 const stat = new Map();
-let nestedFixed = 0, markerFixed = 0;
-for (const tag of TAGS) for (const ci of CHAPTER_IDS) {
-  const ch = CH_NAME(ci);
-  const p = pOf(ch, tag);
-  const before = read(p);
-  const flat = flattenNested(before);
-  const mk = fixMarkers(flat);
-  if (flat !== before) nestedFixed++;
-  markerFixed += mk.fixed;
-  for (const m of flat.matchAll(ANN_RE)) {
-    const w = m[1].toLowerCase();
-    if (!stat.has(w)) stat.set(w, new Map());
-    const g = stat.get(w);
-    g.set(m[2], (g.get(m[2]) ?? 0) + 1);
+let nestedFixed = 0,
+  markerFixed = 0;
+for (const tag of TAGS)
+  for (const ci of CHAPTER_IDS) {
+    const ch = CH_NAME(ci);
+    const p = pOf(ch, tag);
+    const before = read(p);
+    const flat = flattenNested(before);
+    const mk = fixMarkers(flat);
+    if (flat !== before) nestedFixed++;
+    markerFixed += mk.fixed;
+    for (const m of flat.matchAll(ANN_RE)) {
+      const w = m[1].toLowerCase();
+      if (!stat.has(w)) stat.set(w, new Map());
+      const g = stat.get(w);
+      g.set(m[2], (g.get(m[2]) ?? 0) + 1);
+    }
   }
-}
 
 /* ── 决策：每个词型 → 删除 or 归一 ── */
 const removeSet = new Set();
@@ -145,10 +160,25 @@ const canonical = new Map();
 const why = new Map();
 for (const [w, glosses] of stat) {
   const total = [...glosses.values()].reduce((a, b) => a + b, 0);
-  if (PROPER.includes(w)) { removeSet.add(w); why.set(w, ['专名', total]); continue; }
-  if (KB_WORDS.has(w)) { canonical.set(w, GLOSS_OVERRIDE.get(w) ?? KB.get(w).zh); continue; }
-  if (w === 'chapter') { removeSet.add(w); why.set(w, ['标题残留', total]); continue; }
-  if (isKnown(w)) { removeSet.add(w); why.set(w, ['词表已知', total]); continue; }
+  if (PROPER.includes(w)) {
+    removeSet.add(w);
+    why.set(w, ['专名', total]);
+    continue;
+  }
+  if (KB_WORDS.has(w)) {
+    canonical.set(w, GLOSS_OVERRIDE.get(w) ?? KB.get(w).zh);
+    continue;
+  }
+  if (w === 'chapter') {
+    removeSet.add(w);
+    why.set(w, ['标题残留', total]);
+    continue;
+  }
+  if (isKnown(w)) {
+    removeSet.add(w);
+    why.set(w, ['词表已知', total]);
+    continue;
+  }
   const best = [...glosses.entries()].sort((a, b) => b[1] - a[1] || a[0].length - b[0].length)[0][0];
   canonical.set(w, best);
 }
@@ -157,11 +187,12 @@ for (const [w, glosses] of stat) {
 /** 缺空格修补：小写字母后紧跟 .!? 再接大写（排除 J.Smith 类首字母缩写）。
  *  替换串只能引用真实存在的捕获组——首版误写 '$1 $2'（只有 1 组），
  *  JS 把不存在的 $2 当字面量插入，污染 154 处，已回滚重来。 */
-const fixSpacing = (t) => t
-  .replace(/(?<=[a-z])([.!?])(?=[A-Z])/g, '$1 ')
-  .replace(/([）)])(?=[A-Za-z])/g, '$1 ')
-  .replace(/([A-Za-z])\s+（/g, '$1（')
-  .replace(/ {2,}/g, ' ');
+const fixSpacing = (t) =>
+  t
+    .replace(/(?<=[a-z])([.!?])(?=[A-Z])/g, '$1 ')
+    .replace(/([）)])(?=[A-Za-z])/g, '$1 ')
+    .replace(/([A-Za-z])\s+（/g, '$1（')
+    .replace(/ {2,}/g, ' ');
 
 /** 段首 OCR 章节名残留：覆盖 "Chapter 2 " 与 "Chapter 2: " 两种形态 */
 const stripP01 = (t) => t.replace(/^(\[P\d+\] )(?:Chapter\s+\d+\s*:?\s*)/gm, '$1');
@@ -176,8 +207,8 @@ function dropDuplicateGloss(md) {
 
 function repairProduct(md) {
   md = dropDuplicateGloss(md);
-  const flat = flattenNested(md);                       // ① 畸形嵌套注释先摊平
-  const { text: marked } = fixMarkers(flat);            // ② 字面 [P##] 补回真标记
+  const flat = flattenNested(md); // ① 畸形嵌套注释先摊平
+  const { text: marked } = fixMarkers(flat); // ② 字面 [P##] 补回真标记
   const out = marked.replace(ANN_RE, (full, word, gloss) => {
     const w = word.toLowerCase();
     if (removeSet.has(w)) return word;
@@ -189,20 +220,27 @@ function repairProduct(md) {
 
 /* ── 执行 ── */
 const changes = [];
-for (const tag of TAGS) for (const ci of CHAPTER_IDS) {
-  const ch = CH_NAME(ci);
-  const p = pOf(ch, tag);
-  const before = read(p);
-  const after = repairProduct(before);
-  if (before !== after) { changes.push({ p: `${ch}/原文_${tag}`, before, after }); if (!DRY) writeAtomic(p, after, 'utf-8'); }
-}
+for (const tag of TAGS)
+  for (const ci of CHAPTER_IDS) {
+    const ch = CH_NAME(ci);
+    const p = pOf(ch, tag);
+    const before = read(p);
+    const after = repairProduct(before);
+    if (before !== after) {
+      changes.push({ p: `${ch}/原文_${tag}`, before, after });
+      if (!DRY) writeAtomic(p, after, 'utf-8');
+    }
+  }
 for (const ci of CHAPTER_IDS) {
   const ch = CH_NAME(ci);
   const sp = join(SRC_BASE, ch, '原文_规范化.md');
   if (!existsSync(sp)) continue;
   const before = read(sp);
   const after = fixSpacing(stripP01(fixMarkers(flattenNested(before)).text));
-  if (before !== after) { changes.push({ p: `${ch}/原文_规范化`, before, after }); if (!DRY) writeAtomic(sp, after, 'utf-8'); }
+  if (before !== after) {
+    changes.push({ p: `${ch}/原文_规范化`, before, after });
+    if (!DRY) writeAtomic(sp, after, 'utf-8');
+  }
 }
 
 /* ── 写出注释词典 ── */
@@ -220,10 +258,17 @@ const removed = [...removeSet].map((w) => ({ w, n: why.get(w)[1], why: why.get(w
 const byWhy = {};
 for (const r of removed) byWhy[r.why] = (byWhy[r.why] ?? 0) + r.n;
 const multi = [...stat.entries()].filter(([, g]) => g.size > 1).length;
-console.log(`${DRY ? '[DRY] ' : ''}改动文件：${changes.length} 个（产物 ${changes.filter((c) => c.p.startsWith('第')).length} + 源文 ${changes.filter((c) => c.p.startsWith('原文重制')).length}）`);
+/* 2026-09-14：源文那份的判别原先写的是 `p.startsWith('原文重制')`，而 `p` 的实际形状是
+ * `第一章/原文_规范化`——那个条件**恒为 false**，所以"源文 N 个"永远显示 0（只是日志数字错，
+ * 不影响实际改写）。按构造处的真实后缀判别。 */
+console.log(`${DRY ? '[DRY] ' : ''}改动文件：${changes.length} 个（产物 ${changes.filter((c) => c.p.startsWith('第')).length} + 源文 ${changes.filter((c) => c.p.endsWith('原文_规范化')).length}）`);
 console.log(`畸形嵌套注释摊平：${nestedFixed} 个文件｜字面 [P##] 占位符补回真标记：${markerFixed} 处`);
 console.log(`加注总数：${totalAnn} → ${totalAnn - removed.reduce((a, b) => a + b.n, 0)}（删 ${removed.reduce((a, b) => a + b.n, 0)} 次 / ${removed.length} 个词型）`);
-console.log(`删除构成：${Object.entries(byWhy).map(([k, v]) => `${k} ${v} 次`).join(' / ')}`);
+console.log(
+  `删除构成：${Object.entries(byWhy)
+    .map(([k, v]) => `${k} ${v} 次`)
+    .join(' / ')}`,
+);
 console.log(`归一释义词型：${[...canonical.keys()].filter((w) => !KB_WORDS.has(w)).length} 个（另 ${[...canonical.keys()].filter((w) => KB_WORDS.has(w)).length} 个来自教师知识库）`);
 console.log(`修复前同词多义词型：${multi} 个`);
 console.log(`\n词典 → ${P.词典路径}${DRY ? '（DRY 未写）' : ''}`);

@@ -10,6 +10,7 @@ import { buildLexiconNow } from './lexicon.js';
 import { scheduleHeatRail } from './edit.js';
 import { showGateHelp } from './chat.js';
 import { showSentenceEditor, applyZhAnnotations, applyEnDefinitions, applyWordSimplifications, removeZhAnnotation } from './pipew.js';
+import { simplifyMaxLen } from './ai.js';
 import { aiRewriteSentence } from './aiflow.js';
 import { jumpTo, refreshBookmarksDom, refreshMarkDom, removeMarkDom, renderSidebar, restoreAllMarkDom, scheduleSave } from './review.js';
 import { WORD_PANEL_TYPES, SENT_TYPES, newMarkId, typeLabel, type FileSession, type Mark, type MarkLevel, type MarkType } from './types.js';
@@ -75,7 +76,8 @@ export function renderReader(session: FileSession): void {
       s.dataset.pi = String(pi);
       s.dataset.si = String(si);
       s.dataset.text = sent.slice(0, 60);
-      const risk = sentenceRisks(sent);
+      /* 判定线要跟全局简化标准同源：默认 maxLen 是 20，而 simplifyMaxLen()（出厂 16）才是上限。 */
+      const risk = sentenceRisks(sent, simplifyMaxLen());
       if (risk.overlong || risk.passive || risk.relcl || risk.pastperf) {
         s.classList.add('risk');
         if (risk.passive) s.appendChild(badge('被'));
@@ -328,7 +330,7 @@ export function showSentPanel(session: FileSession, sentEl: HTMLElement, x: numb
   const si = Number((sentEl as HTMLElement).dataset.si);
   const text = sentsOf(extractParas(splitChapter(session.md).body)[pi], false)[si] ?? '';
   const wc = text.split(/\s+/).filter(Boolean).length;
-  const risk = sentenceRisks(text);
+  const risk = sentenceRisks(text, simplifyMaxLen());
   const riskBits = [risk.passive ? '被动' : '', risk.relcl ? '定从' : '', risk.pastperf ? '过去完成' : '', risk.overlong ? `超长(${wc}词)` : ''].filter(Boolean).join(' / ');
   pop.dataset.level = 'sent';
   pop.dataset.pi = String(pi);

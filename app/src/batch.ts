@@ -518,7 +518,9 @@ async function runBatch(): Promise<void> {
       setStatus('书级报告写入失败：' + e, 'err');
     }
   }
-  if (!canceled) {
+  /* 2026-09-14：原先只判 !canceled——**有章节失败**时也照样删进度，而那正是最需要续跑的情形。 */
+  const hasFailed = rows.some((r) => r.status === 'failed');
+  if (!canceled && !hasFailed) {
     try {
       await invoke('remove_file', { path: `${batchDir}/${BATCH_PROGRESS_FILE}` });
     } catch {

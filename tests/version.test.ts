@@ -423,6 +423,27 @@ test('★ 批量：一章只写一次盘、只出一条版本节点（kind=batch
   assert.equal(parseDecisionLog(fs.files[DEC_PATH]!).events.length, 2, '每条改动一条事件');
 });
 
+test('★ 批量里的**每一段**都追得到、重放得了（不是只有第一步）', async () => {
+  /* 2026-09-14 修复的回归守卫。修复前 `VersionNode.target` 只记 `okSteps[0]`，
+   * 于是同一批改了 P01+P02 之后：replaySegment(nodes,'P02') → found:false，
+   * provenanceOf → "P02：本运行没有改动过这一段"——一个**否定性的错结论**，
+   * 而它否定的那件事（P02 被改过）在决定日志里明明白白记着两条。 */
+  const fs = fakeFs({ [DOC_PATH]: DOC });
+  const r = await applyChangeBatch(fs.io, { ...ARGS, steps: steps() });
+  assert.equal(r.status, 'applied');
+  const nodes = readNodes(fs);
+  for (const seg of ['P01', 'P02']) {
+    const rep = replaySegment(nodes, seg);
+    assert.equal(rep.found, true, `${seg} 在这一批里被改过，必须重放得到`);
+    assert.equal(rep.consistent, true, `${seg} 的版本链要自洽`);
+    assert.match(rep.text ?? '', /（/, `${seg} 重放出来的应当是加注后的文本`);
+    assert.doesNotMatch(provenanceOf(nodes, seg), /没有改动过这一段/, `${seg} 不许被说成"没改过"`);
+  }
+  /* 批量节点仍是一条（不因为修溯源就把一次事务拆成两条节点） */
+  assert.equal(nodes.length, 1, '仍然是一次事务一条节点');
+  assert.equal(nodes[0]!.targets?.length, 2, '批量节点里每一步都要留档');
+});
+
 test('★ 批量里有一条做不成：其余照做、那一条留 rejected、**不静默跳过**、最后如实报几成几败', async () => {
   const fs = fakeFs({ [DOC_PATH]: DOC });
   const r = await applyChangeBatch(fs.io, {

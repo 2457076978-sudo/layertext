@@ -21,7 +21,10 @@ export interface AppConfig {
   lowThinking?: boolean;
   recentFiles?: string[];
   /** 备用供应商序列（W3 failover）：主供应商失败时按序降级；key 留空则复用主 Key */
-  failover?: { name?: string; baseUrl?: string; model?: string; key?: string }[];
+  /** `id`：**稳定标识**（2026-09-14 加）。Key 存在钥匙串里，账号名原先用**行下标**
+   *  （`fb0`/`fb1`…）——删掉一行，剩下的行就会读到**被删那家的 Key**，鉴权失败，
+   *  而报错文案还会让教师去怀疑自己填的 Key。现在账号用 `fb:<id>`，并保留旧下标的回落。 */
+  failover?: { id?: string; name?: string; baseUrl?: string; model?: string; key?: string }[];
   /**
    * 辅助模型（可选，2026-09-13）：本机小模型**只**干"输入短 + 任务单一 + 输出可机检"的映射类小活
    * （词→课标内简单词、短语→中文注释）。整章简化 / 逐句改写 / 对话一律仍走主模型——
@@ -54,6 +57,11 @@ export const S = {
   /** 打开的章节会话 */
   sessions: [] as FileSession[],
   activeIdx: -1,
+  /** **解析坏了、读不进来的**标记文件路径（2026-09-14）。
+   *  存在的理由：main.ts 打开章节时原先把"文件不存在"和"JSON 损坏"共用一个 catch，
+   *  损坏的 _审校标记.json 被当成空清单打开，教师接着标记、下次保存整体覆盖，整章标记全丢。
+   *  现在损坏会当场报出来并进这个集合，保存时**跳过**它。 */
+  markFileBroken: new Set<string>(),
   /** 词库状态 */
   vocabCsvText: null as string | null,
   vocabName: '',

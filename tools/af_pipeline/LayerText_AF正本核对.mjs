@@ -119,7 +119,9 @@ for (const tier of TIERS) {
   for (const ci of ids) {
     const ch = CN[ci - 1];
     const srcPath = join(SRC_BASE, ch, '原文_规范化.md');
-    const prodPath = findProduct(join(OUT_BASE, ch), tag);
+    /* 章目录走共享解析：`--layout run` 下产物在 `_运行/<runId>/正文/<章>/`，
+     * 原先直接 `join(OUT_BASE, ch)` 会每章都报"缺产物"并 exit 2（响，但错）。 */
+    const prodPath = findProduct(SHARED.chapterDirOf(OUT_BASE, ch), tag);
     if (!existsSync(srcPath)) {
       unreadable.push(`${ch}/${tag}：缺规范化原文 ${srcPath}`);
       continue;

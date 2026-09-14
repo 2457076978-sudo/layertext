@@ -12,17 +12,7 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import {
-  applyRepairs,
-  flattenNestedAnnotations,
-  isPlaceholder,
-  parseDoc,
-  removeAnnotation,
-  repairDoc,
-  serializeDoc,
-  setSense,
-  type SegmentNode,
-} from '../src/core/docast.js';
+import { applyRepairs, flattenNestedAnnotations, isPlaceholder, parseDoc, removeAnnotation, repairDoc, serializeDoc, setSense, type SegmentNode } from '../src/core/docast.js';
 
 /** 覆盖各种真实出现过的形状：连字符、撇号、多段、空行、词句卡、无标记旧稿 */
 const CORPUS: { name: string; md: string }[] = [
@@ -56,8 +46,14 @@ test('往返恒等：干净文档跑一遍修复也逐字节不变（幂等）',
 
 test('段 ID 来自 [P##]，是稳定 ID（不是数组下标）', () => {
   const ast = parseDoc('## Chapter One\n\n[P07] Seven.\n\n[P08] Eight.\n');
-  assert.deepEqual(ast.segments.map((s) => s.id), ['P07', 'P08']);
-  assert.deepEqual(ast.segments.map((s) => s.idSource), ['marker', 'marker']);
+  assert.deepEqual(
+    ast.segments.map((s) => s.id),
+    ['P07', 'P08'],
+  );
+  assert.deepEqual(
+    ast.segments.map((s) => s.idSource),
+    ['marker', 'marker'],
+  );
   assert.equal(ast.segments[0]!.marker, '[P07]');
 });
 
@@ -72,7 +68,10 @@ test('旧文件补稳定 ID，并**标成需要人确认**（对齐是猜的）'
 
 test('段号重复/不连续都要报出来（否则按标记配对会整体错位）', () => {
   const dup = parseDoc('## Chapter One\n\n[P03] A.\n\n[P03] B.\n');
-  assert.equal(dup.issues.some((i) => i.kind === 'marker-duplicate'), true);
+  assert.equal(
+    dup.issues.some((i) => i.kind === 'marker-duplicate'),
+    true,
+  );
   const gap = parseDoc('## Chapter One\n\n[P01] A.\n\n[P05] B.\n');
   const g = gap.issues.find((i) => i.kind === 'marker-gap');
   assert.ok(g);
@@ -103,10 +102,33 @@ test('同词多义：能查出来，并可按"首次出现的释义"统一', () 
   assert.equal(serializeDoc(ast), '## Chapter One\n\n[P01] A barn（谷仓） here.\n\n[P02] A barn（谷仓） there.\n');
 });
 
+test('★ 同词多义出现在**同一段**里：也要真的改到那一处（不是只改第一处）', () => {
+  /* 2026-09-14 回归守卫。修之前：`applyRepairs` 遍历的是 span **旧数组**，而 `setSense`
+   * 只按词找、**永远改该段第一处**——于是"第二处释义不一致"会**报修好了（senses+1）、
+   * 实际一个字符没改**。教师看到"已统一"，正文里第二处还是旧释义。 */
+  const md = '## Chapter One\n\n[P01] The boxer（拳击手） saw the boxer（拳师） here.\n';
+  const ast = parseDoc(md);
+  const r = applyRepairs(ast);
+  assert.equal(r.senses, 1, '确实该修一处');
+  assert.equal(serializeDoc(ast), '## Chapter One\n\n[P01] The boxer（拳击手） saw the boxer（拳击手） here.\n', '第二处必须真的被改成首次出现的释义');
+});
+
+test('★ 同段三处同词：一次全改对（从右往左改，偏移不会被改左边挤歪）', () => {
+  const md = '## Chapter One\n\n[P01] a barn（谷仓） b barn（仓房） c barn（棚子） d.\n';
+  const ast = parseDoc(md);
+  const r = applyRepairs(ast);
+  assert.equal(r.senses, 2, '后两处都要改');
+  assert.equal(serializeDoc(ast), '## Chapter One\n\n[P01] a barn（谷仓） b barn（谷仓） c barn（谷仓） d.\n');
+});
+
 test('嵌套注释：结构上查得出来，且能扁平化（正则只能看到最外层）', () => {
   const md = '## Chapter One\n\n[P01] A barn（谷仓 barn（仓房）） here.\n';
   const ast = parseDoc(md);
-  assert.equal(ast.issues.some((i) => i.kind === 'annotation-nested'), true, '畸形嵌套必须被报出来');
+  assert.equal(
+    ast.issues.some((i) => i.kind === 'annotation-nested'),
+    true,
+    '畸形嵌套必须被报出来',
+  );
   const r = applyRepairs(ast);
   assert.equal(r.nested >= 1, true, '嵌套要被发现并处理');
   // 释义取"第一个 1–6 字汉字串"——与 2026-09-10 修复脚本既有行为一致（教师可见结果不变）
@@ -141,8 +163,12 @@ test('编辑操作：去注释还原裸词，前后文一字不动', () => {
 
 test('占位段能被认出（门禁未通过留下的空位不能当正文）', () => {
   const seg: SegmentNode = {
-    id: 'P02', marker: '[P02]', prefix: ' ', raw: '<!-- 本段未通过复检，未收录；原文与改写见 _待复核/A层85/ -->',
-    spans: [], idSource: 'marker',
+    id: 'P02',
+    marker: '[P02]',
+    prefix: ' ',
+    raw: '<!-- 本段未通过复检，未收录；原文与改写见 _待复核/A层85/ -->',
+    spans: [],
+    idSource: 'marker',
   };
   assert.equal(isPlaceholder(seg), true);
   assert.equal(isPlaceholder({ ...seg, raw: 'Normal text.' }), false);
