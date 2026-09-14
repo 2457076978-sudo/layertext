@@ -4,6 +4,68 @@
 1.0.0 之前的版本号为开发期里程碑（当时 `package.json` 未同步递增，本文件按里程碑整理，2026-09-06 校准）。
 面向教师的通俗版功能说明见 [README](README.md) 与 [docs/PRD.md](docs/PRD.md)。
 
+## [未发布] - 2026-09-14（第九轮：把「按钮点了到底有没有用」逐个点到底）
+
+来源：Wayne"我怕某个 button 设置在那其实没有用"。
+所以这一轮不是看文档、也不是凭印象，而是**按代码把每个入口追到落点**：
+
+1. 把 `index.html` 里**全部 26 个静态 `<button>`/可点元素 id** 与全部
+   `addEventListener('click')` 做交叉比对；
+2. 把各面板里**运行时生成的 123 个按钮**按"渲染函数是否在新建的 DOM 上重新绑定"逐个看；
+3. 把 25 处 `invoke('命令', {...})` 与 Rust 侧 `fn 命令(...)` 的参数名逐个对照
+   （Tauri v2 **按参数名匹配**，名字对不上就是运行时才炸）；
+4. 确认兜底网：`uikit.ts` 顶层有 `error` / `unhandledrejection` → `toast`，
+   所以"抛出来的错"不会无声——**真正会无声的，是压根没绑监听的那种**。
+
+**复核掉 4 条假报**（记下来，免得下一份报告再把它们报一遍）：
+`help-usage` / `help-qc` / `help-example-dir` 三个菜单项**是原生实现的**（`main.rs` 的
+`on_menu_event` 里有对应分支，不是前端按钮）；`#plot-accept` **有**启用逻辑（`refreshCnt()`
+在勾选变化时点亮）；`dict_lookup_zh` / `open_help_window` 的"参数名不符"是正则看走眼；
+`panelState` / 窗口控制按钮 / `<symbol>` 的 id 都不是可点入口。
+
+**核实为真、这一轮修掉的（按"点了没反应"的成因分类）**
+
+| # | 位置 | 成因（核实后） | 修法 |
+| --- | --- | --- | --- |
+| 71 | `app/src/main.ts` `#btn-ai` | **绑了两次**（同一文件两处 `addEventListener`）：一次点击跑两遍 `aiSuggest()`——两倍 AI 请求、结果重复落盘 | 删掉后加的那处并留注释；现在全仓只绑一次 |
+| 72 | `app/src/settings.ts` `toggleClsPanel` | 入口先查 `#cls-panel` 是否存在，而那个容器**是 `renderClsPanel()` 懒创建的**——于是这个面板自功能引入起**从未可达** | 不存在就先 `renderClsPanel()` 再切 |
+| 73 | `app/src/shelf.ts` `#shelf-demo` / `#shelf-add` | DOM 由 `renderShelfGrid` 重建，而监听只在 `bindShelfChrome` 里绑过一次：搜索框敲一个字、切一次视图、点一下分组 chip，这两个按钮**就死了**（不弹框、不报错、不 toast） | 绑定移进 `renderShelfGrid` 末尾（紧挨 `bindShelfCards`），并从 `bindShelfChrome` **移除**以免双绑 |
+| 74 | `app/src/risk.ts` `renderRiskPane` | 空队列 / 已全部处理两条分支**提前 `return`**，但 `head` 里已经渲染了 `data-undo` / `data-workbench` / `data-taskdone`——按钮在页面上、**零监听** | 早退改成 `emptyHtml` 变量，按钮照常绑；绑定循环之后再按 `emptyHtml` 决定返回 |
+| 75 | `app/src/batch.ts` 批处理收尾 | 跑完只改按钮文案、不恢复 `disabled`，也不把隐藏的 `#bt-list-fld` / `#bt-inst-fld` 显示回来——**这个入口一辈子只能用一次** | 收尾时按勾选数恢复 `开始简化（N 章）` / `先在上方勾选章节` 与可用性，并恢复两个字段 |
+| 76 | `app/src/datapanel.ts` `[data-dp-del]` | 按钮渲染出来了，**全仓没有任何地方绑它**，`deleteProperLine` 一个调用者都没有 | 补监听：失败 `alert` 说出口，成功走 `doSave` |
+| 77 | `app/src/main.rs` `save_app_config` | 用的是裸 `std::fs::write`——与同文件 `write_text_file` 的原子落盘不是一套 | 抽出 `atomic_write`，两处共用；`load_app_config` 顺带区分 `NotFound`（当空配置）与其他 IO 错误（**报错并带上路径**，不再把"读不了"当"没配置"） |
+
+**同一轮修掉的"有反应但反应是错的"**（点击有落点，只是落点不对，同样属于"按钮不可信"）
+
+| # | 位置 | 问题 | 修法 |
+| --- | --- | --- | --- |
+| 78 | `app/src/bookio.ts` `exportDocx` | 目标路径就是 `<源目录>/<同基名>.docx`——**可能正是教师原件**；而 `write_file_base64` 不查存在、不备份、非原子，也不经 `persistEdit`（`_原始备份.md` 那套完全不生效）。结果是原件被一份 App 生成的纯文本 docx 原地替换、排版图片全丢，界面还只显示"已导出 Word 版" | 目标已存在（含等于源文件）就另起 `<基名>_LayerText导出.docx`，绝不覆盖 |
+| 79 | `app/src/pipew.ts` 同步清单 | `plans.push({ name: n })` 里的 `n` 是后端给的**完整路径**，与相对路径二次拼成 `a/b/a/b.md`——于是"已同步"是**假报** | 改 `baseName(n)` |
+| 80 | `app/src/report.ts` 图标按钮 | 用 `textContent` 塞整段 `<svg>` → 页面上显示源码字符串 | 改 `innerHTML` |
+| 81 | `app/src/report.ts` 两个档案导出 | 没有 `S.currentBookDir` 时**静默 `return`**，教师点了什么都不发生 | 改 `setStatus(..., 'err')` 说出口 |
+| 82 | `app/src/edit.ts` `jumpFind` | 查找框是空的或无命中时静默不动 | 补 `toast('先在查找框里输入要查的内容')` |
+| 83 | `app/src/datapanel.ts` `#dp-filter` | 输入后整块重渲染，**焦点与光标位置全丢**（继续打字打到别处） | 重渲染后恢复 `focus()` + `setSelectionRange` |
+| 84 | `app/src/main.ts` `#mode-pill` | 先 `await saveConfig()` 再更新界面：保存失败时**界面停在旧模式**，教师看到的是"点了没反应" | 先 `updateModePill()` / `updateMarkBadge()` / `setStatus(...)` 再落盘；失败额外说"模式已切换，但**没能存进设置文件**" |
+| 85 | `app/src/settings.ts` `#set-autorew` | 改自动改写后模式胶囊不刷新（胶囊显示的仍是旧状态） | 变更处理器里补 `updateModePill()` |
+
+**返工 1（如实记）**：给 `LayerText-optimization` 打这批补丁时，`shelf.ts` 的锚点把
+`renderShelfGrid` 的结尾**连着一起复制**了，于是多出一个 `}` 和一个重复的 `bindShelfCards`。
+分支 `tsc` **当场报 `shelf.ts(323,1): error TS1128`**——门禁拦住了，删除重复块后恢复。
+教训与上一轮同源：**锚点选在"函数尾"就必须把右括号算进断言**，否则补丁会静默地贴歪。
+
+**分支侧另补两处（本轮才发现分支上漏了）**
+
+- `app/src/review.ts`：`S.markFileBroken` 在 `main.ts` 里**只写不读**——守卫等于不存在，
+  损坏的 `_审校标记.json` 照样被内存里的空表覆盖。补上 `scheduleSave` 落盘前的拦截。
+- `app/src/bookio.ts`：分支此前只跟了"正则补 `.docx`"那一半，**没跟"目标路径可能覆盖原件"**这一半。
+  这次补上（同一份判定两边必须一致，见 §4）。
+
+**验证**：`npm run verify` 全绿（preflight 44 + typecheck（含 `app`）+ lint 0 warning +
+**971 项：970 通过 / 0 失败 / 1 跳过**）；`USER=runner npm run verify` 同样全绿（复现 CI 条件）；
+Rust gate（`fmt` / `clippy --all-targets -- -D warnings` / 6 测试）全绿。
+`LayerText-optimization` 同步后 preflight 43 + 根/app typecheck + **1000 项：999 通过 / 0 失败 / 1 跳过**，
+`USER=runner` 亦全绿，分支 Rust gate 全绿。
+
 ## [未发布] - 2026-09-14（第八轮：三处"未接线"逐个定性 + 分支侧 Rust 假绿）
 
 第 4 条我原先只写了"未接线（不是 bug）"。逐个核实之后发现，**三处的实际情况并不一样**，

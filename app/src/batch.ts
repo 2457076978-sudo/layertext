@@ -533,7 +533,19 @@ async function runBatch(): Promise<void> {
   }
   // 恢复对话框为可再次选择状态
   ($('bt-pick') as unknown as HTMLButtonElement).disabled = false;
-  ($('bt-start') as unknown as HTMLButtonElement).style.display = '';
+  /* 2026-09-14 修（**跑完一次后「开始简化」永久灰死**）：这里原先只恢复了 `style.display`，
+   * 而进进度态时设过的 `bt-start.disabled = true`（以及被隐藏的 #bt-list-fld / #bt-inst-fld）
+   * **从来没有复位**。唯一会重新启用它的 `refreshStart()` 挂在章节勾选框的 change 上，
+   * 而勾选框所在的容器正被隐藏着——于是按钮看得见、点不动，也没有任何提示，
+   * 只能关掉对话框重开。`refreshStart` 是 `showBatchPop` 的闭包局部函数、这里够不到，
+   * 就按同一口径重算一次（同一批仍勾选着，文案也要跟着回到"开始简化（N 章）"）。 */
+  const startBtn = $('bt-start') as unknown as HTMLButtonElement;
+  const nChecked = $('bt-list').querySelectorAll('[data-bt]:checked').length;
+  startBtn.disabled = nChecked === 0;
+  startBtn.textContent = nChecked ? `开始简化（${nChecked} 章）` : '先在上方勾选章节';
+  startBtn.style.display = '';
+  ($('bt-list-fld') as HTMLElement).style.display = '';
+  ($('bt-inst-fld') as HTMLElement).style.display = '';
   ($('bt-cancel') as HTMLElement).style.display = 'none';
   $('bt-progress').style.display = 'none';
   batchAbort = null;

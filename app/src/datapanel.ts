@@ -705,8 +705,39 @@ export async function renderDataPane(bookDir: string): Promise<void> {
   el.querySelector('#dp-filter')?.addEventListener('input', (e) => {
     panelState.filter = (e.target as HTMLInputElement).value;
     resetRows();
-    void renderDataPane(bookDir);
+    void renderDataPane(bookDir).then(() => {
+      /* 2026-09-14 修（**筛选框每敲一个字符就丢焦点**）：`renderDataPane` 在 project 已加载时
+       * 到 `el.innerHTML = …` 之间没有 await，于是同步把整个 #pane-data 换掉、输入框节点被销毁。
+       * 实测 focus 后派发一次 input，activeElement 就变回 BODY——词库 3600+ 行时，
+       * 教师每敲一个字母都得再用鼠标点回筛选框一次，筛选等于不可用。
+       * 重渲染后把焦点与光标位置还回去。 */
+      const f2 = el.querySelector('#dp-filter') as HTMLInputElement | null;
+      if (f2) {
+        const n = f2.value.length;
+        f2.focus();
+        try {
+          f2.setSelectionRange(n, n);
+        } catch {
+          /* 有意兜底：某些输入类型不支持 setSelectionRange，聚焦本身才是关键 */
+        }
+      }
+    });
   });
+  /* 专名表每行的「删除」：**原先一个监听都没有**（全仓只有渲染、没有绑定），
+   * 配套的纯函数 `deleteProperLine` 也因此全仓无调用者——有实现、无入口。
+   * 点下去什么都不发生、连确认都没有。这里照 CSV 那套 `[data-dp-delrow]` 的口径补上。 */
+  el.querySelectorAll('[data-dp-del]').forEach((b) =>
+    b.addEventListener('click', async () => {
+      const word = (b as HTMLElement).dataset.dpDel ?? '';
+      if (!word) return;
+      const r = deleteProperLine(st.text, word);
+      if (r.error) {
+        alert(r.error);
+        return;
+      }
+      await doSave(r.text, `删除专名 ${word}`);
+    }),
+  );
   el.querySelector('#dp-add')?.addEventListener('click', async () => {
     const inp = el.querySelector('#dp-new') as HTMLInputElement;
     const r = upsertProperLine(st.text, inp.value);

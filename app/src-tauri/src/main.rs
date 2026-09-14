@@ -137,8 +137,15 @@ fn dict_lookup_zh(words: Vec<String>) -> Vec<Option<String>> {
 
 #[cfg(not(target_os = "macos"))]
 #[tauri::command]
-fn dict_lookup_zh(_words: Vec<String>) -> Vec<Option<String>> {
-    vec![None; _words.len()]
+/// 非 macOS 上没有系统词典，一律返回 `None`（前端照常显示"未带词典"）。
+///
+/// 2026-09-14：形参原先叫 `_words`。**它其实是被用到的**（`words.len()`），
+/// 而且 Tauri 是**按参数名**把前端 JSON 映射进来的——前端传的是 `words`，
+/// 声明成 `_words` 就匹配不上，整个命令会以"缺必填参数"失败。
+/// 本机是 macOS 所以走的是上面那份、看不出来；一旦出 Windows/Linux 构建，
+/// 「查词」这类按钮就会**点了没反应**。名字改回 `words`。
+fn dict_lookup_zh(words: Vec<String>) -> Vec<Option<String>> {
+    vec![None; words.len()]
 }
 
 /// 二进制读取（base64），供前端解析 xlsx 等格式
@@ -177,16 +184,24 @@ fn base64_encode(data: &[u8]) -> String {
 
 #[tauri::command]
 fn write_text_file(path: String, content: String) -> Result<(), String> {
-    let p = std::path::Path::new(&path);
+    atomic_write(&path, content.as_bytes())
+}
+
+/// **原子写**：先写同目录临时文件，再 rename 覆盖。
+///
+/// `std::fs::write` 是"截断 → 写"，中途失败（进程被杀、磁盘满、断电）会留下
+/// **半份正文**——对教师唯一的一份稿，半份比没有更糟：没有你知道丢了，
+/// 半份看起来像改坏了，而它其实已经被毁掉了。
+/// rename 在同一文件系统内是原子的：读者要么看到旧内容、要么看到新内容。
+/// 临时文件必须与目标同目录（跨文件系统的 rename 会退化成 copy+unlink，就不原子了）。
+///
+/// 2026-09-14 从 `write_text_file` 里抽出来：`save_app_config` 当时还在用裸 `std::fs::write`，
+/// 配置文件同样会被写坏。抽出来两边共用（与 `write_file_base64` 共用同一个缺口清单）。
+fn atomic_write(path: &str, bytes: &[u8]) -> Result<(), String> {
+    let p = std::path::Path::new(path);
     if let Some(dir) = p.parent() {
         let _ = std::fs::create_dir_all(dir);
     }
-    // **原子写**：先写同目录临时文件，再 rename 覆盖。
-    // `std::fs::write` 是"截断 → 写"，中途失败（进程被杀、磁盘满、断电）会留下
-    // **半份正文**——对教师唯一的一份稿，半份比没有更糟：没有你知道丢了，
-    // 半份看起来像改坏了，而它其实已经被毁掉了。
-    // rename 在同一文件系统内是原子的：读者要么看到旧内容、要么看到新内容。
-    // 临时文件必须与目标同目录（跨文件系统的 rename 会退化成 copy+unlink，就不原子了）。
     let name = match p.file_name().and_then(|n| n.to_str()) {
         Some(n) => n.to_string(),
         None => return Err(format!("路径没有文件名，无法原子写：{path}")),
@@ -195,7 +210,7 @@ fn write_text_file(path: String, content: String) -> Result<(), String> {
     let write = || -> std::io::Result<()> {
         use std::io::Write;
         let mut f = std::fs::File::create(&tmp)?;
-        f.write_all(content.as_bytes())?;
+        f.write_all(bytes)?;
         // 先落盘再 rename：否则断电后可能 rename 了一个"还没写完"的文件
         f.sync_all()?;
         Ok(())
@@ -603,12 +618,25 @@ fn load_api_key(account: Option<String>) -> Result<String, String> {
 
 #[tauri::command]
 fn save_app_config(config: String) -> Result<(), String> {
-    std::fs::write(config_path()?, config).map_err(|e| e.to_string())
+    // 2026-09-14：改用原子写。原先这里是裸 `std::fs::write`——截断式写，写到一半崩了
+    // （或磁盘满）会把**已有的设置文件毁成半份**。同文件的 `write_text_file` 早就实现了
+    // "同目录临时文件 → rename"，配置文件没理由不走同一条路。
+    atomic_write(&config_path()?, config.as_bytes())
 }
 
 #[tauri::command]
 fn load_app_config() -> Result<String, String> {
-    Ok(std::fs::read_to_string(config_path()?).unwrap_or_else(|_| "{}".into()))
+    // 2026-09-14：原先一律 `unwrap_or_else(|_| "{}".into())`——权限/IO 失败被**伪装成
+    // "这台机器从没配过"**。前端 `ai.ts` 专门写了一条"设置文件读不出来…先修好它，
+    // 否则改设置会把原文件覆盖成默认值"的告警，可它只在"文件存在但 JSON 语法坏"时才可能触发，
+    // 几乎永远不会响；而随后任意一次 `saveConfig()`（切章、换主题、记最近文件都会触发）
+    // 就把默认值写回去，**真配置被覆盖**。这正是"存进去读不回来"的最坏形态。
+    // 现在：NotFound → "{}"（真的是第一次用）；其他 IO 错误**如实上报**，让前端那条告警生效。
+    match std::fs::read_to_string(config_path()?) {
+        Ok(s) => Ok(s),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok("{}".into()),
+        Err(e) => Err(format!("读设置文件失败（{}）：{e}", config_path()?)),
+    }
 }
 
 fn open_help(app: &tauri::AppHandle, label: &str, title: &str, url: &str, w: f64, h: f64) {

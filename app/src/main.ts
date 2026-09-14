@@ -839,10 +839,19 @@ export function updateModePill(): void {
 }
 $('mode-pill').addEventListener('click', async () => {
   S.appConfig.autoRewriteOnMark = !(S.appConfig.autoRewriteOnMark === true);
-  await saveConfig();
+  /* 2026-09-14：**先刷界面，再落盘**。原先 updateModePill()/setStatus 排在 `await saveConfig()`
+   * 之后——那一次 IPC 失败就会把这三行全部跳过：内存里模式已经翻转、胶囊仍显示旧模式、
+   * 状态行一个字都没有（只剩全局 unhandledrejection 的一句泛化 toast）。
+   * 用户下次点标记会按一个**他看不见的模式**执行。同文件的 stepTheme / stepReaderFont
+   * 都是"先刷 UI 再 await"，只有这里反了。落盘失败单独说清楚。 */
   updateModePill();
   updateMarkBadge();
   setStatus(S.appConfig.autoRewriteOnMark ? '已切换【即改模式】：点标记/AI建议将立即生效（写原稿+变更日志，首次修改前自动备份）' : '已切换【候选模式】：AI 只出建议，你点 ✓ 才生效', 'saved');
+  try {
+    await saveConfig();
+  } catch (e) {
+    setStatus(`模式已切换，但**没能存进设置文件**（${String(e).slice(0, 80)}）——重启后会回到原来的模式`, 'err');
+  }
 });
 updateModePill();
 
@@ -1020,7 +1029,11 @@ document.addEventListener('mousedown', (e) => {
   if (pop.classList.contains('open')) hidePop();
 });
 
-$('btn-ai').addEventListener('click', () => void aiSuggest());
+/* `#btn-ai` 的 click 在上方（「词面板：AI 改写本句」那一段）已经绑过一次。
+ * 2026-09-14：这里原先**又绑了一次完全相同的**——同一元素两个监听，点一次 `aiSuggest()` 跑两遍：
+ * 两次真实 AI 请求、双倍 token 计费、`S.suggestions` 互相覆盖；即改模式下两条链路各自写正文
+ * 与《变更日志_AI审核.csv》，可能重复落盘。按钮上的 `disabled = true` 发生在第一个 await
+ * **之后**，拦不住第二个监听。界面看起来一切正常，代价完全看不见。删掉这里，只保留那一处。 */
 
 document.addEventListener('mousedown', (e) => {
   if (gatePop.classList.contains('open') && !(e.target as HTMLElement).closest('#gate-pop') && !(e.target as HTMLElement).closest('.qmark')) {

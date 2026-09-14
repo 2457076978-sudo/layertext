@@ -319,7 +319,10 @@ async function aiPlotPoints(s: FileSession): Promise<void> {
     setStatus('AI 摘要点失败：' + e, 'err');
   } finally {
     btn.disabled = false;
-    btn.textContent = '<svg class="ico"><use href="#i-sparkle"/></svg>AI 摘情节要点';
+    /* 2026-09-14：这里原先用 `textContent` 写含 `<svg>` 的字符串——`textContent` 不做 HTML 解析，
+     * 于是**第一次点完**按钮上就显示字面量 `<svg class="ico">…</svg>AI 摘情节要点`。
+     * 功能没坏（finally 已复位 disabled），但外观坏了。改回 innerHTML。 */
+    btn.innerHTML = '<svg class="ico"><use href="#i-sparkle"/></svg>AI 摘情节要点';
   }
 }
 
@@ -858,7 +861,13 @@ export async function renderDossierPane(): Promise<void> {
 }
 
 async function exportChapterDossier(d: DossierData): Promise<void> {
-  if (!S.currentBookDir) return;
+  /* 2026-09-14：原先这句是**静默 return**——而用顶部「打开文件…」直接开的章节
+   * （不经过书架）从不设 `S.currentBookDir`，档案页却照常把这两个导出按钮画出来，
+   * 点下去什么都不发生。同文件其它导出的失败路径都有提示，只有这条守卫没有。 */
+  if (!S.currentBookDir) {
+    setStatus('这一章不是从书架打开的，没有"书"的上下文——档案要先从书架进入一本书再导出', 'err');
+    return;
+  }
   try {
     const dir = `${S.currentBookDir}/审校档案`;
     const path = `${dir}/${dossierFileName(d.章名, new Date().toLocaleDateString('sv-SE'))}`;
@@ -872,7 +881,10 @@ async function exportChapterDossier(d: DossierData): Promise<void> {
 
 /** 全书档案：各章（指标+台账+标记+门禁）串卷 + 头部汇总（对照节仅章档案有，全书不逐章对齐） */
 async function exportBookDossier(): Promise<void> {
-  if (!S.currentBookDir) return;
+  if (!S.currentBookDir) {
+    setStatus('这一章不是从书架打开的，没有"书"的上下文——全书档案要先从书架进入一本书再导出', 'err');
+    return;
+  }
   try {
     const chapters = await tocChapters();
     if (chapters.length === 0) {
