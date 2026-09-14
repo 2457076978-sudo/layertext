@@ -5,7 +5,7 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, WidthType } from 'docx';
-import { S, esc } from './state.js';
+import { S, esc, globalInstructionsCaptured, globalInstructionsValue, rememberGlobalInstructions } from './state.js';
 import { $, setStatus } from './uikit.js';
 import { activeSession, persistEdit } from './main.js';
 import { renderReader, sidebarHandlers } from './reader.js';
@@ -50,25 +50,96 @@ export async function saveBookConfig(): Promise<void> {
   }
 }
 
-export async function loadBookConfig(dir: string): Promise<boolean> {
+/** 上一次 `loadBookConfig` 作用在哪个书目录。**只有换书才清空**：
+ *  同一本书里翻下一章也会重跑本函数（`main.ts` 打开新章节那条路），
+ *  而教师刚从界面导入的词库/专名表还没"保存为本书配置"——那种内存里的当前值
+ *  不该因为他翻了一页就消失。跨书残留才是要修的：换目录说明换了一本书。 */
+let lastBookConfigDir: string | null = null;
+
+/** 本书配置管辖的字段，退回默认值。**换书时必须在应用本书配置之前先清干净**：
+ *  下面每一条都是 `if (cfg.X)` 的守卫式赋值（那是为了不把 `null` 当成"清空"），
+ *  守卫式赋值本身没问题，问题是**上一个本书的值不会被请走**——
+ *  打开一本没有配置的书（或配置里没有某一项），上一本书的词库/术语/专名/改写规则
+ *  会原封不动继续生效，而界面上没有任何迹象。 */
+function resetBookScope(): void {
+  S.vocabCsvText = null;
+  S.vocabName = '';
+  S.termsText = null;
+  S.properRows = [];
+  S.rewriteRules = { replacements: [], viewpoint: 'keep', viewpointName: '', extra: '' };
+  if (globalInstructionsCaptured()) S.appConfig.instructions = globalInstructionsValue();
+}
+
+/** 换书时清空本书作用域；同一本书内重入则保留界面上还没保存的当前值。 */
+function resetBookScopeIfNew(dir: string): void {
+  if (lastBookConfigDir === dir) return;
+  resetBookScope();
+}
+
+/** 读一个可选文件：读不到就是"没有这一项"（`read_text_file` 对缺失文件是报错的）。 */
+async function readIfExists(path: string): Promise<string | null> {
   try {
-    const raw = await invoke<string>('read_text_file', { path: `${dir}/${BOOK_CONFIG}` });
+    return await invoke<string>('read_text_file', { path });
+  } catch {
+    /* 有意兜底：缺文件是常态，调用方按"这一项没有"处理。 */
+    return null;
+  }
+}
+
+/** 书目录里的 `_词库.csv`（词库编辑器的落盘位置）——有它就以它为准。 */
+function applyVocabCsv(csv: string | null): void {
+  if (!csv || !csv.trim()) return;
+  S.vocabCsvText = csv;
+  S.vocabName = '_词库.csv';
+}
+
+export async function loadBookConfig(dir: string): Promise<boolean> {
+  rememberGlobalInstructions();
+  /* 2026-09-14：**先读同目录的 `_词库.csv`**。词库编辑器那个「完成」按钮写的就是这个文件
+   * （`pipew.ts` 的 `saveVocab`），设置页也写着"词库以书目录 _词库.csv 为准"，
+   * 可是全仓**没有任何地方把它读回来**：教师编辑完、重启 App、再打开这本书，
+   * 词库当作没配过——一个"保存成功"的按钮，存下来的东西谁也读不回来。
+   * 顺序放在 JSON 配置之前读、之后应用，让 `_词库.csv` 覆盖 JSON 里那份 `vocabCsv`（与设置页口径一致）。 */
+  const vocabCsv = await readIfExists(`${dir}/_词库.csv`);
+  let raw: string;
+  try {
+    raw = await invoke<string>('read_text_file', { path: `${dir}/${BOOK_CONFIG}` });
+  } catch {
+    /* 有意兜底：这本书没有配置＝绝大多数书的常态（`read_text_file` 对缺失文件是报错的）。
+     * 代价写明：配置损坏与"没配过"在这里分不出，都会退到"没有本书配置"。
+     * 但**必须先把上一本书的配置清掉**——否则"没有本书配置"会变成"沿用上一本书的配置"。 */
+    resetBookScopeIfNew(dir);
+    lastBookConfigDir = dir;
+    applyVocabCsv(vocabCsv);
+    return Boolean(vocabCsv);
+  }
+  try {
     const cfg = JSON.parse(raw) as { vocabCsv?: string | null; vocabName?: string; terms?: string | null; proper?: string[] | null; instructions?: string | null; rewrite?: typeof S.rewriteRules };
+    resetBookScopeIfNew(dir);
+    lastBookConfigDir = dir;
     if (cfg.vocabCsv) {
       S.vocabCsvText = cfg.vocabCsv;
       S.vocabName = cfg.vocabName ?? '本书词库';
     }
+    applyVocabCsv(vocabCsv);
     if (cfg.terms) S.termsText = cfg.terms;
     /* 相邻字段都有守卫，只有这条没有——而 saveBookConfig 在没有专名表时写的正是 null。 */
     if (cfg.proper) S.properRows = cfg.proper;
     if (cfg.instructions) S.appConfig.instructions = cfg.instructions;
     if (cfg.rewrite)
       S.rewriteRules = { replacements: cfg.rewrite.replacements ?? [], viewpoint: cfg.rewrite.viewpoint ?? 'keep', viewpointName: cfg.rewrite.viewpointName ?? '', extra: cfg.rewrite.extra ?? '' };
-    return Boolean(cfg.vocabCsv || cfg.terms || cfg.proper?.length || cfg.rewrite);
-  } catch {
-    /* 有意兜底：这本书没有配置＝绝大多数书的常态（`read_text_file` 对缺失文件是报错的）。
-     * 代价写明：配置损坏与"没配过"在这里分不出，都会退到"没有本书配置"。 */
-    return false;
+    return Boolean(cfg.vocabCsv || vocabCsv || cfg.terms || cfg.proper?.length || cfg.rewrite);
+  } catch (e) {
+    /* 2026-09-14：**解析失败必须与"没配过"分开**。原先两者共用上面那个 catch，
+     * 于是损坏的 `_本书配置.json` 被静默当成"这本书没有配置"——
+     * 教师明明配过词库与改写规则，打开书却什么都没生效，且一个字都不提示。
+     * 现在说出口，并按"没有本书配置"处理（换书已清，不会残留上一本）。
+     * `_词库.csv` 是独立的另一份，仍然应用它。 */
+    resetBookScopeIfNew(dir);
+    lastBookConfigDir = dir;
+    applyVocabCsv(vocabCsv);
+    setStatus(`这本书的配置读不进来（${String(e).slice(0, 60)}）：${dir}/${BOOK_CONFIG}——本次按"没有本书配置"打开，请检查该文件`, 'err');
+    return Boolean(vocabCsv);
   }
 }
 

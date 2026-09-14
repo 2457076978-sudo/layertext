@@ -171,8 +171,26 @@ async function runSingle(): Promise<void> {
     setStatus('先粘贴学生原文（或选文件）', 'err');
     return;
   }
-  const analysis = await analyzeProduction(text);
-  renderSingleReport(name, text, analysis, []);
+  /* 2026-09-14：体检本身要读词库/算结构，不是瞬时的；而这条链路原先**没有 try/catch、
+   * 也没有任何进行中反馈**——抛出去只靠全局兜底网 toast 一下（能看见，但看不出是"点了没反应"
+   * 还是"算了很久"）。这里补上：按钮禁用+文案，失败当场说出口，算完恢复。 */
+  const btn = p.querySelector('#gr-run') as HTMLButtonElement | null;
+  const label = btn?.textContent ?? '';
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = '体检中…';
+  }
+  try {
+    const analysis = await analyzeProduction(text);
+    renderSingleReport(name, text, analysis, []);
+  } catch (e) {
+    setStatus(`体检没能算出来：${e instanceof Error ? e.message : String(e)}——原文没有动，可重试`, 'err');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = label;
+    }
+  }
 }
 
 function renderSingleReport(name: string, text: string, a: Analysis, notes: GradingNote[]): void {
@@ -343,17 +361,24 @@ async function pickClassDir(): Promise<void> {
     }
   }
   const q = reinforceWordsNow();
+  /* 2026-09-14：`failed` / `error` 这两个字段**在导出里用上了、在屏幕上却没人读**——
+   * 上面的注释写着"不许混进正常行"，但屏幕上渲染出来就是一排 `—`/0，
+   * 与"学生交了个空文件"长得一模一样：教师会照着这张表去批评学生，而他批评的其实是没读进来的文件。
+   * 现在屏幕上照导出的口径走：失败行整行 `—` + 名字挂 ⚠ + 悬停给原因；只是"这一列偏低"的行也挂 ⚠。 */
+  const rowHtml = (r: ClassGradingRow): string => {
+    const warn = r.error ? ' <span title="' + esc(r.error) + '">⚠</span>' : '';
+    const cells = r.failed
+      ? `<td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td>`
+      : `<td>${r.words || '—'}</td><td>${r.sents || '—'}</td><td>${r.avgLen ? r.avgLen.toFixed(1) : '—'}</td>
+        <td>${r.structure}</td><td>${r.longSents}</td><td>${r.oovWords}</td><td>${r.queue ? `${r.used}/${r.queue}` : '—'}</td>`;
+    return `<tr class="board-row${r.failed ? ' warnrow' : ''}" data-cg="${esc(r.name)}" style="cursor:pointer" title="${esc(r.error ?? '')}">
+        <td>${esc(r.name)}${warn}</td>${cells}</tr>`;
+  };
   out.innerHTML = `
-    <div class="dim" style="margin-bottom:6px">完成 ${rows.length} 份（点击行看单生明细）</div>
+    <div class="dim" style="margin-bottom:6px">完成 ${rows.length} 份（点击行看单生明细）${rows.some((r) => r.failed) ? `；其中 <b>${rows.filter((r) => r.failed).length} 份没读进来</b>（整行 — 并挂 ⚠，别当成"学生没写"）` : ''}</div>
     <table class="sgtable">
       <tr><th>学生</th><th>词数</th><th>句数</th><th>均长</th><th>未学结构</th><th>长句</th><th>超纲词</th><th>复现命中</th></tr>
-      ${rows
-        .map(
-          (r) => `<tr class="board-row" data-cg="${esc(r.name)}" style="cursor:pointer">
-        <td>${esc(r.name)}</td><td>${r.words || '—'}</td><td>${r.sents || '—'}</td><td>${r.avgLen ? r.avgLen.toFixed(1) : '—'}</td>
-        <td>${r.structure}</td><td>${r.longSents}</td><td>${r.oovWords}</td><td>${r.queue ? `${r.used}/${r.queue}` : '—'}</td></tr>`,
-        )
-        .join('')}
+      ${rows.map(rowHtml).join('')}
     </table>
     <div class="row-btns" style="margin-top:8px">
       <button id="cg-export" class="primary">导出班级批改汇总（md+csv 到该文件夹）</button>
@@ -362,7 +387,13 @@ async function pickClassDir(): Promise<void> {
     tr.addEventListener('click', () => {
       const name = tr.dataset.cg!;
       const a = details.get(name);
-      if (!a) return;
+      /* 2026-09-14：以前这里 `if (!a) return;`——**点失败行什么都不发生**。
+       * 而失败行恰恰是教师最需要知道原因的那一行（他刚看到一排 —）。改成说出口。 */
+      if (!a) {
+        const r = rows.find((x) => x.name === name);
+        setStatus(`${name}：${r?.error ?? '这一份没有可看的明细'}`, 'err');
+        return;
+      }
       /* 第二个实参原先是**字面量空串**，而它就是学生正文——AI 批改收到空原文。 */
       renderSingleReport(name, a.md, a, []);
     }),

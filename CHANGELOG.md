@@ -4,6 +4,34 @@
 1.0.0 之前的版本号为开发期里程碑（当时 `package.json` 未同步递增，本文件按里程碑整理，2026-09-06 校准）。
 面向教师的通俗版功能说明见 [README](README.md) 与 [docs/PRD.md](docs/PRD.md)。
 
+## [未发布] - 2026-09-14（codex/total-optimization · 按钮审计后半批：把"发现了但没改"的九条同步过来）
+
+主仓第十轮把上一轮留下的九条"发现但没改"逐条核实并改完（第 86–100 项，逐条理由见主仓 CHANGELOG）。
+本分支是 **App 开发位**，`app/` 下十几个文件与主仓已有实质分叉，所以照旧**不是整文件覆盖**——
+每条补丁都断言"锚点恰好出现 1 次"，对不上就报错退出。
+
+**分支上同步过来的**
+
+| 位置 | 问题 | 修法 |
+| --- | --- | --- |
+| `app/src/risk.ts` 四处 | `void p.then(...)` 全都没有 `.catch()`：按钮先 disabled，promise 一拒绝就**永久禁用**，卡片还在、顶部没说明——"点了没反应" | 四处各补 `.catch()`，走"顶部说明 + 重渲染让按钮重新可点"的出路 |
+| `app/src/grading.ts` 班级表 | `failed` / `error` **导出用了、屏幕上一次都没读**：失败行与"学生交了个空文件"长得一模一样 | 失败行整行 `—` + 名字挂 ⚠ + 悬停给原因；标题行点出"其中 N 份没读进来" |
+| `app/src/grading.ts` | 点失败行 `if (!a) return;` **什么都不发生** | 改成 `setStatus(name：原因, 'err')` |
+| `app/src/grading.ts` `runSingle` | 链路没有 try/catch、也没有进行中反馈 | 按钮「体检中…」+ try/catch/finally |
+| `app/src/chat.ts` 四处 | 空输入发送静默；清空无确认；损坏会话被静默当成"没有对话"并覆盖；无 key 时先清空输入框 | 逐条照主仓口径修（详见主仓第九/十轮） |
+| `app/src/pipew.ts` 手动改句 | `s.md` 先赋值再 `persistEdit` → 撤销快照与"原始备份"都废 | 先算 `next`、落盘成功后再 `s.md = next` |
+| `app/src/bookio.ts` | 跨书残留（换书不清空）+ 损坏配置被当成"没配过" + **`_词库.csv` 写了全仓没人读回** | `resetBookScopeIfNew(dir)` + 拆 catch 说出口 + 三个分支都先读 `${dir}/_词库.csv` |
+| `app/src/pipew.ts` 词库编辑器 | 「取消」只关弹层，而增删是**即时写盘**的 | 取消时把打开时的原始内容写回并还原内存 |
+| `app/src/settings.ts` | `collectFb` 静默丢半填行；占位文案"空=用主Key"是假话且无法清除已存 Key | 收集函数不再过滤 + 半填行点名；文案改真话 + **新增 Rust `delete_api_key`** 与每行「清」按钮 |
+
+**分支独有的一处**（主仓那边不涉及）：`app/src-tauri/src/main.rs` 的 `delete_api_key`
+同样加在这里并注册进 `invoke_handler`——读 Key 走的是 `ai.ts` 的"钥匙串里有就用钥匙串的"，
+少了这条命令，教师在界面上就没有任何办法把某一家备用的 Key 拿掉。
+
+**验证**：本 worktree `npm run verify` 全绿（preflight 43 + 根/app typecheck + lint 0 warning +
+**1000 项：999 通过 / 0 失败 / 1 跳过**）；Rust gate（`cargo fmt` / `cargo clippy --all-targets -- -D warnings` /
+6 测试）全绿。
+
 ## [未发布] - 2026-09-14（codex/total-optimization · 按钮审计：同步主仓那一批"点了没用"的入口，并补两处分支漏项）
 
 来源：Wayne"我怕某个 button 设置在那其实没有用"。主仓已按「静态 26 个入口 × 运行时 123 个

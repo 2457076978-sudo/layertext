@@ -20,8 +20,17 @@ import { GATE_HELP, typeLabel, type Suggestion } from './types.js';
 
 /* ---------- AI 会话持久化（防抖落盘，重启可恢复） ---------- */
 
+/** 盘上那份 `AI会话.json` 存在但**解析不了**——这一轮不再自动保存（否则等于拿空对话把它盖掉）。 */
+let chatFileBroken = false;
+
 let chatSaveTimer: ReturnType<typeof setTimeout> | undefined;
 function scheduleChatSave(): void {
+  if (chatFileBroken) {
+    /* 损坏文件还在盘上：现在保存＝拿一份空对话把它盖掉，等于替教师把最后一点线索也毁掉。 */
+    const st = document.getElementById('chat-status');
+    if (st) st.textContent = '⚠ 上次的对话记录损坏，本轮**暂停自动保存**（避免把它覆盖掉）；修复或移走 AI会话.json 后重启即可恢复';
+    return;
+  }
   clearTimeout(chatSaveTimer);
   chatSaveTimer = setTimeout(
     () =>
@@ -42,15 +51,28 @@ function scheduleChatSave(): void {
 }
 
 export async function restoreChat(): Promise<void> {
+  let saved: string | null = null;
   try {
     const dir = await invoke<string>('reports_dir');
-    const saved = JSON.parse(await invoke<string>('read_text_file', { path: `${dir}/AI会话.json` }));
-    if (Array.isArray(saved) && saved.length) {
-      S.chatMsgs = saved;
+    saved = await invoke<string>('read_text_file', { path: `${dir}/AI会话.json` });
+  } catch {
+    /* 有意兜底：会话文件还不存在＝第一次用（`read_text_file` 对缺失文件是报错的），没有历史可恢复。 */
+  }
+  if (saved === null) return;
+  /* 2026-09-14：**解析失败必须与"文件不存在"分开**（与 `main.ts` 打开章节时同一条口径）。
+   * 原先两者共用一个 catch，于是损坏的 `AI会话.json` 被静默当成"没有对话"，
+   * 下一次自动保存就把它整体覆盖——教师攒了几十轮的审校对话**一句话都不剩，且没有任何提示**。
+   * 现在：解析不了就当场说出来，并且**这一轮不再自动保存**，先让教师有机会把它复制走。 */
+  try {
+    const parsed = JSON.parse(saved);
+    if (Array.isArray(parsed) && parsed.length) {
+      S.chatMsgs = parsed;
       chatRender();
     }
-  } catch {
-    /* 有意兜底：会话文件还不存在＝第一次用（读缺失文件本来就是报错的），没有历史可恢复。 */
+  } catch (e) {
+    chatFileBroken = true;
+    const st = document.getElementById('chat-status');
+    if (st) st.textContent = `⚠ 上次的对话记录读不进来（${String(e).slice(0, 60)}）——已保留文件、本轮**不会覆盖**它；需要的话先把 AI会话.json 复制走`;
   }
 }
 
@@ -277,14 +299,24 @@ async function sendChat(): Promise<void> {
   }
   const input = $('chat-input') as HTMLTextAreaElement;
   const text = input.value.trim();
-  if (!text) return;
-  input.value = '';
-  const key = await invoke<string>('load_api_key');
-  if (!key) {
-    setStatus('请先配置 AI（菜单 LayerText → AI 设置…）', 'err');
-    showAiSettings();
+  /* 2026-09-14：原先这里是 `if (!text) return;`——点发送什么都不发生（`S.chatBusy` 也不置位，
+   * 所以连"忙"的样式都没有）。空输入是**最常撞到**的一种，必须说出口。 */
+  if (!text) {
+    setStatus('先在下面的输入框里写点什么再发送（Enter 换行，⌘/Ctrl+Enter 发送）', 'err');
+    input.focus();
     return;
   }
+  /* 2026-09-14：`input.value = ''` 原先在**取 key 之前**。没有配置 AI 时教师刚打的一整段
+   * 话就被清掉了，而弹出来的还是"AI 设置"窗口——他关掉设置回来，输入框是空的，只能重打。
+   * 改成**确认能发出去之后再清**（没有 key 就不清）。 */
+  const key = await invoke<string>('load_api_key');
+  if (!key) {
+    setStatus('请先配置 AI（菜单 LayerText → AI 设置…）——你刚写的内容还在输入框里', 'err');
+    showAiSettings();
+    input.focus();
+    return;
+  }
+  input.value = '';
 
   S.chatBusy = true;
   ($('chat-send') as unknown as HTMLButtonElement).disabled = true;
@@ -346,7 +378,12 @@ async function sendChat(): Promise<void> {
 
 $('chat-send').addEventListener('click', () => void sendChat());
 $('chat-clear').addEventListener('click', () => {
+  /* 2026-09-14：清空是**不可撤销**的（清完还会落盘，重启也回不来），原先连问都不问——
+   * 而它就贴在发送按钮旁边。攒了几十轮的审校对话被一次误点抹掉，且没有任何第二次机会。 */
+  if (S.chatMsgs.length > 0 && !window.confirm(`清空当前 AI 对话（共 ${S.chatMsgs.filter((m) => m.role === 'user').length} 轮）？清空后无法恢复。`)) return;
   S.chatMsgs = [];
+  /* 清空是教师的明确意图：顺手解除"损坏文件不覆盖"的暂停，否则清空后自动保存仍是停的。 */
+  chatFileBroken = false;
   chatRender();
   scheduleChatSave();
   setStatus('AI 对话已清空', '');

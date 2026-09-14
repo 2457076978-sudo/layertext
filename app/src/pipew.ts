@@ -435,19 +435,29 @@ async function applyManualSentenceEdit(pi: number, si: number): Promise<void> {
     return;
   }
   const atExact = s.md.indexOf(exact);
-  s.md = s.md.slice(0, atExact) + revised + s.md.slice(atExact + exact.length);
-  // 标记存留：该句句级标记随人工修订完成；被改掉的词不再留幽灵标记；其余 remap 重定位
-  s.review.marks = marksSurvivingManualEdit(s.review.marks, { pi, si }, exact, revised);
-  s.review.warns = (s.review.warns ?? []).filter((x) => !x.startsWith(`${pi}:${si}|`)); // 教师亲手改过=复核完成
-  remapMarks(s.review.marks, s.md);
-  s.review.warns = remapWarns(s.review.warns, s.md);
+  /* 2026-09-14：**先算出来，别急着写回 `s.md`**（与 `bookio.ts` 的「整体替换」同一条口径）。
+   * 原先这里 `s.md = …` 之后才 `persistEdit(s, s.md)`——两个实参同一个引用，
+   * `persistEdit` 里 `newMd !== s.md` 恒为 false：
+   * ① 不 push 撤销快照，教师手动改句后 **⌘Z 撤不回来**；
+   * ② 写 `<章>_原始备份.md` 时用的正是 `s.md`，也就是**改后**的正文——
+   *    教师想"还原成改前"会还原成刚改的那一版，备份本身是废的。
+   * 顺带把 `s.md = next` 挪到**落盘成功之后**：写失败时内存与磁盘才不会各说一套。 */
+  const next = s.md.slice(0, atExact) + revised + s.md.slice(atExact + exact.length);
   switchSide('review');
   resetEditPane();
   const date = new Date().toLocaleDateString('sv-SE');
   const outDir = s.sourcePath ? s.sourcePath.slice(0, s.sourcePath.lastIndexOf('/')) : await invoke<string>('reports_dir');
   const logPath = `${outDir}/变更日志_AI审核.csv`;
   try {
-    const savedTo = await persistEdit(s, s.md);
+    const savedTo = await persistEdit(s, next);
+    s.md = next;
+    /* 标记存留：该句句级标记随人工修订完成；被改掉的词不再留幽灵标记；其余 remap 重定位。
+     * 放在**落盘成功之后**：写失败时内存里的标记不该先被改掉（否则屏上是新标记、盘上是旧正文）。
+     * remap 用的必须是 `next`，不能再用旧的 `s.md`——否则标记会按改前正文重定位。 */
+    s.review.marks = marksSurvivingManualEdit(s.review.marks, { pi, si }, exact, revised);
+    s.review.warns = (s.review.warns ?? []).filter((x) => !x.startsWith(`${pi}:${si}|`)); // 教师亲手改过=复核完成
+    remapMarks(s.review.marks, next);
+    s.review.warns = remapWarns(s.review.warns, next);
     let csv = '';
     try {
       csv = await invoke<string>('read_text_file', { path: logPath });
@@ -717,6 +727,13 @@ export function showVocabEditor(): void {
     .split('\n')
     .map((l) => l.replace(/\r$/, ''))
     .filter((l) => l.trim() && !l.startsWith('#'));
+  /* 2026-09-14：**「取消」必须真的取消**。面板是"增删即时写盘"的（下面 `saveVocab(true)`），
+   * 而 `#vclose` 原先只 `remove()` 弹层——教师加了两个词、删了一个词，点「取消」，
+   * 改动**已经落在盘上**，而且这个面板里没有任何撤销入口；界面上却摆着「完成 / 取消」一对按钮，
+   * 谁都会以为"取消＝不保存"。现在记下打开时的原始内容，取消时把它写回去。 */
+  const initialText = S.vocabCsvText ?? '';
+  const initialName = S.vocabName;
+  let wroteToDisk = false;
   let q = '';
   const wordOf = (line: string): string =>
     line
@@ -760,6 +777,7 @@ export function showVocabEditor(): void {
         const path = `${dir}/_词库.csv`;
         try {
           await invoke('write_text_file', { path, content: text });
+          wroteToDisk = true;
           S.vocabCsvText = text;
           S.vocabName = '_词库.csv';
           renderAll(); // 重新着色（renderReader 会按新词库重算三态）
@@ -772,6 +790,28 @@ export function showVocabEditor(): void {
           setStatus('词库保存失败：' + e, 'err');
         }
       })();
+
+    /** 取消：把"增删即时写盘"造成的那几次写回退掉，连内存一起还原。 */
+    const cancel = async (): Promise<void> => {
+      if (!wroteToDisk) {
+        popEl!.remove();
+        return;
+      }
+      try {
+        const s = activeSession();
+        const dir = s?.sourcePath ? s.sourcePath.slice(0, s.sourcePath.lastIndexOf('/')) : await invoke<string>('examples_dir');
+        await invoke('write_text_file', { path: `${dir}/_词库.csv`, content: initialText });
+        S.vocabCsvText = initialText || null;
+        S.vocabName = initialName;
+        renderAll();
+        popEl!.remove();
+        void runQcCurrent({ auto: true });
+        toast('已取消——词库改动已撤回（含刚才即时写进 _词库.csv 的那些）', 'ok');
+      } catch (e) {
+        /* 回退失败必须说出口：盘上现在是"改过的"，而不是教师以为的"取消后的"。 */
+        setStatus(`取消时没能把 _ 词库.csv 改回原样：${String(e)}——盘上仍是刚才改动后的词库，请手工核对`, 'err');
+      }
+    };
 
     const add = (): void => {
       const inp = popEl!.querySelector('#vadd') as HTMLInputElement | null;
@@ -794,7 +834,7 @@ export function showVocabEditor(): void {
         void saveVocab(true);
       }),
     );
-    popEl!.querySelector('#vclose')?.addEventListener('click', () => popEl!.remove());
+    popEl!.querySelector('#vclose')?.addEventListener('click', () => void cancel());
     popEl!.querySelector('#vsave')?.addEventListener('click', () => void saveVocab(false));
   };
   render();

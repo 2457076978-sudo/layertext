@@ -711,9 +711,18 @@ export async function renderRiskPane(
       const it = file.队列.find((x) => x.id === id);
       if (!it) return;
       t.setAttribute('disabled', 'true');
-      void appendDecision(input.paths, input.tier, decisionLineFor(it, kind, { teacherId: input.teacherId, sourceVersion: input.paths.sourceVersion }), identity).then(() =>
-        renderRiskPane({ ...input, skipSessionOpen: true }),
-      );
+      /* 2026-09-14：`void p.then(...)` **没有 catch** —— 一旦这条 promise 拒绝
+       * （写日志失败、IO 未注入、`pathsFor` 抛），这个按钮就**永久 disabled**：
+       * 卡还在列表里、顶部没有任何说明、再点也没用。教师看到的正是"点了没反应"。
+       * 判据统一成：**凡是 disabled 过的按钮，都必须有一条让自己重新可点的出路**。 */
+      void appendDecision(input.paths, input.tier, decisionLineFor(it, kind, { teacherId: input.teacherId, sourceVersion: input.paths.sourceVersion }), identity)
+        .then(() => renderRiskPane({ ...input, skipSessionOpen: true }))
+        .catch((e: unknown) =>
+          renderRiskPane(
+            { ...input, skipSessionOpen: true },
+            { itemId: it.id, text: `这条决定没能记上：${e instanceof Error ? e.message : String(e)}`, hint: '事件日志写不进去；重试即可，队列与已有决定都没动' },
+          ),
+        );
     });
   }
   // 暂停 / 恢复：往**工作台那本账**追加一条标记。待办一条不动——状态是现算的，不是存出来的。
@@ -748,10 +757,15 @@ export async function renderRiskPane(
       const ref = (ev.currentTarget as HTMLElement).getAttribute('data-undo');
       if (!ref) return;
       (ev.currentTarget as HTMLElement).setAttribute('disabled', 'true');
-      void undoDecision(input, file, identity, ref).then((r) => {
-        if (r.ok) void renderRiskPane({ ...input, skipSessionOpen: true });
-        else void renderRiskPane({ ...input, skipSessionOpen: true }, { itemId: '', text: r.message ?? '撤销未完成' });
-      });
+      void undoDecision(input, file, identity, ref)
+        .then((r) => {
+          if (r.ok) void renderRiskPane({ ...input, skipSessionOpen: true });
+          else void renderRiskPane({ ...input, skipSessionOpen: true }, { itemId: '', text: r.message ?? '撤销未完成' });
+        })
+        /* 与上面同因：没有 catch 时按钮永久 disabled，而"撤销"恰恰是最需要说清楚的一种失败 */
+        .catch((e: unknown) =>
+          renderRiskPane({ ...input, skipSessionOpen: true }, { itemId: '', text: `撤销没能执行：${e instanceof Error ? e.message : String(e)}`, hint: '历史一条没删；重试即可' }),
+        );
     });
   }
   // 批量应用：只对"动作统一、且有确定性修法"的组开放（其余组连按钮都不给）
@@ -761,9 +775,14 @@ export async function renderRiskPane(
       const g = groups.find((x) => x.id === gid);
       if (!g) return;
       (ev.currentTarget as HTMLElement).setAttribute('disabled', 'true');
-      void runBatchApply(input, file, identity, g).then((r) => {
-        void renderRiskPane({ ...input, skipSessionOpen: true }, r.ok ? undefined : { itemId: '', text: r.message ?? '批量应用未完成' });
-      });
+      void runBatchApply(input, file, identity, g)
+        .then((r) => {
+          void renderRiskPane({ ...input, skipSessionOpen: true }, r.ok ? undefined : { itemId: '', text: r.message ?? '批量应用未完成' });
+        })
+        /* 同上：批量应用会改正文，覆盖风险最大，失败更不能无声 */
+        .catch((e: unknown) =>
+          renderRiskPane({ ...input, skipSessionOpen: true }, { itemId: '', text: `批量应用没能执行：${e instanceof Error ? e.message : String(e)}`, hint: '改稿与记录是一次事务，失败即未改动' }),
+        );
     });
   }
   for (const btn of Array.from(input.dom.querySelectorAll('#pane-risk [data-act]'))) {
@@ -774,12 +793,17 @@ export async function renderRiskPane(
       const it = file.队列.find((x) => x.id === id);
       if (!it) return;
       t.setAttribute('disabled', 'true');
-      void runRiskAction(input, file, identity, it).then((r) => {
-        // 失败时**不**立刻重渲染队列：否则刚写上去的失败原因会被覆盖，
-        // 教师只看到"点了没反应、卡片还在"。卡片留在列表里 + 顶部一条失败说明。
-        if (r.ok) void renderRiskPane({ ...input, skipSessionOpen: true });
-        else void renderRiskPane({ ...input, skipSessionOpen: true }, { itemId: it.id, text: r.message ?? '动作未执行' });
-      });
+      void runRiskAction(input, file, identity, it)
+        .then((r) => {
+          // 失败时**不**立刻重渲染队列：否则刚写上去的失败原因会被覆盖，
+          // 教师只看到"点了没反应、卡片还在"。卡片留在列表里 + 顶部一条失败说明。
+          if (r.ok) void renderRiskPane({ ...input, skipSessionOpen: true });
+          else void renderRiskPane({ ...input, skipSessionOpen: true }, { itemId: it.id, text: r.message ?? '动作未执行' });
+        })
+        /* 同上：这个按钮也会改正文，抛出去就永久 disabled + 卡片还在＝看着就是"点了没反应" */
+        .catch((e: unknown) =>
+          renderRiskPane({ ...input, skipSessionOpen: true }, { itemId: it.id, text: `动作没能执行：${e instanceof Error ? e.message : String(e)}`, hint: '改稿与记录是一次事务，失败即未改动' }),
+        );
     });
   }
   if (emptyHtml) return { ok: true, message: !file.队列.length ? '队列为空' : '已全部处理' };

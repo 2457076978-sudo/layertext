@@ -53,6 +53,32 @@ export interface RewriteRules {
   extra: string;
 }
 
+/** 全局（非本书）AI 附加约定：由 AI 设置面板写入 `~/.layertext.json`，不属于任何一本书。
+ *  `_本书配置.json` 也会带一份 `instructions`，打开一本书会临时把它覆盖成本书的；
+ *  而"下一本书没有这一项"时必须能**退回全局值**，否则上一本书的约定会留在下一本书上。
+ *  放在 state.ts（而不是 bookio.ts）：settings.ts 要能写它，而 settings → bookio 会成环。 */
+let globalInstructions: string | undefined;
+let globalCaptured = false;
+/** 打开任何一本书之前先记下当时的全局值（只在第一次生效）。 */
+export function rememberGlobalInstructions(): void {
+  if (!globalCaptured) {
+    globalInstructions = S.appConfig.instructions;
+    globalCaptured = true;
+  }
+}
+/** AI 设置面板保存时调用：全局值变了。 */
+export function setGlobalInstructions(v: string): void {
+  globalInstructions = v;
+  globalCaptured = true;
+}
+/** 打开一本书时用它把 `instructions` 退回全局值（本书没带这一项时）。 */
+export function globalInstructionsValue(): string | undefined {
+  return globalInstructions;
+}
+export function globalInstructionsCaptured(): boolean {
+  return globalCaptured;
+}
+
 export const S = {
   /** 打开的章节会话 */
   sessions: [] as FileSession[],
