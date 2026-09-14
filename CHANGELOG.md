@@ -4,6 +4,62 @@
 1.0.0 之前的版本号为开发期里程碑（当时 `package.json` 未同步递增，本文件按里程碑整理，2026-09-06 校准）。
 面向教师的通俗版功能说明见 [README](README.md) 与 [docs/PRD.md](docs/PRD.md)。
 
+## [未发布] - 2026-09-14（第十轮：把上一轮"发现了但没改"的九条做完——其中五条是同一类"按钮不可信"）
+
+第九轮结尾留了一张"发现但没改"的清单。这一轮逐条**回代码核实**（一个只读子代理专门做这件事），
+九条里 **七条为真、两条已在更早的批次里修掉**。为真的逐条改完，并按老规矩把"报告说错了"
+和"我自己改错了"都写在这里。
+
+**先记两条返工（都是我自己造的）**
+
+1. **`collectFb` 的第一版改法是空炮**。我在保存侧写了
+   `const allFb = collectFb(); const fbs = allFb.filter(...); const halfFilled = allFb.filter(...)`，
+   却**没删掉 `collectFb` 内部那句 `.filter(r => r.baseUrl && r.model)`**——
+   于是 `allFb` 本来就已经是过滤后的集合，`halfFilled` 恒为 `[]`，
+   新加的"⚠ 有 N 行没填齐"**永远渲染不出来**，被修的缺陷原样还在。
+   是审计子代理在跑的时候**当场发现并回头喊我**（它那两个文件的哈希在几分钟里变了四次）。
+   教训：**过滤器写在收集函数里，下游就永远看不见被过滤掉的东西**；改这类问题时，
+   先确认"半成品有没有机会到达判定点"，再谈怎么提示。
+2. **`loadBookConfig` 的"换书清空"第一版太狠**。我一开始无条件 `resetBookScope()`，
+   而 `main.ts` **打开同一本书的下一章也会重跑这个函数**——
+   教师刚从界面导入了词库、还没点「保存为本书配置」，翻一页就被清掉了。
+   改成 `resetBookScopeIfNew(dir)`：**只有书目录变了才清**。跨书残留照修，同书内存态不受影响。
+
+| # | 位置 | 问题（核实后） | 修法 |
+| --- | --- | --- | --- |
+| 86 | `app/src/risk.ts` 四处 | `void p.then(...)` **全部没有 `.catch()`**（`data-decide` / `data-undo` / `data-batch` / `data-act`）。按钮先 `setAttribute('disabled','true')`，promise 一拒绝就**永久禁用**：卡片还在、顶部没有说明、再点也没用——正是"点了没反应" | 四处各补 `.catch()`，走同一条"顶部说明 + 重渲染让按钮重新可点"的出路。判据写进注释：**凡是 disabled 过的按钮，都必须有一条让自己重新可点的出路** |
+| 87 | `app/src/grading.ts` 班级表 | `failed` / `error` 两个字段**导出（md/csv）用了、屏幕上一次都没读**：失败行渲染成一排 `—`/0，与"学生交了个空文件"一模一样——教师会照着这张表去批评学生，而他批评的其实是没读进来的文件 | 屏幕上照导出口径走：失败行整行 `—`、名字挂 ⚠、悬停给原因；"这一列偏低"（`riskError`）的行也挂 ⚠；标题行点出"其中 N 份没读进来" |
+| 88 | `app/src/grading.ts` 点失败行 | `if (!a) return;`——**点失败行什么都不发生**，而失败行恰恰是教师最需要看原因的那一行 | 改成 `setStatus(name：原因, 'err')` |
+| 89 | `app/src/grading.ts` `runSingle` | 整条链路**没有 try/catch、也没有进行中反馈**（体检要读词库/算结构，不是瞬时的）。抛出去只靠全局兜底网 toast 一下，看不出是"没反应"还是"在算" | 按钮禁用 + 文案「体检中…」，失败当场说出口，`finally` 恢复 |
+| 90 | `app/src/chat.ts` 空输入发送 | `if (!text) return;`——点发送**什么都不发生**（连 `chatBusy` 都不置位，连"忙"的样式都没有） | 补 `setStatus('先在下面的输入框里写点什么再发送（Enter 换行，⌘/Ctrl+Enter 发送）','err')` + 聚焦 |
+| 91 | `app/src/chat.ts` `#chat-clear` | 清空**不可撤销**（清完还落盘，重启也回不来），而它就贴在发送按钮旁边，**原先连问都不问** | 加 `window.confirm`（带轮数）；清空时顺便解除"损坏文件不覆盖"的暂停 |
+| 92 | `app/src/chat.ts` `restoreChat` | "文件不存在"与"JSON 解析失败"**共用一个 catch**：损坏的 `AI会话.json` 被静默当成"没有对话"，下一次自动保存就把它整体覆盖——攒了几十轮的审校对话一句话不剩 | 拆开：读失败＝第一次用（静默）；解析失败＝当场说出口 + `chatFileBroken = true`，**本轮暂停自动保存**，先把文件留住。与 `main.ts` 打开章节时那条口径一致 |
+| 93 | `app/src/chat.ts` `sendChat` | `input.value = ''` 在**取 API Key 之前**：没配 AI 时教师刚打的一整段话被清掉，弹出来的还是"AI 设置"窗口，关掉回来输入框是空的 | 挪到确认能发出去之后；无 key 的提示补一句"你刚写的内容还在输入框里" |
+| 94 | `app/src/pipew.ts` 手动改句 | `s.md = s.md.slice(...)` **之后**才 `persistEdit(s, s.md)`——两个实参同一个引用，`newMd !== s.md` 恒 false：① 不 push 撤销快照（⌘Z 撤不回来）；② 写 `<章>_原始备份.md` 用的是**改后**的正文，"还原成改前"会还原成刚改的那一版 | 先算 `next`，`persistEdit(s, next)` 成功后再 `s.md = next`；标记 remap 也挪到落盘成功之后（写失败时内存与磁盘不会各说一套） |
+| 95 | `app/src/bookio.ts` `loadBookConfig` | 全是 `if (cfg.X)` 守卫式赋值（那是为了不把 `null` 当"清空"），但**上一本书的值不会被请走**：打开一本没有配置的书，上一本书的词库/术语/专名/改写规则原封不动继续生效，界面上没有任何迹象 | 加 `resetBookScope()`，由 `resetBookScopeIfNew(dir)` 驱动——**只有换书才清**（见上面返工 2）；`instructions` 退回的是"全局值"而不是默认值（新增 `state.ts` 的 `rememberGlobalInstructions` / `setGlobalInstructions`） |
+| 96 | `app/src/bookio.ts` 同上 | 损坏的 `_本书配置.json` 被静默当成"这本书没有配置"：教师明明配过词库与改写规则，打开书什么都没生效，一个字都不提示 | 拆 catch，说出口并带上路径，按"没有本书配置"处理 |
+| 97 | `app/src/bookio.ts` + `pipew.ts` | **`_词库.csv` 写了但全仓没人读回**。词库编辑器的「完成」写这个文件、设置页写着"词库以书目录 `_词库.csv` 为准"，而唯一的读者 `lexicon.ts` 读的是 **`examples_dir`**，不是书目录。教师编辑完 → 重启 → 再打开这本书，词库当作没配过 | `loadBookConfig` 三个分支都先读 `${dir}/_词库.csv` 再应用（**覆盖** JSON 里那份 `vocabCsv`，与设置页口径一致） |
+| 98 | `app/src/pipew.ts` 词库编辑器 | 面板是"增删即时写盘"的，而「取消」`#vclose` **只 `remove()` 弹层**：加了词删了词点取消，改动**已经在盘上**，面板里也没有任何撤销入口——界面上却摆着「完成 / 取消」一对按钮 | 记下打开时的原始内容；取消时把它写回 `_词库.csv` 并还原内存，失败必须说出口（否则盘上是"改过的"，而教师以为"取消了"） |
+| 99 | `app/src/settings.ts` `collectFb` | `.filter(r => r.baseUrl && r.model)` 让"只填了一半的备用行"**在收集阶段就消失**，而成功提示报的是过滤后的 N——教师填了两行、界面说保存了一个，另一个不见了，且没有任何提示 | 收集函数**不再过滤**；判定挪到保存侧：整行全空＝空行静默跳过，**填了一半的点名**，并且不谎报"已保存" |
+| 100 | `app/src/settings.ts` 备用行的 Key | 占位文案写的是「空=用主Key」，而读取侧 `ai.ts` 是"钥匙串里有就用钥匙串的"——**把输入框清空并不能**让这一行退回用主 Key，旧 Key 照旧生效；界面上也没有任何入口能删掉它 | 文案改成真话「留空=沿用已存」+ 悬停说明；**新增 Rust 命令 `delete_api_key`** 与每行的「清」按钮（没存过不算失败），并注册进 `invoke_handler` |
+
+**复核掉的两条（不再改，记下来免得下一份报告重报一遍）**
+
+- **「采纳 100% 失败」已经在第八批（`4848fe6`）修掉了**：真正的病根是 `findProjectConfig` 永远找不到配置
+  （`list_dir` 默认不返回 `.json`，过滤器又拿完整路径去锚定 `^调适项目_.+\.json$`），代码注释里
+  「于是**写正文 100% 失败**」记的就是它；已在 `datapanel.ts` 改成 `listDir(d, ['json'])` + `baseName(f)`。
+  剩下的"没有调适项目配置"那声拒绝是**设计如此**（没有版本与追溯的去处就不该写正文），
+  而且 `setStatus` + `toast` 都说了——不是静默失败。
+- **数据面板的未绑定按钮已经在第九轮修掉了**（专名表的 `[data-dp-del]`，`CHANGELOG` 第 76 项）。
+  这一轮把 `renderDataPane` 渲染出的**每一个**可点元素重数了一遍
+  （`[data-dp-tab]` / `#dp-add` / `#dp-filter` / `[data-dp-del]` / `#dp-more` / `#dp-save` / `#dp-clear` / `[data-dp-edit]` / `[data-dp-delrow]`），**全部有监听**。
+
+**验证**：`npm run verify` 全绿（preflight 44 + typecheck（含 `app`）+ lint 0 warning +
+**971 项：970 通过 / 0 失败 / 1 跳过**）；Rust gate（`cargo fmt` / `clippy --all-targets -- -D warnings` /
+6 测试）全绿（含新增的 `delete_api_key` 编译与注册）。
+`LayerText-optimization` 同步后 preflight 43 + 根/app typecheck + **1000 项：999 通过 / 0 失败 / 1 跳过**，
+分支 Rust gate 全绿。
+
 ## [未发布] - 2026-09-14（第九轮：把「按钮点了到底有没有用」逐个点到底）
 
 来源：Wayne"我怕某个 button 设置在那其实没有用"。

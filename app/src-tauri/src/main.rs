@@ -590,6 +590,29 @@ fn save_api_key(key: String, account: Option<String>) -> Result<(), String> {
     }
 }
 
+/// 删掉某一家（备用供应商）已存的 Key。
+/// 存在的理由：`ai.ts` 取值时是"钥匙串里有就用钥匙串的"，所以**把输入框清空并不能**
+/// 让这一行退回"用主 Key"——上一次存进去的仍然生效。少了这条命令，教师在界面上就没有
+/// 任何办法把那把 Key 拿掉（只能自己去"钥匙串访问"里删）。
+/// 没存过（`could not be found`）不算失败：目的已经达成。
+#[tauri::command]
+fn delete_api_key(account: Option<String>) -> Result<(), String> {
+    let service = key_service(&account);
+    let out = std::process::Command::new("security")
+        .args(["delete-generic-password", "-a", "layertext", "-s", &service])
+        .output()
+        .map_err(|e| e.to_string())?;
+    if out.status.success() {
+        return Ok(());
+    }
+    let err = String::from_utf8_lossy(&out.stderr).into_owned();
+    if err.contains("could not be found") {
+        Ok(())
+    } else {
+        Err(err)
+    }
+}
+
 #[tauri::command]
 fn load_api_key(account: Option<String>) -> Result<String, String> {
     let service = key_service(&account);
@@ -869,6 +892,7 @@ fn main() {
             reveal_path,
             save_api_key,
             load_api_key,
+            delete_api_key,
             save_app_config,
             load_app_config,
             open_help_window,

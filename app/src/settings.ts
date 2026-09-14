@@ -5,7 +5,7 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
-import { S, esc } from './state.js';
+import { S, esc, setGlobalInstructions } from './state.js';
 import { $, setStatus, toast } from './uikit.js';
 import { activeSession, fileSummary, renderAll, updateModePill } from './main.js';
 import { mergedSelection, reinforceWordsNow } from './lexicon.js';
@@ -251,21 +251,40 @@ export function showAiSettings(): void {
     div.innerHTML = `<input class="fb-name" value="${esc(name)}" placeholder="名称(如 智谱备用)" style="max-width:90px" />
       <input class="fb-url" value="${esc(url)}" placeholder="API 地址 /v1" />
       <input class="fb-model" value="${esc(model)}" placeholder="模型名" style="max-width:110px" />
-      <input class="fb-key" type="password" value="${esc(key)}" placeholder="Key(空=用主Key)" style="max-width:110px" />
+      <input class="fb-key" type="password" value="${esc(key)}" placeholder="Key(留空=沿用已存)" title="留空不代表用主 Key：Key 存在钥匙串里，留空只是本次不覆盖——上一次存进去的仍然生效。要换掉就直接填新的；要退回用主 Key，按右边的「清」。" style="max-width:110px" />
+      <button class="fb-clear" style="font-size:11px;padding:2px 6px" title="删掉这一家已经存进本机钥匙串的 Key，让这一行退回用主 Key">清</button>
       <button class="x">×</button>`;
+    /* 2026-09-14：**「清」必须有**。保存侧只在 `f.key` 非空时才写钥匙串，
+     * 而读取侧（`ai.ts` 的 `activeTargets`）是"钥匙串里有就用钥匙串的"——
+     * 于是"把输入框清空再保存"**并不能**让这一行退回用主 Key，旧 Key 照旧生效。
+     * 少这一个按钮，教师在界面上就没有任何办法把那把 Key 拿掉
+     * （只能自己去"钥匙串访问"里删 `layertext.apikey.fb:<id>`）。 */
+    div.querySelector('.fb-clear')!.addEventListener('click', async () => {
+      const id = (div as HTMLElement).dataset.fbId ?? '';
+      const inp = div.querySelector('.fb-key') as HTMLInputElement;
+      inp.value = '';
+      try {
+        if (id) await invoke('delete_api_key', { account: `fb:${id}` });
+        toast('这一家已存的 Key 已删除——留空即用主 Key', 'ok');
+      } catch (e) {
+        setStatus(`清除 Key 失败：${String(e)}——可到"钥匙串访问"里手动删除 layertext.apikey.fb:${id}`, 'err');
+      }
+    });
     div.querySelector('.x')!.addEventListener('click', () => div.remove());
     fbRows.appendChild(div);
   };
+  /* 2026-09-14：**这里不许再过滤**。原先结尾挂了一句 `.filter((r) => r.baseUrl && r.model)`，
+   * 于是"只填了一半的行"在**收集阶段**就没了，调用方拿到的永远已经是干净的集合——
+   * 想在下游提醒"有一行没填齐"是不可能的（半成品在到达下游之前就消失了）。
+   * 收齐是收齐，判定是判定：过滤挪到保存那一侧，并且**必须点名**被跳过的行。 */
   const collectFb = () =>
-    [...fbRows.querySelectorAll('.rw-row')]
-      .map((r) => ({
-        id: (r as HTMLElement).dataset.fbId ?? '',
-        name: (r.querySelector('.fb-name') as HTMLInputElement).value.trim(),
-        baseUrl: (r.querySelector('.fb-url') as HTMLInputElement).value.trim().replace(/\/+$/, ''),
-        model: (r.querySelector('.fb-model') as HTMLInputElement).value.trim(),
-        key: (r.querySelector('.fb-key') as HTMLInputElement).value.trim(),
-      }))
-      .filter((r) => r.baseUrl && r.model);
+    [...fbRows.querySelectorAll('.rw-row')].map((r) => ({
+      id: (r as HTMLElement).dataset.fbId ?? '',
+      name: (r.querySelector('.fb-name') as HTMLInputElement).value.trim(),
+      baseUrl: (r.querySelector('.fb-url') as HTMLInputElement).value.trim().replace(/\/+$/, ''),
+      model: (r.querySelector('.fb-model') as HTMLInputElement).value.trim(),
+      key: (r.querySelector('.fb-key') as HTMLInputElement).value.trim(),
+    }));
   $('ai-fb-add').addEventListener('click', () => addFbRow());
   for (const f of S.appConfig.failover ?? []) addFbRow(f.name ?? '', f.baseUrl ?? '', f.model ?? '', '', f.id ?? '');
 
@@ -298,22 +317,35 @@ export function showAiSettings(): void {
       S.appConfig.baseUrl = urlEl.value.trim();
       S.appConfig.model = currentModel();
       S.appConfig.instructions = ($('ai-instructions') as HTMLTextAreaElement).value.trim();
+      /* 这是**全局**附加约定（`~/.layertext.json`）。同步给 bookio：打开下一本书时若那本书
+       * 自己没带 `instructions`，要退回的是这里刚存下的值，而不是上一本书的。 */
+      setGlobalInstructions(S.appConfig.instructions);
       S.appConfig.autoRewriteOnMark = ($('ai-auto') as HTMLInputElement).checked;
       updateModePill();
       S.appConfig.trustEdit = ($('ai-trust') as HTMLInputElement).checked;
       S.appConfig.inPlaceEdit = ($('ai-inplace') as HTMLInputElement).checked;
       S.appConfig.lowThinking = ($('ai-lowthink') as HTMLInputElement).checked;
-      const fbs = collectFb();
+      /* 2026-09-14：`collectFb()` 里那句 `.filter(r => r.baseUrl && r.model)` 会**静默丢掉**
+       * 只填了一半的行（填了地址没填模型，或反过来）。而下面那句"✓ 已保存（备用供应商 N 个…）"
+       * 用的是**过滤后**的 N——教师明明填了两行，界面说保存了一个，另一个不见了，
+       * 且没有任何提示。现在改成：整行全空＝只是没用的空行，静默跳过；
+       * **填了一半的必须点名**，并且不谎报"已保存"。 */
+      const allFb = collectFb();
+      const fbs = allFb.filter((f) => f.baseUrl && f.model);
+      const halfFilled = allFb.filter((f) => !(f.baseUrl && f.model) && (f.name || f.baseUrl || f.model || f.key));
       S.appConfig.failover = fbs.length ? fbs.map((f) => ({ id: f.id, name: f.name, baseUrl: f.baseUrl, model: f.model })) : undefined;
       await saveConfig();
       const k = cur.value.trim();
       if (k) await invoke('save_api_key', { key: k });
-      /* 账号用**稳定 id**（`fb:<id>`），不用行下标——删一行不会让剩下的行串到别人的 Key。 */
+      /* 账号用**稳定 id**（`fb:<id>`），不用行下标——删一行不会让剩下的行串到别人的 Key。
+       * 注意：**留空不等于用主 Key**。Key 存在钥匙串里，留空只是"这次不覆盖"，
+       * 上一次存进去的仍然生效。要退回用主 Key，按那一行的「清」（走 `delete_api_key`）。 */
       for (const f of fbs) {
         if (f.key) await invoke('save_api_key', { key: f.key, account: `fb:${f.id}` });
       }
       reloadPrompts();
-      out.textContent = fbs.length ? `✓ 已保存（Key 存入本机钥匙串；备用供应商 ${fbs.length} 个，主服务商失败时按序自动切换）` : '✓ 已保存（Key 存入本机钥匙串）';
+      const half = halfFilled.length ? `；⚠ 有 ${halfFilled.length} 行没填齐（地址与模型都要填）**没有保存**：${halfFilled.map((f) => f.name || '(未命名)').join('、')}` : '';
+      out.textContent = fbs.length ? `✓ 已保存（Key 存入本机钥匙串；备用供应商 ${fbs.length} 个，主服务商失败时按序自动切换）${half}` : `✓ 已保存（Key 存入本机钥匙串）${half}`;
     } catch (e) {
       out.textContent = '✗ 保存失败：' + e;
     }
