@@ -2345,50 +2345,6 @@
         border-top: 1px solid var(--line);
         margin-top: 6px;
       }
-      /* 工作区条（浏览器标签式：B/M/A 工作区 + 当前工作区章节 chips） */
-      .wstabs {
-        display: none;
-        gap: 4px;
-        align-items: stretch;
-        padding: 4px 12px 0;
-        border-bottom: 1px solid var(--wsline);
-        background: var(--wsbg);
-        overflow-x: auto;
-      }
-      .wstabs .ftab.ws {
-        padding: 5px 14px;
-        font-size: var(--fs-sm);
-        cursor: pointer;
-        user-select: none;
-        border: 1px solid transparent;
-        border-bottom: none;
-        border-radius: var(--r-md) var(--r-md) 0 0;
-        transition:
-          background 0.15s,
-          color 0.15s;
-      }
-      .wstabs .ftab.ws:hover {
-        color: var(--accent);
-        background: var(--accent-soft);
-      }
-      .wstabs .ftab.ws.active {
-        color: var(--accent);
-        font-weight: 700;
-        background: var(--accent-soft);
-        border-color: var(--wsline);
-        box-shadow: inset 0 3px 0 var(--accent);
-      }
-      .wstabs .ftab.ws:active {
-        transform: translateY(1px);
-      }
-      .ws-files {
-        display: inline-flex;
-        gap: 4px;
-        margin-left: 10px;
-        padding-left: 10px;
-        border-left: 1px solid var(--line);
-        align-items: center;
-      }
       .wschip {
         font-size: var(--fs-xs);
         color: var(--ink);
@@ -3364,16 +3320,12 @@
           0 1px 3px rgba(21, 62, 50, 0.28);
       }
       /* 文件条与工作区条：与顶栏连成一整片玻璃，细分隔线造层次 */
-      .filetabs,
-      .wstabs {
+      .filetabs {
         background: var(--panel-glass);
         -webkit-backdrop-filter: blur(24px) saturate(170%);
         backdrop-filter: blur(24px) saturate(170%);
       }
       .filetabs {
-        border-bottom: 1px solid var(--glass-line);
-      }
-      .wstabs {
         border-bottom: 1px solid var(--glass-line);
       }
       /* 侧栏：玻璃浮层 + 左缘亮线 */
