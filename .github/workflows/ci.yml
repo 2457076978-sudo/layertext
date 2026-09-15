@@ -47,3 +47,19 @@ jobs:
           cd app
           npm ci
           npx tsc --noEmit -p tsconfig.json
+
+  # Rust 主进程单独一个 job：它是 macOS 专有的（security / open / say / TCC），
+  # 塞不进 ubuntu 那个 job。而它是**最会丢数据的一层**（文件读写、原子写、钥匙串），
+  # 长期只在开发者本机跑过——2026-09-14 之前 CI 里根本没有 cargo 这一步。
+  rust:
+    name: Rust 主进程门禁（fmt / clippy / 单测）
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: cargo fmt --check / clippy -D warnings / test
+        run: npm run verify:rust

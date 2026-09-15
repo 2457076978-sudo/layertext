@@ -4,6 +4,37 @@
 1.0.0 之前的版本号为开发期里程碑（当时 `package.json` 未同步递增，本文件按里程碑整理，2026-09-06 校准）。
 面向教师的通俗版功能说明见 [README](README.md) 与 [docs/PRD.md](docs/PRD.md)。
 
+## [未发布] - 2026-09-14（第十四轮：把上次说"该做"的两件事做掉——接线门禁 + 门禁与 CI 对齐）
+
+上一轮末尾我说"如果接着做，先做这三件"。跨层传播撤销已完成（第十三/十四轮之间），
+这一轮做剩下两件。
+
+| # | 位置 | 做了什么 | 为什么 |
+| --- | --- | --- | --- |
+| 115 | `tests/clickwiring.test.ts`（新增） | **接线门禁**：模板里渲染出的 `<button/input/select/textarea id="X">` 与 `data-xxx=` 动作钩子，全仓必须至少有一处读它（`getElementById`/`$`/`querySelector('#X')`/`bind('X')`；钩子则是 `[data-xxx]`/`getAttribute`/`.dataset.xxx`/`closest`），否则判红 | 第九轮那次人工审计是**手工**对了一遍 26 个静态 id + 123 个运行时按钮，找出 21 处问题。手工审一遍只管一次；这条把它变成每次提交都跑 |
+| 116 | `package.json` | `verify` 补齐 `check_versions` / `eval` / `compare`；新增 `verify:all` = `verify + verify:rust` | 原先本地 `verify` 少跑这三条，而 CI 跑——**"本地全绿"不等于"CI 会绿"** |
+| 117 | `.github/workflows/ci.yml` + `package.json` | CI 新增独立的 **Rust job**（`macos-latest`，`dtolnay/rust-toolchain`）；`verify:rust` 的 clippy 提到 `--all-targets` | Rust 主进程是 macOS 专有的（`security`/`open`/`say`/TCC），塞不进 ubuntu job——**而 CI 里原本根本没有 cargo 这一步**，最会丢数据的那一层长期只在开发者本机跑过 |
+| 118 | `tools/compare.ts` | 比对结果没变就**不重写**报告（比之前去掉"生成日期"那一行）；日志区分"已更新/未重写" | 那个报告是**被 git 跟踪的**文档，原先每跑一次就把日期改一行——`verify` 一跑就变脏。现在那条日期表示"结果最后一次变化是哪天" |
+
+**接线门禁这条，先说清楚它今天抓到了什么**：**0 处真问题**。
+扫出来的 3 条候选全是误报，我逐条查过：
+`sum-suggest` / `sum-close` 的绑定写在**另一个文件**（`uikit.ts` 里统一绑）——第一版扫描只看渲染它的那个文件，所以漏了；
+`cls-close` / `cls-reload` / `cls-clear` 走的是本文件里的 `bind('id', …)` 助手；
+`w-ui-lang` / `w-text-lang` 是上手向导里只有**一个可用项**的下拉（另一个是 disabled 的"即将支持"），本来就没有可绑的行为——这两个进了白名单，**每个都写了理由**。
+
+所以它的价值不在今天，在以后：**回归验证过**——把 `datapanel.ts` 换回 `e87ecf4^` 那版（
+`data-dp-del` 渲染出来却没有任何监听，就是那次审计抓到的真缺陷），这条门禁当场报出来。
+另外还做了**实机负向验证**：往 `app/src/` 里丢一个临时探针文件渲染 `<button id="ghost-probe">`
+与 `data-ghost-hook`，测试立刻红；删掉探针即恢复绿。
+
+**`verify` 变长了，如实说代价**：现在跑一次 `verify` 会连带跑金标准评测与双引擎对照，
+比原来慢（本地实测多十几秒）。换来的是"本地绿 = CI 绿"。
+
+**验证**：`npm run verify` 全绿（preflight 44 + 版本五处一致 + typecheck 根/app + lint 0 warning +
+**988 项：987 通过 / 0 失败 / 1 跳过** + 评测不低于基线 + 76/76 双引擎一致）；
+`npm run verify:all`（含 Rust）全绿。
+`LayerText-optimization` 同步后 preflight 43 + **1017 项：1016 通过 / 0 失败 / 1 跳过**，Rust gate 全绿。
+
 ## [未发布] - 2026-09-14（第十三轮：跨层传播改成**自动**，并补上它的对侧）
 
 Wayne 拍板改口径：**"直接弄，自动传播，我也不需要撤销的那种"**。

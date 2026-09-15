@@ -137,7 +137,20 @@ ${notes.length ? `\n## 注记\n\n${notes.map((n) => `- ${n}`).join('\n')}\n` : '
 ${sections.join('\n')}
 `;
 
-writeFileSync(OUT, md, 'utf-8');
+/* 2026-09-14：**结果没变就不要重写这个文件**。
+ * 原先每次跑都无条件写一遍，而报告头一行是"生成日期"——于是 `npm run verify` 只要跑到这一步，
+ * 就会把一个**被 git 跟踪的文档**改脏（换一天跑就变一行），提交时要么误带上、要么天天看见
+ * 一条无意义的 diff。现在：把新报告与旧报告**去掉日期行**再比，一样就不写——
+ * 那条日期于是表示"结果最后一次发生变化是哪天"，这才是它该有的意思。 */
+const stripDate = (t: string): string => t.replace(/^- 生成日期：.*$/m, '');
+let prev = '';
+try {
+  prev = readFileSync(OUT, 'utf-8');
+} catch {
+  /* 有意兜底：报告还不存在＝第一次生成，直接写。 */
+}
+const changed = stripDate(prev) !== stripDate(md);
+if (changed) writeFileSync(OUT, md, 'utf-8');
 console.log(`比对完成：${pass}/${total} 项一致（${texts.length} 篇文本，${failedTexts} 篇存在差异）`);
-console.log(`报告已落盘: ${OUT}`);
+console.log(changed ? `报告已更新: ${OUT}` : `比对结果无变化，报告未重写: ${OUT}`);
 if (pass !== total) process.exit(1);
