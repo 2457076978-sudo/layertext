@@ -54,6 +54,23 @@ for (const name of ['LayerText_AF工序化生成.mjs', 'LayerText_AF会话改写
       const refs = ['README.md', 'AGENTS.md'].filter((f) => existsSync(join(root, f)) && readFileSync(join(root, f), 'utf8').includes(OVERVIEW));
       if (refs.length < 2) failures.push(`${OVERVIEW}: README 与 AGENTS 都应链到它，现在只有 ${refs.join('、') || '（都没有）'}`);
     }
+    /* 地图第 4.2 节那句"app/src 有 N 个模块"必须与**实际文件数**对得上。
+     * 为什么加这条：那个数字一直是手写的，没人校验——查历史发现 `4848fe6` 时
+     * 实际 26 个、地图写 31 个，已经差了 5；到合并那次又差 2。
+     * 它会漂是因为**没有人会因为数字错了而失败**。这条门禁把"改了目录要改地图"
+     * 从"靠自觉"变成"跑一下就知道"。 */
+    {
+      const appSrc = join(root, 'app', 'src');
+      if (existsSync(appSrc)) {
+        /* `vite-env.d.ts` 是类型声明，不是模块——地图的清单里也没有它。 */
+        const actual = readdirSync(appSrc).filter((f) => f.endsWith('.ts') && f !== 'vite-env.d.ts').length;
+        const claims = [...map.matchAll(/app\/src\/\*\.ts\s+界面（Vite 前端，(\d+) 个模块）/g)].map((m) => Number(m[1]));
+        const heading = map.match(/### 4\.2 `app\/src\/` — (\d+) 个模块/);
+        for (const c of [...claims, ...(heading ? [Number(heading[1])] : [])]) {
+          if (c !== actual) failures.push(`${MAP}: 写的是"${c} 个模块"，但 app/src 下实际有 ${actual} 个 .ts（不含 vite-env.d.ts）——改结构时忘了改地图`);
+        }
+      }
+    }
     /* 动手前先读的那一页：在，且链到地图。 */
     const AGENTS = 'AGENTS.md';
     if (!existsSync(join(root, AGENTS))) failures.push(`${AGENTS}: 缺失——它是"动手前先读这一页"的入口`);
