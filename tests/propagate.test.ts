@@ -108,3 +108,13 @@ test('descendantTierFiles：树可以嵌套（A→M→B），传递闭包一起�
     '两层都要，不只是直接下级',
   );
 });
+
+test('descendantTierFiles：同层多版本只取字典序最新那个（旧版本不该被插注解）', () => {
+  const files = ['/c/原文_M层75_2026-09-10_x.md', '/c/原文_M层75_2026-09-12_x.md', '/c/原文_M层75_2026-09-11_x.md', '/c/原文_B层60_2026-09-12_x.md'];
+  const got = descendantTierFiles(DEFAULT_READER_TREE, NAMING, 'A层85', files);
+  assert.deepEqual(
+    got.map((t) => t.path.split('/').pop()),
+    ['原文_M层75_2026-09-12_x.md', '原文_B层60_2026-09-12_x.md'],
+    '每层各取一个，且是日期最新的那个',
+  );
+});

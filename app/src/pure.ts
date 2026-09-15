@@ -973,6 +973,41 @@ export function baseName(p: string): string {
   return i >= 0 ? p.slice(i + 1) : p;
 }
 
+/* ---------- 中文标注的剥离与词头识别（2026-09-14 从分支搬过来） ----------
+
+ * 主仓此前**没有**"去除中文标注"这条通道：教师给一个词加了注、发现没必要，
+ * 界面上没有任何办法拆掉它。而跨层传播现在改成自动的，如果"撤销"传不下去，
+ * 下级就会永远留着上级已经撤掉的注解——所以剥离这一侧必须有，而且必须能传播。 */
+
+/** 剥掉某词全章的 word（中文） 标注，保留英文原词（大小写按原文保留）。
+ *  纯函数：只做正则替换并计数，落盘/撤销/日志由调用方管线负责。 */
+export function stripWordAnnotations(md: string, word: string): { md: string; count: number } {
+  const esc = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp(`\\b${esc}（[^）]*）`, 'gi');
+  let count = 0;
+  const out = md.replace(re, (m) => {
+    count++;
+    return m.slice(0, m.indexOf('（'));
+  });
+  return { md: out, count };
+}
+
+/** 点中的词所属的**完整注释词头**：注释在 md 里形如 head（中文），head 可为连字符词
+ *  （great-looking）或空格短语（good looking）。点击落在 head 的任一部分时，去除与
+ *  登记都应对整个 head 做（只对点中片段做会留下残头/登记错词）。多个候选取最长
+ *  （最具体）；找不到退回原词。 */
+export function annotatedHeadOf(md: string, word: string): string {
+  const parts = word.toLowerCase().split(/[\s-]+/);
+  let best = '';
+  for (const m of md.matchAll(/([A-Za-z][A-Za-z'-]*(?:[ ][A-Za-z][A-Za-z'-]*)*)（[^）]*）/g)) {
+    const head = m[1]!;
+    const hp = head.toLowerCase().split(/[\s-]+/);
+    if (hp.some((x) => parts.includes(x)) && head.length > best.length) best = head;
+  }
+  /* 前导冠词不入词头（最长候选会把「a great-looking」整个吞下，入库应记 great-looking） */
+  return (best || word).replace(/^(?:a|an|the)[ -]/i, '');
+}
+
 /* ---------- 备用供应商（纯逻辑：分拣 + 钥匙串账号，读/写/删共用一套判据） ---------- */
 
 /** 设置面板那一排"备用供应商"输入框收上来的原始值。 */

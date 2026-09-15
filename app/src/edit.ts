@@ -32,7 +32,7 @@ export function scrollNow(): number {
  * 而撤销/重做**自己**负责移动栈元素，调用 `persistEdit` 时必须
  * `recordHistory: false`——否则它会把刚压进 redo 的项清空（重做永远没得做）。
  */
-async function applyMdSnapshot(s: FileSession, md: string, label: string, opts: { recordHistory?: boolean } = {}): Promise<void> {
+export async function applyMdSnapshot(s: FileSession, md: string, label: string, opts: { recordHistory?: boolean } = {}): Promise<void> {
   await persistEdit(s, md, opts);
   s.md = md;
   s.review.warns = []; // 快照级回退：所有句位置已变，复核角标整体失效清空
