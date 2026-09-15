@@ -9,6 +9,58 @@
 
 
 
+## [未发布] - 2026-09-15（合并事后复核：合并丢了 4 处主仓独有修复，逐条补回）
+
+**结论先行**：合并记录「搬回来的」那一节写的是"主仓真正的独有语义只有两处
+（`report.ts` 的 ⑤ 标注体检卡 + 三份文档）"。**那个结论是错的**——少算了 4 处，
+其中 2 处是**数据丢失路径**、1 处是**跨平台死按钮**、1 处是**设置文件可能被写坏**。
+
+**为什么会漏**：当时的判据是"逐行比对 + 手工印象"，没有把主仓自 merge-base 以来的
+**每一条改动**都落到合并后的树上验一遍。主仓的修复注释在分支侧被**压缩**过
+（合并记录自己写了"同步时压缩了"），"注释对不上"绝大多数确实是措辞差异——
+但**代码行对不上**的那几处，是真的没了。
+
+**复核方法（可重跑）**
+
+```bash
+BASE=$(git merge-base f00d256 fb63708)   # 合并前 main / 合并前分支
+# 主仓自 BASE 起**新增的非注释代码行**，逐行看它在分支版、合并树里还在不在
+git diff -U0 $BASE f00d256 -- <file> | grep '^+' | grep -v '^+++' | grep -v '^\s*\(//\|/\*\|*\)'
+```
+
+跑完得到 14 个"有行对不上"的文件；逐个判定后，**只有下面 4 处是真丢**，
+其余是分支侧的等价实现或注释详略差异（见本节末尾的"确认没丢"清单）。
+
+**补回来的 4 处**（每一处都为主仓独有，分支侧从未同步）
+
+| # | 位置 | 补回的内容 | 为什么不能丢 | 主仓来源 |
+| --- | --- | --- | --- | --- |
+| ① | `app/src/risk.ts` `appendDecision` | 加回 `if (io.append) { await io.append(...); return; }`（在"读全文→拼一行→写全文"之前） | 两个决定按钮里有一个是 `void appendDecision(...)` **不 await**；连续快速点两张卡时，"读全文→拼一行→写全文"会**后写覆盖先写，丢一整条决定事件**。决定日志是"已决/待办"的正本，丢了那条卡会回到待办，误报率/撤销率的分母也跟着偏。同文件 `appendWorkbenchMarker` 本来就走 `io.append` | `4848fe6` |
+| ② | `app/src/main.ts` `persistEdit` | `_原始备份.md` 改用 `readTextChecked` 三态；`unreadable` 时**抛错中止本次改动** | 原先"读不到＝没有备份，写一份"会把**读不出来但其实存在**的真原始版用当前正文顶掉——而原始备份是教师最后的退路。这正是 `a248baf` 点名的"**四处数据丢失路径**"的第 4 条：另外 3 条（`_审校标记.json` / `AI会话.json` / `_本书配置.json`）合并后都在，只有这条掉了 | `a248baf` |
+| ③ | `app/src-tauri/src/main.rs` `dict_lookup_zh`（`#[cfg(not(target_os = "macos"))]` 那份） | 形参 `_words` → `words` | Tauri **按参数名**把前端 JSON 映射进来；前端传的是 `words`，声明成 `_words` 匹配不上，整个命令以"缺必填参数"失败。macOS 走的是另一份实现，本机看不出来；一旦出 Windows/Linux 构建，「查词」这类按钮就是**点了没反应**。属主仓 `e87ecf4`「真死按钮」清单里的一条 | `e87ecf4` |
+| ④ | `app/src-tauri/src/main.rs` `save_app_config` | 裸 `std::fs::write` → `atomic_write` | 截断式写，写到一半崩（或被杀、磁盘满）会把**已有设置文件毁成半份**；同文件 `write_text_file` 早就是"同目录临时文件 → rename"，配置文件没理由不走同一条路 | `e87ecf4` |
+
+**同时逐个确认"没丢"的**（复核过、不需要动；差异只在注释详略或等价实现）
+
+- `report.ts` ⑤ 标注体检卡（`repairDiff` / `repairCardHtml` / `applyRepairPreview` / `diag-repair-btn`）✓
+- 另外 3 条数据丢失路径：`_审校标记.json`（`main.ts`）✓、`AI会话.json`（`chat.ts`）✓、`_本书配置.json`（`bookio.ts`）✓
+- `reader.ts` 去除中文标注（`__unanno`）✓、`pure.ts` 中文标注剥离 ✓
+- `ai.ts` 三条 prompts 登记 ✓、`batch.ts` 「开始简化」灰死复位 ✓、`bookio.ts` 改写先算后写 ✓
+- `edit.ts` 撤销/重做先写盘且 `recordHistory:false` ✓、`rewritegate.ts` / `datapanel.ts` 用 `baseName` 与按书失效 ✓
+- `chat.ts` 采纳返回值 ✓、`review.ts` 「暂停保存」横幅 ✓、`settings.ts` 班级面板与「清 Key」✓
+- `shelf.ts` 死按钮重绑 ✓、`compare.ts` 去日期行 ✓、`risk.ts` 空态"画出来却点不动" ✓
+- `pipew.ts` 换词类传播：主仓写的是 `corrPairs2`，分支写的是 `simplified`——同一个调用点的等价实现 ✓
+
+**唯一仍然"有意舍弃"的**（与合并记录一致，不变）：`app/src/shelf.ts` 的
+`renderWorkspaceBar()`（渲染进 `#wstabs`）——分支在同位置有 `renderVersionSwitcher()`
+（`#ctxbar` / `#ver-switch`），是同一功能的两种实现；合并后 `index.html` 里已无 `#wstabs` 元素。
+
+**验证**：本提交上 `npm run verify` 全绿（preflight 45 + 版本五处一致 + typecheck 根/app +
+lint 0 warning + **1017 项：1016 通过 / 0 失败 / 1 跳过** + 评测不低于基线 + 双引擎 76/76）；
+`npm run verify:rust` 全绿（fmt / clippy --all-targets -D warnings / 6 测试）。
+**用例数仍是 1017 且未变**——因为补回的是 4 处实现，主仓在这 4 处**没有独有用例**
+（`tests/fsx.test.ts` 等主仓用例早已随 `a248baf` 同步到分支）。
+
 ## [未发布] - 2026-09-15（合并收尾·补记：清掉合并遗留的 `.wstabs` / `.ws-files` 死 CSS）
 
 > 这一节对应**独立提交** `6c98635`，**不属于合并提交**。合并提交（`7680e79`）只做合并，
@@ -85,6 +137,9 @@ lint 0 warning + 1017 项：1016 通过 / 0 失败 / 1 跳过）。
 里保留分支独有的 6 个小节。
 
 **搬回来的（主仓独有，漏了就是丢东西）**
+
+> ⚠️ **这一节当时写漏了 4 处，事后复核才发现**（2026-09-15）。见文首
+> 「合并事后复核：合并丢了 4 处主仓独有修复，逐条补回」——那张表才是完整的。
 
 | 位置 | 内容 |
 | --- | --- |

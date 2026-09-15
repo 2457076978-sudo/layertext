@@ -915,13 +915,17 @@ export async function persistEdit(s: FileSession, newMd: string, opts: { recordH
     const dir = s.sourcePath.slice(0, s.sourcePath.lastIndexOf('/'));
     const base = s.fileName.replace(/\.(md|txt|markdown)$/i, '');
     const backup = `${dir}/${base}_原始备份.md`;
-    try {
-      await invoke<string>('read_text_file', { path: backup });
-    } catch {
-      /* 有意兜底：读不到＝还没有备份，写一份（这是"首次改动前留原始版"的正常路径）。
-       * 风险写明：若备份其实存在、只是读不出来，这一写会把真原始版换成当前的 s.md；
-       * 后端没给错误码分不出来，只能接受，并靠"有备份就不覆盖"把概率压到最小。 */
+    /* 2026-09-14：这条分支原先写的是"读不到＝还没有备份，写一份"，
+     * 并把"备份其实存在、只是读不出来"的风险**自认下来**（注释里明写的）。
+     * 那笔风险的代价是：真原始版被当前正文替换掉，而"原始备份"正是教师最后的退路。
+     * 现在用 `fsx` 问清楚：**确实不存在**才写；**存在但读不出来**就中止这一次改动——
+     * 宁可这一次不改，也不拿教师唯一的原始版去赌。
+     * （2026-09-15 合并复核：这一处为主仓独有、分支未同步，从主仓补回。） */
+    const bak = await readTextChecked(backup);
+    if (bak.kind === 'missing') {
       await invoke('write_text_file', { path: backup, content: s.md });
+    } else if (bak.kind === 'unreadable') {
+      throw new Error(`原始备份 ${backup} 读不出来（${bak.error}）——为免把这份唯一的原始版覆盖掉，本次改动**没有执行**；请先确认该文件`);
     }
     await invoke('write_text_file', { path: s.sourcePath, content: newMd });
     return s.sourcePath;

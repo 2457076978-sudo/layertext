@@ -153,8 +153,16 @@ fn dict_lookup_zh(words: Vec<String>) -> Vec<Option<String>> {
 
 #[cfg(not(target_os = "macos"))]
 #[tauri::command]
-fn dict_lookup_zh(_words: Vec<String>) -> Vec<Option<String>> {
-    vec![None; _words.len()]
+/// 非 macOS 上没有系统词典，一律返回 `None`（前端照常显示"未带词典"）。
+///
+/// 2026-09-14：形参原先叫 `_words`。**它其实是被用到的**（`words.len()`），
+/// 而且 Tauri 是**按参数名**把前端 JSON 映射进来的——前端传的是 `words`，
+/// 声明成 `_words` 就匹配不上，整个命令会以"缺必填参数"失败。
+/// 本机是 macOS 所以走的是上面那份、看不出来；一旦出 Windows/Linux 构建，
+/// 「查词」这类按钮就会**点了没反应**。名字改回 `words`。
+/// （2026-09-15 合并复核：这一处为主仓独有、分支未同步，从主仓补回。）
+fn dict_lookup_zh(words: Vec<String>) -> Vec<Option<String>> {
+    vec![None; words.len()]
 }
 
 /// 二进制读取（base64），供前端解析 xlsx 等格式
@@ -648,7 +656,11 @@ fn load_api_key(account: Option<String>) -> Result<String, String> {
 
 #[tauri::command]
 fn save_app_config(config: String) -> Result<(), String> {
-    std::fs::write(config_path()?, config).map_err(|e| e.to_string())
+    // 2026-09-14：改用原子写。原先这里是裸 `std::fs::write`——截断式写，写到一半崩了
+    // （或磁盘满）会把**已有的设置文件毁成半份**。同文件的 `write_text_file` 早就实现了
+    // "同目录临时文件 → rename"，配置文件没理由不走同一条路。
+    // （2026-09-15 合并复核：这一处为主仓独有、分支未同步，从主仓补回。）
+    atomic_write(&config_path()?, config.as_bytes())
 }
 
 #[tauri::command]
