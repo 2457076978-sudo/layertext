@@ -4,6 +4,58 @@
 1.0.0 之前的版本号为开发期里程碑（当时 `package.json` 未同步递增，本文件按里程碑整理，2026-09-06 校准）。
 面向教师的通俗版功能说明见 [README](README.md) 与 [docs/PRD.md](docs/PRD.md)。
 
+
+> 以下 6 节来自 `codex/total-optimization` 分支的 CHANGELOG——2026-09-14 合并时**原样保留**，不并进主仓的轮次编号里（它们是"同一批改动在分支侧怎么落的"的第一手记录）。
+
+
+## [未发布] - 2026-09-14（合并 `codex/total-optimization` → `main`：两个 worktree 的账终于并成一本）
+
+**为什么合**：两条线各自独有 10 / 48 个提交，而且**已经在重复劳动**——
+"项目总说明 + 架构地图进门禁"两边各做了一遍（`4911ffd` / `45efda6`），
+"真项目回放夹具移出公开仓库"也是（`44a16ec` / `aa5b6f6`）；
+跨层传播更直接：主仓新写了一份"确认后写"，分支早有一份在跑的"自动写"，
+**同一件事两套实现**（见第十三轮）。每多一天就多长一份，这个账必须并。
+
+**怎么解的（先说判断依据，再说动作）**
+
+动手前量了两件事，结论决定了整个解法：
+
+1. **主仓在文件层面没有独有文件**——分支是完整的超集（分支多出 `annotate.ts` /
+   `calibrationio.ts` / `risklogic.ts` / `wordnet.ts` / 词典数据 / 两份研究文档）。
+2. **逐行比对"主仓有、分支没有的代码行"**：绝大多数是**同一改动的措辞差异**——
+   这几轮我一直在手工把主仓的修复同步到分支，两边的语义早就一样了，只是注释详略不同
+   （主仓的注释写得更细，同步时压缩了）。真正的主仓独有语义只有两处，见下。
+
+据此：**全部代码/测试/引擎冲突取分支版**（`--ours`），然后**把主仓真正独有的补回去**；
+三份文档（`AGENTS.md` / `docs/文件架构.md` / `CHANGELOG.md`）取主仓版并在 `CHANGELOG`
+里保留分支独有的 6 个小节。
+
+**搬回来的（主仓独有，漏了就是丢东西）**
+
+| 位置 | 内容 |
+| --- | --- |
+| `app/src/report.ts` | **⑤ 标注体检卡**：`applyRepairs` 的接线（逐条 diff 预览 → 确认 → `persistEdit`）。上一轮我明确说过"主仓另外接了一条，分支上没有对应入口" |
+| `CHANGELOG.md` | 主仓 64 个小节的历史 + 分支独有的 6 个小节（原样保留，不并进主仓轮次编号） |
+| `AGENTS.md` / `docs/文件架构.md` | 主仓版（`t.skip()` 那条纪律、33 个模块的地图——都是分支没有的） |
+
+**有意舍弃的（如实记，这是这次合并唯一"删掉东西"的地方）**
+
+- **`app/src/shelf.ts` 的 `renderWorkspaceBar()`（渲染进 `#wstabs`）没有保留**。
+  理由：分支在同位置有 **`renderVersionSwitcher()`**（渲染进 `#ctxbar` / `#ver-switch` /
+  `#ver-pop`），是排版重构方案 A 的那一版——**同一个功能的两种实现**，不是"分支缺这个功能"。
+  合并后 `index.html` 里已经没有 `#wstabs` 元素了，主仓那份即使留着也是 `if (!el) return` 的空转。
+  两处对照确认过：主仓 `main.ts` 里"关掉全部章节后收起工作区条"那个修复，
+  分支侧对应的是 `ctxbar` 的处理（`main.ts` 里 `document.getElementById('ctxbar')`），**没有丢**。
+- **遗留**：`index.html` 里还留着 `.wstabs` 的 CSS（选择器匹配不到元素了）。
+  无害但属于死代码，另起一次清理，不在这次合并里顺手删（合并提交里动无关的东西最难查）。
+
+**验证**（合并后这一棵树，不是两边各跑一遍）
+
+`npm run verify` 全绿：preflight 43 + 版本五处一致 + typecheck（根 + app）+ lint 0 warning +
+**1017 项：1016 通过 / 0 失败 / 1 跳过** + 金标准评测不低于基线 + 双引擎对照 76/76；
+`npm run verify:rust` 全绿（fmt / clippy --all-targets -D warnings / 6 测试）。
+**测试数是分支侧的 1017，因为主仓没有独有用例文件**（上面第 1 条量过）。
+
 ## [未发布] - 2026-09-14（codex/total-optimization · 第十四轮：接线门禁 + 门禁与 CI 对齐）
 
 主仓这一轮做了两件"上次说该做"的事（第 115–118 项，理由见主仓 CHANGELOG）：
@@ -163,6 +215,601 @@ Wayne 拍板：三个"未接线"模块都接，触发点由 agent 定；**可以
 **验证**：本 worktree `npm run verify` 全绿（preflight 43 + 根/app typecheck + lint 0 warning +
 **1000 项：999 通过 / 0 失败 / 1 跳过**）；`USER=runner npm run verify` 同样全绿（复现 CI 条件）；
 Rust gate（`cargo fmt` / `cargo clippy --all-targets -- -D warnings` / 6 测试）全绿。
+
+## [未发布] - 2026-09-14（第十四轮：把上次说"该做"的两件事做掉——接线门禁 + 门禁与 CI 对齐）
+
+上一轮末尾我说"如果接着做，先做这三件"。跨层传播撤销已完成（第十三/十四轮之间），
+这一轮做剩下两件。
+
+| # | 位置 | 做了什么 | 为什么 |
+| --- | --- | --- | --- |
+| 115 | `tests/clickwiring.test.ts`（新增） | **接线门禁**：模板里渲染出的 `<button/input/select/textarea id="X">` 与 `data-xxx=` 动作钩子，全仓必须至少有一处读它（`getElementById`/`$`/`querySelector('#X')`/`bind('X')`；钩子则是 `[data-xxx]`/`getAttribute`/`.dataset.xxx`/`closest`），否则判红 | 第九轮那次人工审计是**手工**对了一遍 26 个静态 id + 123 个运行时按钮，找出 21 处问题。手工审一遍只管一次；这条把它变成每次提交都跑 |
+| 116 | `package.json` | `verify` 补齐 `check_versions` / `eval` / `compare`；新增 `verify:all` = `verify + verify:rust` | 原先本地 `verify` 少跑这三条，而 CI 跑——**"本地全绿"不等于"CI 会绿"** |
+| 117 | `.github/workflows/ci.yml` + `package.json` | CI 新增独立的 **Rust job**（`macos-latest`，`dtolnay/rust-toolchain`）；`verify:rust` 的 clippy 提到 `--all-targets` | Rust 主进程是 macOS 专有的（`security`/`open`/`say`/TCC），塞不进 ubuntu job——**而 CI 里原本根本没有 cargo 这一步**，最会丢数据的那一层长期只在开发者本机跑过 |
+| 118 | `tools/compare.ts` | 比对结果没变就**不重写**报告（比之前去掉"生成日期"那一行）；日志区分"已更新/未重写" | 那个报告是**被 git 跟踪的**文档，原先每跑一次就把日期改一行——`verify` 一跑就变脏。现在那条日期表示"结果最后一次变化是哪天" |
+
+**接线门禁这条，先说清楚它今天抓到了什么**：**0 处真问题**。
+扫出来的 3 条候选全是误报，我逐条查过：
+`sum-suggest` / `sum-close` 的绑定写在**另一个文件**（`uikit.ts` 里统一绑）——第一版扫描只看渲染它的那个文件，所以漏了；
+`cls-close` / `cls-reload` / `cls-clear` 走的是本文件里的 `bind('id', …)` 助手；
+`w-ui-lang` / `w-text-lang` 是上手向导里只有**一个可用项**的下拉（另一个是 disabled 的"即将支持"），本来就没有可绑的行为——这两个进了白名单，**每个都写了理由**。
+
+所以它的价值不在今天，在以后：**回归验证过**——把 `datapanel.ts` 换回 `e87ecf4^` 那版（
+`data-dp-del` 渲染出来却没有任何监听，就是那次审计抓到的真缺陷），这条门禁当场报出来。
+另外还做了**实机负向验证**：往 `app/src/` 里丢一个临时探针文件渲染 `<button id="ghost-probe">`
+与 `data-ghost-hook`，测试立刻红；删掉探针即恢复绿。
+
+**`verify` 变长了，如实说代价**：现在跑一次 `verify` 会连带跑金标准评测与双引擎对照，
+比原来慢（本地实测多十几秒）。换来的是"本地绿 = CI 绿"。
+
+**验证**：`npm run verify` 全绿（preflight 44 + 版本五处一致 + typecheck 根/app + lint 0 warning +
+**988 项：987 通过 / 0 失败 / 1 跳过** + 评测不低于基线 + 76/76 双引擎一致）；
+`npm run verify:all`（含 Rust）全绿。
+`LayerText-optimization` 同步后 preflight 43 + **1017 项：1016 通过 / 0 失败 / 1 跳过**，Rust gate 全绿。
+
+## [未发布] - 2026-09-14（第十三轮：跨层传播改成**自动**，并补上它的对侧）
+
+Wayne 拍板改口径：**"直接弄，自动传播，我也不需要撤销的那种"**。
+上一轮我做的是"每次都问、写前留备份、给恢复入口"，这一轮把确认与备份都去掉。
+
+**为什么去掉是站得住的**：传播做的只有"插/剥 `词（中文）`"，**天然可逆**——
+下级文件里那个「✂ 去除中文标注」随时能拆掉。所以真正的撤销路径是那个按钮，
+不是确认框、也不是 `_原始备份.md`。留的是**变更日志**——那不是撤销，
+是"这段现在这样是哪来的"，台账与审校档案一直在读它。
+
+| # | 位置 | 改了什么 | 为什么 |
+| --- | --- | --- | --- |
+| 111 | `app/src/propagateui.ts`（**新模块**） | 跨层传播的 App 侧接线从 `pipew.ts` 拆出来；`offerPropagation` → `propagateToLowerTiers`：**无确认、无备份**，多个词合并成一次扫描（原先逐词各跑一趟，同一批文件被反复读写） | ① 口径变了；② `pipew.ts` 撞上 `max-lines: 1000`；③ 这本来就是自成一体的一件事 |
+| 112 | `src/core/propagate.ts` | `descendantTierFiles` **同层多版本只取字典序最新那个** | 一章目录里可能躺着几个日期的同层产物，把注解插进**旧版本**是纯粹的污染。这条口径来自分支上跑了很久的实现，搬过来是为了两边不要再各挑各的 |
+| 113 | `app/src/pure.ts` + `pipew.ts` + `reader.ts` | **补上「去除中文标注·记已会」这条通道**（`stripWordAnnotations` / `annotatedHeadOf` / `removeZhAnnotation` / 词面板按钮） | 主仓**根本没有**这条通道：教师加了注、发现没必要，界面上没有任何办法拆掉。而传播现在是自动的，撤销传不下去就会在下级越积越多——**自动传播会变成只进不出的漏斗** |
+| 114 | `app/src/pipew.ts` | 换词类接上：只在下级留一张 `_待复核/层级传播_待办.md`，不改下级正文 | 与 `propagate.ts` 一开始写明的策略一致（跨层机器改写语境依赖强）。主仓原先连这张清单都不留 |
+
+**这一轮最值钱的动作其实不是"改成自动"，是把两边的实现合成一份。**
+上一轮我指出"两个 worktree 在长出两套实现"——`propagate` 就是活例：主仓新写的是
+"确认后写"，分支早有一份在跑的"自动写"。这一轮把分支那份**删掉**，
+两边都调同一个 `propagateToLowerTiers`（新模块内容两边逐字相同）。
+顺带发现分支的 `propagateWordAction` 里"同层取最新文件"那条判断比主仓的好，也一并搬过来了。
+
+**验证**：`npm run verify` 全绿（preflight 44 + typecheck（含 `app`）+ lint 0 warning +
+**985 项：984 通过 / 0 失败 / 1 跳过**）；Rust gate 全绿。
+`LayerText-optimization` 同步后 preflight 43 + **1014 项：1013 通过 / 0 失败 / 1 跳过**，Rust gate 全绿。
+`docs/文件架构.md` 已同步（32 → 33 个模块）。
+
+## [未发布] - 2026-09-14（第十二轮：三个"未接线"模块收口——两个接上按钮，一个说明为什么不该接）
+
+上一轮结尾的第 6 条是"三个未接线模块"。Wayne 的决定：**三个都接，我来定触发点**；
+写入范围：**可以改正文，但每次都要教师确认**。三处的实际情况不一样，所以处理也不一样。
+
+| # | 模块 | 核实结论 | 处理 |
+| --- | --- | --- | --- |
+| 108 | `src/core/propagate.ts` | **是一份能力规格，从未运行过**：纯函数与单测都齐，全仓只有测试调它。"上级加了注，下级自动跟上"这句话从来没成立过 | **接上**：新增纯函数 `descendantTierFiles`（挑下级层目标）；`app/src/pipew.ts` 加 `offerPropagation()`——「加注中文」之后**每次都问**，列出各下级层要改的文件与命中处数，教师确认后才写；每个文件写前留 `_原始备份.md`，写完落变更日志（与 `persistEdit` 同一口径） |
+| 109 | `src/core/docast.ts` 的 `applyRepairs` | 上一轮**修好了 bug**（原先"报修好了、实际一个字符没改"），但**全仓只有测试调它**——教师手册里那句"嵌套标注会自动拍平"从来没跑过 | **接上**：质检报告页新增「⑤ 标注体检」卡，显示嵌套 N 处 / 同词释义不一致 M 处；点「预览并修复」先给**逐条 diff**，确认后走 `persistEdit`（带原始备份与撤销快照） |
+| 110 | `src/core/candidate.ts` 的 `applyUndo` | **已删（第九轮），这一轮不加回来**。它的能力（撤销）在生产路径上**已经可达**：风险队列的「撤销」按钮写一条 `undo` 事件，`LayerText_AF决定汇总.mjs` 走 `candidatesFromEvents(allEvents)` 全量重建时由 `undoneIds` 扣证据。被删的是**第二套口径**（它在证据清零时把候选标成 `rejected`，而重建路径的结论是"根本不成候选"） | 加一条**守卫用例**：断言 `applyUndo` 不再导出。理由写进用例里——"上一个想把撤销接进来的人会照它写，然后在已经扣过一次的候选上再扣一次" |
+
+**触发点是怎么定的（写给下一个人）**
+
+- **加注 → 问一次。** 不自动写：传播会改**别的层级**的正文，那是数据改动，
+  而"上级点头"与"下级被改"之间必须有一次显式的确认。这是 Wayne 拍的口径。
+- **换词 → 不写正文，只在下级留待办。** 这条是 `propagate.ts` 一开始就写明的策略
+  （跨层机器改写语境依赖强），本轮沿用，没有放宽。
+- **标注体检 → 只在教师点的时候跑。** 它是机械修复，不需要"背后自动跑"；
+  每次都给 diff 预览，因为改的是正文。
+
+**这一次又被自己的门禁拦下（如实记）**
+
+`descendantTierFiles` 的第一版把 `_工作稿.md` 与 `_原始备份.md` 也当成了传播目标——
+它们与正本同层、文件名里同样带层标签，只有后缀不同。**新写的用例当场抓出来**：
+"A 的下级是 M、B" 实得 `['M','M','M','B']`。改法是在挑选阶段排掉这两个后缀，
+并把这条写进测试注释（"挑宽了会污染备份、把工作稿当成第二份正本"）。
+另外 `pipew.ts` 里那个 `failed.push(...)` 被 `appswallow` 判红，改成仓库既有的账名
+`failedFiles`（白名单里那条本来就是为"记进账、随后渲染出来"设的），**没有去放宽白名单**。
+
+**验证**：`npm run verify` 全绿（preflight 44 + typecheck（含 `app`）+ lint 0 warning +
+**984 项：983 通过 / 0 失败 / 1 跳过**，本轮 +4 条）；Rust gate 全绿。
+`LayerText-optimization` 同步后 preflight 43 + **1013 项：1012 通过 / 0 失败 / 1 跳过**，Rust gate 全绿。
+
+**分支上发现的差异（重要）**：本分支**早就有一份** `propagateWordAction`——但它是**自动写**的
+（上级一点，下级正文立刻改），没有确认、没有备份。按 Wayne 这一轮拍的口径，分支那份也改成了
+"先列计划、问一次、写前留备份"，与主仓口径对齐。也就是说：**这条能力在分支上"跑过"，
+只是跑的方式与拍板不符**，本轮把它纠正过来。
+
+## [未发布] - 2026-09-14（第十一轮：把上一轮结尾列的"还没解决"逐条做掉——含一个新模块 `fsx.ts`）
+
+上一轮结尾我列了 8 条"还没解决的"。Wayne 让把前 6 条做完。这一轮逐条落地。
+
+**最要紧的一条：`read_text_file` 的"读不了"与"没有"终于分开了**
+
+Rust 侧加了一条命令 `describe_path`（`"missing"` / `"exists"`），前端加了一个新模块
+**`app/src/fsx.ts`**，`readTextChecked()` 返回三态 `{ok} | {missing} | {unreadable}`。
+听起来像小工具，其实全仓有**四处数据丢失路径**都卡在这一个分辨不出来上：
+
+| 位置 | 原先的写法 | 代价 |
+| --- | --- | --- |
+| `_审校标记.json` | 注释写"读不到＝还没审过，是常态" | 文件在、只是读不出来时，整章标记被空清单覆盖 |
+| `AI会话.json` | 同上 | 攒了几十轮的审校对话被空对话覆盖 |
+| `_本书配置.json` | 同上 | 教师配过的词库/改写规则静默失效 |
+| `_原始备份.md` | **注释里明写"风险自认"**：备份其实存在但读不出来时，会把真原始版换成当前正文 | 教师"最后的退路"没了 |
+
+前三条上一轮已经拆过 catch，但拆的是"解析失败"那一层；**"文件读不出来"这一层始终分不出**，
+所以注释里那句"后端没给错误码分不出来"一直成立。现在它不成立了：
+`fsx` 只在**确认路径不存在**时才允许落到"没有"那一支，其余一切（文件确实在、连"在不在"都问不出来）
+都是 `unreadable` —— 说出口，并且**不覆盖**。备份那一处更严：读不出来就**中止这次改动**
+（`persistEdit` / `aiflow` 都一样），宁可这一次不改，也不拿教师唯一的原始版去赌。
+
+**其余五条**
+
+| # | 位置 | 问题（核实后） | 修法 |
+| --- | --- | --- | --- |
+| 101 | `app/src/ai.ts` + `settings.ts` | 上一轮加的「清 Key」按钮**是假动作**：读取侧写的是"稳定账号取不到就回落下标账号"，删掉 `fb:<id>` 之后**立刻从 `fb0` 把同一把 Key 读了回来**，toast 却说"已删除"。更糟的是删过一行之后下标会易主，回落到别家的 Key（鉴权失败，而报错会让教师怀疑自己填的 Key） | 判据统一到纯函数 `pure.failoverKeyAccounts`：**有 id 就只认 `fb:<id>`，绝不回落下标**；老 Key 改在 `settings.ts` **给一行新分配稳定 id 的那一刻**搬一次（那时下标还有意义）——放在 `ai.ts` 做进程级迁移是错的，那会把教师刚「清」掉的 Key 又搬回来。`ai.ts` 里那段迁移已删 |
+| 102 | 新增 `app/src/fsx.ts` + Rust `describe_path` | 见上 | — |
+| 103 | `app/src/main.ts` `persistEdit` | 原始备份读不出来时照写，把真原始版换成当前正文（**注释里明写"风险自认"**） | 读不出来就抛，**这次改动不执行** |
+| 104 | `app/src/aiflow.ts` `adoptRewrite` 的 backup 端口 | 同上 | 同上 |
+| 105 | `app/src/adoptrewrite.ts` + `datapanel.ts` + `main.ts` | 没有 `调适项目_*.json` 时"采纳 / 直改"**100% 被拒**（这是设计如此：没有版本与追溯的去处就不该写正文），但界面上只教"复制模板"那条命令——等于要求教师开终端、还得知道仓库在哪，**没有出路** | ① 拒绝文案补上下一步去哪做；② `datapanel` 加 `createProjectConfig()`：**一键在书目录生成 `调适项目_<名>.json`**，只填能从书目录推出来的路径，其余一律 `null` 并**如实列成待办**（那些指向教师机器上的真实文件，猜不得）；③ 「库」页与风险面板空态各给一个按钮 |
+| 106 | `app/src/review.ts` + `chat.ts` | "暂停保存"（坏文件保护）**没有恢复入口**：教师备份好之后只能重启 App，而那条状态行会滚走/被覆盖 | 侧栏与对话区各加一块常驻横幅：「打开所在文件夹（先备份它）」+「我已备份好，恢复保存」——恢复时**当场试存一次**，否则按钮点完只是消失，他还是不知道存上没有 |
+| 107 | 测试覆盖 | 审计子代理把这件事列为"最大的结构性缺口"：`tests/` 从不 import `settings.ts` / `chat.ts`，也不调 `loadBookConfig` / `showVocabEditor`——上一轮那批 UI 修复**一个用例都没守着** | 抽出三处**纯逻辑**并补 9 条用例：`failoverRowKind` / `partitionFailoverRows`（分拣绝不能在收集阶段吃掉半成品）、`failoverKeyAccounts`（含"删行后下标易主"那条断言）、`fsx.classifyRead`（只有 missing 才能变成"没有"）、`createProjectConfig`（能推的填好、猜不到的列成待办） |
+
+**这一步被仓库自己的门禁拦了一次（如实记）**
+
+新加的 4 个 `catch` 被 `tests/appswallow.test.ts` 当场判红（`bookio.ts` 一处多余的 `.catch()`、
+`datapanel.ts` 一处只 `alert` 不写状态行、`fsx.ts` 两处缺「有意兜底：」）。
+修法按门禁给的四个出口来，没有去放宽白名单——那条纪律写着"加之前先问一句：
+加进来以后 `catch { }` 这种形状还拦得住吗？"。**这是它第二次在我手上生效**。
+
+**测试覆盖到哪里、没到哪里（说清楚，别让下一个人以为都守住了）**
+
+- 守住了：上面那三处纯逻辑 + `createProjectConfig` 的产物形状。
+- **没守住**：DOM 接线本身（按钮绑没绑上、横幅渲染成什么样）依旧没有用例——
+  `settings.ts` / `chat.ts` / `review.ts` 的渲染层还是靠"改完自己读一遍"。
+  要真守住得先把这几处的 DOM 逻辑也抽成纯函数，那是更大的一件事，本轮没做。
+
+**验证**：`npm run verify` 全绿（preflight 44 + typecheck（含 `app`）+ lint 0 warning +
+**980 项：979 通过 / 0 失败 / 1 跳过**，比上一轮 +9 条新用例）；Rust gate
+（`cargo fmt` / `clippy --all-targets -- -D warnings` / 6 测试）全绿。
+`LayerText-optimization` 同步后 preflight 43 + 根/app typecheck + **1009 项：1008 通过 / 0 失败 / 1 跳过**，
+分支 Rust gate 全绿。
+
+## [未发布] - 2026-09-14（第十轮：把上一轮"发现了但没改"的九条做完——其中五条是同一类"按钮不可信"）
+
+第九轮结尾留了一张"发现但没改"的清单。这一轮逐条**回代码核实**（一个只读子代理专门做这件事），
+九条里 **七条为真、两条已在更早的批次里修掉**。为真的逐条改完，并按老规矩把"报告说错了"
+和"我自己改错了"都写在这里。
+
+**先记两条返工（都是我自己造的）**
+
+1. **`collectFb` 的第一版改法是空炮**。我在保存侧写了
+   `const allFb = collectFb(); const fbs = allFb.filter(...); const halfFilled = allFb.filter(...)`，
+   却**没删掉 `collectFb` 内部那句 `.filter(r => r.baseUrl && r.model)`**——
+   于是 `allFb` 本来就已经是过滤后的集合，`halfFilled` 恒为 `[]`，
+   新加的"⚠ 有 N 行没填齐"**永远渲染不出来**，被修的缺陷原样还在。
+   是审计子代理在跑的时候**当场发现并回头喊我**（它那两个文件的哈希在几分钟里变了四次）。
+   教训：**过滤器写在收集函数里，下游就永远看不见被过滤掉的东西**；改这类问题时，
+   先确认"半成品有没有机会到达判定点"，再谈怎么提示。
+2. **`loadBookConfig` 的"换书清空"第一版太狠**。我一开始无条件 `resetBookScope()`，
+   而 `main.ts` **打开同一本书的下一章也会重跑这个函数**——
+   教师刚从界面导入了词库、还没点「保存为本书配置」，翻一页就被清掉了。
+   改成 `resetBookScopeIfNew(dir)`：**只有书目录变了才清**。跨书残留照修，同书内存态不受影响。
+
+| # | 位置 | 问题（核实后） | 修法 |
+| --- | --- | --- | --- |
+| 86 | `app/src/risk.ts` 四处 | `void p.then(...)` **全部没有 `.catch()`**（`data-decide` / `data-undo` / `data-batch` / `data-act`）。按钮先 `setAttribute('disabled','true')`，promise 一拒绝就**永久禁用**：卡片还在、顶部没有说明、再点也没用——正是"点了没反应" | 四处各补 `.catch()`，走同一条"顶部说明 + 重渲染让按钮重新可点"的出路。判据写进注释：**凡是 disabled 过的按钮，都必须有一条让自己重新可点的出路** |
+| 87 | `app/src/grading.ts` 班级表 | `failed` / `error` 两个字段**导出（md/csv）用了、屏幕上一次都没读**：失败行渲染成一排 `—`/0，与"学生交了个空文件"一模一样——教师会照着这张表去批评学生，而他批评的其实是没读进来的文件 | 屏幕上照导出口径走：失败行整行 `—`、名字挂 ⚠、悬停给原因；"这一列偏低"（`riskError`）的行也挂 ⚠；标题行点出"其中 N 份没读进来" |
+| 88 | `app/src/grading.ts` 点失败行 | `if (!a) return;`——**点失败行什么都不发生**，而失败行恰恰是教师最需要看原因的那一行 | 改成 `setStatus(name：原因, 'err')` |
+| 89 | `app/src/grading.ts` `runSingle` | 整条链路**没有 try/catch、也没有进行中反馈**（体检要读词库/算结构，不是瞬时的）。抛出去只靠全局兜底网 toast 一下，看不出是"没反应"还是"在算" | 按钮禁用 + 文案「体检中…」，失败当场说出口，`finally` 恢复 |
+| 90 | `app/src/chat.ts` 空输入发送 | `if (!text) return;`——点发送**什么都不发生**（连 `chatBusy` 都不置位，连"忙"的样式都没有） | 补 `setStatus('先在下面的输入框里写点什么再发送（Enter 换行，⌘/Ctrl+Enter 发送）','err')` + 聚焦 |
+| 91 | `app/src/chat.ts` `#chat-clear` | 清空**不可撤销**（清完还落盘，重启也回不来），而它就贴在发送按钮旁边，**原先连问都不问** | 加 `window.confirm`（带轮数）；清空时顺便解除"损坏文件不覆盖"的暂停 |
+| 92 | `app/src/chat.ts` `restoreChat` | "文件不存在"与"JSON 解析失败"**共用一个 catch**：损坏的 `AI会话.json` 被静默当成"没有对话"，下一次自动保存就把它整体覆盖——攒了几十轮的审校对话一句话不剩 | 拆开：读失败＝第一次用（静默）；解析失败＝当场说出口 + `chatFileBroken = true`，**本轮暂停自动保存**，先把文件留住。与 `main.ts` 打开章节时那条口径一致 |
+| 93 | `app/src/chat.ts` `sendChat` | `input.value = ''` 在**取 API Key 之前**：没配 AI 时教师刚打的一整段话被清掉，弹出来的还是"AI 设置"窗口，关掉回来输入框是空的 | 挪到确认能发出去之后；无 key 的提示补一句"你刚写的内容还在输入框里" |
+| 94 | `app/src/pipew.ts` 手动改句 | `s.md = s.md.slice(...)` **之后**才 `persistEdit(s, s.md)`——两个实参同一个引用，`newMd !== s.md` 恒 false：① 不 push 撤销快照（⌘Z 撤不回来）；② 写 `<章>_原始备份.md` 用的是**改后**的正文，"还原成改前"会还原成刚改的那一版 | 先算 `next`，`persistEdit(s, next)` 成功后再 `s.md = next`；标记 remap 也挪到落盘成功之后（写失败时内存与磁盘不会各说一套） |
+| 95 | `app/src/bookio.ts` `loadBookConfig` | 全是 `if (cfg.X)` 守卫式赋值（那是为了不把 `null` 当"清空"），但**上一本书的值不会被请走**：打开一本没有配置的书，上一本书的词库/术语/专名/改写规则原封不动继续生效，界面上没有任何迹象 | 加 `resetBookScope()`，由 `resetBookScopeIfNew(dir)` 驱动——**只有换书才清**（见上面返工 2）；`instructions` 退回的是"全局值"而不是默认值（新增 `state.ts` 的 `rememberGlobalInstructions` / `setGlobalInstructions`） |
+| 96 | `app/src/bookio.ts` 同上 | 损坏的 `_本书配置.json` 被静默当成"这本书没有配置"：教师明明配过词库与改写规则，打开书什么都没生效，一个字都不提示 | 拆 catch，说出口并带上路径，按"没有本书配置"处理 |
+| 97 | `app/src/bookio.ts` + `pipew.ts` | **`_词库.csv` 写了但全仓没人读回**。词库编辑器的「完成」写这个文件、设置页写着"词库以书目录 `_词库.csv` 为准"，而唯一的读者 `lexicon.ts` 读的是 **`examples_dir`**，不是书目录。教师编辑完 → 重启 → 再打开这本书，词库当作没配过 | `loadBookConfig` 三个分支都先读 `${dir}/_词库.csv` 再应用（**覆盖** JSON 里那份 `vocabCsv`，与设置页口径一致） |
+| 98 | `app/src/pipew.ts` 词库编辑器 | 面板是"增删即时写盘"的，而「取消」`#vclose` **只 `remove()` 弹层**：加了词删了词点取消，改动**已经在盘上**，面板里也没有任何撤销入口——界面上却摆着「完成 / 取消」一对按钮 | 记下打开时的原始内容；取消时把它写回 `_词库.csv` 并还原内存，失败必须说出口（否则盘上是"改过的"，而教师以为"取消了"） |
+| 99 | `app/src/settings.ts` `collectFb` | `.filter(r => r.baseUrl && r.model)` 让"只填了一半的备用行"**在收集阶段就消失**，而成功提示报的是过滤后的 N——教师填了两行、界面说保存了一个，另一个不见了，且没有任何提示 | 收集函数**不再过滤**；判定挪到保存侧：整行全空＝空行静默跳过，**填了一半的点名**，并且不谎报"已保存" |
+| 100 | `app/src/settings.ts` 备用行的 Key | 占位文案写的是「空=用主Key」，而读取侧 `ai.ts` 是"钥匙串里有就用钥匙串的"——**把输入框清空并不能**让这一行退回用主 Key，旧 Key 照旧生效；界面上也没有任何入口能删掉它 | 文案改成真话「留空=沿用已存」+ 悬停说明；**新增 Rust 命令 `delete_api_key`** 与每行的「清」按钮（没存过不算失败），并注册进 `invoke_handler` |
+
+**复核掉的两条（不再改，记下来免得下一份报告重报一遍）**
+
+- **「采纳 100% 失败」已经在第八批（`4848fe6`）修掉了**：真正的病根是 `findProjectConfig` 永远找不到配置
+  （`list_dir` 默认不返回 `.json`，过滤器又拿完整路径去锚定 `^调适项目_.+\.json$`），代码注释里
+  「于是**写正文 100% 失败**」记的就是它；已在 `datapanel.ts` 改成 `listDir(d, ['json'])` + `baseName(f)`。
+  剩下的"没有调适项目配置"那声拒绝是**设计如此**（没有版本与追溯的去处就不该写正文），
+  而且 `setStatus` + `toast` 都说了——不是静默失败。
+- **数据面板的未绑定按钮已经在第九轮修掉了**（专名表的 `[data-dp-del]`，`CHANGELOG` 第 76 项）。
+  这一轮把 `renderDataPane` 渲染出的**每一个**可点元素重数了一遍
+  （`[data-dp-tab]` / `#dp-add` / `#dp-filter` / `[data-dp-del]` / `#dp-more` / `#dp-save` / `#dp-clear` / `[data-dp-edit]` / `[data-dp-delrow]`），**全部有监听**。
+
+**验证**：`npm run verify` 全绿（preflight 44 + typecheck（含 `app`）+ lint 0 warning +
+**971 项：970 通过 / 0 失败 / 1 跳过**）；Rust gate（`cargo fmt` / `clippy --all-targets -- -D warnings` /
+6 测试）全绿（含新增的 `delete_api_key` 编译与注册）。
+`LayerText-optimization` 同步后 preflight 43 + 根/app typecheck + **1000 项：999 通过 / 0 失败 / 1 跳过**，
+分支 Rust gate 全绿。
+
+## [未发布] - 2026-09-14（第九轮：把「按钮点了到底有没有用」逐个点到底）
+
+来源：Wayne"我怕某个 button 设置在那其实没有用"。
+所以这一轮不是看文档、也不是凭印象，而是**按代码把每个入口追到落点**：
+
+1. 把 `index.html` 里**全部 26 个静态 `<button>`/可点元素 id** 与全部
+   `addEventListener('click')` 做交叉比对；
+2. 把各面板里**运行时生成的 123 个按钮**按"渲染函数是否在新建的 DOM 上重新绑定"逐个看；
+3. 把 25 处 `invoke('命令', {...})` 与 Rust 侧 `fn 命令(...)` 的参数名逐个对照
+   （Tauri v2 **按参数名匹配**，名字对不上就是运行时才炸）；
+4. 确认兜底网：`uikit.ts` 顶层有 `error` / `unhandledrejection` → `toast`，
+   所以"抛出来的错"不会无声——**真正会无声的，是压根没绑监听的那种**。
+
+**复核掉 4 条假报**（记下来，免得下一份报告再把它们报一遍）：
+`help-usage` / `help-qc` / `help-example-dir` 三个菜单项**是原生实现的**（`main.rs` 的
+`on_menu_event` 里有对应分支，不是前端按钮）；`#plot-accept` **有**启用逻辑（`refreshCnt()`
+在勾选变化时点亮）；`dict_lookup_zh` / `open_help_window` 的"参数名不符"是正则看走眼；
+`panelState` / 窗口控制按钮 / `<symbol>` 的 id 都不是可点入口。
+
+**核实为真、这一轮修掉的（按"点了没反应"的成因分类）**
+
+| # | 位置 | 成因（核实后） | 修法 |
+| --- | --- | --- | --- |
+| 71 | `app/src/main.ts` `#btn-ai` | **绑了两次**（同一文件两处 `addEventListener`）：一次点击跑两遍 `aiSuggest()`——两倍 AI 请求、结果重复落盘 | 删掉后加的那处并留注释；现在全仓只绑一次 |
+| 72 | `app/src/settings.ts` `toggleClsPanel` | 入口先查 `#cls-panel` 是否存在，而那个容器**是 `renderClsPanel()` 懒创建的**——于是这个面板自功能引入起**从未可达** | 不存在就先 `renderClsPanel()` 再切 |
+| 73 | `app/src/shelf.ts` `#shelf-demo` / `#shelf-add` | DOM 由 `renderShelfGrid` 重建，而监听只在 `bindShelfChrome` 里绑过一次：搜索框敲一个字、切一次视图、点一下分组 chip，这两个按钮**就死了**（不弹框、不报错、不 toast） | 绑定移进 `renderShelfGrid` 末尾（紧挨 `bindShelfCards`），并从 `bindShelfChrome` **移除**以免双绑 |
+| 74 | `app/src/risk.ts` `renderRiskPane` | 空队列 / 已全部处理两条分支**提前 `return`**，但 `head` 里已经渲染了 `data-undo` / `data-workbench` / `data-taskdone`——按钮在页面上、**零监听** | 早退改成 `emptyHtml` 变量，按钮照常绑；绑定循环之后再按 `emptyHtml` 决定返回 |
+| 75 | `app/src/batch.ts` 批处理收尾 | 跑完只改按钮文案、不恢复 `disabled`，也不把隐藏的 `#bt-list-fld` / `#bt-inst-fld` 显示回来——**这个入口一辈子只能用一次** | 收尾时按勾选数恢复 `开始简化（N 章）` / `先在上方勾选章节` 与可用性，并恢复两个字段 |
+| 76 | `app/src/datapanel.ts` `[data-dp-del]` | 按钮渲染出来了，**全仓没有任何地方绑它**，`deleteProperLine` 一个调用者都没有 | 补监听：失败 `alert` 说出口，成功走 `doSave` |
+| 77 | `app/src/main.rs` `save_app_config` | 用的是裸 `std::fs::write`——与同文件 `write_text_file` 的原子落盘不是一套 | 抽出 `atomic_write`，两处共用；`load_app_config` 顺带区分 `NotFound`（当空配置）与其他 IO 错误（**报错并带上路径**，不再把"读不了"当"没配置"） |
+
+**同一轮修掉的"有反应但反应是错的"**（点击有落点，只是落点不对，同样属于"按钮不可信"）
+
+| # | 位置 | 问题 | 修法 |
+| --- | --- | --- | --- |
+| 78 | `app/src/bookio.ts` `exportDocx` | 目标路径就是 `<源目录>/<同基名>.docx`——**可能正是教师原件**；而 `write_file_base64` 不查存在、不备份、非原子，也不经 `persistEdit`（`_原始备份.md` 那套完全不生效）。结果是原件被一份 App 生成的纯文本 docx 原地替换、排版图片全丢，界面还只显示"已导出 Word 版" | 目标已存在（含等于源文件）就另起 `<基名>_LayerText导出.docx`，绝不覆盖 |
+| 79 | `app/src/pipew.ts` 同步清单 | `plans.push({ name: n })` 里的 `n` 是后端给的**完整路径**，与相对路径二次拼成 `a/b/a/b.md`——于是"已同步"是**假报** | 改 `baseName(n)` |
+| 80 | `app/src/report.ts` 图标按钮 | 用 `textContent` 塞整段 `<svg>` → 页面上显示源码字符串 | 改 `innerHTML` |
+| 81 | `app/src/report.ts` 两个档案导出 | 没有 `S.currentBookDir` 时**静默 `return`**，教师点了什么都不发生 | 改 `setStatus(..., 'err')` 说出口 |
+| 82 | `app/src/edit.ts` `jumpFind` | 查找框是空的或无命中时静默不动 | 补 `toast('先在查找框里输入要查的内容')` |
+| 83 | `app/src/datapanel.ts` `#dp-filter` | 输入后整块重渲染，**焦点与光标位置全丢**（继续打字打到别处） | 重渲染后恢复 `focus()` + `setSelectionRange` |
+| 84 | `app/src/main.ts` `#mode-pill` | 先 `await saveConfig()` 再更新界面：保存失败时**界面停在旧模式**，教师看到的是"点了没反应" | 先 `updateModePill()` / `updateMarkBadge()` / `setStatus(...)` 再落盘；失败额外说"模式已切换，但**没能存进设置文件**" |
+| 85 | `app/src/settings.ts` `#set-autorew` | 改自动改写后模式胶囊不刷新（胶囊显示的仍是旧状态） | 变更处理器里补 `updateModePill()` |
+
+**返工 1（如实记）**：给 `LayerText-optimization` 打这批补丁时，`shelf.ts` 的锚点把
+`renderShelfGrid` 的结尾**连着一起复制**了，于是多出一个 `}` 和一个重复的 `bindShelfCards`。
+分支 `tsc` **当场报 `shelf.ts(323,1): error TS1128`**——门禁拦住了，删除重复块后恢复。
+教训与上一轮同源：**锚点选在"函数尾"就必须把右括号算进断言**，否则补丁会静默地贴歪。
+
+**分支侧另补两处（本轮才发现分支上漏了）**
+
+- `app/src/review.ts`：`S.markFileBroken` 在 `main.ts` 里**只写不读**——守卫等于不存在，
+  损坏的 `_审校标记.json` 照样被内存里的空表覆盖。补上 `scheduleSave` 落盘前的拦截。
+- `app/src/bookio.ts`：分支此前只跟了"正则补 `.docx`"那一半，**没跟"目标路径可能覆盖原件"**这一半。
+  这次补上（同一份判定两边必须一致，见 §4）。
+
+**验证**：`npm run verify` 全绿（preflight 44 + typecheck（含 `app`）+ lint 0 warning +
+**971 项：970 通过 / 0 失败 / 1 跳过**）；`USER=runner npm run verify` 同样全绿（复现 CI 条件）；
+Rust gate（`fmt` / `clippy --all-targets -- -D warnings` / 6 测试）全绿。
+`LayerText-optimization` 同步后 preflight 43 + 根/app typecheck + **1000 项：999 通过 / 0 失败 / 1 跳过**，
+`USER=runner` 亦全绿，分支 Rust gate 全绿。
+
+## [未发布] - 2026-09-14（第八轮：三处"未接线"逐个定性 + 分支侧 Rust 假绿）
+
+第 4 条我原先只写了"未接线（不是 bug）"。逐个核实之后发现，**三处的实际情况并不一样**，
+处理方法也不该一样：
+
+| # | 位置 | 核实结论 | 处理 |
+| --- | --- | --- | --- |
+| 68 | `src/core/candidate.ts` 的 `applyUndo` | **死代码，而且口径与生产路径冲突**：全仓只有测试调它；真正的入口（`决定汇总`）走 `candidatesFromEvents(allEvents)` **全量重建**，撤销在重建里已经算过。更要命的是它对"证据清零"给的是 `rejected`，而重建路径给的是**根本不成候选**（`回流红线` 那条测试钉的就是后者）。两个都留着 = 同一件事两套答案，而只有一套在跑 | **删掉**（附上删除理由）；把它的测试换成测**真正在跑**的路径（两条证据撤掉一条 → 证据 1、confidence 降、被撤那条不再进 `sourceDecisionIds`） |
+| 69 | `src/core/docast.ts` 的 `applyRepairs` | **有真 bug 且未接线**。Bug：遍历的是 span **旧数组**，而 `setSense` 只按词找、**永远改该段第一处**——于是"第二处释义不一致"会**报修好了（senses+1）、实际一个字符没改** | 修 bug：`setSense` 加可选 `at`（定位到具体那处）；`applyRepairs` 改**两趟**——先左→右定"正"（"首次出现为正"这条规矩不能因为遍历方向变了就变），再从右→左改（`setSense` 会重算 `spans`，先改左边会把右边的 `start` 挤歪）。加两条回归守卫（同段两处、同段三处） |
+| 70 | `src/core/propagate.ts` | **是一份设计好的能力规格，但从未接线**：纯函数齐全、有单测，全仓零调用。它**不是一道正在生效的机制** | **不动行为**，在模块头写明"尚未接线"，并列出接线前必须定的两件事（教师在哪个操作后触发；允许写哪些层级文件）——都是产品/数据决定 |
+
+`applyRepairs` 那条**第一版我只做了"从右往左"，于是"正"变成了最右边那个**——被我自己刚写的三处同词用例当场抓住，
+改成两趟扫描才对。又一次证明：**先说清要守什么不变式，再写实现**。
+
+**同一轮：分支侧 Rust 假绿的修法**
+
+`local_dict_returns_zh_gloss` 在本机没有系统词典时 `return`——**Rust 把"正常返回"记为通过**，
+所以 Linux/新机器上这条**永远绿而没人知道**（与 TS 侧那条 `if (!existsSync(p)) return;` 同类，那边已改成 `t.skip()`）。
+Rust 没有条件跳过机制，所以给了一个**显式硬开关**：
+`LAYERTEXT_REQUIRE_SYS_DICT=1` 时缺词典当场失败；默认仍跳过但打印原因。
+两种模式都实测过：硬开关 + 查不到词 → **FAILED**；去掉开关 → 通过（跳过）。
+（`cargo test` 默认吞掉通过用例的输出，所以单靠 eprintln 不够——硬开关才是那条"说得出口"的路。）
+
+**验证**：`npm run verify` 全绿（preflight 44 + typecheck（含 `app`）+ lint + **971 项：970 通过 / 0 失败 / 1 跳过**）；
+`LayerText-optimization` 同步后 preflight + 根/app typecheck + **1000 项：999 通过 / 0 失败 / 1 跳过**；
+分支 Rust gate 全绿（fmt / clippy 0 warning / 6 测试 + 硬开关模式各跑一遍）。
+
+## [未发布] - 2026-09-14（第七轮：`冻结回放` 三个字段名 + 一次**有意的重新冻结**）
+
+上一轮把这条列成"需要你先点头"。这一轮把它做完了——因为核实之后发现，
+**重冻是自包含的**（`tests/replay.test.ts` 的 `materialize()` 从夹具自己的 `输入/` 重放），
+不必动真项目，也不必猜。
+
+| # | 位置 | 问题（核实后） | 修法 |
+| --- | --- | --- | --- |
+| 67 | `tools/af_pipeline/LayerText_AF冻结回放.mjs` | 三个字段名是错的：`QcResult` 里没有 `words`（叫 `tokenCount`），过去完成是**全小写**的 `pastperf`。取到的永远是 `undefined`，`JSON.stringify` 直接丢键——冻结基线里**从来没有**原文词数/产物词数/过去完成，对账两边都缺、**永远比不出差异** | 改成 `qSrc.tokenCount` / `qOut.tokenCount` / `qOut.pastperf`，并**重新冻结了基线** |
+
+**重新冻结是怎么做的（可复核，不是"把红的改成绿的"）**
+
+1. 先**重冻到临时目录**，与现有基线逐路径深比。得 **101 处差异**：
+   - **99 处** = 33 组（11 章 × 3 层）× 三个字段，全部是 `missing → number`；
+   - 2 处是重冻 harness 的副产物（`冻结自` 用了临时项目名、`项目树指纹` 随副本变）。
+2. 又试了**从真项目重冻**做对照——产出 **1840 处**差异（真项目已经漂了很多，B 层输入都没了）。
+   **这反过来证明夹具才是重冻的正确来源**：基线之所以存在，正是因为真项目会变。
+3. 最终基线 = 夹具重冻的结果 + **把溯源元数据（`冻结自`/`项目树指纹`）恢复成原样**，
+   于是**净差异恰好是那 99 处、零非预期**。旧基线备份在同目录的 `期望结论.json.pre-20260914`。
+4. 复核 `--check` 只比 `结论`（不比 `冻结自`/指纹），所以这次改动不会掩盖别的东西。
+
+**验证**：`npm run verify` 全绿（preflight 44 + typecheck（含 `app`）+ lint + **969 项：968 通过 / 0 失败 / 1 跳过**）；
+`dist/tests/replay.test.js` **15/15**（含 `--check` 逐章对账与"重新冻结必须一致"两条）。
+`LayerText-optimization` 同步后根/app typecheck + **998 项：997 通过 / 0 失败 / 1 跳过**，其 replay 层同样 15/15
+（两个 worktree **共用同一份夹具**，所以基线重冻对两边同时生效）。
+
+**这一条从"发现"到"修完"隔了三轮**——不是技术难，是它要求一次**有意的动作**，
+而"顺手把红的改绿"正是这类改动最容易掩盖真问题的地方。所以过程留档在这里。
+
+**同一轮补上的另一个缺口：Rust 侧终于真的编译+测试了**
+
+`AGENTS.md` 里那句"本机没有 Rust 工具链"是**错的**：`~/.cargo/bin` 下有 cargo 1.98.1 与 rustc，
+只是不在 PATH 上。把 PATH 加上之后：
+
+- `cargo check --all-targets` 通过；
+- `cargo test` **抓到我自己加的 Rust 单测有 bug**——`list_dir` 末尾会 `out.sort()`，
+  而我在断言里写死了中文文件名的顺序（`调适项目_X.json` 在 `班级A.json` 前），实测是反的。
+  改成"两边都排序再比"，测"返回了哪几个"而不是"以什么顺序返回"；
+- `cargo fmt --check` 报两处不合规（一处是我的新代码，一处是**既有**测试）；
+- `cargo clippy -- -D warnings` 报我写的 `allow.iter().any(|x| *x == eq)` 该用 `allow.contains(&ext)`。
+
+四道现在全绿（fmt ✓ / clippy 0 warning / **6/6 测试**）。**这三处 CI 一处都拦不到**——
+`.github/workflows/ci.yml` 全文没有 cargo 步骤，`package.json` 的 `verify:rust` 也没人跑。
+也就是说：我上一轮把"Rust 未验证"列成缺口是**对的**，而它比我以为的更值得补。
+
+**验证**：`npm run verify` 全绿（preflight 44 + typecheck（含 `app`）+ lint + **969 项：968 通过 / 0 失败 / 1 跳过**）；
+`dist/tests/replay.test.js` **15/15**（含 `--check` 逐章对账与"重新冻结必须一致"两条）。
+`LayerText-optimization` 同步后根/app typecheck + **998 项：997 通过 / 0 失败 / 1 跳过**；
+两个 worktree 的 Rust gate 同样全绿（fmt / clippy / 6 测试）。
+（两个 worktree **共用同一份夹具**，所以基线重冻对两边同时生效。）
+
+**记录一处尚未处理的同类问题（分支侧，不在主仓）**：`LayerText-optimization` 的
+`main.rs` 里 `local_dict_returns_zh_gloss` 在本机没有系统词典时 `return`——**Rust 把"正常返回"记为通过**，
+所以 CI（没有 macOS 系统词典）上这条永远绿。与我在 TS 侧修掉的 `t.skip()` 那条是同一类"假绿"，
+但 Rust 没有条件跳过机制，要改得先定做法（`#[ignore]` 会连有词典的机器也不跑）。留待决定。
+
+## [未发布] - 2026-09-14（第六轮：tools 的 P2 批——"写死十章"与几处静默吞因）
+
+| # | 位置 | 问题（核实后） | 修法 |
+| --- | --- | --- | --- |
+| 55 | `三档复核` / `修复_20260910` / `会话改写` / `清单` / `对照台账` | **写死十章**：`.filter((n) => n >= 1 && n <= 10)`——换一本 12 章的书，`--chapters 11` 被**静默丢掉**（默认路径反而正确，所以只有显式传章号时才踩得到） | 改成 `n <= 章名清单.length` |
+| 56 | `三档复核` / `修复_20260910` / `对照台账` | 各自**自抄**一份 `['一'…'十']` 章名数组，与 `chapterNames(P)` 并存（项目已经专门抽过这个，这是漏改的几处） | 改从共享模块取 `chapterNames(P)`，`CH_NAME` 直接返回完整章名 |
+| 57 | `冻结回放` | 同上一份自抄的十章数组：`CN[10] === undefined` → 第 11 章拼出 `第undefined章`（**脚本照常报成功**） | 换成一张到二十的中文数字表。**没有**改用 `chapterNames(P)`：`P` 要到主流程才载入，模块顶层引用它就是 TDZ（仓库有冒烟守卫专抓这个），而 `runCheck()` 又有它自己局部的 `P`——注释里写明了这条取舍 |
+| 58 | `三档生成` / `会话改写` | 源文没有 `## Chapter …` 时按章序补英文标题，数组只有十个——第 11 章拼出 `## Chapter undefined` | 超出部分退回阿拉伯数字（`?? i`），1–10 的既有措辞不变 |
+| 59 | `对照台账` | `chapterLedger(tier_tag(t), t.tag, ci)` 把**整个层级对象**（`{key,tag,label,ratio,maxLen}`）当 `tier` 传给 `runQc`，而 `tier_tag` 是个恒等函数。覆盖率/加注数不依赖 tier 所以数字没错，但 `gates.passiveOk/relclOk` 这类判定拿到的是个对象——**看着有、其实没有** | 直接传 `t.tag`；删掉恒等函数 `tier_tag` |
+| 60 | `修复_20260910` | 日志里"源文 N 个"的判别写成 `p.startsWith('原文重制')`，而 `p` 的实际形状是 `第一章/原文_规范化`——条件**恒为 false**，那个数永远是 0 | 按构造处的真实后缀 `endsWith('原文_规范化')` 判 |
+| 61 | `tools/compare.ts` | 对照脚本的临时文件名只带 `basename(text)`：两个同名输入（不同目录，或两次并发）**互相覆盖**，后一次读到别人的结果，而脚本照样报"一致" | 临时名加 `pid` + 时间戳 |
+| 62 | `tools/perf_baseline.mjs` | 默认输入写死一条**跨仓库相对路径**（`../../01-教学工作/…`）——本机成立，换机器即断，而它正是"不传参就跑不动"的那类默认值 | 改从 `LAYERTEXT_AF_DIR` 取；取不到就**说清楚并退出 2**，不猜 |
+| 63 | `validate_data.mjs` / `迁移.mjs` / `词表与词典.mjs` | 三处静默吞因：`validate_data` 读不出的文件**既没进结果也没进 skipped**（目录扫描悄悄漏检）；`词表与词典` 的 `.catch(() => null)` 把"现场词表算不出来"的原因吞掉，漂移记录里只剩一句 refusal——**"没算出来"与"没差异"分不开**；`迁移` 的目录不可读兜底没写明代价 | 前两处改成"如实记下来"（`skipped` 带原因 / 记录里加 `liveError`）；第三处写明"尽力而为、可能不全"；顺带去掉 `迁移` 里 `readdirSync(d) ?? []` 的死代码 |
+| 64 | `清单.mjs` | 风险队列报告的**人读版**在多层运行时叫 `风险队列_<首层tag>_等`（写入侧如此），而清单只按单层名 `风险队列_<tag>` 找——`--tier A,M` 这类运行的人读报告**永远不会被登记**，发布包因此不含它，而教师以为报告进去了 | 两种名字都试，取先存在的那个 |
+| 65 | `四格实验.mjs` | 内联的第二份应注词阈值 `w.length > 2`（引擎唯一口径是 `segmentgate.ANNOTATABLE_MIN_LEN`）。数值当前一致，但引擎改阈值时这里不会跟着变 | 改成从引擎取 `ANNOTATABLE_MIN_LEN` |
+| 66 | `src/core/manifest.ts` + `bundle.ts` | `bytes` 记的是 **UTF-16 码元数**（`text.length`）而不是字节：中文产物**低报约三分之一**，而清单/包里那句"清单说有 N 字节"是给教师看的。唯一的功能性用途是 `bytes === 0` 判空文件（那里两种算法同值），所以不影响任何校验结论 | 新增 `byteLenOf`（`TextEncoder`，Node 与浏览器都是全局），两处改用 |
+
+**如实记录一次险些犯下的错**：`冻结回放` 那处我第一版直接写成 `SHARED.chapterNames(P)`，
+而 `P` 在模块顶层还没定义（第 562 行才 `loadProject`）——**那是 TDZ**，运行期才炸。
+是 `tests/pipeline_smoke.test.ts` 那条"不许以 TDZ 方式死"的守卫在等着；我在动手前先核了 `P` 的位置，
+改成不依赖 `P` 的数字表，冒烟 4/4 通过。**上一轮我自己刚说过这个仓库有守卫，这一轮差点表演给它看。**
+
+**未做**：`tools/_af_calibrate.mjs` / `tools/_af_drift_sample.mjs` 里也写着本机绝对路径，
+但它们在 `.gitignore` 的 `tools/_af_*` 里、**不进仓库**，文件头自己还写着"用法：node /tmp/xxx.mjs"——
+属本地一次性脚本，不是仓库缺陷，只在此记一笔。
+
+**验证**：`npm run verify` 全绿（preflight 44 + typecheck（含 `app`）+ lint + **969 项：968 通过 / 0 失败 / 1 跳过**）。
+`LayerText-optimization` 同步后 preflight 43 + 根/app typecheck + **998 项：997 通过 / 0 失败 / 1 跳过** 全绿
+（`冻结回放.mjs` 在分支上只因 prettier 换行而分叉，按单锚点断言后外科式补丁）。
+
+## [未发布] - 2026-09-14（第五轮：tools 剩下的 P1——两种布局、口径统一、段号对齐）
+
+| # | 位置 | 问题（核实后） | 修法 |
+| --- | --- | --- | --- |
+| 51 | `tools/af_pipeline/chapterdir.mjs`（新）+ `正本核对` / `本地助手` / `补注候选` / `待确认队列` | 四个脚本直接拼 `join(产物目录, 章名)`。`legacy` 布局下对，`--layout run`（产物在 `_运行/<runId>/正文/<章>/`）下**找不到产物**：`正本核对`每章报"缺产物"并 exit 2（响，但错）；`补注候选`/`待确认队列`/`本地助手` 读到空串、**静默产出空队列**——那种最难查，看起来像"本来就没有待办" | 新增共享 `chapterDirOf(产物目录, 章名)`：优先运行私有目录（显式 `--run`/`LAYERTEXT_RUN` 最优先，否则取最近一次运行），**最后回落 legacy**（老项目一个字都不用改）。四处各改一行。（`_待复核` 那个文件读写双方都在 legacy 路径上、彼此一致，没动，避免把写读拆到两个位置。） |
+| 52 | `tools/af_pipeline/LayerText_AF两轮调适.mjs` | 段号形态不一致：引擎（`adaptcheck`）给的 `segId` 是 `P03`，而脚本用 `match(/\[P\d+\]/)` 拿到 `[P03]` 去比——**「一句 N 处注释」这类段级 finding 永远匹配不到自己的段**；而 `注释拥挤`/`最长句`/`归因` 是整篇级（没有 segId），对每一段都成立。两个错叠起来：全篇有密度或长句问题时第二轮把**每一段**都标成待复写；只有句级问题时则一段都不进 | 段号去方括号再比；整篇级的用 `!f.segId` 明说（不再靠三个 `note.includes` 猜） |
+| 53 | `tools/af_pipeline/LayerText_AF清单.mjs` | `--stamp` 登记"待复核"时**手拼** `join('_待复核', tag, …)`——既没有 `--out` 后缀、也没有运行私有目录，而写入方走的是 `R.any('待复核', {chapter, segId})`。于是用了 `--out` 或 `--layout run` 的运行会登记一个**不存在的路径**，`--verify` 报 blocked「产物缺失」，把一次正常运行判成不可交付 | 路径交给解析器算（`rr.any('待复核', …)`），再按相对路径登记 |
+| 54 | `tools/af_pipeline/LayerText_AF重制_生成.mjs` | 自己 `buildLexicon({ vocabCsvTexts })`——只喂本书词库，**没喂内置课标 1600/补录，也没喂专名**，于是课标词被判成超纲：生词率虚高、加注跑到 pig/sheep 这类课标词上。这正是 `冻结回放.mjs` 注释里写明踩过的坑 | 改走 `SHARED.loadLexicon(P)`，与其余脚本同一口径 |
+
+**顺带**：`chapterDirOf` 一度直接写在 `LayerText_AF词表与词典.mjs` 里，撞了 `max-lines` 1000 行门禁
+（这个文件当天第二次撞），按仓库既有结论"prettier 会重展压缩行，拆模块是正解"拆成
+`chapterdir.mjs`；架构地图同步加了这一行、脚本数 31 → 32（铁律 1）。
+
+**验证**：`npm run verify` 全绿（preflight **44** 个脚本 + typecheck（含 `app`）+ lint + **969 项：968 通过 / 0 失败 / 1 跳过**）。
+`LayerText-optimization` 同步后 preflight + 根/app typecheck + **998 项：997 通过 / 0 失败 / 1 跳过** 全绿
+（其中 `LayerText_AF待确认队列.mjs` 在分支上多了一处同类查找，按"锚点必须出现 N 次"断言后两处一起打补丁）。
+
+## [未发布] - 2026-09-14（第四轮：收尾——续跑、锁、撤销栈、跨书缓存，外加一条偶发红的根因）
+
+> 上一轮留了四条"要先定契约"的。这一轮把契约定了、把它们做掉，
+> 并在排查"锁测试偶发红"的过程中找到一个**还没修完的 TOCTOU**。
+
+**改了什么**
+
+| # | 位置 | 问题（核实后） | 修法 |
+| --- | --- | --- | --- |
+| ㊸ | `tools/af_pipeline/LayerText_AF两轮调适.mjs` | **断点续跑会把未简化原文写进初稿**：进度文件只记 `done: number[]`，那些段的正文从没被存下来，而 `out = [...segs]` 让它们保持原文、循环又直接跳过——落盘的初稿前一半是原文、后一半是 AI 产物，**不报任何异常**，还会被下游复核/台账/发布当成正常初稿 | 进度文件同时记 `texts`；**旧格式（没有 texts）一律当"没做完"重跑**——宁可多花一次调用，也不产出夹着原文的初稿 |
+| ㊹ | `tools/af_pipeline/LayerText_AF词表与词典.mjs`（`withLock`） | **还没修完的 TOCTOU**：`openSync(path,'wx')` 建出的是**空文件**，内容要等下一行 `writeSync` 才进去。窗口里另一个进程读到空串 → `JSON.parse` 抛 → `readLock()` 返回 null → `lockState(null)` 判成 `'free'` → 走"陈旧锁"分支**把活锁删掉**并抢过来：两个进程同时进临界区。**机器越忙窗口越宽**——这正是 `tests/lockfile.test.ts` 在整仓跑时偶发红、单跑却 4/4 全过（旧实现实测 6 次整仓里红 1 次）的根因 | 先把内容写进同目录临时文件，再 `linkSync` 建硬链接：目标已存在即 `EEXIST`，而**链接成功那一刻锁文件就有完整内容**，没有窗口 |
+| ㊺ | `app/src/edit.ts` + `main.ts` + `pure.ts` | **重做永远没得做**：`persistEdit` 每次都会 `redoStack = []`，而 `doUndo` 在调它**之前**就把当前稿压进了 redo——压完立刻被清空；同时当前稿又被塞回 undo，撤销退化成"来回切"。另外栈在 await 写盘**之前**就被改动，写盘失败会静默少一版 | 定契约：`persistEdit` 负责"记一次新编辑"（新增 `recordHistory` 开关），撤销/重做**自己**搬栈并传 `recordHistory: false`；**先写盘、成功了再动栈**。栈的移动抽成纯函数 `undoStep`/`redoStep`（原先这段和 DOM/IO 缠在一起，**没有任何测试守着**，所以它一直是错的） |
+| ㊻ | `app/src/datapanel.ts` | `panelState` 是模块级全局、切书时没人清空，`bookDir` 在首次加载后就被完全忽略——打开书 A 再打开书 B，列的是 A 的词库/词典，保存还会写进 **A 的绝对路径**。这一条此前被"`调适项目_*.json` 永远探测不到"遮住（`project` 恒 null），**我上一轮修好探测的那一刻它就会变成活 bug** | 缓存按 `bookDir` 失效，切书即清空 project/tables/log |
+| ㊼ | `app/src/settings.ts` + `state.ts` + `ai.ts` | 备用供应商的 Key 存钥匙串时用**行下标**做账号（`fb0`/`fb1`…）：删掉一行，剩下的行会读到**被删那家的 Key**，鉴权失败，而报错文案让教师去怀疑自己填的 Key | 每行一个**稳定 id**，账号改 `fb:<id>`；读取时优先新账号、回落旧下标（迁移期两边都认，不会"升级后备用全失效"） |
+| ㊽ | `src/core/decision.ts`（新）+ `productmetrics.ts` / `teacherexperiment.ts` / `workbench.ts` | `isBatch` / `timeOf` / `ordered` / `refOf` 在两个文件里**各写一份**，两边注释都写着"逐字一致，免得两处漂移"——**注释拦不住漂移**，而它们是撤销率、批量采纳回滚这些指标的**分母口径** | 四个收进 `decision.ts`（`eventRefOf` / `isBatchDecision` / `eventTimeOf` / `orderedByTime`），三处改为调用；`workbench.eventRef` 改成转发到 `eventRefOf`，格式只剩一份定义 |
+| ㊾ | `src/core/qc.ts` | 歌篇句按**文本**做集合剔除（`songSet.has(sentence)`）：叙事区里只要有**一句与歌篇逐字相同**（副歌被复述、引语里重复演唱），那句也会被踢出叙事句法统计与平均句长——「去歌词后平均句长」**悄悄少算**，界面上看不出异常 | 改成按**下标**标记歌篇句，文本相同不再互相牵连 |
+| ㊿ | `src/core/experiment.ts` | 会话日志解析的 `catch { continue; }` 既没理由也没计数，与 `decision.ts`/`workbench.ts` 的同类解析不一致 | 写明 `有意兜底：` 与"为什么不返回 `badLines`"（本函数只回答"每段第一轮响应是什么"） |
+
+**新增测试**：`tests/lockfile.test.ts` 加一条**锁文件内容原子性**守卫（持锁期间紧循环采样，每次都必须能解析出持有者）——
+用旧实现回退跑 6 次，红 1 次，证明这条守卫抓得住；恢复后 3/3 全过。
+`tests/app_logic.test.ts` 加 5 条：撤销后必须攒得下重做、空栈返回 null、纯函数不改入参、撤 3 步重做 3 步往返一致、`baseName`。
+
+**验证**：`npm run verify` 全绿（preflight + typecheck（含 `app`）+ lint + **969 项：968 通过 / 0 失败 / 1 跳过**）；
+连跑 `npm test` 3 次全绿（专治那条偶发红）。
+**同步**：`src/`、`tools/`、`tests/` 本次改动与分支一致 → 直接复制；`app/` 仍是外科式补丁（该分支是 App 开发位）。
+`LayerText-optimization` 复跑 preflight + 根 typecheck + app typecheck + **998 项：997 通过 / 0 失败 / 1 跳过** 全绿。
+（过程中我一度把上一轮已同步过去的 app 补丁又打了一遍 —— 脚本按"锚点必须唯一"逐条断言，
+对不上就报错退出，所以只是白跑一趟，没有重复应用；这也说明那个断言是有效的。）
+
+**仍未做（需要一次有意的动作，不是技术问题）**
+
+- **`LayerText_AF冻结回放.mjs` 的三个字段名**（`qSrc.words` 应为 `tokenCount`、`qOut.pastPerf` 应为 `pastperf`）：取到的一直是 `undefined`，`JSON.stringify` 直接丢键，所以冻结基线里**从来没有**原文词数/产物词数/过去完成。改了会让 `tests/replay.test.ts` 两处红——**基线是在旧口径下冻的**，正确次序是"先有意地重新冻结 `~/Documents/LayerText配置/回放夹具_真项目/期望结论.json`，再让代码跟上"。代码处已留注释写明改法。
+- **`app/src-tauri` 仍未编译验证**：本机没有 `cargo`，CI 也不跑 Rust。
+
+## [未发布] - 2026-09-14（第三轮：`app/` 侧整批）
+
+> 前两轮把 `src/` 与 `tools/` 做完了，`app/` 一直空着。这一轮专做它。
+> 根因是**一条契约没人定义清楚**：后端 `list_dir` 返回的是**完整绝对路径**，
+> 而一半调用点把它当**裸文件名**用。四条链路因此静默失效。
+
+**改了什么**
+
+| # | 位置 | 问题（核实后） | 修法 |
+| --- | --- | --- | --- |
+| ㉞ | `app/src-tauri/src/main.rs` | `list_dir` 只返回书稿扩展名，**`.json` 永远不出现**；且返回完整路径这一点从未写进任何契约 | 加可选参数 `exts`（默认仍是书稿扩展名），函数文档写明"**返回完整绝对路径**"。配 Rust 单测：默认看不见 `.json`、显式要才返回 |
+| ㉟ | `app/src/datapanel.ts` | `调适项目_*.json` 探测**永远失败**（`.json` 不被返回 + `^调适项目_.+\.json$` 拿整条路径去锚定开头 + 又把完整路径拼一次目录）。后果链条：数据面板恒"还没有数据资产配置" → 风险队列恒"没有调适项目配置" → `adoptRewrite` 读不到配置 → **AI 建议的「采纳」写正文 100% 失败** | `io.listDir(d, ['json'])`；`baseName` 判名；直接用返回的路径读 |
+| ㊱ | `app/src/settings.ts` | 同一个 `.json` 问题：`.endsWith('.json')` 恒得空数组 → `classTargets` 恒空、`mergedSelection()` 恒 `active:false` → **班级多人定制整体失效** | 显式要 `['json']`（路径用法本来就是对的） |
+| ㊲ | `app/src/pipew.ts` ×2、`app/src/rewritegate.ts` | 完整路径再拼一次目录 → `/a/b//a/b/c.md`（不存在），读失败被兜底吞掉。跨版本标记同步说"同目录没找到可用的其他版本文件"（而目录里明明有）、台账里写"已传播到 /a/b//a/b/c.md"；跨章"已注词账本"**永远只覆盖当前章**（而防跨章重复加注正是它的存在意义） | 统一走新加的 `pure.baseName`；`tryDir(sub)` 不再重复拼 `parent` |
+| ㊳ | `app/src/shelf.ts` | `tocChapters()` 把完整路径当章节名返回 —— 目录里会显示整条路径 | `map(baseName)` |
+| ㊴ | `app/src/pipew.ts`（词汇简化） | 大小写**串味**：替换循环是倒序的，而 `let r = repl` 里的 `repl` 会在首次迭代（最右侧那处）被改写成首字母大写形，于是它**左侧所有小写出现处**都被替换成大写词并落盘：`the commandments were read aloud. Commandments mattered.` → `the Rules were … Rules mattered.` | 形态计算基准改成不变的 `replBase` |
+| ㊵ | `app/src/bookio.ts`（改写应用） | `s.md = applyRewrite(s.md)` 之后再 `persistEdit(s, s.md)` ——两个实参同一个引用，于是 `newMd !== s.md` 恒 false：**① 不 push 撤销快照；② 更糟，"原始备份"写的是改写后正文**，教师想整体还原会还原成被替换的版本 | 先算 `next`，`persistEdit` 成功后再赋 `s.md` |
+| ㊶ | `app/src/bookio.ts`、`app/src/bookpure.ts`、`app/src/main.ts`、`app/src/batch.ts`、`app/src/chat.ts`、`app/src/grading.ts`、`app/src/reader.ts`、`app/src/risk.ts` | 六处独立缺陷：专名表被静默清空（`= cfg.proper ?? []` 少守卫）；进度文件缺 `status` 时抛 TypeError；关标签页后 `activeIdx` 不左移（**操作作用到错误的文档**）；有失败章仍删进度文件（"可中断续跑"承诺失效）；`apply_edit` 工具**谎报"已应用"**；批改报告拿**空正文**送 AI | 逐条按上文修 |
+| ㊷ | `app/src/state.ts` + `app/src/review.ts` + `app/src/main.ts` | 标记文件"读不出"与"JSON 损坏"共用一个 catch → 损坏的 `_审校标记.json` 被当空清单打开，下次保存**整体覆盖**、整章标记全丢；且 15 处 `scheduleSave(s, () => undefined)` 把失败出口掐掉了 | 两件事分开：损坏当场报出并进 `S.markFileBroken`，保存时**跳过**该文件；再给 `review.ts` 加一个**依赖注入**的错误播报器，由 `main.ts` 装上 |
+
+**两次返工，都记在这里**
+
+- 我先给 `review.ts` 直接 `import { setStatus } from './uikit.js'`——**错了**：`uikit.js` 顶层有 `window.addEventListener`，
+  而 `phrase_mark` / `review_dom` 两组用例在 node 下直接 import 这个模块，于是**收集期就 `ReferenceError: window is not defined`**，
+  测试总数从 963 掉到 948、还多两个红。改成依赖注入（`setMarkSaveErrorReporter`，与 `ai.ts` 的 `setAiUi` 同一个套路）后恢复。
+  **仓库"响应式纯逻辑优先"那条纪律是真的在保护测试可行性**，我这次是撞上去才想起来的。
+- `tests/rewritegate.test.ts` 的假 IO 返回**裸文件名**，把"调用方把完整路径当裸名用"这个错误契约固化了下来——
+  生产读不到、被兜底吞掉，测试却全绿。改成"目录项照裸名写、`listDir` 像真后端那样补成完整路径"，与 Rust 单测同一口径。
+
+**明确没改的（需要先定契约）**
+
+- **撤销/重做栈的所有权**：`edit.ts` 的 `doUndo` 是"先动栈、再 await 写盘"，失败时会少一版；但 `persistEdit`（`main.ts`）**自己也**在 `undoStack.push` / `redoStack = []`。要修得先定"栈归谁管"（`persistEdit` 独占还是调用方独占），那会影响全部调用点，不该猜着改。已在 `doUndo` 处注明。
+- **`settings.ts` 备用供应商 Key 按下标存钥匙串**：删掉一行后 Key 与供应商错配，需要一次带迁移的稳定 id 改造。
+- `candidate.applyUndo` / `docast.applyRepairs` 仍只在测试里被调用（**未接线**，不是活漏洞）；`propagate.ts` 整模块同样无生产调用点。
+
+**验证**：`npm run verify` 全绿（preflight + typecheck（含 `cd app`）+ lint + **963 项：962 通过 / 0 失败 / 1 跳过**）。
+
+**同步到 `LayerText-optimization` 的方式（与 `src/`、`tools/` 不同）**：该分支是 **App 开发位**，
+`app/` 下 13 个文件与 main 已有实质分叉（`pipew.ts` +317 行、`datapanel.ts` +164 行、`pure.ts` +82 行…），
+**整文件覆盖会冲掉它的在建工作**。所以改用**逐条断言的补丁脚本**：每个补丁要求锚点恰好出现一次，
+对不上就报错退出、不静默跳过。42 个补丁全部命中并落地后，该分支
+preflight + 根 typecheck + app typecheck + **992 项：991 通过 / 0 失败 / 1 跳过** 全绿。
+
+**未能验证**：本机**没有 `cargo`**，所以 `app/src-tauri/src/main.rs` 的改动（含新增的那条 Rust 单测）**没有编译验证过**——`npm run verify:rust` 与 CI 也都不跑 Rust。这是我这一轮唯一没有闭环的地方，推 CI 前请在有 Rust 工具链的机器上跑一次 `cd app/src-tauri && cargo test`。
+
+## [未发布] - 2026-09-14（第二轮：把上一轮"发现但未改"的清单继续做掉）
+
+> 上一轮把改编的做了、把"发现未改"的留了档。这一轮按那份档案继续，**只做能自证的**：
+> 每一处都先回代码/文档核实，改完跑 `npm run verify`，基线类的东西不顺手动。
+
+**改了什么**
+
+| # | 位置 | 问题（核实后） | 修法 |
+| --- | --- | --- | --- |
+| ⑳ | `src/core/version.ts` | **批量事务的溯源说谎**：`VersionNode.target` 只记第一批里**第一步**，于是 `applyChangeBatch` 改了 P01+P02 之后 `replaySegment(nodes,'P02')` 返回 `found:false`、`provenanceOf` 说"本运行没有改动过这一段"——一个**否定性的错结论**，而决定日志里明明白白记着两条 | 新增 `VersionNodeTarget` + `VersionNode.targets[]`（带每段自己的 `segBase/segBefore/segAfter`），`replaySegment`/`provenanceOf`/`segBaseOf` 统一走 `nodeSegEntry`（旧节点无 `targets` 时回落 `target`，行为不变）；新增回归守卫 |
+| ㉑ | `src/core/version.ts` | `recordOnly` 读不到正文时 `doc=''`，随后 `if (doc && …)` 把**乐观并发校验整个跳过**，照样把决定记成"对着当前版本做的"——而同一次失败在 `runTransaction` 里是 `not-found` + 拒绝 | 与 `runTransaction` 对齐：读不到就 `not-found` 拒掉 |
+| ㉒ | `calibration.ts` / `rewrite.ts` / `workbench.ts` / `pendingqueue.ts` | **FNV 哈希本体全仓有 6 份手抄**（含已修的 `decision.ts`），`workbench` 的注释还拿"语义不同"当"实现也各写一遍"的理由 | 全部改调 `manifest.contentHash`（`manifest` 无运行期 import，无环）；输出逐字不变。现只剩 1 份 |
+| ㉓ | `src/core/pendingqueue.ts` | `TAG = {A:'A层85',…}` 是 `manifest.TIER_TAG` 漏改的第 8 份；`mergePending` 注释写"补注优先"与实现（`[...restore, ...annotate]`，正本优先）相反 | 改用 `tierTagOf`；注释改成与实现一致 |
+| ㉔ | `src/core/plotweight.ts` | `includes(c.trim()…) && includes(c…)` 前半被后半蕴含，纯冗余；但它**不能**反过来当宽松口径单独用——`'if '` 末尾那个空格是故意的，去掉会撞上 different/life/gift | 只留原样匹配（行为不变），注释写清为什么 |
+| ㉕ | `src/core/studentversion.ts` | `COMMENT_RE` 带 `/g` 却在 `.map()` 里跨行 `exec`，`lastIndex` 累计，第二行起可能取到空串/别人的片段 | 改用 `match` |
+| ㉖ | `tools/af_pipeline/LayerText_AF决定汇总.mjs` | ① `parseDecisionLog` 收的是**内容**却传了**路径**，且返回 `{events,badLines}` 被 `flatMap` 成对象而不是事件数组——两错叠加，**回流候选台账恒为空、"已批准资产回流"整条链路是死的且不报错**；② `resolveTeacher` 漏 `await`，`teacherId` 恒 `undefined` | 两处都按第 84 行的正确用法改写；补 `await` |
+| ㉗ | `tools/af_pipeline/LayerText_AF校准台账.mjs` | `mkdirSync` 在**循环之后**，新工作区里第一条标记就会让 `appendFileSync` 抛 ENOENT（未被捕获，导入半途而废） | 建目录提到循环内第一次 append 之前 |
+| ㉘ | `tools/af_pipeline/LayerText_AF本地助手.mjs` | `!KEY` 无条件拦在**所有子命令之前**，而 `格式` 是纯代码转换（文件头明说"不调模型"）——没装 oMLX 的机器连 CSV→JSON 都用不了 | 只拦真正要调模型的三个子命令 |
+| ㉙ | `LayerText_AF补注.mjs` / `LayerText_AF重制_生成.mjs` | 裸 `JSON.parse(~/.layertext.json)`，缺该文件的机器**加载期**就抛栈回溯（报的是堆栈不是"缺什么配置"） | 包 try 给默认值（照 `会话改写.mjs` 的既定写法） |
+| ㉚ | `tools/narrative_fidelity.mjs` | `--tau abc` → `NaN` → 对齐器一对都对不上：覆盖率打印 0.0% 且每句记成"疑似丢句"；`--risk abc` 一个 ⚠ 都不标。全程不报错 | 加 `numArg` 校验，非法即退出 2 |
+| ㉛ | `LayerText_AF工序化生成.mjs` / `LayerText_AF两轮调适.mjs` | 逐章失败只打一行 `✗` 就 `exit 0`——而 `管线.mjs` 正用 `status === 0` 判断这一步成没成，断网跑完整本书也算"成功" | 收尾 `process.exit(1)` |
+| ㉜ | `LayerText_AF三档生成.mjs` / `LayerText_AF三档精修.mjs` | `管线.mjs` 把层级拼成**一个**参数传进来（`tiers.join(',')`），而脚本只认 `^[AMB]$` → `--tier A,M` 静默退回**全部三层**，多跑一层多烧一份额度 | 接受逗号分隔 |
+| ㉝ | `LayerText_AF会话改写.mjs` / `LayerText_AF风险队列.mjs` / `LayerText_AF三档复核.mjs` | **判定线两把尺**：这三处写死 `maxLen: 16`（那是**生成目标**），而引擎的检查线是 `SENT_LEN_CHECK.M = 17`（见 `docs/更新亮点_2026-09-12_13.md`「判定线统一……统一到检查线这一把」）。同一句 17 词的 M 层英文在一个脚本判 blocker、在另一个判通过 | 判定线改从 `SENT_LEN_CHECK` 取；生成目标（提示词里的 16）不动 |
+
+**核实后判定不改 / 不能顺手改的**
+
+- **`LayerText_AF冻结回放.mjs` 的三个字段名确实是错的**（`qSrc.words` 应为 `tokenCount`、`qOut.pastPerf` 应为 `pastperf`；`QcResult` 里没有 `words`）：取到的永远是 `undefined`，`JSON.stringify` 直接丢键，所以冻结基线里**从来没有**原文词数/产物词数/过去完成——这三个数没有任何东西在守。
+  **但改了会让 `tests/replay.test.ts` 两处当场红**（实测：`--check` 与"重新冻结"都对不上）——因为基线正是在旧口径下冻的。重新冻结会覆写仓库外的 `~/Documents/LayerText配置/回放夹具_真项目/期望结论.json`，那是**验收正本**。正确次序是"先有意地重新冻结、再让代码跟上"，不该附在缺陷修复里顺手做掉。**已在代码处留注释写明改法与次序，留待你决定。**
+  同理，`冻结回放` 的 M 层判定线**故意**仍是 16（它要复现冻结当时的数）。
+- **`LayerText_AF两轮调适.mjs` 断点续跑**：`const out = [...segs]` 让 `done` 的段不重新赋值，续跑落盘的前半是**未简化原文**。修法要决定"已完成段的文本从哪读回"（现有实现没有任何增量存储，中断时 `dst` 还不存在），属于要先定的设计，没拍脑袋改。
+- **`app/` 侧仍是空白**：`datapanel.ts` 的 `list_dir`（不返回 `.json` 且返回完整路径）→ AI 采纳写正文 100% 失败、`settings.ts` 班级定制同因失效；`pipew.ts` 完整路径再拼目录；`bookio.ts` 首次备份存成改写后正文；`risk.ts` 决定日志读改写会并发丢事件；`main.ts` 关标签页后 `activeIdx` 不左移。**这些需要动 Rust 侧的目录列举契约或改 UI 状态机，单独一批做。**
+
+**验证**：`npm run verify` 全绿（preflight + typecheck + lint + **963 项：962 通过 / 0 失败 / 1 跳过**）。
+**如实记录第三次自我违规**：这一轮我又把 `(A20/M**17**/B14)` 写进注释，`*/` 提前闭合块注释、两个脚本语法错误——**是 `preflight` 当场拦下的**（`node --check` 逐脚本跑）。同一天第三次踩同一个坑，说明"注释里别贴正则/星号"这条教训我没有内化；好在守卫这次真的接住了。
+
+## [未发布] - 2026-09-14（按审查报告核实后的真实缺陷修复；含两处"报告说错了"的复核结论）
+
+> 来源：一份外部代码审查报告（20+ 条，分🚨/🔴/🟡/🟢）。逐条回代码核实后**只改了站得住的**，
+> 并把复核结论一并记在这里——**没改的那些，理由和改了的同样重要**，否则下一份报告还会把它们重新报一遍。
+
+**改了什么**
+
+| # | 位置 | 问题（核实后） | 修法 |
+| --- | --- | --- | --- |
+| ① | `~/.agents/skills/layertext/scripts/revcheck.mjs`（+ `layertext-plugin` 同名副本） | 写死 `/Users/wayne/…/LayerText/dist/src/core/risks.js`。**两份副本都写死**，换机器/换用户当场 ENOENT——违反 AGENTS.md 铁律 3 第 4 款 | 四步定位：`LAYERTEXT_DIST` → `LAYERTEXT_ENGINE` → `调适项目_*.json` 的 `引擎目录` → 从 cwd 向上找 `dist/src/core/risks.js`；全落空则**明确报错并退出 2**，说清该设哪个变量。实测：仓库根自动命中；空目录退出 2；`LAYERTEXT_ENGINE` 显式指定可跑 |
+| ② | `src/core/align.ts` | `SENT_STARTERS` 里 `'one day'` / `'at last'` 是**死条目**——唯一用点 `signalsOf` 拿的是单 token，正则不跨空格，永远命不中；且 `one`/`at` 早在表里，本就冗余 | 删掉两条，注释写明"只收单词"的理由 |
+| ③ | `src/core/decision.ts` ↔ `src/core/manifest.ts` | `eventIdOf` 手抄了一份与 `contentHash` 逐字相同的 FNV-1a 128 位（连 `0x01000193`/`0x85ebca6b` 都相同）。违反 AGENTS.md 第四节"同一条判定只许有一份实现" | `eventIdOf` 改调 `contentHash(...).slice(0,12)`。**实测 20000 例与旧算法逐字一致**——已写进日志的 eventId 继续可复算 |
+| ④ | `src/core/textpipe.ts` + `src/core/qc.ts` | 专名一致性用 `includes`（子串）：正文有 `BoxerCode` 时专名 `Box` 假通过，**两侧同错、报表照绿** | 新增 `containsWord`（整词边界，兼容空格/连字符专名），`propInText` 与 `propConsistent` **两侧同时**改 |
+| ⑤ | `tools/af_pipeline/chapterargs.mjs`（新）+ 5 个脚本 | `/^\d/` + `Number` 让 `1A` 静默变 `NaN` → `CN[NaN-1]` 是 `undefined` → 拼出 `…/undefined/…`。**这条在 5 个脚本里各抄了一份** | 抽成共享模块（`keychain.mjs` 同款做法，顺带解掉 `词表与词典.mjs` 的 1000 行门禁），5 个调用点全部改走它；非正整数**当场退出 2** 并点名 token |
+| ⑥ | `tools/af_pipeline/keychain.mjs`、`LayerText_AF工序化生成.mjs` | `execSync` 模板串拼 shell | 改 `execFileSync` + 数组传参。**注意：这两处当时都不可利用**（见下），改的是"结构性隐患"不是"活漏洞" |
+| ⑦ | `src/core/irregular.ts` + `risks.ts` + `qc.ts` | `risks.ts` 注释写着"与 qc.ts 共用同一套正则"，但代码是**两份手抄**——任一处改豁免词就漂移，UI 着色的句子与报表数字会指向不同的句（注释里那句"含 R12-inv-case 修复"就是这么来的） | 模式串集中到 `irregular.ts` 的 `PAT_*`（唯一一份），`qc.ts` 加 `/g` 计数、`risks.ts` 不加 `g` 逐句判定 |
+
+**核实后判定"不是问题"，明确不改（附理由，免得下次重报）**
+
+- **🚨"命令注入可执行任意 shell"——攻击链是断的。** `工序化生成.mjs` 的查询词来自
+  `stagescan.oovOfSeg`，那里取词的正则只收"字母开头 + 字母/撇号/连字符"，`expandForms` 也只做字母增删——
+  `;`、`$`、反引号**从来进不了那个列表**。所以报告里"任何教师拿到的章节 md 都能借此执行任意 shell"
+  的场景构造不出来。`keychain.mjs` 的 `service` 也全是硬编码字面量。**两处都改成了 `execFileSync`**（结构性隐患值得清），
+  但**不该按"裸奔"处理**，更不该排在最高优先级。
+- **"`fidelity.mjs` 把 ENOENT 和格式错混成同一条提示"——不成立。** `readFileSync` 在 `chapterSents`
+  **之外**，文件不存在会正常抛栈，根本走不到那个 `catch`。
+- **"`reinforce_plan.mjs` 让已现存的词被当缺席"——方向说反了。** 多出来的候选串只会**增加**命中，
+  后果是"该注入的词被判成已复现"（漏注入），不是"把已现存的词当缺席"。报告中 `playaying`/`eateating`/`aed`
+  三个例子也都是手算错的（实际是 `playying` / 重复的 `eating` / `aaed`）。
+- **"`adaptcheck.ts` 的 `-er` 双候选会让生词误判为已学"——注释已把它写成刻意取舍**，且假命中要以
+  `worke`/`gree` 落在词表里为前提。**保留原行为**；但注释里"只收不产生假命中的规则"这句不够准确
+  （`finer`→`fin`、`cover`→`cove` 属于真词碰撞），留待有词库数据时再定，不拍脑袋改。
+- **"`appswallow` 阈值留了 30% 腐化空间"——把探针当成了执法强度。** `>=140` 是"扫描器没坏"的探针，
+  真正的执法断言是紧邻的 `silent.length === 0`（零容差），后面还有第三条"注入合成违规必须被拦下"。
+  改成 `===` 只会让每次正常重构都红，拦截力一点不增加。
+- **"`TEACHER` 回退 `$USER` 污染 CI 产物"——CI 里不会发生。** `pipeline_smoke.test.ts` 用
+  **不存在的项目指针**跑每个脚本，脚本在项目加载处就失败，**不写任何产物**。且
+  `teachers.ts` 已把回退口径固化为"一个字不改"的既有约定。**不改**。
+- **"`preflight.mjs` 不检查 `tools/*.ts`"——对，但影响有限**（`tsc -p tsconfig.json` 兜底）。
+  报告同时说"工具里的 catch 没有机器守"**与事实不符**：preflight 有 catch 检查、dry/plan 守卫、
+  架构地图与 README 链接校验。
+
+**同一轮里由并行审查（4 个只读子代理：`src/`、`app/`、`tools/`、`tests/`+配置）追加发现的真实缺陷，已修的部分**
+
+| # | 位置 | 问题 | 修法 |
+| --- | --- | --- | --- |
+| ⑧ | `.github/workflows/ci.yml` | **`AGENTS.md:45` 写的"CI 跑的就是 `npm run verify`"是假的**——CI 里从来没跑过 `preflight`（`grep -rn preflight .github/` 零命中），三份文档同向错。后果：只让 preflight 挂掉的改动推上去 CI 全绿 | ci.yml 加一步 `npm run preflight`，把这句话变成事实 |
+| ⑨ | `.github/workflows/release.yml` | `node-version: 20`，而测试硬要求 `node:sqlite`（≥22.5），且 `engines` 写的是 `>=22`。**打 tag 时"发布门禁：全量测试"必红 → `tauri build` 与创建 Release 永远跑不到** | release.yml 改 `22`；`package.json` 的 `engines` 收紧到 `>=22.13`（同时满足 eslint 的 `^22.13.0`） |
+| ⑩ | `tests/studentversion.test.ts` | ★ 守卫写死一个谁都没有的路径 `/book/…` 并用 `if (!existsSync(p)) return;` 当"跳过"——**node:test 把"正常返回"记为 pass**，这条守卫在任何机器上都没跑过却一直显示为绿 | 改从 `LAYERTEXT_AF_DIR` 取，取不到 `t.skip()`；顺带把 `AGENTS.md` 里那个"成例"变成真的（原先全仓只有文档提过这个变量） |
+| ⑪ | `tools/preflight.mjs` | 只扫 `tools/af_pipeline/`（顶层 `tools/*.mjs` 10 个一个不查）；且没有"清单非空"断言——目录被清空会打印 `✓ 0 pipeline scripts` 并退 0 | `dirs` 加 `'tools'`（只跑 `node --check`，不执行），加 `files.length < 20` 断言。实测扫描数 30 → **43** |
+| ⑫ | `src/cli.ts` | `fsrs --current-pieces` 传的键名是 `currentPieces`，字段实际叫 `currentPolicyPieces`——对象展开不做多余属性检查，`tsc` 一声不吭，**这个开关静默失效**（"现行(篇)"永远是默认 2） | 改名，并对 `--days-per-piece`/`--current-pieces` 做正整数校验（`0` 会算出 `Infinity`、`abc` 会算出 `NaN`，原先都会印进表） |
+| ⑬ | `src/core/candidate.ts` | 撤销判定自己拼 `itemId+\u0001+timestamp`，而全仓写 `undoOf` 的唯一格式是 `eventRef` 的 `itemId@timestamp`——`undone.has(...)` **一次都没命中过**：`undos` 恒 0、`confidence` 恒 1，"撤销多的候选该降级"从未生效 | 改用 `workbench.eventRef`（唯一实现） |
+| ⑭ | `app/src/rewritegate.ts` | `invoke('list_dir', { path: dir })`，而 Rust 形参是 `dir`——缺必填键被 Tauri 拒绝，再被兜底吞掉，**跨章"已注词账本"永远只覆盖当前章**（而防跨章重复加注正是这个模块存在的意义） | 改 `{ dir }` |
+| ⑮ | `app/src/chat.ts` | `void maybeCompactChat()` 在 `try` 里，而 `S.chatBusy = false` 在 `finally` 里——调用瞬间 busy 恒 true，**对话历史自动压缩从未执行过** | 移到 `finally` 里、清掉 busy 之后 |
+| ⑯ | `tools/af_pipeline/LayerText_AF重制_生成.mjs` | 请求头写的是 `Bearer ${KEY}`——`KEY` 是函数，插进去的是**函数对象源码**，每次调用必然 401；401 又被 catch 只打一行 `✗`，脚本照旧 `exit 0` | 改 `KEY()` |
+| ⑰ | `src/core/stagepipe.ts` | **假交付**：调用层失败（网络/HTTP）的段既不重试也不隔离——`callFailed` 只影响 `break`，而 `retryables` 只装"被门禁拒绝"的段（此时为空），于是第一次就 `break`。该段保持**未简化的原文**落盘，调用方还按 `segs.length - quarantined.length` 报"自动完成 N/N"。**断一次网就能产出一份夹着原文、未过任何门禁的"完成品"** | 调用失败并入 `blockedThisAttempt`（先重试、用尽后隔离）；新增回归守卫：断言重试到 `maxStageTries` 且失败段被隔离 |
+| ⑱ | `src/core/bundle.ts` | 注释与 `AGENTS.md` 都写"按内容与文件名**双重**拦截学生数据"，**按内容那一半从来没实现过**——`buildBundle` 与 `verifyBundle` 都只调 `studentDataReason(path)`。于是本文件自己举的场景（台账里贴了班级成绩）恰好漏掉 | 新增 `STUDENT_DATA_CONTENT_PATTERNS` + `studentDataContentReason`，两处都改成 `路径 ?? 内容`；新增 3 条测试（内容命中的台账不出包 / 名字干净内容是名单的也要拦 / 正常教案报告不误伤） |
+| ⑲ | `app/src/ai.ts` | 三个提示词（`grading` / `reading_quiz` / `review_material`）在 `prompts/` 里有文件、`manifest.json` 里有条目，却**没登记进 `BUNDLED_PROMPTS`**——`loadPrompt` 取不到就返回空串。于是「AI 批改建议 / 读后检测题 / 定向复习材料」三条链路一直在发**空提示词**：白花一次调用，教师拿到模型自由发挥的产物 | 补 3 条 `?raw` import 与表项；新增守卫：**`manifest.json` 的每个名字都必须能在 `BUNDLED_PROMPTS` 里找到**（这类"漏一行 import"只有对表才拦得住） |
+
+**审查发现但**本轮未改**的（需要设计决策或更大改动，已按优先级留档）
+
+- **`src/core/version.ts` 批量节点只记第一段的 `target`**：`replaySegment(nodes,'P02')` 返回 `found:false`、`provenanceOf` 说"本运行没有改动过这一段"——而它确实被改了。需改成每步一条节点或 `targets[]`。
+- **`tools/af_pipeline/LayerText_AF两轮调适.mjs` 断点续跑用原文兜底**：`const out = [...segs]` 让已完成段不重新赋值，续跑落盘的初稿里前半是**未简化原文**。
+- **`LayerText_AF决定汇总.mjs`**：`parseDecisionLog` 传的是路径而它收的是内容、`resolveTeacher` 漏 `await`——回流候选台账恒为空、"已批准资产回流"整条链路是死的且不报错。
+- **M 层超长句判定两把尺**：`会话改写`/`风险队列`/`冻结回放`/`三档复核` 写死 `maxLen 16`，引擎唯一口径 `SENT_LEN_CHECK.M` 是 **17**——同一句在不同脚本里一个判 blocker 一个判通过。
+- **`app/` 侧（子代理报告 P0，本轮未改）**：`datapanel.ts` 的 `调适项目_*.json` 永不匹配（`list_dir` 不返回 `.json` 且返回完整路径）→ **AI 采纳写正文 100% 失败**；`settings.ts` 班级定制同因失效；`rewritegate.ts` 跨章账本（**已修**，见 ⑭）；`bookio.ts` 首次备份存成改写后正文；`risk.ts` 决定日志读改写会并发丢事件；`bookpure.ts:33` 缺 `status` 字段时抛 TypeError；`batch.ts:521` 有失败章仍删进度。
+- `appswallow` 只扫 `app/src` 顶层（`src/` 40 处 + `tools/` 99 处 catch 无人守）；`docs/文件架构.md` 有 6 个文件只存在于兄弟 worktree、数字（模块数/测试项数）全部对不上；CHANGELOG 的 38 个 `[未发布]` 段会让 `extract_changelog.mjs` 取到旧版本内容。**这些都记在审查报告里，未在本轮动。**
+
+**验证**：`npm run verify` 全绿（preflight + typecheck + lint + **962 项测试：961 通过 / 0 失败 / 1 跳过**，原 954 全通过）。
+那 1 项跳过正是 ⑩ 修好的那条 ★ 守卫——它现在**说出来自己跳过了**，而不是混在绿里。
+改动的 `src/` 与 `tools/` 已同步落进 `LayerText-optimization`（`package.json` 按分支差异只搬了 `engines` 一行，
+保留该分支独有的 `perf:bench` 与 `wordnet-db`；该分支的 `app/src/ai.ts` 比 main 领先很多（辅助模型那一整套），
+所以 ⑲ 是**外科式打补丁**而不是整文件覆盖）；该 worktree 的 preflight、根 typecheck、app typecheck 均已复跑通过。
+新增 3 条测试进 `tests/pipeline_smoke.test.ts`：章号正常路径、`1A` 必须退出 2、**以及一条防复发的纪律扫描**
+（任何脚本再手抄那份章号正则就红）。
+
+**如实记录两次自我违规**：本次改动把正则字面量粘进了 `/** */` 注释，其中的 `*/` **提前闭合了块注释**，
+`align.ts` 与 `工序化生成.mjs` 双双语法错误——是并行审查的子代理报上来的，不是我自己发现的。
+同类问题还有一次：测试名字符串里的 `\d` 触发 `no-useless-escape`，由 lint 拦下。
+**教训**：注释与字符串里不要直接粘正则原文。
 
 ## [未发布] - 2026-09-13（codex/total-optimization · 文档骨架：项目总说明 + 架构地图 + AGENTS.md，三者进门禁）
 

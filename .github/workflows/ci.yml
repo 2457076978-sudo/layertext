@@ -27,6 +27,9 @@ jobs:
       - name: 版本对齐门禁（四处版本一致，漂移即失败）
         run: node tools/check_versions.mjs
 
+      - name: 提交前门禁 preflight（管线脚本语法 / 空 catch / 非破坏性入口 / 架构地图在位）
+        run: npm run preflight
+
       - name: Lint（ESLint 静态检查，0 error 门禁）
         run: npm run lint
 
