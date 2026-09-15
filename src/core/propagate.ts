@@ -132,6 +132,10 @@ export interface PropagationTarget {
  * 换一本书、换一套命名依然成立。
  *
  * 返回顺序按 `descendantsOf` 的层级顺序，便于界面按"先 M 后 B"列出来给教师看。
+ *
+ * **同层多版本只取一个**（字典序最大的那个：日期新的排后面）：一章目录里可能同时躺着
+ * 几个日期的同层产物，把注解插进**旧版本**是纯粹的污染。这条口径来自分支上那份已经跑了
+ * 很久的实现（`candidates.at(-1)`），搬过来是为了两边不要再各挑各的。
  */
 export function descendantTierFiles(tree: ReaderTree, naming: Readonly<Record<string, string>>, fromTag: string, files: readonly string[]): PropagationTarget[] {
   const fromTier = tierKeyOfTag(fromTag, naming);
@@ -142,7 +146,7 @@ export function descendantTierFiles(tree: ReaderTree, naming: Readonly<Record<st
     if (tag) wanted.set(tier, tag);
   }
   if (!wanted.size) return [];
-  const out: PropagationTarget[] = [];
+  const byTier = new Map<string, PropagationTarget[]>();
   for (const path of files) {
     /* 只认"正文产物"：`原文_<tag>_…md`。
      * 用 `原文_` 前缀而不是"文件名里含 tag"——后者会把碰巧带同名字段的文件也卷进来。 */
@@ -157,10 +161,17 @@ export function descendantTierFiles(tree: ReaderTree, naming: Readonly<Record<st
     if (!tag) continue;
     const tier = tierKeyOfTag(tag, naming);
     if (!tier || !wanted.has(tier)) continue;
-    if (out.some((t) => t.path === path)) continue;
-    out.push({ tier, tag, path });
+    const bucket = byTier.get(tier) ?? [];
+    if (!bucket.some((t) => t.path === path)) bucket.push({ tier, tag, path });
+    byTier.set(tier, bucket);
   }
-  const order = [...wanted.keys()];
-  out.sort((a, b) => order.indexOf(a.tier) - order.indexOf(b.tier) || a.path.localeCompare(b.path));
+  /* 同层只留字典序最新那一个；顺序仍按层级树（先 M 后 B）。 */
+  const out: PropagationTarget[] = [];
+  for (const tier of wanted.keys()) {
+    const bucket = byTier.get(tier);
+    if (!bucket?.length) continue;
+    bucket.sort((a, b) => a.path.localeCompare(b.path));
+    out.push(bucket[bucket.length - 1]!);
+  }
   return out;
 }

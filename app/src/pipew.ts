@@ -14,7 +14,6 @@ import { restoreAllMarkDom, renderSidebar, scheduleSave } from './review.js';
 import { CHANGELOG_HEADER, newMarkId, type FileSession, type Mark } from './types.js';
 import { parseSpecifiedReplacement } from '../../src/core/pendingqueue.js';
 import { S as _S } from './state.js';
-import { readTextChecked } from './fsx.js';
 import {
   annotatedHeadOf,
   glossOutOfVocab,
@@ -36,6 +35,7 @@ import {
 import { extractParas, hit, sentsOf, splitChapter } from '../../src/core/textpipe.js';
 import { sentenceRisks } from '../../src/core/risks.js';
 import { auxSuitedFor, AUX_MAX_WORDS, simplifyMaxLen } from './ai.js';
+import { propagateToLowerTiers } from './propagateui.js';
 
 /** 「加中文标注」管线：AI 只出 词→中文 映射（一次小调用，零改写风险），
  *  原句逐字保留，机器在标记所在段对该词的词边界出现处插入 词（中文） */
@@ -165,7 +165,10 @@ export async function applyZhAnnotations(s: FileSession, marks: Mark[]): Promise
   void propagateCorrection(s, corrPairs);
   /* 与「词汇简化」那条对称（见本文件 simplified 的处理）：加注同样要往层级树传播。
      原写法引用了不存在的 propagated，tsc 直接报未定义——是重构留下的断线。 */
-  for (const p of corrPairs) void propagateWordAction(s, 'annotate', p.word, p.result);
+  void propagateToLowerTiers(
+    s,
+    corrPairs.map((p) => ({ word: p.word, op: 'annotate' as const, zh: p.result })),
+  );
   return done.length;
 }
 
@@ -334,7 +337,10 @@ export async function applyWordSimplifications(s: FileSession, marks: Mark[]): P
     `已换 ${done.length} 个词（句子未动）${noted ? `；${noted} 个降级加注` : ''}${morphWarn.length ? `；⚠︎ ${morphWarn.length} 处词形待复核（明细见右下总结面板）` : ''}${useAux && needAi.length ? '｜这批用辅助模型，未花 API 钱' : ''}`,
     'saved',
   );
-  for (const p of simplified) void propagateWordAction(s, 'rewrite', p.word, p.zh);
+  void propagateToLowerTiers(
+    s,
+    simplified.map((p) => ({ word: p.word, op: 'rewrite' as const, zh: p.zh })),
+  );
   // 传播结果回填总结面板（感知原则：后台自动行为必须在可回看的面板留一行，不允许只有一闪 toast）
   void propagateCorrection(s, corrPairs2).then((msg) => {
     const el = document.getElementById('sum-prop');
@@ -895,6 +901,9 @@ export async function removeZhAnnotation(s: FileSession, word: string): Promise<
   S.vocabCsvText = `${base.replace(/\n$/, '')}\n${head},单词,,,教师确认,,,${date} 去除标注时登记\n`;
   await runQcCurrent({ auto: true });
   toast(`已去除「${head}」×${count} 处标注，${canonical ? '词库正本+会话均已登记' : '本会话词库已登记'}（↩︎ 可撤销；下次生成不再注它）`, 'ok');
+  /* ★ 撤销**也要往下传**（2026-09-14 加）。加注现在是自动传播的；如果"去除"不传播，
+   * 上级撤掉的注解会永远留在下级，越积越多——自动传播就变成一个只进不出的漏斗。 */
+  void propagateToLowerTiers(s, [{ word: head, op: 'unanno' as const }]);
 }
 
 /* ---------- 加英语释义（词面板「英」；内置 WordNet 3.1 + Lesk 语境选义，零 AI 零网络） ---------- */
@@ -1001,145 +1010,4 @@ export async function applyEnDefinitions(s: FileSession, marks: Mark[]): Promise
   }
   setStatus(`已加英语释义 ${done.length} 个${missed.length ? `；未收 ${missed.length} 个` : ''}${ambiguous.length ? `；语境不决 ${ambiguous.length} 个` : ''}`, 'saved');
   return done.length;
-}
-
-/* ---------- 读者层级树传播（Wayne 2026-09-13：上级的词级决定，下级自动检查生效） ---------- */
-
-/** 把上级读者刚做的词级操作传播到层级树全部下级读者的同章文本：
- *  annotate/unanno=下级命中处直接插/剥中文注释（学生直接受益，可再撤销）；
- *  rewrite=只写下级待办清单（跨层机器改写有风险，交下级教师过目）。
- *  层级树来自项目配置「读者层级」（缺省 A→[M,B]）；文件枚举按「产物命名」tag 匹配同章目录最新文件。 */
-export async function propagateWordAction(s: FileSession, op: 'annotate' | 'unanno' | 'rewrite', word: string, zh?: string): Promise<void> {
-  try {
-    if (!s.sourcePath || !word) return;
-    const { findProjectConfig } = await import('./datapanel.js');
-    const { descendantsOf, normalizeTree, applyWordActionToText, tierTagOfFilename, tierKeyOfTag } = await import('../../src/core/propagate.js');
-    const dir = s.sourcePath.replace(/\/[^/]*$/, '');
-    const file = s.sourcePath.split('/').pop()!;
-    const hit = (await findProjectConfig(dir.replace(/\/[^/]*$/, ''))) ?? (await findProjectConfig(dir));
-    if (!hit) return; // 非项目书：无层级树可依，静默跳过
-    const naming = (hit.config['产物命名'] ?? {}) as Record<string, string>;
-    const tree = normalizeTree(hit.config['读者层级']);
-    const myTag = tierTagOfFilename(file, naming);
-    if (!myTag) return;
-    const myKey = tierKeyOfTag(myTag, naming);
-    if (!myKey) return;
-    const kids = descendantsOf(tree, myKey);
-    if (!kids.length) return;
-
-    const names = await invoke<string[]>('list_dir', { dir });
-    /* 2026-09-14 **加确认**（Wayne 拍板"可以改正文，但每次都要教师确认"）。
-     * 原先这里是**自动写**：上级教师点一下「加注中文」，下级 A→M/B 的正文就被改了，
-     * 他既没看见改了哪些文件，也没有任何一次点头。改正文的按钮必须先给教师看要改什么。
-     * 做法：先按"同一套命名表"挑目标、逐个算出命中处数，列出来问一次，再写；
-     * 写之前每个文件留 `_原始备份.md`（与 persistEdit 同一口径）。
-     * `rewrite` 类**不在此列**——它只写下级待办清单，不动正文。 */
-    const plan: { tag: string; path: string; text: string; hits: number }[] = [];
-    const unreadable: string[] = [];
-    let touched = 0;
-    /* 记进账、随后渲染出来（`appswallow` 认的就是这个形状）。 */
-    const failedFiles: string[] = [];
-    for (const kid of kids) {
-      const tag2 = naming[kid];
-      if (!tag2) continue;
-      const candidates = names.filter((x) => x.startsWith(`原文_${tag2}_`) && x.endsWith('.md')).sort();
-      const target = candidates.at(-1); // 同层多版本取字典序最新（日期新、_工序化 排后）
-      if (!target) continue;
-      const targetPath = `${dir}/${target}`;
-      const rd = await readTextChecked(targetPath);
-      if (rd.kind !== 'ok') {
-        unreadable.push(`${tag2} ${target}`);
-        continue;
-      }
-      const text = rd.text;
-      if (op === 'rewrite') {
-        // 跨层机器改写有风险：只记待办，交下级教师过目
-        const todoDir = `${dir}/_待复核`;
-        try {
-          /* 有意兜底：待办文件还不存在＝这个层级第一次收到传播，读不到不是错误。 */
-          const prev = await invoke<string>('read_text_file', { path: `${todoDir}/层级传播_待办.md` }).catch(() => '');
-          const line = `- ${new Date().toLocaleDateString('sv-SE')} 上级 ${myTag} 将「${word}」换成了「${zh ?? '更简单说法'}」——请核对本层文本命中处\n`;
-          if (!prev.includes(line)) await invoke('write_text_file', { path: `${todoDir}/层级传播_待办.md`, content: prev + line });
-          touched++;
-        } catch {
-          /* 有意兜底：待办写失败不拦主流程——正文与视图标记都已落盘，这里只是低层没收到清单。 */
-        }
-        continue;
-      }
-      const r = applyWordActionToText(text, word, op, zh);
-      if (!r.changed) continue;
-      /* 只**算**，不写。写盘统一挪到教师确认之后（见下）。 */
-      plan.push({ tag: tag2, path: targetPath, text: r.text, hits: 1 });
-    }
-    if (unreadable.length) setStatus(`层级传播：${unreadable.length} 个下级文件读不出来，已跳过（${unreadable.slice(0, 3).join('、')}）`, 'err');
-    if (plan.length) {
-      const lines = plan.map((p) => `· ${p.tag} ${baseName(p.path)}`).join('\n');
-      if (
-        !window.confirm(
-          `把这次「${word}」的${op === 'annotate' ? '加注' : '去标注'}同步到下级读者正文？\n\n${lines}\n\n合计 ${plan.length} 个文件（只插/剥中文注释，英文原句不动）。每个文件写前会留一份 _原始备份.md。`,
-        )
-      ) {
-        setStatus(`层级传播已取消（${plan.length} 个下级文件未写入）`, '');
-      } else {
-        for (const p of plan) {
-          try {
-            const backup = `${p.path.replace(/\.md$/i, '')}_原始备份.md`;
-            const bak = await readTextChecked(backup);
-            if (bak.kind === 'unreadable') throw new Error(`原始备份 ${backup} 读不出来，未改动`);
-            if (bak.kind === 'missing') {
-              const cur = await readTextChecked(p.path);
-              if (cur.kind === 'ok') await invoke('write_text_file', { path: backup, content: cur.text });
-            }
-            await invoke('write_text_file', { path: p.path, content: p.text });
-            touched++;
-          } catch (e) {
-            failedFiles.push(`${baseName(p.path)}（${String(e)}）`);
-          }
-        }
-        /* 变更日志 R18（下级章目录自己的日志，与 R16 去标注/R17 英语释义同表同口径）。
-         * 只给**真写成功**的那些文件记账——失败的不许留"已落实"的痕。 */
-        if (touched) {
-          try {
-            const date = new Date().toLocaleDateString('sv-SE');
-            const logPath = `${dir}/变更日志_AI审核.csv`;
-            let csv = '';
-            const rd = await readTextChecked(logPath);
-            if (rd.kind === 'ok') csv = rd.text;
-            else if (rd.kind === 'unreadable') throw new Error(rd.error);
-            if (!csv.trim()) csv = CHANGELOG_HEADER.join(',') + '\n';
-            const detail = op === 'annotate' ? `${word}（${zh}）` : word;
-            csv +=
-              [
-                'R1',
-                date,
-                `标准${simplifyMaxLen()}词`,
-                '',
-                '',
-                detail,
-                op === 'annotate' ? detail.slice(0, detail.indexOf('（')) : detail,
-                'R18',
-                `层级传播：上级 ${myTag} 的${op === 'annotate' ? '加注' : '去标注'}决定落实到本层（教师已确认）`,
-                '层级传播',
-              ]
-                .map(csvCell)
-                .join(',') + '\n';
-            await invoke('write_text_file', { path: logPath, content: csv });
-          } catch (e) {
-            toast(`下级正文已改，但变更日志没写上：${String(e)}——这次传播不会出现在台账里`, 'err');
-          }
-        }
-      }
-    }
-    if (touched)
-      toast(
-        `层级传播：${kids
-          .map((k) => naming[k])
-          .filter(Boolean)
-          .join('/')} 层已${op === 'rewrite' ? '记录待办' : '落实'}「${word}」（${touched} 个文件）`,
-        'ok',
-      );
-    if (failedFiles.length) setStatus(`层级传播部分失败：${failedFiles.join('；')}`, 'err');
-  } catch {
-    /* 有意兜底：传播是增强路径：项目没配层级/文件枚举失败都静默——主操作已成功 */
-  }
 }
