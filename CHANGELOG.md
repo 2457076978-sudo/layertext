@@ -4,6 +4,25 @@
 1.0.0 之前的版本号为开发期里程碑（当时 `package.json` 未同步递增，本文件按里程碑整理，2026-09-06 校准）。
 面向教师的通俗版功能说明见 [README](README.md) 与 [docs/PRD.md](docs/PRD.md)。
 
+## [未发布] - 2026-09-14（codex/total-optimization · 第十四轮：接线门禁 + 门禁与 CI 对齐）
+
+主仓这一轮做了两件"上次说该做"的事（第 115–118 项，理由见主仓 CHANGELOG）：
+
+1. **新增接线门禁** `tests/clickwiring.test.ts`：模板里渲染出的可点元素与 `data-*` 动作钩子，
+   全仓必须至少有一处读它。本分支跑出来**同样是 0 处真问题**——说明这一侧也没有"设置在那
+   其实没有用"的按钮。它的价值在以后：回归验证过，把 `datapanel.ts` 换回修复前那版，
+   门禁当场报出 `data-dp-del`。
+2. **`npm run verify` 与 CI 的 ubuntu job 逐条对齐**（补 `check_versions` / `eval` / `compare`），
+   新增 `verify:all`；`verify:rust` 的 clippy 提到 `--all-targets`。
+3. **CI 新增独立 Rust job**（`macos-latest`）——`app/src-tauri` 是 macOS 专有的，
+   塞不进 ubuntu job，而 CI 里原本根本没有 cargo 这一步。
+4. **`tools/compare.ts` 结果没变就不重写报告**：那份报告是被 git 跟踪的文档，
+   原先每跑一次就把"生成日期"改一行，`verify` 一跑就变脏。
+
+**验证**：本 worktree `npm run verify` 全绿（preflight 43 + 版本五处一致 + 根/app typecheck +
+lint 0 warning + **1017 项：1016 通过 / 0 失败 / 1 跳过** + 评测不低于基线 + 76/76 双引擎一致，
+且比对报告未被重写）；`npm run verify:all`（含 Rust）全绿。
+
 ## [未发布] - 2026-09-14（codex/total-optimization · 第十三轮：传播改回自动，两边实现合成一份）
 
 Wayne 改了口径：**"直接弄，自动传播，我也不需要撤销的那种"**。

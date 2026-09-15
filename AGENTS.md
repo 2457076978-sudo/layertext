@@ -42,8 +42,19 @@
 ## 二、开工前 30 秒
 
 ```bash
-npm run verify      # preflight + typecheck + lint + test（CI 跑的就是它）
+npm run verify      # 与 CI 的 ubuntu job **逐条对齐**（见下）
+npm run verify:all  # 上面那条 + Rust 门禁（verify:rust）；本机全量自测用这条
 ```
+
+`verify` 现在跑的是：`preflight` → `check_versions` → `typecheck`（根 + app）→ `lint` →
+`test` → `eval`（金标准评测）→ `compare`（TS vs Python 参照版）。
+**2026-09-14 之前它只跑前四条里的三条**，而 CI 还跑 `check_versions` / `eval` / `compare`
+——于是"本地全绿"并不等于"CI 会绿"。现在两边一份清单。
+
+**Rust 门禁（`verify:rust`）不在 `verify` 里，别以为跑了 `verify` 就万事大吉**：
+`app/src-tauri` 是 macOS 专有的（`security` / `open` / `say` / TCC），塞不进 ubuntu job，
+所以 CI 里它是**单独的 macos job**；本地则是 `npm run verify:all`。
+2026-09-14 之前 CI 里**根本没有 cargo 这一步**，Rust 侧长期只在开发者本机跑过。
 
 改完再跑一次。**CI 上的 `USER=runner` 是本机默认复现不出来的**——涉及"跑真脚本"的测试，
 本地用下面这条自测，历史上整整一轮 CI 只因为这个变量假红：
