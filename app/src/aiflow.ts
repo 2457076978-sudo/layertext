@@ -8,7 +8,7 @@ import { S, esc } from './state.js';
 import { $, setStatus, toast, pop, hidePop, showSummaryPop } from './uikit.js';
 import { activeSession } from './session.js';
 import { chatUntilJson } from './ai.js';
-import { flashApplied, switchView } from './main.js';
+import { uibus } from './uibus.js';
 import { renderReader, sidebarHandlers, updateMarkBadge } from './reader.js';
 import { renderSidebar, scheduleSave } from './review.js';
 import { CHANGELOG_HEADER, typeLabel, type FileSession, type Mark, type Suggestion } from './types.js';
@@ -301,7 +301,7 @@ export async function aiSuggest(instruction?: string): Promise<void> {
     }
     renderSuggestions();
     attachInlineSuggestions();
-    switchView('suggest');
+    uibus.switchView('suggest');
     setStatus(`AI 返回 ${S.suggestions.length} 条修订候选 ${usage}——建议已标到正文里，点 ✓ 采纳 / ✗ 放弃`, 'saved');
   } catch (e) {
     const hint = String(e).includes('未找到 JSON') ? '（模型思考太长占满输出上限——建议 AI 设置里换非思考型模型，或减少一次标记的数量分批出）' : '';
@@ -445,7 +445,7 @@ export async function acceptSuggestion(g: Suggestion, opts: { scene?: string; ou
       s.review.warns = [...(s.review.warns ?? []).filter((x) => !x.startsWith(pos)), `${pos}${g.original.slice(0, 60)}|${stillBad.join('/')}`];
       toast(`⚠︎ 新句仍含${stillBad.join('/')}——正文已按建议写入，句旁已挂 ⚠︎ 角标（点角标消除；↩︎ 可撤销）`, 'info');
     }
-    flashApplied(g.revised);
+    uibus.flashApplied(g.revised);
     return true;
   } catch (e) {
     setStatus('落盘失败：' + e, 'err');

@@ -10,7 +10,7 @@ import { $, setStatus, toast } from './uikit.js';
 import { activeSession } from './session.js';
 import { docxToText } from './bookpure.js';
 import { readTextSmart } from './fsx.js';
-import { addSession, runQcCurrent } from './main.js';
+import { uibus } from './uibus.js';
 import { buildLexiconNow, mergedSelection, reinforceWordsNow } from './lexicon.js';
 import { showAiSettings } from './settings.js';
 import { applyRewrite, loadBookConfig } from './bookio.js';
@@ -192,8 +192,8 @@ async function generateDraft(): Promise<void> {
     }
     await invoke('write_text_file', { path: outPath, content: newMd });
     draftPop.classList.remove('open');
-    await addSession(newMd, outPath.slice(outPath.lastIndexOf('/') + 1), outPath, { noAutoQc: true });
-    await runQcCurrent();
+    await uibus.addSession(newMd, outPath.slice(outPath.lastIndexOf('/') + 1), outPath, { noAutoQc: true });
+    await uibus.runQcCurrent();
     const shrink = srcWords ? Math.round((1 - outWords / srcWords) * 100) : 0;
     setStatus(
       `简化版已生成（${segCount} 段，${srcWords}→${outWords} 词${shrink > 0 ? `，收缩 ${shrink}%` : shrink < 0 ? `，扩写 ${-shrink}%` : ''}${retried ? `，${retried} 段触发篇幅守恒重试` : ''}，约 ${tokens} 出tokens）：${outPath}。体检指标见报告页——继续用标记精修；要更简版本：打开它再简化一次`,

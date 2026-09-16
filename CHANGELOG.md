@@ -9,6 +9,33 @@
 
 
 
+## [未发布] - 2026-09-16（C2 解环：UI 总线端口 uibus，main 的 13 条反向边全断）
+
+**补查（三项，全部只读）**
+
+- A 动态 import 全仓扫描（六形态）：指向 main 的动态边**只有 reader.ts:220 一条**
+  （C1 漏网根因，本轮已改走总线）；另发现 pipew/propagateui→datapanel 两条动态横向边
+  （不构环，保留观察）；tools/tests 的模板串动态 import 均为研究管线/测试装载，不在运行时图内。
+- B onPlotJump 调用链：reader.ts:219 → review.ts:345 `plotBtn.addEventListener('click')`
+  ——**纯用户交互触发**，"装配先于调用"前提成立。
+- C 内容清单（本提交）。
+
+**改动**
+
+- 新增 `app/src/uibus.ts`：10 槽位（renderAll/switchView/syncChrome/updateModePill/
+  flashApplied/runQcCurrent/openPathIntoSession/loadBuiltinDemo/addSession/fileSummary），
+  **未注册调用当场抛错**（不静默）；头注释写明过渡性与删除条件。
+- main.ts 装配期 `Object.assign(uibus, {...})` 注入实现；十符号撤 export（跨模块唯一入口=uibus）。
+- 9 个视图模块（aiflow/batch/lexicon/edit/pipew/report/settings/shelf/reviewgen）
+  对 main 的引用全部改走 uibus；reader.ts:220 动态边同步改走 uibus。
+- **app/src 内 `from './main.js'` 静态引用 = 0**（静态+动态双向扫描）；
+  main 回到纯自上而下的 UI 总线位置。
+- 架构地图 32→33（+uibus，含过渡性标注）。
+
+**验证**：`npm run verify` 全绿；madge 循环链实数见提交信息（>10 即停的约定不变）；
+调用点全部为用户交互回调（补查 3/B 双向证据），装配顺序缺陷会被守卫当场暴露。
+
+
 ## [未发布] - 2026-09-16（依赖健康收口 + C1 解环：状态/IO 九符号下沉）
 
 **依赖健康（阶段 B，两项独立提交）**

@@ -10,7 +10,7 @@ import { switchSide } from './chat.js';
 import { activeSession, persistEdit, markPathFor } from './session.js';
 import { readTextSmart } from './fsx.js';
 import { chatUntilJson } from './ai.js';
-import { renderAll, runQcCurrent, flashApplied } from './main.js';
+import { uibus } from './uibus.js';
 import { renderReader, sidebarHandlers, updateMarkBadge } from './reader.js';
 import { scheduleHeatRail, applyMdSnapshot } from './edit.js';
 import { restoreAllMarkDom, renderSidebar, scheduleSave } from './review.js';
@@ -162,7 +162,7 @@ export async function applyZhAnnotations(s: FileSession, marks: Mark[]): Promise
      * 那不是"少一条记录"，是这次改动在审计链里根本不存在——必须再见一次光。 */
     toast(`正文已改，但变更日志没写上：${String(e)}——这次改动不会出现在台账/档案里`, 'err');
   }
-  flashApplied(done[done.length - 1]);
+  uibus.flashApplied(done[done.length - 1]);
   setStatus(`已加中文标注 ${done.length} 处（原句未动）：${done.slice(0, 6).join('、')}${done.length > 6 ? '…' : ''}`, 'saved');
   toast(`已加中文标注 ${done.length} 处（原句未动）`, 'ok');
   void propagateCorrection(s, corrPairs);
@@ -322,7 +322,7 @@ export async function applyWordSimplifications(s: FileSession, marks: Mark[]): P
      * 那不是"少一条记录"，是这次改动在审计链里根本不存在——必须再见一次光。 */
     toast(`正文已改，但变更日志没写上：${String(e)}——这次改动不会出现在台账/档案里`, 'err');
   }
-  if (done.length) flashApplied(done[done.length - 1].split('→')[1]);
+  if (done.length) uibus.flashApplied(done[done.length - 1].split('→')[1]);
   // 总结面板：换词/降级加注/词形待复核全量明细（此前只有状态行截断前 3 条，长清单看不全）
   showSummaryPop(`
     <div class="pop-h">词汇简化总结</div>
@@ -491,8 +491,8 @@ async function applyManualSentenceEdit(pi: number, si: number): Promise<void> {
         .map(csvCell)
         .join(',') + '\n';
     await invoke('write_text_file', { path: logPath, content: csv });
-    renderAll();
-    flashApplied(revised);
+    uibus.renderAll();
+    uibus.flashApplied(revised);
     toast(`正文已改好并写入${savedTo === s.sourcePath ? '原稿' : '工作稿'}（↩︎ 可撤销，日志已记"人工修订"）`, 'ok');
   } catch (e) {
     setStatus('写入失败：' + e, 'err');
@@ -506,7 +506,7 @@ async function applyManualSentenceEdit(pi: number, si: number): Promise<void> {
     );
     if (stillBad.length) toast(`⚠ 你改的新句仍含${stillBad.join('/')}——正文已按你的定稿写入，此处仅提示不拦截`, 'info');
   }
-  void runQcCurrent({ auto: true }); // 改完自动重检，报告不滞后
+  void uibus.runQcCurrent({ auto: true }); // 改完自动重检，报告不滞后
 }
 
 export const syncPop = $('sync-pop');
@@ -790,10 +790,10 @@ export function showVocabEditor(): void {
           wroteToDisk = true;
           S.vocabCsvText = text;
           S.vocabName = '_词库.csv';
-          renderAll(); // 重新着色（renderReader 会按新词库重算三态）
+          uibus.renderAll(); // 重新着色（renderReader 会按新词库重算三态）
           if (!silent) {
             popEl!.remove();
-            void runQcCurrent({ auto: true });
+            void uibus.runQcCurrent({ auto: true });
             toast(`词库已保存并生效：${rows.length} 条 → ${path}`, 'ok');
           }
         } catch (e) {
@@ -813,9 +813,9 @@ export function showVocabEditor(): void {
         await invoke('write_text_file', { path: `${dir}/_词库.csv`, content: initialText });
         S.vocabCsvText = initialText || null;
         S.vocabName = initialName;
-        renderAll();
+        uibus.renderAll();
         popEl!.remove();
-        void runQcCurrent({ auto: true });
+        void uibus.runQcCurrent({ auto: true });
         toast('已取消——词库改动已撤回（含刚才即时写进 _词库.csv 的那些）', 'ok');
       } catch (e) {
         /* 回退失败必须说出口：盘上现在是"改过的"，而不是教师以为的"取消后的"。 */
@@ -902,7 +902,7 @@ export async function removeZhAnnotation(s: FileSession, word: string): Promise<
   /* 会话立即生效：S.vocabCsvText 追加该词并重跑质检——该词当场不再红 */
   const base = S.vocabCsvText?.trim() ? S.vocabCsvText : '词,类型,词性,释义,来源册,来源单元,音标,备注\n';
   S.vocabCsvText = `${base.replace(/\n$/, '')}\n${head},单词,,,教师确认,,,${date} 去除标注时登记\n`;
-  await runQcCurrent({ auto: true });
+  await uibus.runQcCurrent({ auto: true });
   toast(`已去除「${head}」×${count} 处标注，${canonical ? '词库正本+会话均已登记' : '本会话词库已登记'}（↩︎ 可撤销；下次生成不再注它）`, 'ok');
   /* ★ 撤销**也要往下传**（2026-09-14 加）。加注现在是自动传播的；如果"去除"不传播，
    * 上级撤掉的注解会永远留在下级，越积越多——自动传播就变成一个只进不出的漏斗。 */

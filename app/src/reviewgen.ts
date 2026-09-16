@@ -8,7 +8,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { open as openFileDialog } from '@tauri-apps/plugin-dialog';
 import { S, esc } from './state.js';
 import { $, setStatus } from './uikit.js';
-import { addSession, runQcCurrent } from './main.js';
+import { uibus } from './uibus.js';
 import { readChapterRaw } from './batch.js';
 import { showAiSettings } from './settings.js';
 import { buildLexiconNow, reinforceWordsNow } from './lexicon.js';
@@ -186,8 +186,8 @@ async function runRevMaterial(): Promise<void> {
       if (g.engine === 'relcl') goalBits.push(`定从 ✓${report.relcl} 处`);
       if (g.engine === 'pastperf') goalBits.push(`过去完成 ✓${report.pastperf} 处`);
     }
-    await addSession(newMd, outPath.slice(outPath.lastIndexOf('/') + 1), outPath, { noAutoQc: true });
-    await runQcCurrent();
+    await uibus.addSession(newMd, outPath.slice(outPath.lastIndexOf('/') + 1), outPath, { noAutoQc: true });
+    await uibus.runQcCurrent();
     setStatus(
       `复习材料已生成（${segs.length} 段，约 ${tokens} 出tokens）：${outPath}——体检见报告页` +
         (goalBits.length ? `；目标语法达成：${goalBits.join('、')}（报告页按通用口径仍标难句，以本提示为准）` : '；未勾选可引擎计数的目标语法（其余语法点请过目）'),

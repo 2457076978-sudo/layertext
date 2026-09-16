@@ -8,7 +8,7 @@ import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
 import { S, esc, setGlobalInstructions } from './state.js';
 import { $, setStatus, toast } from './uikit.js';
 import { activeSession } from './session.js';
-import { fileSummary, renderAll, updateModePill } from './main.js';
+import { uibus } from './uibus.js';
 import { mergedSelection, reinforceWordsNow } from './lexicon.js';
 import { showVocabEditor } from './pipew.js';
 import { scheduleHeatRail } from './edit.js';
@@ -111,13 +111,13 @@ function renderClsPanel(): void {
       void loadClassGroups().then(() => {
         classGroupsReady = true;
         renderClsPanel();
-        fileSummary();
+        uibus.fileSummary();
       }),
   );
   bind('cls-clear', () => {
     S.selectedIds = [];
     renderClsPanel();
-    fileSummary();
+    uibus.fileSummary();
   });
   panel.querySelectorAll<HTMLInputElement>('input[data-cls-id]').forEach((el) => {
     el.addEventListener('change', () => {
@@ -125,7 +125,7 @@ function renderClsPanel(): void {
       if (el.checked) S.selectedIds.push(id);
       else S.selectedIds = S.selectedIds.filter((x) => x !== id);
       renderClsPanel();
-      fileSummary();
+      uibus.fileSummary();
     });
   });
 }
@@ -384,7 +384,7 @@ export function showAiSettings(): void {
        * 自己没带 `instructions`，要退回的是这里刚存下的值，而不是上一本书的。 */
       setGlobalInstructions(S.appConfig.instructions);
       S.appConfig.autoRewriteOnMark = ($('ai-auto') as HTMLInputElement).checked;
-      updateModePill();
+      uibus.updateModePill();
       S.appConfig.trustEdit = ($('ai-trust') as HTMLInputElement).checked;
       S.appConfig.inPlaceEdit = ($('ai-inplace') as HTMLInputElement).checked;
       S.appConfig.lowThinking = ($('ai-lowthink') as HTMLInputElement).checked;
@@ -539,7 +539,7 @@ function renderSettings(): void {
     void saveConfig();
     /* 2026-09-14：这里原先不刷顶部模式胶囊——改完关掉设置，胶囊仍显示旧模式，
      * 而 reader.ts 读的是新值：**界面说的和程序做的相反**。 */
-    updateModePill();
+    uibus.updateModePill();
     toast('已保存');
   });
 }
@@ -570,7 +570,7 @@ export function showStandardPop(): void {
     await saveConfig();
     tierPop.classList.remove('open');
     const s = activeSession();
-    if (s) renderAll();
+    if (s) uibus.renderAll();
     setStatus(v === undefined ? '简化标准已恢复默认（16 词/句）' : `简化标准已保存：句长上限 ${v} 词/句`, 'saved');
   };
   $('std-reset').addEventListener('click', () => void apply(undefined));

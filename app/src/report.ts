@@ -14,7 +14,7 @@ import { activeSession, persistEdit } from './session.js';
 import { chatUntilJson } from './ai.js';
 import { docxToText } from './bookpure.js';
 import { readTextSmart } from './fsx.js';
-import { openPathIntoSession, renderAll } from './main.js';
+import { uibus } from './uibus.js';
 import { buildLexiconNow, mergedSelection, reinforceWordsNow } from './lexicon.js';
 import { addMark, sidebarHandlers } from './reader.js';
 import { tocChapters } from './shelf.js';
@@ -152,7 +152,7 @@ async function applyRepairPreview(s: FileSession): Promise<void> {
   try {
     const savedTo = await persistEdit(s, r.md);
     s.md = r.md;
-    renderAll();
+    uibus.renderAll();
     setStatus(`标注修复已应用（${n} 处）并写入 ${savedTo}${savedTo === s.sourcePath ? '（首次改动前已留原始备份）' : ''}`, 'saved');
   } catch (e) {
     setStatus('标注修复没能写入：' + String(e) + '——正文没有改', 'err');
@@ -330,7 +330,7 @@ export function renderReportPane(s: FileSession): void {
       const tok = (btn as HTMLElement).dataset.oovLearn!;
       S.vocabCsvText = (S.vocabCsvText ? S.vocabCsvText.replace(/\n+$/, '') + '\n' : '') + `${tok},单词,,,,,,`;
       S.currentKnown.add(tok);
-      renderAll();
+      uibus.renderAll();
       setStatus(`✓「${tok}」已入库（词表内），正文立即不再标红——文件 → 保存为本书配置 后全书每章生效`, 'saved');
     }),
   );
@@ -851,7 +851,8 @@ export async function renderBoardPane(): Promise<void> {
   pane.querySelectorAll<HTMLElement>('[data-bpath]').forEach((tr) =>
     tr.addEventListener('click', () => {
       const f = tr.dataset.bpath!;
-      openPathIntoSession(f)
+      uibus
+        .openPathIntoSession(f)
         .then(() => setStatus(`已打开：${workspaceChipName(f)}`, 'saved'))
         .catch((e) => setStatus('打开失败：' + e, 'err'));
     }),

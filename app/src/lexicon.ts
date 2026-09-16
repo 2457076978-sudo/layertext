@@ -8,7 +8,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { open as openFileDialog } from '@tauri-apps/plugin-dialog';
 import * as XLSX from 'xlsx';
 import { S } from './state.js';
-import { renderAll } from './main.js';
+import { uibus } from './uibus.js';
 import { setStatus } from './uikit.js';
 import { mergeTargets } from './bookpure.js';
 import { parseCsv, parseReinforceText, buildLexicon, type Lexicon } from '../../src/core/lexicon.js';
@@ -91,7 +91,7 @@ export async function importVocabFile(): Promise<void> {
   try {
     S.vocabCsvText = await readVocabAsCsv(path);
     S.vocabName = path.slice(path.lastIndexOf('/') + 1);
-    renderAll();
+    uibus.renderAll();
     setStatus(`已导入词库：${S.vocabName}（${S.vocabCsvText.split('\n').filter(Boolean).length} 行）`, 'saved');
   } catch (e) {
     setStatus('词库读取失败：' + e, 'err');
@@ -103,7 +103,7 @@ export async function importTermsFile(): Promise<void> {
   if (typeof path !== 'string') return;
   try {
     S.termsText = await invoke<string>('read_text_file', { path });
-    renderAll();
+    uibus.renderAll();
     setStatus('已导入术语表：' + path.slice(path.lastIndexOf('/') + 1), 'saved');
   } catch (e) {
     setStatus('读取失败：' + e, 'err');
@@ -119,7 +119,7 @@ export async function importProperFile(): Promise<void> {
       .split('\n')
       .map((l) => l.trim())
       .filter((l) => l && !l.startsWith('#'));
-    renderAll();
+    uibus.renderAll();
     setStatus(`已导入专名表：${S.properRows.length} 个（⑧专名一致性检查同步启用）`, 'saved');
   } catch (e) {
     setStatus('读取失败：' + e, 'err');

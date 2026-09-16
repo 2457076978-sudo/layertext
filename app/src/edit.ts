@@ -6,7 +6,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { $, setStatus, toast, pop } from './uikit.js';
 import { activeSession, persistEdit } from './session.js';
-import { renderAll } from './main.js';
+import { uibus } from './uibus.js';
 import { scheduleSaveLastSession } from './shelf.js';
 import { csvCell, remapMarks, redoStep, undoStep } from './pure.js';
 import { scheduleSave } from './review.js';
@@ -36,7 +36,7 @@ export async function applyMdSnapshot(s: FileSession, md: string, label: string,
   s.review.warns = []; // 快照级回退：所有句位置已变，复核角标整体失效清空
   remapMarks(s.review.marks, s.md); // 正文变了标记跟着重对齐（撤销/查找替换曾是欠账：标记错位不修）
   scheduleSave(s, () => undefined);
-  renderAll();
+  uibus.renderAll();
   setStatus(label + '（文件已同步保存）', 'saved');
   scheduleSaveLastSession();
 }

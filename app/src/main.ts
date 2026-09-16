@@ -13,6 +13,7 @@ import { renderModePill, switchView as switchViewDom, bindViewTabs, type ViewNam
 import { createProjectConfig, findProjectConfig, io as panelIo, renderDataPane } from './datapanel.js';
 import { makeFirstChangeBackup, readTextChecked, readTextSmart } from './fsx.js';
 import { activeSession, markPathFor } from './session.js';
+import { uibus } from './uibus.js';
 import { docxToText } from './bookpure.js';
 import { teacherIdOf } from '../../src/core/teachers.js';
 import { renderRiskPane, setRiskIo, TAGS as RISK_TAGS } from './risk.js';
@@ -79,7 +80,7 @@ import { refreshPendingBanner, renderAnnotatePane, setAnnotateIo } from './annot
 /** 当前会话的合并已知词表（含词句卡），供词面板显示原形 */
 
 /** 状态行只放"现在在哪"：文件名（班级口径生效时附带）。词库/复现等完整口径见 设置 弹层 */
-export function fileSummary(): void {
+function fileSummary(): void {
   const s = activeSession();
   const sel = mergedSelection();
   setStatus(s ? `${s.fileName}${sel.active ? ` ｜ 班级 ${sel.label}` : ''}` : '');
@@ -87,7 +88,7 @@ export function fileSummary(): void {
 
 /* ---------- 会话管理 ---------- */
 
-export async function addSession(md: string, fileName: string, sourcePath: string | null, opts: { noAutoQc?: boolean } = {}): Promise<void> {
+async function addSession(md: string, fileName: string, sourcePath: string | null, opts: { noAutoQc?: boolean } = {}): Promise<void> {
   const same = S.sessions.findIndex((s) => s.sourcePath === sourcePath && s.fileName === fileName);
   if (same >= 0) {
     S.activeIdx = same;
@@ -182,7 +183,7 @@ function closeSession(i: number): void {
 /* ---------- 渲染 ---------- */
 
 /** 界面随上下文显隐：打开章节才出现章节工具（质检/按标记修改/撤销/查找/字号），书架态只留书架级界面 */
-export function syncChrome(): void {
+function syncChrome(): void {
   const s = activeSession();
   const hasChapter = !!s;
   document.body.classList.toggle('no-session', !hasChapter);
@@ -216,7 +217,7 @@ setAnnotateIo({
   onStatus: (msg, cls) => setStatus(msg, cls ?? ''),
 });
 
-export function renderAll(): void {
+function renderAll(): void {
   renderFileTabs();
   const s = activeSession();
   if (!s) {
@@ -282,7 +283,7 @@ function renderFileTabs(): void {
 }
 
 /** 改写生效的视觉反馈：新句子绿色高亮一闪 */
-export function flashApplied(revised: string): void {
+function flashApplied(revised: string): void {
   const key = revised.slice(0, 30);
   const el = [...document.querySelectorAll('#reader .sent')].find((x) => (x.textContent ?? '').includes(key));
   if (!el) return;
@@ -294,7 +295,7 @@ export function flashApplied(revised: string): void {
 
 /* ---------- 质检 ---------- */
 
-export async function runQcCurrent(opts: { auto?: boolean } = {}): Promise<void> {
+async function runQcCurrent(opts: { auto?: boolean } = {}): Promise<void> {
   const s = activeSession();
   if (!s) {
     setStatus('请先载入文本', 'err');
@@ -438,7 +439,7 @@ async function openRiskPane(): Promise<void> {
 
 let curView: ViewName = 'text';
 
-export function switchView(name: ViewName): void {
+function switchView(name: ViewName): void {
   curView = name;
   VIEW_HOOKS[name]?.();
   switchViewDom(document, name);
@@ -508,7 +509,7 @@ function closeDemoMenu(): void {
   S.demoMenuOpen = false;
 }
 
-export function loadBuiltinDemo(): void {
+function loadBuiltinDemo(): void {
   if (!S.vocabCsvText) {
     S.vocabCsvText = exampleVocab;
     S.vocabName = '示例词库 sample_teaching_vocab.csv';
@@ -528,7 +529,7 @@ document.addEventListener('mousedown', (e) => {
 
 /** 纯文本/无标记文本 → 章节 md（按空行分段，自动编号 [P01]…） */
 
-export async function openPathIntoSession(p: string): Promise<void> {
+async function openPathIntoSession(p: string): Promise<void> {
   const name = p.slice(p.lastIndexOf('/') + 1);
   if (p.toLowerCase().endsWith('.epub')) {
     // epub 整书导入：解析拆章，每章一个会话（原文件不动；想入库走「添加书稿文件夹」）
@@ -801,7 +802,7 @@ document.addEventListener('mousedown', (e) => {
 });
 
 /* ---------- 修改模式胶囊：一眼可见、一键切换（即改=立即生效 / 候选=点✓生效） ---------- */
-export function updateModePill(): void {
+function updateModePill(): void {
   renderModePill($('mode-pill'), S.appConfig.autoRewriteOnMark === true);
 }
 $('mode-pill').addEventListener('click', async () => {
@@ -819,6 +820,11 @@ $('mode-pill').addEventListener('click', async () => {
     setStatus(`模式已切换，但**没能存进设置文件**（${String(e).slice(0, 80)}）——重启后会回到原来的模式`, 'err');
   }
 });
+/* ★ C2 装配（2026-09-16）：把全局 UI 编排动作注入 uibus——视图模块从此不再 import main。
+ *   必须在任何用户交互发生之前完成；本行之后的顶层引导（updateModePill 等）才会真正用到它们。
+ *   槽位未注册被调用会当场抛错（见 uibus.ts 的守卫），不会静默失败。 */
+Object.assign(uibus, { renderAll, switchView, syncChrome, updateModePill, flashApplied, runQcCurrent, openPathIntoSession, loadBuiltinDemo, addSession, fileSummary });
+
 updateModePill();
 
 /* ---------- 学生视角预览：隐藏全部审校视觉，只看学生将读到的正文（含生词注释） ---------- */

@@ -8,7 +8,7 @@ import { open as openFileDialog } from '@tauri-apps/plugin-dialog';
 import { S, esc } from './state.js';
 import { $, setStatus, toast, hidePop } from './uikit.js';
 import { activeSession } from './session.js';
-import { fileSummary, loadBuiltinDemo, openPathIntoSession, renderAll, syncChrome } from './main.js';
+import { uibus } from './uibus.js';
 import { ensureClassGroups } from './settings.js';
 import { loadBookConfig } from './bookio.js';
 import { scrollEl, scrollNow } from './edit.js';
@@ -53,7 +53,7 @@ async function activateWorkspace(name: string): Promise<void> {
     await ensureClassGroups(); // 绑定口径的前提：分组就位（幂等，未就位才读一次盘）
     if (S.activeWorkspace === name && S.classTargets.some((t) => t.id === w.定制目标)) {
       S.selectedIds = [w.定制目标];
-      fileSummary();
+      uibus.fileSummary();
       renderVersionSwitcher();
     } else if (S.activeWorkspace === name) {
       setStatus(`工作区【${name}】绑定的口径 ${w.定制目标} 在分组文件里没找到（<svg class="ico"><use href="#i-users"/></svg>班级定制里可查目录位置）`, 'dirty');
@@ -92,7 +92,8 @@ export function switchWorkspace(name: string): void {
     setStatus(`工作区已切换：${name}${w.定制目标 ? `（口径 ${w.定制目标}）` : ''}`, 'saved');
     return;
   }
-  openPathIntoSession(w.文件[0])
+  uibus
+    .openPathIntoSession(w.文件[0])
     .then(() => setStatus(`已进入【${name}】${workspaceChipName(w.文件[0])}`, 'saved'))
     .catch((e) => setStatus('打开失败：' + e, 'err'));
 }
@@ -131,7 +132,7 @@ async function saveShelf(books: ShelfBook[]): Promise<void> {
 }
 
 export async function renderShelf(): Promise<void> {
-  syncChrome(); // 书架=无章节上下文：进书架即收起章节级界面（不依赖调用方先走 renderAll）
+  uibus.syncChrome(); // 书架=无章节上下文：进书架即收起章节级界面（不依赖调用方先走 renderAll）
   const el = $('reader');
   try {
     await renderShelfInner(el);
@@ -316,7 +317,7 @@ function renderShelfGrid(el: HTMLElement, books: ShelfBook[], covers: Map<string
    * 而监听原先只在 `bindShelfChrome` 里绑过一次。搜索框敲一个字、切一次视图、点一下分组 chip——
    * 这三条都会重跑本函数，之后这两个按钮**再没有任何监听**：不弹框、不报错、不 toast，
    * 纯粹点了没反应，只有回到书架首页才恢复。改成跟着这次重建一起绑。 */
-  el.querySelector('#shelf-demo')?.addEventListener('click', () => loadBuiltinDemo());
+  el.querySelector('#shelf-demo')?.addEventListener('click', () => uibus.loadBuiltinDemo());
   el.querySelector('#shelf-add')?.addEventListener('click', () => void addBookToShelf());
 }
 
@@ -457,7 +458,7 @@ async function openBook(b: ShelfBook): Promise<void> {
 
 /** 版本选择页（两级导航第二步）：一本书的各版本卡片；点了版本才进工作区 */
 function renderBookVersions(b: ShelfBook): void {
-  syncChrome(); // 版本页=书级页面：章节工具与视图行按无会话上下文收起
+  uibus.syncChrome(); // 版本页=书级页面：章节工具与视图行按无会话上下文收起
   const el = $('reader');
   const cards = buildVersionCards(S.workspaces);
   void coverDataUrl(b.目录).then((img) => {
@@ -508,7 +509,7 @@ export function backToShelf(): void {
   S.currentBookDir = null;
   closeToc();
   hidePop();
-  renderAll();
+  uibus.renderAll();
 }
 
 /* ---------- 目录侧滑面板（章节 + 审校状态徽标 + 本章书签；审校台的目录，不是小说目录） ---------- */
@@ -603,7 +604,8 @@ export async function refreshToc(): Promise<void> {
       item.addEventListener('click', () => {
         const f = (item as HTMLElement).dataset.tocf!;
         closeToc();
-        openPathIntoSession(f)
+        uibus
+          .openPathIntoSession(f)
           .then(() => setStatus(`已打开：${tocItemName(chapters, f)}（工作区【${S.activeWorkspace ?? '—'}】口径）`, 'saved'))
           .catch((e) => setStatus('打开失败：' + e, 'err'));
       }),
@@ -702,7 +704,7 @@ export function renderVersionSwitcher(): void {
   pop.querySelectorAll<HTMLElement>('[data-ch]').forEach((el) =>
     el.addEventListener('click', () => {
       closeVersionPop();
-      void openPathIntoSession(el.dataset.ch!).catch((e) => setStatus('打开失败：' + e, 'err'));
+      void uibus.openPathIntoSession(el.dataset.ch!).catch((e) => setStatus('打开失败：' + e, 'err'));
     }),
   );
 }
@@ -751,7 +753,7 @@ async function resumeLastSession(): Promise<void> {
   const failedFiles: string[] = [];
   for (const f of ls.files) {
     try {
-      await openPathIntoSession(f.path);
+      await uibus.openPathIntoSession(f.path);
       opened++;
     } catch {
       /* 文件可能被移走，跳过——但**要记下是哪几个**：只丢一个文件时下面那句
@@ -775,6 +777,6 @@ async function resumeLastSession(): Promise<void> {
       if (el) el.scrollTop = ls.files[idx].scroll;
     }, 60);
   }
-  renderAll();
+  uibus.renderAll();
   toast(`已回到上次：${ls.workspace ? ls.workspace + ' · ' : ''}${s?.fileName ?? ''}（${ls.savedAt}）`, 'ok');
 }
