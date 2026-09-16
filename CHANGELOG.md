@@ -9,6 +9,48 @@
 
 
 
+## [未发布] - 2026-09-16（合并补回 4 处修复的根因收口：每处都不再靠"记得走对的路"）
+
+**为什么再做一轮**：2026-09-15 补回的 4 处修复（连点丢事件 / 备份三态 / 查词死按钮 /
+设置原子写）修的是**症状**——危险路径还在，只是主路径绕开了它。本轮把每处的**根因**
+收掉：让"错路"在类型或结构上不存在，而不是靠调用方自觉。同族残留也一并清点
+（复核发现同一种病不止 4 处）。
+
+| # | 原修复 | 本轮收口 | 根因判据 |
+| --- | --- | --- | --- |
+| ① | `appendDecision` 有 `io.append` 就走原子追加 | **`RiskIo.append` / `TxIo.append` 改必选**，删掉 risk.ts 两处与引擎 `appendLine` 的"读全文→拼行→写全文"兜底 | 兜底正是丢事件的路径：留着它，任何一个忘记注入 append 的调用点就把病带回来。接口必选后，"读改写"在类型上不复存在 |
+| ② | `persistEdit` 备份三态 | **三处内联备份收敛为 `fsx.makeFirstChangeBackup()` 一个策略函数**（`persistEdit` / aiflow adoptRewrite / risk 面板 backup 钩子）；其中 risk 钩子原先还是两态、风险写在注释里自认 | 同一策略三处各写一份、口径还不一致（一处两态），修的人会以为已经修齐了。策略（`planBackup`）成为纯函数、单测三态 |
+| ③ | 非 macOS `dict_lookup_zh` 形参改名对齐 | **命令只声明一次，cfg 只切实现**；非 macOS 行为放进 `no_dict()`（macOS 下也编译、也有单测） | 原先两份 `#[tauri::command]` 签名靠人工同步——`_words` 漂移就是这么发生的，且本机（macOS）编译不到坏的那份。单声明后参数表全文件唯一，改名本机立刻编译报错 |
+| ④ | `save_app_config` 原子写 | **`write_file_base64` 同步改走 `atomic_write`**；`appendCsvLine`（原先两态 + 读改写，读不出来会拿新表头**覆盖旧台账**）迁入 fsx：三态 + 追加走 `append_text_file` + 进程内串行 | 截断式写与两态读是**类**，不是孤例：扫全仓把同类一次收齐，比逐个撞见再修便宜 |
+
+**同族清点（本轮一并处理的）**：`appendCsvLine` 两态覆盖风险（→fsx 三态，`csvAppendPlan`
+纯函数）；引擎 `TxIo` 读改写兜底（→必选 append）；测试替身 5 处（memIo / DOM×4 /
+fakeFs×2）全部补上"内存版原子追加"，与 App 注入的 `O_APPEND` 同一纪律。
+
+**验收标准与结果**（每条都可机械重跑）：
+
+- 账本读改写路径清零：`grep 'prev + line' app/src/risk.ts src/core/version.ts` 无输出 ✓；
+  新增回归测试"连点两张卡不丢决定"（并发两条 `appendDecision` 不 await 第一条，
+  日志两条都在、顺序稳定、**write 调用数 = 0**）✓
+- 备份策略唯一：仓内 `planBackup` 只在 fsx 定义一次；单测三态（missing→write /
+  ok→skip / unreadable→abort 且理由含"没有执行"）；`backupPathFor` 路径约定单测 ✓
+- `fn dict_lookup_zh` 全文件恰 1 处、参数表唯一 ✓；`no_dict` 单测（3 词→3 个 None、
+  空入参→空出参）在 macOS 上真实运行 ✓
+- 生产代码裸 `std::fs::write` 清零（仅剩注释与 `#[cfg(test)]`）✓
+- `appendCsvLineWith` 单测：首建表头 write 恰一次、后续全 append；**并发两次**对新台账
+  表头恰一份、两行都在；读不出来时 write/append 零调用 ✓
+
+**门禁**：`npm run verify` 全绿（**1029 项：1028 通过 / 0 失败 / 1 跳过**——较上轮 +12，
+全部是本轮新增的验收测试；preflight 45 + 版本五处一致 + typecheck 根/app + lint 0 warning +
+评测不低于基线 + 双引擎 76/76）；`USER=runner npm run verify` 同数字全绿；
+`npm run verify:rust` 全绿（fmt / clippy --all-targets -D warnings / **7 测试**，+1 为 `no_dict`）。
+
+**如实记录的边界**：`no_dict` 之上的 cfg 分派三行在 macOS 上仍不被编译（结构性风险已
+压到最低：分派只调用这个已验证函数）；`appendCsvLine` 的进程内串行只保护同进程，
+跨进程并发由 `append_text_file`（O_APPEND）兜底；`makeFirstChangeBackup` 的 invoke
+组合层不可 node 测试，行为由纯函数 `planBackup` 单测 + 三处调用点走查保证。
+
+
 ## [未发布] - 2026-09-15（合并事后复核：合并丢了 4 处主仓独有修复，逐条补回）
 
 **结论先行**：合并记录「搬回来的」那一节写的是"主仓真正的独有语义只有两处

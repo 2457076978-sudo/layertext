@@ -145,24 +145,31 @@ mod dict {
     }
 }
 
-#[cfg(target_os = "macos")]
-#[tauri::command]
-fn dict_lookup_zh(words: Vec<String>) -> Vec<Option<String>> {
-    words.iter().map(|w| dict::lookup_zh(w)).collect()
+/// 非 macOS 上没有系统词典，一律返回 `None`（前端照常显示"未带词典"）。
+/// 独立成函数（而不是 cfg 臂里的裸表达式）：**它在 macOS 下也参与编译与测试**——
+/// 命令分派那几行才是唯一不被本机编译的部分，而它们只调用这个已验证的函数。
+/// （生产调用点在 `not(macos)` 臂里，macOS 构建下只有测试引用它，故仅对 macOS 放行 dead_code。）
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+fn no_dict(words: &[String]) -> Vec<Option<String>> {
+    vec![None; words.len()]
 }
 
-#[cfg(not(target_os = "macos"))]
+/// 本地词典查询。**参数表只声明这一份**（2026-09-16）：
+/// 原先 macOS / 非 macOS 各有一份 `#[tauri::command]` 声明，靠人工保持同步——
+/// 2026-09-14 的事故正是两份签名漂移（`_words` vs `words`）：Tauri 按参数名映射，
+/// 非 macOS 构建上整个命令以"缺必填参数"失败，「查词」成了死按钮，而本机（macOS）
+/// 编译的是另一份、看不出来。现在命令只声明一次，cfg 只切换**实现**；
+/// 想改参数名，改一处即可，且 macos 臂引用 `words`，改名本机编译立刻报错。
 #[tauri::command]
-/// 非 macOS 上没有系统词典，一律返回 `None`（前端照常显示"未带词典"）。
-///
-/// 2026-09-14：形参原先叫 `_words`。**它其实是被用到的**（`words.len()`），
-/// 而且 Tauri 是**按参数名**把前端 JSON 映射进来的——前端传的是 `words`，
-/// 声明成 `_words` 就匹配不上，整个命令会以"缺必填参数"失败。
-/// 本机是 macOS 所以走的是上面那份、看不出来；一旦出 Windows/Linux 构建，
-/// 「查词」这类按钮就会**点了没反应**。名字改回 `words`。
-/// （2026-09-15 合并复核：这一处为主仓独有、分支未同步，从主仓补回。）
 fn dict_lookup_zh(words: Vec<String>) -> Vec<Option<String>> {
-    vec![None; words.len()]
+    #[cfg(target_os = "macos")]
+    {
+        words.iter().map(|w| dict::lookup_zh(w)).collect()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        no_dict(&words)
+    }
 }
 
 /// 二进制读取（base64），供前端解析 xlsx 等格式
@@ -242,13 +249,12 @@ fn atomic_write(path: &str, bytes: &[u8]) -> Result<(), String> {
 }
 
 /// 二进制写入（base64），供导出 Word/音频等
+/// 2026-09-16：改走 `atomic_write`（原先裸 `std::fs::write` 是截断式写，导出到一半
+/// 崩/磁盘满会留下半份 .docx/.mp3——看起来像导出坏了，其实旧文件已被毁）。
 #[tauri::command]
 fn write_file_base64(path: String, b64: String) -> Result<(), String> {
     let bin = base64_decode(&b64)?;
-    if let Some(dir) = std::path::Path::new(&path).parent() {
-        let _ = std::fs::create_dir_all(dir);
-    }
-    std::fs::write(&path, bin).map_err(|e| e.to_string())
+    atomic_write(&path, &bin)
 }
 
 /// **追加**一行到文本文件（append-only 账本专用：决定日志、版本日志）。
@@ -950,6 +956,21 @@ mod dict_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn no_dict_keeps_shape_and_len() {
+        // 非 macOS 的「查词」行为：长度对齐（每个词一个槽位）、全部查不到。
+        // 这条在 macOS 上也编译并运行——`no_dict` 是命令分派唯一依赖的已验证实现，
+        // cfg 臂里剩下的只有对它的调用（见 dict_lookup_zh 的注释）。
+        let words: Vec<String> = vec!["boar".into(), "wild".into(), "中文".into()];
+        let out = no_dict(&words);
+        assert_eq!(out.len(), words.len(), "长度必须与入参一致——前端按位置对齐");
+        assert!(
+            out.iter().all(|o| o.is_none()),
+            "没有系统词典时全部返回 None"
+        );
+        assert_eq!(no_dict(&[]).len(), 0, "空入参给空出参");
+    }
 
     #[test]
     fn base64_roundtrip() {

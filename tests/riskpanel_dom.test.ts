@@ -61,6 +61,11 @@ function setup(files: Record<string, string>): void {
       files[p] = c;
       return Promise.resolve();
     },
+    // 内存版原子追加（RiskIo.append 必选）：一行一追加，不走读改写
+    append: (p, line) => {
+      files[p] = (files[p] ?? '') + line;
+      return Promise.resolve();
+    },
     listDir: () => Promise.resolve([]),
   });
 }
@@ -187,6 +192,11 @@ function actionSetup(files: Record<string, string>): void {
     read: (p) => (p in files ? Promise.resolve(files[p]!) : Promise.reject(new Error('no file'))),
     write: (p, c) => {
       files[p] = c;
+      return Promise.resolve();
+    },
+    // 内存版原子追加（RiskIo.append 必选）：一行一追加，不走读改写
+    append: (p, line) => {
+      files[p] = (files[p] ?? '') + line;
       return Promise.resolve();
     },
     listDir: () => Promise.resolve([]),
@@ -381,6 +391,10 @@ test('批量应用：一章只读一次写一次，逐条走同一个 applyActio
       files[p] = c;
       return Promise.resolve();
     },
+    append: (p, line) => {
+      files[p] = (files[p] ?? '') + line;
+      return Promise.resolve();
+    },
     listDir: () => Promise.resolve([]),
   });
   await renderRiskPane({
@@ -479,8 +493,10 @@ test('★ 事件写失败 → 正文回滚，不留"改了稿却没记录"的状
   win.document.body.innerHTML = '<section id="pane-risk"></section>';
   setRiskIo({
     read: (p) => (p in files ? Promise.resolve(files[p]!) : Promise.reject(new Error('no file'))),
-    // 决定日志**写不进去**；正文照写——正好构造"改稿成功、记账失败"
-    write: (p, c) => (/决定/.test(p) ? Promise.reject(new Error('磁盘满')) : ((files[p] = c), Promise.resolve())),
+    // 账本（决定/版本日志）**追加不进去**；正文照写——正好构造"改稿成功、记账失败"。
+    // 2026-09-16：账本一律走原子追加，失败面从 write 挪到 append（语义同旧：记不上账）
+    write: (p, c) => ((files[p] = c), Promise.resolve()),
+    append: () => Promise.reject(new Error('磁盘满')),
     listDir: () => Promise.resolve([]),
   });
   await renderRiskPane({

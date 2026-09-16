@@ -41,20 +41,27 @@ import { parseDecisionLog } from '../src/core/decision.js';
 interface FakeFs {
   files: Record<string, string>;
   /** 让某次写入失败（模拟磁盘满 / 权限 / 日志目录被删） */
-  failWrite?: (path: string) => boolean;
+  failAt?: (path: string) => boolean;
   /** 备份调用记录 */
   backups: string[];
   io: TxIo;
 }
 
-function fakeFs(initial: Record<string, string>, failWrite?: (p: string) => boolean): FakeFs {
+function fakeFs(initial: Record<string, string>, failAt?: (p: string) => boolean): FakeFs {
   const files: Record<string, string> = { ...initial };
   const backups: string[] = [];
   const io: TxIo = {
     read: (p) => (p in files ? Promise.resolve(files[p]!) : Promise.reject(new Error(`ENOENT ${p}`))),
     write: (p, c) => {
-      if (failWrite?.(p)) return Promise.reject(new Error(`EACCES ${p}`));
+      if (failAt?.(p)) return Promise.reject(new Error(`EACCES ${p}`));
       files[p] = c;
+      return Promise.resolve();
+    },
+    // 内存版原子追加（TxIo.append 必选）。失败谓词与 write 共用：
+    // "这个路径写不了"对账本而言就是"追加不进去"（账本不走 write）
+    append: (p, line) => {
+      if (failAt?.(p)) return Promise.reject(new Error(`EACCES ${p}`));
+      files[p] = (files[p] ?? '') + line;
       return Promise.resolve();
     },
     backup: (p, c) => {
@@ -64,7 +71,7 @@ function fakeFs(initial: Record<string, string>, failWrite?: (p: string) => bool
     },
     now: () => '2026-09-11T10:00:00.000Z',
   };
-  return { files, failWrite, backups, io };
+  return { files, failAt, backups, io };
 }
 
 /* ────────────────────── 夹具 ────────────────────── */

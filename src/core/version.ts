@@ -256,8 +256,11 @@ export const stateOfChange = (r: ChangeResult): ChangeState => (r.status === 'ap
 export interface TxIo {
   read(path: string): Promise<string>;
   write(path: string, content: string): Promise<void>;
-  /** 追加一行。不实现就退回 read+write 拼接（账本很小，行为一致） */
-  append?(path: string, line: string): Promise<void>;
+  /** 追加一行（**必选**）。账本（版本日志/决定日志）是 append-only，
+   * 写入必须走 O_APPEND / `fs.appendFile` 这类原子追加——
+   * 2026-09-16：原先可选、缺了退回 read+write 拼接，那条退路在两次并发事务里
+   * 后写覆盖先写、丢整条记录；接口收敛成一条路，"读改写"在类型上不复存在。 */
+  append(path: string, line: string): Promise<void>;
   /** 改稿前备份（可选）。给了就先备份再写——**不可逆的操作不该没有退路** */
   backup?(path: string, content: string): Promise<void>;
   /** 当前时间（便于测试确定性）。缺省 `new Date().toISOString()` */
@@ -404,10 +407,11 @@ const readOr = async (io: TxIo, path: string, fallback: string): Promise<string>
   }
 };
 
+/** 账本追加的**唯一入口**：只走原子追加（`TxIo.append` 必选）。
+ * 2026-09-16：原先缺 append 时退回"读全文→拼行→写全文"，两次并发事务后写覆盖先写、
+ * 丢整条版本/决定记录——那条退路已随接口收敛删除。 */
 const appendLine = async (io: TxIo, path: string, line: string): Promise<void> => {
-  if (io.append) return await io.append(path, line);
-  const prev = await readOr(io, path, '');
-  await io.write(path, prev + line);
+  await io.append(path, line);
 };
 
 /** 段正文（去掉段标记，也去掉段与段之间的空行——那是结构不是内容）。

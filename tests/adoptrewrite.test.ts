@@ -46,6 +46,10 @@ function fs(initial: Record<string, string>): { files: Record<string, string>; i
         files[p] = c;
         return Promise.resolve();
       },
+      append: (p, line) => {
+        files[p] = (files[p] ?? '') + line;
+        return Promise.resolve();
+      },
       now: () => '2026-09-11T10:00:00.000Z',
     },
   };

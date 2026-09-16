@@ -169,6 +169,11 @@ function memIo(files: Record<string, string>): { io: RiskIo; files: Record<strin
       async write(p, c) {
         files[p] = c;
       },
+      /* 内存版"原子追加"：一行一追加、永不读改写——与 App 注入的 O_APPEND 同一纪律。
+       * `RiskIo.append` 已是必选成员：不给 append 编译不过。 */
+      async append(p, line) {
+        files[p] = (files[p] ?? '') + line;
+      },
       async listDir() {
         return [];
       },
@@ -208,6 +213,41 @@ test('写决定：追加而不是覆盖（append-only），两次决定都在日
     r.events.map((e) => e.decision),
     ['reject', 'accept'],
   );
+});
+
+test('连点两张卡不丢决定（2026-09-16 验收）：并发两条 appendDecision 都落账，且全程零 write', async () => {
+  const { io, files } = memIo({ '/out/_运行/风险队列_A层85.json': JSON.stringify(file()) });
+  const writes: string[] = [];
+  const appended: string[] = [];
+  setRiskIo({
+    ...io,
+    /* 模拟"读改写"的诱惑面：write 若被调用就记下来——原子追加纪律下必须一条都没有 */
+    write: async (p, c) => {
+      writes.push(p);
+      files[p] = c;
+    },
+    append: async (p, line) => {
+      appended.push(line);
+      /* 让两个追加真正交错（都先挂起再落账），而不是碰巧顺序执行 */
+      await new Promise((r) => setTimeout(r, 1));
+      files[p] = (files[p] ?? '') + line;
+    },
+  });
+  const paths = { outDir: '/out', workDir: '/work', sourceVersion: 'sha-1' };
+  const f = file();
+  /* 不 await 第一条＝按钮 `void appendDecision(...)` 的连点现场 */
+  const p1 = appendDecision(paths, 'A', decisionLineFor(f.队列[0], 'reject', { teacherId: 'wayne', sourceVersion: paths.sourceVersion, timestamp: '2026-09-11T10:00:00.000Z' }));
+  const p2 = appendDecision(paths, 'A', decisionLineFor(f.队列[0], 'accept', { teacherId: 'wayne', sourceVersion: paths.sourceVersion, timestamp: '2026-09-11T10:00:01.000Z' }));
+  await Promise.all([p1, p2]);
+  const log = files['/work/_决定/A层85.jsonl'];
+  assert.equal(parseDecisionLog(log).events.length, 2, '连点两张卡，两条决定都得在——少一条就是后写覆盖了先写');
+  assert.deepEqual(
+    parseDecisionLog(log).events.map((e) => e.decision),
+    ['reject', 'accept'],
+    '落账顺序与点击顺序一致',
+  );
+  assert.equal(writes.length, 0, '决定日志只能走原子追加（append），一次"读全文再写回"都不允许');
+  assert.equal(appended.length, 2);
 });
 
 /* ────────────────── 路径也由清单解析（App 与命令行同一套口径） ────────────────── */

@@ -29,9 +29,9 @@ import type { LedgerRow } from '../../src/core/adoption.js';
 import { LEDGER_HEADER, toLedgerLine } from '../../src/core/adoption.js';
 import { sentenceRisks } from '../../src/core/risks.js';
 import { buildSystemPrompt, buildRewriteSentencePrompt, promptSetVersion, simplifyMaxLen } from './ai.js';
-import { RULE_BY_TYPE, appendCsvLine } from './main.js';
+import { RULE_BY_TYPE } from './main.js';
 import { showAiSettings } from './settings.js';
-import { readTextChecked } from './fsx.js';
+import { appendCsvLine, makeFirstChangeBackup } from './fsx.js';
 import { applyZhAnnotations, applyWordSimplifications } from './pipew.js';
 import { buildAppPolicy } from './rewritegate.js';
 import { checkRewrite } from '../../src/core/rewrite.js';
@@ -352,16 +352,7 @@ export async function acceptSuggestion(g: Suggestion, opts: { scene?: string; ou
       write: (p, c) => invoke('write_text_file', { path: p, content: c }).then(() => undefined),
       // 版本日志与决定日志都是 append-only：用 O_APPEND 追加，避免"读全文→写全文"互相覆盖
       append: (p, line) => invoke('append_text_file', { path: p, content: line }).then(() => undefined),
-      backup: async (p, c) => {
-        // 首改前留一份"原始备份"（与 persistEdit 同一约定），有备份就不覆盖
-        const dir = p.slice(0, p.lastIndexOf('/'));
-        const bak = `${dir}/${p.slice(p.lastIndexOf('/') + 1).replace(/\.(md|txt|markdown)$/i, '')}_原始备份.md`;
-        /* 2026-09-14：用 `fsx` 把"还没有备份"与"备份在、但读不出来"分开——
-         * 后者如果照写，会把教师唯一的原始版换成当前内容（原先的风险是写在注释里自认的）。 */
-        const r = await readTextChecked(bak);
-        if (r.kind === 'unreadable') throw new Error(`原始备份 ${bak} 读不出来（${r.error}）——为免覆盖掉它，本次改动没有执行`);
-        if (r.kind === 'missing') await invoke('write_text_file', { path: bak, content: c });
-      },
+      backup: makeFirstChangeBackup(),
       now: () => new Date().toISOString(),
     },
     {

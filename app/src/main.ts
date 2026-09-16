@@ -12,7 +12,7 @@ import { chnoFromPath, tagFromPath, normalizeAndSplitChapters, parseAiJson, rout
 import { parseEpubChapters, epubChapterMd } from './bookpure.js';
 import { renderModePill, switchView as switchViewDom, bindViewTabs, type ViewName } from './widgets.js';
 import { createProjectConfig, findProjectConfig, io as panelIo, renderDataPane } from './datapanel.js';
-import { readTextChecked } from './fsx.js';
+import { makeFirstChangeBackup, readTextChecked } from './fsx.js';
 import { teacherIdOf } from '../../src/core/teachers.js';
 import { renderRiskPane, setRiskIo, TAGS as RISK_TAGS } from './risk.js';
 import { S, esc } from './state.js';
@@ -461,20 +461,11 @@ async function openRiskPane(): Promise<void> {
     read: (p) => panelIo.read(p),
     write: (p, c) => panelIo.write(p, c),
     listDir: (d) => panelIo.listDir(d),
-    /* 改稿前备份：不可逆的操作不该没有退路。与 persistEdit 同一约定——
-     * 首改前留一份"原始备份"，已经有就不覆盖（否则第二次改稿会把真正的原始版冲掉）。 */
-    backup: async (p, c) => {
-      const dir = p.slice(0, p.lastIndexOf('/'));
-      const bak = `${dir}/${p.slice(p.lastIndexOf('/') + 1).replace(/\.(md|txt|markdown)$/i, '')}_原始备份.md`;
-      try {
-        await invoke<string>('read_text_file', { path: bak });
-      } catch {
-        /* 有意兜底：读不到＝还没有备份（"首改前留一份"就是这个 catch 的用途）。
-         * 风险写明：后端没给错误码，"不存在"与"存在但读不出来"在这里分不出，
-         * 后一种情况下这一写会覆盖原始备份——所以备份**只在这里写**，不做每次覆盖。 */
-        await invoke('write_text_file', { path: bak, content: c });
-      }
-    },
+    /* 改稿前备份：不可逆的操作不该没有退路。与 persistEdit、aiflow 的 adoptRewrite
+     * 走**同一个** `fsx.makeFirstChangeBackup`——首改前留一份"原始备份"，已经有就不覆盖。
+     * 2026-09-16：这处原先还是"读不到＝还没有"的两态写法（风险写在注释里自认），
+     * "存在但读不出来"时这一写会把真原始版顶掉；现在三态决策收敛在 fsx 一处。 */
+    backup: makeFirstChangeBackup(),
     /* 账本用**追加**而不是"读全文→拼一行→写全文"：后者在两个人同时记一条时
      * 会把对方的整份内容覆盖掉——丢的是一整条决定或一整版记录，而且毫无迹象。
      * `O_APPEND` 让"一行一次写"成为原子的。 */
@@ -882,18 +873,6 @@ export const RULE_BY_TYPE: Record<string, string> = {
   goods: 'R11',
 };
 
-/** 读旧追加一行 CSV（无文件则连表头新建；台账与变更日志共用） */
-export async function appendCsvLine(path: string, header: readonly string[], line: string): Promise<void> {
-  let csv = '';
-  try {
-    csv = await invoke<string>('read_text_file', { path });
-  } catch {
-    /* 有意兜底：台账还不存在＝第一次写（读缺失文件本来就是报错的），下面补表头。 */
-  }
-  if (!csv.trim()) csv = header.join(',') + '\n';
-  await invoke('write_text_file', { path, content: csv + line });
-}
-
 /* ---------- 行内修订对照（左栏所见即所得） ---------- */
 
 /** 保存正文改动：默认直接写原稿文件（首次前自动备份原始版）；关闭"直接修改原稿"则写工作稿 */
@@ -912,21 +891,11 @@ export async function persistEdit(s: FileSession, newMd: string, opts: { recordH
     s.redoStack = [];
   }
   if (s.sourcePath && (S.appConfig.inPlaceEdit ?? true)) {
-    const dir = s.sourcePath.slice(0, s.sourcePath.lastIndexOf('/'));
-    const base = s.fileName.replace(/\.(md|txt|markdown)$/i, '');
-    const backup = `${dir}/${base}_原始备份.md`;
-    /* 2026-09-14：这条分支原先写的是"读不到＝还没有备份，写一份"，
-     * 并把"备份其实存在、只是读不出来"的风险**自认下来**（注释里明写的）。
-     * 那笔风险的代价是：真原始版被当前正文替换掉，而"原始备份"正是教师最后的退路。
-     * 现在用 `fsx` 问清楚：**确实不存在**才写；**存在但读不出来**就中止这一次改动——
-     * 宁可这一次不改，也不拿教师唯一的原始版去赌。
-     * （2026-09-15 合并复核：这一处为主仓独有、分支未同步，从主仓补回。） */
-    const bak = await readTextChecked(backup);
-    if (bak.kind === 'missing') {
-      await invoke('write_text_file', { path: backup, content: s.md });
-    } else if (bak.kind === 'unreadable') {
-      throw new Error(`原始备份 ${backup} 读不出来（${bak.error}）——为免把这份唯一的原始版覆盖掉，本次改动**没有执行**；请先确认该文件`);
-    }
+    /* 首改前留一份"原始备份"（策略在 `fsx.makeFirstChangeBackup`，与 risk 面板、
+     * aiflow 的 adoptRewrite 共用同一份三态决策）：
+     * 确实不存在才写；**存在但读不出来就中止这一次改动**——
+     * 宁可这一次不改，也不拿教师唯一的原始版去赌。 */
+    await makeFirstChangeBackup()(s.sourcePath, s.md);
     await invoke('write_text_file', { path: s.sourcePath, content: newMd });
     return s.sourcePath;
   }

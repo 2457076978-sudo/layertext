@@ -66,8 +66,11 @@ export interface RiskIo {
   exists?(path: string): Promise<boolean>;
   /** 改稿前备份（可选）。给了就先备份再写——**不可逆的操作不该没有退路**。 */
   backup?(path: string, content: string): Promise<void>;
-  /** 追加一行（可选）。账本是 append-only，给了就不必 read+write 整份日志 */
-  append?(path: string, line: string): Promise<void>;
+  /** 追加一行（**必选**）。账本是 append-only，写入必须走 O_APPEND 这类原子追加——
+   * 2026-09-16：原先可选、缺了退回"读全文→拼一行→写全文"，那条退路正是
+   * 连点两张卡丢整条决定的成因（后写覆盖先写）。接口层面收敛成一条路：
+   * 想注入本面板，就必须给出原子追加；"读改写"这条路在类型上不复存在。 */
+  append(path: string, line: string): Promise<void>;
 }
 
 let io: RiskIo | null = null;
@@ -376,28 +379,17 @@ export async function loadRiskQueue(
   return { file, events, error, identity, sourceVersion };
 }
 
-/** 追加一条不可变事件（读→拼接→写；事件日志只增不改）。路径按清单布局解析。 */
+/** 追加一条不可变事件（账本只增不改）。路径按清单布局解析。 */
 export async function appendDecision(paths: ProjectPaths, tier: string, event: DecisionEvent, id?: RunIdentity): Promise<void> {
   if (!io) throw new Error('面板 IO 未注入');
   const identity = id ?? (await loadRunIdentity(paths, { teacher: event.teacherId, tier: TAGS[tier] ?? tier }));
   const path = pathsFor(paths, identity, tier).decision();
-  /* 2026-09-14：同文件另一个追加点（`appendWorkbenchMarker`）走的是 `io.append`，
-   * 而这里仍是"读全文 → 拼一行 → 写全文"。两个决定按钮里有一个是 `void appendDecision(...)`
-   * 不 await 的，连续快速点两张卡时后写覆盖先写——**丢一整条决定事件**。
+  /* 2026-09-14：这里曾是"读全文 → 拼一行 → 写全文"。两个决定按钮里有一个是
+   * `void appendDecision(...)` 不 await 的，连续快速点两张卡时后写覆盖先写——**丢一整条决定事件**。
    * 决定日志是"已决/待办"的正本，丢了那条卡会回到待办，误报率/撤销率的分母也跟着偏。
-   * （2026-09-15 合并复核：这一处为主仓独有、分支未同步，从主仓补回。） */
-  if (io.append) {
-    await io.append(path, toDecisionLine(event));
-    return;
-  }
-  let prev: string;
-  try {
-    prev = await io.read(path);
-  } catch {
-    /* 有意兜底：还没有决定日志＝这就是第一条决定，从空串接着写。 */
-    prev = '';
-  }
-  await io.write(path, prev + toDecisionLine(event));
+   * 2026-09-16：`RiskIo.append` 收敛为必选后，"读改写"退路在类型上已不存在——
+   * 这里只剩原子追加一条路（`O_APPEND` 让"一行一次写"成为原子的）。 */
+  await io.append(path, toDecisionLine(event));
 }
 
 /* ────────────────────── 工作台：暂停点那本账（IO） ────────────────────── */
@@ -430,23 +422,12 @@ export async function loadWorkbenchMarkers(paths: ProjectPaths, tier: string, id
   }
 }
 
-/** 追加一条暂停/恢复标记。有原子追加就用它——读全文再写回去会在两个人同时按暂停时丢一条。 */
+/** 追加一条暂停/恢复标记。走原子追加——"读全文再写回去"在两个人同时按暂停时会丢一条
+ * （`RiskIo.append` 已收敛为必选，这条纪律现在由类型保证）。 */
 export async function appendWorkbenchMarker(paths: ProjectPaths, tier: string, marker: WorkbenchMarker, id?: RunIdentity): Promise<void> {
   if (!io) throw new Error('面板 IO 未注入');
   const identity = id ?? (await loadRunIdentity(paths, { teacher: marker.teacherId, tier: TAGS[tier] ?? tier }));
-  const path = workbenchLogPath(paths, identity, tier);
-  const line = toWorkbenchLine(marker);
-  if (io.append) {
-    await io.append(path, line);
-    return;
-  }
-  let prev = '';
-  try {
-    prev = await io.read(path);
-  } catch {
-    /* 有意兜底：还没有这本账＝第一次暂停，从空串接着写。 */
-  }
-  await io.write(path, prev + line);
+  await io.append(workbenchLogPath(paths, identity, tier), toWorkbenchLine(marker));
 }
 
 /* ────────────────────── DOM 渲染 ────────────────────── */
@@ -828,7 +809,7 @@ const txIo = (): TxIo => {
   return {
     read: (p) => real.read(p),
     write: (p, c) => real.write(p, c),
-    append: real.append ? (p, l) => real.append!(p, l) : undefined,
+    append: (p, l) => real.append(p, l),
     backup: real.backup ? (p, c) => real.backup!(p, c) : undefined,
     now: () => new Date().toISOString(),
   };
