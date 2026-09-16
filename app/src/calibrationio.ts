@@ -22,6 +22,8 @@
  */
 
 import { invoke } from '@tauri-apps/api/core';
+import { teacherIdOf } from '../../src/core/teachers.js';
+import { S } from './state.js';
 import {
   parseCalibrationLog,
   replayCalibrations,
@@ -128,4 +130,19 @@ export async function recordCalibration(session: FileSession, mark: Mark, ctx: C
        视图 `_审校标记.json` 已经落盘，本版校准不丢，只是缺一条跨版本正本记录。 */
     console.warn('校准台账写入失败（不影响本次操作）：' + String(e).slice(0, 120));
   }
+}
+
+/**
+ * 教师点了一下 → 往**校准台账**记一条（正本，append-only）。
+ *
+ * 为什么还要记：`_审校标记.json` 是**视图**，按文件名落盘——管线每重生成一版就换文件名，
+ * 教师的校准在新版本里就"不见了"（2026-09-13 查出的真事故）。
+ * 台账挂 书/章/层/词，换版本由 `replayInto` 重放回来。
+ *
+ * fire-and-forget：记不上不该拦教师干活（与 logCost 同口径），但要在控制台说一声。
+ * （2026-09-16 从 main.ts 下沉——只依赖 recordCalibration/teacherIdOf/S，reader.ts 引它。）
+ */
+export function logCalibration(session: FileSession, mark: Mark, action: 'add' | 'remove'): void {
+  const teacher = teacherIdOf((S.appConfig as { teacherId?: string }).teacherId ?? 'unknown');
+  void recordCalibration(session, mark, { teacher, file: session.fileName, action });
 }

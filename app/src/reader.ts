@@ -5,7 +5,8 @@
 
 import { S, esc } from './state.js';
 import { $, setStatus, toast, pop, hidePop, placePop } from './uikit.js';
-import { logCalibration as logCalibrationOf, activeSession } from './main.js';
+import { logCalibration as logCalibrationOf } from './calibrationio.js';
+import { activeSession } from './session.js';
 import { buildLexiconNow } from './lexicon.js';
 import { scheduleHeatRail } from './edit.js';
 import { showGateHelp } from './chat.js';

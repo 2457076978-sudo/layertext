@@ -8,7 +8,7 @@ import { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, Ta
 import { S, esc, globalInstructionsCaptured, globalInstructionsValue, rememberGlobalInstructions } from './state.js';
 import { readTextChecked } from './fsx.js';
 import { $, setStatus } from './uikit.js';
-import { activeSession, persistEdit } from './main.js';
+import { activeSession, persistEdit } from './session.js';
 import { renderReader, sidebarHandlers } from './reader.js';
 import { attachInlineSuggestions } from './aiflow.js';
 import { renderSidebar } from './review.js';

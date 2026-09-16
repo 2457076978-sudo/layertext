@@ -9,7 +9,7 @@ import { open as openFileDialog, save as saveFileDialog } from '@tauri-apps/plug
 import { S, esc } from './state.js';
 import { setStatus, toast } from './uikit.js';
 import { buildLexiconNow, reinforceWordsNow } from './lexicon.js';
-import { chatUntilJson } from './main.js';
+import { chatUntilJson } from './ai.js';
 import { showAiSettings } from './settings.js';
 import { readChapterRaw } from './batch.js';
 import { buildGradingPrompt } from './ai.js';

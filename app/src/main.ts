@@ -7,12 +7,13 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { open as openFileDialog, save as saveFileDialog } from '@tauri-apps/plugin-dialog';
-import { unzipSync, strFromU8 } from 'fflate';
-import { chnoFromPath, tagFromPath, normalizeAndSplitChapters, parseAiJson, routeSelection, decodeAuto } from './pure.js';
+import { chnoFromPath, tagFromPath, normalizeAndSplitChapters, routeSelection } from './pure.js';
 import { parseEpubChapters, epubChapterMd } from './bookpure.js';
 import { renderModePill, switchView as switchViewDom, bindViewTabs, type ViewName } from './widgets.js';
 import { createProjectConfig, findProjectConfig, io as panelIo, renderDataPane } from './datapanel.js';
-import { makeFirstChangeBackup, readTextChecked } from './fsx.js';
+import { makeFirstChangeBackup, readTextChecked, readTextSmart } from './fsx.js';
+import { activeSession, markPathFor } from './session.js';
+import { docxToText } from './bookpure.js';
 import { teacherIdOf } from '../../src/core/teachers.js';
 import { renderRiskPane, setRiskIo, TAGS as RISK_TAGS } from './risk.js';
 import { S, esc } from './state.js';
@@ -61,14 +62,14 @@ import { showGradingPop, showClassGradingPop } from './grading.js';
 import { showRevPop } from './reviewgen.js';
 import { scrollEl, scrollNow, doUndo, doRedo, openFind, closeFind, runFind, jumpFind, replaceAllFind, jumpNextRisk, popHotkey, resetRiskJump } from './edit.js';
 import { buildLexiconNow, mergedSelection, reinforceWordsNow, importVocabFile, importTermsFile, importProperFile, loadLocalExampleConfig } from './lexicon.js';
-import { callChat, loadConfig, saveConfig, setAiUi } from './ai.js';
+import { loadConfig, saveConfig, setAiUi } from './ai.js';
 import exampleMd from '../../examples/texts/aesop_tortoise_hare.md?raw';
 import exampleVocab from '../../examples/vocab/sample_teaching_vocab.csv?raw';
 import { runQc, toLegacyReport } from '../../src/core/qc.js';
 import { extractParas, sentsOf, splitChapter } from '../../src/core/textpipe.js';
 import { renderSidebar, scheduleSave, setAfterSidebarRender, setMarkSaveErrorReporter } from './review.js';
-import { GATES, newReviewState, type FileSession, type Mark } from './types.js';
-import { markFromReplayed, recordCalibration, replayInto } from './calibrationio.js';
+import { GATES, newReviewState } from './types.js';
+import { markFromReplayed, replayInto } from './calibrationio.js';
 import { refreshPendingBanner, renderAnnotatePane, setAnnotateIo } from './annotate.js';
 
 /* ---------- 全局状态 ---------- */
@@ -76,10 +77,6 @@ import { refreshPendingBanner, renderAnnotatePane, setAnnotateIo } from './annot
 /** 专名表原始行（保留大小写与空格短语：既并入已知词，也作 ⑧ 专名一致性检查名单） */
 /** 本地示例目录的附加词表（如原型项目的中考1600按词性分类表） */
 /** 当前会话的合并已知词表（含词句卡），供词面板显示原形 */
-
-export function activeSession(): FileSession | null {
-  return S.activeIdx >= 0 ? S.sessions[S.activeIdx] : null;
-}
 
 /** 状态行只放"现在在哪"：文件名（班级口径生效时附带）。词库/复现等完整口径见 设置 弹层 */
 export function fileSummary(): void {
@@ -89,30 +86,6 @@ export function fileSummary(): void {
 }
 
 /* ---------- 会话管理 ---------- */
-
-export async function markPathFor(sourcePath: string | null, fileName: string): Promise<string> {
-  if (sourcePath) {
-    const dir = sourcePath.slice(0, sourcePath.lastIndexOf('/'));
-    const base = fileName.replace(/\.(md|txt|markdown)$/i, '');
-    return `${dir}/${base}_审校标记.json`;
-  }
-  const dir = await invoke<string>('reports_dir');
-  return `${dir}/示例_审校标记.json`;
-}
-
-/**
- * 教师点了一下 → 往**校准台账**记一条（正本，append-only）。
- *
- * 为什么还要记：`_审校标记.json` 是**视图**，按文件名落盘——管线每重生成一版就换文件名，
- * 教师的校准在新版本里就"不见了"（2026-09-13 查出的真事故）。
- * 台账挂 书/章/层/词，换版本由 `replayInto` 重放回来。
- *
- * fire-and-forget：记不上不该拦教师干活（与 logCost 同口径），但要在控制台说一声。
- */
-export function logCalibration(session: FileSession, mark: Mark, action: 'add' | 'remove'): void {
-  const teacher = teacherIdOf((S.appConfig as { teacherId?: string }).teacherId ?? 'unknown');
-  void recordCalibration(session, mark, { teacher, file: session.fileName, action });
-}
 
 export async function addSession(md: string, fileName: string, sourcePath: string | null, opts: { noAutoQc?: boolean } = {}): Promise<void> {
   const same = S.sessions.findIndex((s) => s.sourcePath === sourcePath && s.fileName === fileName);
@@ -317,26 +290,6 @@ export function flashApplied(revised: string): void {
   el.classList.remove('just-applied');
   void (el as HTMLElement).offsetWidth;
   el.classList.add('just-applied');
-}
-
-/**
- * 请求直到解析出 JSON：若模型把整轮输出耗在思考上（无 [ 字符），自动追发"直接输出 JSON"再试一次。
- *
- * `preferAux`：这条活适合辅助模型时置真（**由调用方判断**"短输入 + 单任务 + 输出可机检"）。
- * 辅助模型失败/交白卷会自动回主模型，且这件事会写在状态行上。
- */
-export async function chatUntilJson(messages: { role: string; content: string }[], maxTokens: number, scene: string, preferAux = false): Promise<{ raw: unknown[]; usage: string }> {
-  const msgs = [...messages];
-  for (let attempt = 0; attempt < 2; attempt++) {
-    const { content, usage } = await callChat(msgs, maxTokens, undefined, scene, { preferAux });
-    try {
-      return { raw: parseAiJson(content), usage };
-    } catch (e) {
-      if (attempt === 1 || content.includes('[')) throw e;
-      msgs.push({ role: 'user', content: '你刚才的整段回答都是思考过程，还没有输出结果。请现在直接输出完整的 JSON 数组：第一个字符必须是 [，不要再写任何思考、解释或代码块。' });
-    }
-  }
-  throw new Error('unreachable');
 }
 
 /* ---------- 质检 ---------- */
@@ -574,26 +527,6 @@ document.addEventListener('mousedown', (e) => {
 /* ---------- 导入无障碍：任意 txt/docx 自动转章节格式 ---------- */
 
 /** 纯文本/无标记文本 → 章节 md（按空行分段，自动编号 [P01]…） */
-
-/** docx → 文本（fflate 解压 + w:t 抽取，段落保序） */
-export function docxToText(b64: string): string {
-  const bin = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
-  const files = unzipSync(bin, { filter: (f) => f.name === 'word/document.xml' });
-  const xml = strFromU8(files['word/document.xml']!);
-  const paras = xml
-    .split(/<\/w:p>/)
-    .map((p) => (p.match(/<w:t[^>]*>([^<]*)<\/w:t>/g) ?? []).map((t) => t.replace(/<[^>]+>/g, '')).join(''))
-    .map((s) => s.trim())
-    .filter(Boolean);
-  return paras.join('\n\n');
-}
-
-/** 读 txt/md：字节读入 + 自动编码探测（BOM → 严格 UTF-8 校验 → GB18030 兜底）。
- *  中文环境导出的 txt 常为 GBK/GB2312，直接按 UTF-8 读会报错或乱码——对新手这是"软件坏了"级事故 */
-export async function readTextSmart(path: string): Promise<string> {
-  const b64 = await invoke<string>('read_file_base64', { path });
-  return decodeAuto(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)));
-}
 
 export async function openPathIntoSession(p: string): Promise<void> {
   const name = p.slice(p.lastIndexOf('/') + 1);
@@ -855,62 +788,7 @@ document.addEventListener('mousedown', (e) => {
 /** 内置提示词模板：词库边界 + 句法黑名单 + 句长上限 + 方法论约束 */
 /** 估算 token 的 estTokens 已抽至 pure.ts（对话压缩与请求预估共用口径） */
 
-export const RULE_BY_TYPE: Record<string, string> = {
-  syntax: 'R03-R06',
-  long: 'R07',
-  ref: 'R05',
-  cut: 'R01',
-  stiff: 'R08',
-  paraphrase: 'R00',
-  simpl: 'R02',
-  zh: 'R02',
-  oov: 'R02',
-  hard: 'R02',
-  factw: 'R00',
-  others: 'R00',
-  otherw: 'R00',
-  fact: 'R00',
-  goods: 'R11',
-};
-
 /* ---------- 行内修订对照（左栏所见即所得） ---------- */
-
-/** 保存正文改动：默认直接写原稿文件（首次前自动备份原始版）；关闭"直接修改原稿"则写工作稿 */
-/**
- * 写盘并**记一次编辑历史**。
- *
- * `opts.recordHistory === false` 是给「撤销/重做」用的：那两个动作自己管理 undo/redo 两个栈，
- * **不能让这里再记一遍**——否则 `redoStack = []` 会把刚压进去的重做项清掉
- * （重做于是永远没得做）。
- */
-export async function persistEdit(s: FileSession, newMd: string, opts: { recordHistory?: boolean } = {}): Promise<string> {
-  if (newMd !== s.md && opts.recordHistory !== false) {
-    // 文件级撤销栈（≤50 快照；重做栈清空）
-    (s.undoStack ??= []).push(s.md);
-    if (s.undoStack.length > 50) s.undoStack.shift();
-    s.redoStack = [];
-  }
-  if (s.sourcePath && (S.appConfig.inPlaceEdit ?? true)) {
-    /* 首改前留一份"原始备份"（策略在 `fsx.makeFirstChangeBackup`，与 risk 面板、
-     * aiflow 的 adoptRewrite 共用同一份三态决策）：
-     * 确实不存在才写；**存在但读不出来就中止这一次改动**——
-     * 宁可这一次不改，也不拿教师唯一的原始版去赌。 */
-    await makeFirstChangeBackup()(s.sourcePath, s.md);
-    await invoke('write_text_file', { path: s.sourcePath, content: newMd });
-    return s.sourcePath;
-  }
-  const wf = s.sourcePath ? workPath(s) : (await invoke<string>('reports_dir')) + '/示例_工作稿.md';
-  await invoke('write_text_file', { path: wf, content: newMd });
-  return wf;
-}
-
-function workPath(s: FileSession): string {
-  if (s.sourcePath) {
-    const dir = s.sourcePath.slice(0, s.sourcePath.lastIndexOf('/'));
-    return `${dir}/${s.fileName.replace(/\.(md|txt|markdown)$/i, '')}_工作稿.md`;
-  }
-  return ''; // 示例模式由调用方处理
-}
 
 /* 标记重排 remapMarks(marks, md) 已抽至 pure.ts（O4，行为不变） */
 

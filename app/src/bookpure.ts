@@ -5,6 +5,7 @@
  */
 
 import { chnoFromPath } from './pure.js';
+import { unzipSync, strFromU8 } from 'fflate';
 
 /* ---------- 全书批处理（O2）：队列规划与书级汇总报告（纯逻辑可测） ---------- */
 
@@ -299,8 +300,6 @@ export function progressPct(read: number, total: number | undefined): number {
 
 /* ================= EPUB 导入（拖一本书直接进管线：zip→spine→段落） ================= */
 
-import { unzipSync, strFromU8 } from 'fflate';
-
 export interface EpubChapter {
   title: string;
   paragraphs: string[];
@@ -519,4 +518,17 @@ export function boardSummary(rows: BoardRow[]): { 过门禁: string; 平均生�
     总标记: rows.reduce((n, r) => n + r.标记数, 0),
     采纳率: 建议总数 ? `${Math.round((采纳总数 / 建议总数) * 100)}%（${采纳总数}/${建议总数}）` : '—',
   };
+}
+
+/** docx → 文本（fflate 解压 + w:t 抽取，段落保序）。（2026-09-16 从 main.ts 下沉——纯解析，batch/report 引它。） */
+export function docxToText(b64: string): string {
+  const bin = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+  const files = unzipSync(bin, { filter: (f) => f.name === 'word/document.xml' });
+  const xml = strFromU8(files['word/document.xml']!);
+  const paras = xml
+    .split(/<\/w:p>/)
+    .map((p) => (p.match(/<w:t[^>]*>([^<]*)<\/w:t>/g) ?? []).map((t) => t.replace(/<[^>]+>/g, '')).join(''))
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return paras.join('\n\n');
 }

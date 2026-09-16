@@ -9,6 +9,40 @@
 
 
 
+## [未发布] - 2026-09-16（依赖健康收口 + C1 解环：状态/IO 九符号下沉）
+
+**依赖健康（阶段 B，两项独立提交）**
+
+- `bcc45e3` 移除无用依赖 `wordnet-db`：WordNet 3.1 数据早已提取为 `app/public/wordnet/*.gz`
+  入库（f8d0849），全仓 0 处代码引用，运行时走 `src/core/wordnet.ts` 惰性读资产；
+  补查确认无 CI/构建期再生成脚本。
+- `dc2ac1b` `npm audit fix`：4 个 high 清零（`@huggingface/transformers` 4.2.0→4.3.0、
+  onnxruntime-node→1.30.0、adm-zip→0.6.1、sharp→0.35.4，全部 semver 内，0 major）。
+  冒烟：同一输入对 `tools/fidelity.mjs` 前后对比——对齐/丢句/新增/信号缺失完全一致，
+  cos 均值持平 0.950，中位/最低漂移 ≤0.003。`npm audit` 复测 0 漏洞。
+
+**C1 解环（阶段 C 第一步，只做"闭包干净"的下沉，零行为变化）**
+
+原先 13 个模块反向 import main.ts（main 是 UI 总线，正向引全部视图模块）——
+这是 madge 实测 24 条循环链的主要根子。本步把 9 个只依赖底层的符号原样搬出：
+
+| 符号 | 原址 | 新址 |
+| --- | --- | --- |
+| activeSession / persistEdit / workPath / markPathFor | main.ts | 新模块 `session.ts`（只依赖 state/types/fsx） |
+| chatUntilJson | main.ts | ai.ts（本就依赖 callChat+parseAiJson） |
+| logCalibration | main.ts | calibrationio.ts（台账正本的家） |
+| RULE_BY_TYPE | main.ts | pure.ts（纯常量） |
+| docxToText | main.ts | bookpure.ts（fflate 解析族） |
+| readTextSmart | main.ts | fsx.ts（文件 IO 口径模块） |
+
+12 个引用方同批改 import；`fileSummary` 因隐藏依赖（mergedSelection→lexicon→main，
+lexicon 的反向边要到 C2 才断）按预案拆出单列，留待 C2 批次。
+架构地图 4.2 同步 31→32 模块（+session.ts）。
+
+**验证**：`npm run verify` 全绿（1029 项：1028 通过 / 0 失败 / 1 跳过）；
+函数体逐字搬移（diff 性质=搬移+import 调整，无逻辑改动）；新边均为自上而下方向，无新增环。
+
+
 ## [未发布] - 2026-09-16（合并补回 4 处修复的根因收口：每处都不再靠"记得走对的路"）
 
 **为什么再做一轮**：2026-09-15 补回的 4 处修复（连点丢事件 / 备份三态 / 查词死按钮 /

@@ -5,7 +5,8 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import { $, setStatus, toast, pop } from './uikit.js';
-import { activeSession, persistEdit, renderAll } from './main.js';
+import { activeSession, persistEdit } from './session.js';
+import { renderAll } from './main.js';
 import { scheduleSaveLastSession } from './shelf.js';
 import { csvCell, remapMarks, redoStep, undoStep } from './pure.js';
 import { scheduleSave } from './review.js';

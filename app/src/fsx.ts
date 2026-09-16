@@ -29,6 +29,7 @@
  */
 
 import { invoke } from '@tauri-apps/api/core';
+import { decodeAuto } from './pure.js';
 
 export type ReadOutcome = { kind: 'ok'; text: string } | { kind: 'missing' } | { kind: 'unreadable'; error: string };
 
@@ -177,3 +178,11 @@ export const appendCsvLine = appendCsvLineWith({
   write: (p, c) => invoke<void>('write_text_file', { path: p, content: c }),
   append: (p, l) => invoke<void>('append_text_file', { path: p, content: l }),
 });
+
+/** 读 txt/md：字节读入 + 自动编码探测（BOM → 严格 UTF-8 校验 → GB18030 兜底）。
+ *  中文环境导出的 txt 常为 GBK/GB2312，直接按 UTF-8 读会报错或乱码——对新手这是"软件坏了"级事故。
+ *  （2026-09-16 从 main.ts 下沉——只依赖 invoke 与 pure.decodeAuto；batch/pipew/report 引它。） */
+export async function readTextSmart(path: string): Promise<string> {
+  const b64 = await invoke<string>('read_file_base64', { path });
+  return decodeAuto(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)));
+}

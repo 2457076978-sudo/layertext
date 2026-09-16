@@ -1131,3 +1131,22 @@ export function redoStep(undo: readonly string[], redo: readonly string[], cur: 
   if (!redo.length) return null;
   return { undo: [...undo, cur], redo: redo.slice(0, -1), md: redo[redo.length - 1]! };
 }
+
+/** AI 建议类型 → 规则号（台账列用）。（2026-09-16 从 main.ts 下沉——纯常量表，aiflow 引它。） */
+export const RULE_BY_TYPE: Record<string, string> = {
+  syntax: 'R03-R06',
+  long: 'R07',
+  ref: 'R05',
+  cut: 'R01',
+  stiff: 'R08',
+  paraphrase: 'R00',
+  simpl: 'R02',
+  zh: 'R02',
+  oov: 'R02',
+  hard: 'R02',
+  factw: 'R00',
+  others: 'R00',
+  otherw: 'R00',
+  fact: 'R00',
+  goods: 'R11',
+};

@@ -7,7 +7,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { S, esc } from './state.js';
 import { $, setStatus } from './uikit.js';
 import { readTextChecked } from './fsx.js';
-import { activeSession } from './main.js';
+import { activeSession } from './session.js';
 import { buildLexiconNow } from './lexicon.js';
 import { renderReportPane } from './report.js';
 import { showAiSettings } from './settings.js';

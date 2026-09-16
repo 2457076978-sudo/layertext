@@ -7,7 +7,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
 import { S, type AppConfig } from './state.js';
-import { failoverKeyAccounts, withRetry } from './pure.js';
+import { failoverKeyAccounts, withRetry, parseAiJson } from './pure.js';
 import { DEFAULT_MAX_LEN } from './types.js';
 import {
   aiErrHuman as aiErrHumanCore,
@@ -563,4 +563,26 @@ export async function chatStream(
     }
   });
   return { ...result, usage: usageText(usage) };
+}
+
+/**
+ * 请求直到解析出 JSON：若模型把整轮输出耗在思考上（无 [ 字符），自动追发"直接输出 JSON"再试一次。
+ * （2026-09-16 从 main.ts 下沉到 ai.ts——chatUntilJson 只依赖 callChat 与 parseAiJson，
+ *  而它被 aiflow/grading/pipew/report 四个模块引用，留在 main 就是四条反向边。）
+ *
+ * `preferAux`：这条活适合辅助模型时置真（**由调用方判断**"短输入 + 单任务 + 输出可机检"）。
+ * 辅助模型失败/交白卷会自动回主模型，且这件事会写在状态行上。
+ */
+export async function chatUntilJson(messages: { role: string; content: string }[], maxTokens: number, scene: string, preferAux = false): Promise<{ raw: unknown[]; usage: string }> {
+  const msgs = [...messages];
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const { content, usage } = await callChat(msgs, maxTokens, undefined, scene, { preferAux });
+    try {
+      return { raw: parseAiJson(content), usage };
+    } catch (e) {
+      if (attempt === 1 || content.includes('[')) throw e;
+      msgs.push({ role: 'user', content: '你刚才的整段回答都是思考过程，还没有输出结果。请现在直接输出完整的 JSON 数组：第一个字符必须是 [，不要再写任何思考、解释或代码块。' });
+    }
+  }
+  throw new Error('unreachable');
 }
