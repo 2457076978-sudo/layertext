@@ -186,3 +186,13 @@ export async function readTextSmart(path: string): Promise<string> {
   const b64 = await invoke<string>('read_file_base64', { path });
   return decodeAuto(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)));
 }
+
+/** 字节 → base64（分块防调用栈溢出）。（2026-09-16 从 bookio.ts 下沉——纯字节工具，
+ *  与 readTextSmart 的 atob 互为镜像，本就属于文件 IO 口径模块；寄居导出模块伤内聚。） */
+export function bufToB64(buf: ArrayBuffer): string {
+  const bin = new Uint8Array(buf);
+  let s = '';
+  const CHUNK = 0x8000;
+  for (let i = 0; i < bin.length; i += CHUNK) s += String.fromCharCode(...bin.subarray(i, i + CHUNK));
+  return btoa(s);
+}

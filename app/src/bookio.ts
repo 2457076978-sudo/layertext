@@ -6,7 +6,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, WidthType } from 'docx';
 import { S, esc, globalInstructionsCaptured, globalInstructionsValue, rememberGlobalInstructions } from './state.js';
-import { readTextChecked } from './fsx.js';
+import { readTextChecked, bufToB64 } from './fsx.js';
 import { $, setStatus } from './uikit.js';
 import { activeSession, persistEdit } from './session.js';
 import { renderReader, sidebarHandlers } from './reader.js';
@@ -167,14 +167,6 @@ export async function loadBookConfig(dir: string): Promise<boolean> {
 }
 
 /* ---------- 导出 Word（学生用，含章末词句卡） ---------- */
-
-export function bufToB64(buf: ArrayBuffer): string {
-  const bin = new Uint8Array(buf);
-  let s = '';
-  const CHUNK = 0x8000;
-  for (let i = 0; i < bin.length; i += CHUNK) s += String.fromCharCode(...bin.subarray(i, i + CHUNK));
-  return btoa(s);
-}
 
 export async function exportDocx(): Promise<void> {
   const s = activeSession();
