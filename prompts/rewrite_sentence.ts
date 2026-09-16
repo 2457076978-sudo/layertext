@@ -1,0 +1,8 @@
+/** 原 prompts/rewrite_sentence.md，2026-09-16 内联为 TS 常量（vite `?raw` 同一字符串，行为零变化）。
+ *  改提示词流程不变：改这里 + prompts/manifest.json 版本号 + CHANGELOG（见 prompts/README.md）。 */
+export const promptRewriteSentence = `句长上限 {{maxLen}} 词/句；被动语态、定语从句禁用，过去完成时一律改写
+同义转换优先：revised 保持与原句相当的信息量与篇幅——细节、修饰照常转述，只换说法不压缩（教师意图为"建议删"时才可删减）
+教师意图：{{intent}}
+请改写下面这句。输出要求：回答的第一个字符必须是 [，只输出一个 JSON 数组（形如 [{"original":"…","revised":"…","basis":"…"}]），不要思考过程、不要解释、不要代码块。original 必须与原句一字不差：
+{{sent}}
+`;

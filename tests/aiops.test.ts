@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
 import {
   AUX_MAX_WORDS,
   auxReady,
@@ -22,15 +23,25 @@ import {
   toCostLine,
 } from '../src/core/aiops.js';
 
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
-
-test('manifest 解析与全部提示词文件齐全（外置契约）', () => {
-  const m = parseManifest(readFileSync(join(ROOT, 'prompts', 'manifest.json'), 'utf-8'));
+test('manifest 解析与全部提示词常量齐全（单一正本契约，2026-09-16 起 prompts 内联为 TS）', async () => {
+  const { manifestText } = await import('../prompts/manifest.js');
+  const m = parseManifest(manifestText);
   assert.match(m.setVersion, /^v\d+\.\d+$/); // 版本随 manifest changelog 递增，不在此锁死
+  /* 静态导入全部常量（模板串动态 import 不被 tsc 跟随、不会进 dist）：
+   * manifest 登记的名字必须在这里有对应非空常量。 */
+  const consts: Record<string, string> = {
+    system_simplify: (await import('../prompts/system_simplify.js')).promptSimplify,
+    system_draft: (await import('../prompts/system_draft.js')).promptDraft,
+    system_assistant: (await import('../prompts/system_assistant.js')).promptAssistant,
+    rewrite_sentence: (await import('../prompts/rewrite_sentence.js')).promptRewriteSentence,
+    plot_points: (await import('../prompts/plot_points.js')).promptPlotPoints,
+    grading: (await import('../prompts/grading.js')).promptGrading,
+    reading_quiz: (await import('../prompts/reading_quiz.js')).promptReadingQuiz,
+    review_material: (await import('../prompts/review_material.js')).promptReviewMaterial,
+  };
   for (const name of Object.keys(m.prompts)) {
     assert.ok(m.prompts[name], `manifest 缺 ${name}`);
-    const body = readFileSync(join(ROOT, 'prompts', m.prompts[name].file), 'utf-8');
-    assert.ok(body.trim().length > 20, `${name} 内容为空`);
+    assert.ok((consts[name] ?? '').trim().length > 20, `${name} 内容为空（prompts/${name}.ts 缺常量或未导出）`);
   }
   assert.ok(m.prompts.plot_points, '初步诊断需要 plot_points 提示词');
 });
@@ -163,7 +174,7 @@ test('★ manifest 里的每个提示词都要真的被打包进 App（否则发
    * 白花一次 API 调用，教师拿到的是模型自由发挥的产物。这类"漏一行 import"的失效，
    * 只有把 manifest 与打包表对起来才拦得住。 */
   const repo = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
-  const manifest = JSON.parse(readFileSync(join(repo, 'prompts', 'manifest.json'), 'utf-8')) as {
+  const manifest = JSON.parse(readFileSync(join(repo, 'prompts', 'manifest.ts'), 'utf-8').match(/`([\s\S]*)`/)![1]!) as {
     prompts: Record<string, unknown>;
   };
   const names = Object.keys(manifest.prompts);

@@ -31,13 +31,11 @@ const REPORTS_DIR = join(ROOT, 'eval-reports');
 const BASELINE_PATH = join(EVALS_DIR, 'baseline.json');
 const BUNDLED_WORDLIST = join(ROOT, 'assets', 'wordlists', 'curriculum_2022_level3_1600.txt');
 const AMENDMENT_WORDLIST = join(ROOT, 'assets', 'wordlists', 'curriculum_2022_amendment.txt');
-const PROMPTS_DIR = join(ROOT, 'prompts');
 
-/** 提示词与生产同源（W3）：prompts/ 目录直接读取 */
-const PROMPT_BODIES: Record<string, string> = {
-  system_simplify: readFileSync(join(PROMPTS_DIR, 'system_simplify.md'), 'utf-8'),
-  system_draft: readFileSync(join(PROMPTS_DIR, 'system_draft.md'), 'utf-8'),
-};
+/* 提示词与生产同源（W3）：与桌面应用 import 同一份 TS 常量（2026-09-16 起 prompts 内联为 TS，单一正本） */
+import { promptSimplify } from '../prompts/system_simplify.js';
+import { promptDraft } from '../prompts/system_draft.js';
+const PROMPT_BODIES = { system_simplify: promptSimplify, system_draft: promptDraft };
 
 /** 内置课标词表 + 补录（数词/星期/月份等存档缺失块，见 amendment 文件头注释） */
 function bundledWordlistTexts(): string[] {

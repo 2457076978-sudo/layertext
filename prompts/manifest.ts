@@ -1,0 +1,84 @@
+/** 原 prompts/manifest.json，2026-09-16 内联为 TS 常量（与 parseManifest 的协作不变）。 */
+export const manifestText = `{
+  "setVersion": "v1.6",
+  "prompts": {
+    "system_simplify": {
+      "version": "v1.1",
+      "file": "system_simplify.md",
+      "desc": "修订候选 system：词库边界/句法黑名单/保真/输出 JSON 格式（教师长期约定与书级规则由代码追加）"
+    },
+    "system_draft": {
+      "version": "v1.1",
+      "file": "system_draft.md",
+      "desc": "AI 简化本章 system：逐段改写规则（占位符 {{tierRule}}/{{chnoNote}}/{{instructions}}）；v1.1 加同义转换优先/篇幅守恒（±15%）"
+    },
+    "system_assistant": {
+      "version": "v1.0",
+      "file": "system_assistant.md",
+      "desc": "AI 助手身份与固定工作方式（占位符 {{submitRule}}/{{fileName}}/{{markCount}}）"
+    },
+    "rewrite_sentence": {
+      "version": "v1.2",
+      "file": "rewrite_sentence.md",
+      "desc": "逐句改写 user 模板（占位符 {{maxLen}}/{{intent}}/{{sent}}）；v1.2 加同义转换优先（信息量与篇幅守恒，建议删才可删）"
+    },
+    "plot_points": {
+      "version": "v1.0",
+      "file": "plot_points.md",
+      "desc": "初步诊断·情节要点提取（占位符 {{chapter}}）：摘出简化不能丢的情节点/伏笔，教师勾选后进要点配额"
+    },
+    "grading": {
+      "version": "v1.0",
+      "file": "grading.md",
+      "desc": "AI 批改候选 user 模板（占位符 {{student}}/{{vocabNote}}/{{engine}}/{{text}}）：教师批改域——AI 只出候选，教师勾选定稿"
+    },
+    "reading_quiz": {
+      "version": "v1.0",
+      "file": "reading_quiz.md",
+      "desc": "读后检测题生成 user 模板（占位符 {{chapter}}/{{words}}）：理解/推断/词汇三型选择题候选，教师勾选定卷；词汇题优先复现队列词"
+    },
+    "review_material": {
+      "version": "v1.0",
+      "file": "review_material.md",
+      "desc": "定向复习材料 system（占位符 {{words}}/{{grammar}}/{{instructions}}/{{vocabRule}}）：作业/教材→班级口径置换+队列词定向复现+目标语法点融入"
+    }
+  },
+  "changelog": [
+    {
+      "version": "v1.6",
+      "date": "2026-09-10",
+      "note": "同义转换/篇幅守恒（Wayne 拍板'尽量同义转换，别大幅度缩减原文'）：system_draft v1.1 每段输出词数与原文相当（±15%）细节修饰照常转述；rewrite_sentence v1.2 同口径；引擎侧配套段级收缩率>15% 自动重试（batch.ts）"
+    },
+    {
+      "version": "v1.5",
+      "date": "2026-09-10",
+      "note": "新增 review_material（定向复习）：作业/教材改写为复习材料，队列词定向复现 8~12 个+目标语法点自然融入（组合拳'生成侧定向注入'落地）"
+    },
+    {
+      "version": "v1.4",
+      "date": "2026-09-10",
+      "note": "新增 grading（批改域）与 reading_quiz（读后检测题）：AI 只出候选，教师勾选定稿"
+    },
+    {
+      "version": "v1.3",
+      "date": "2026-09-09",
+      "note": "system_simplify v1.1：revised 必须英文（仅生词注释可中文）、original 逐字复制所在句——治 AI 输出中文说明文字与原句改写"
+    },
+    {
+      "version": "v1.2",
+      "date": "2026-09-06",
+      "note": "去预设难度（用户拍板：单文本一次简化，多版本=导入再简化）：rewrite_sentence 去掉 {{tier}} 层级字样"
+    },
+    {
+      "version": "v1.1",
+      "date": "2026-09-06",
+      "note": "新增 plot_points（用户点名：新文字初步诊断+AI 摘情节要点预填配额）"
+    },
+    {
+      "version": "v1.0",
+      "date": "2026-09-06",
+      "note": "W3 外置：与 v1.0.0 内置提示词逐字一致，零行为变化。变更任何提示词后在此追加一行，并同步 bump 对应 version 与 setVersion。"
+    }
+  ]
+}
+`;

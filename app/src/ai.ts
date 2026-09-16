@@ -21,16 +21,16 @@ import {
   type ProviderTarget,
   type PromptManifest,
 } from '../../src/core/aiops.js';
-import manifestText from '../../prompts/manifest.json?raw';
-import promptSimplify from '../../prompts/system_simplify.md?raw';
-import promptDraft from '../../prompts/system_draft.md?raw';
-import promptAssistant from '../../prompts/system_assistant.md?raw';
-import promptRewriteSentence from '../../prompts/rewrite_sentence.md?raw';
-import promptPlotPoints from '../../prompts/plot_points.md?raw';
+import { manifestText } from '../../prompts/manifest.js';
+import { promptSimplify } from '../../prompts/system_simplify.js';
+import { promptDraft } from '../../prompts/system_draft.js';
+import { promptAssistant } from '../../prompts/system_assistant.js';
+import { promptRewriteSentence } from '../../prompts/rewrite_sentence.js';
+import { promptPlotPoints } from '../../prompts/plot_points.js';
 /* 2026-09-14：这三个此前漏登记，loadPrompt 会返回空串——三条链路在发空提示词。 */
-import promptGrading from '../../prompts/grading.md?raw';
-import promptReadingQuiz from '../../prompts/reading_quiz.md?raw';
-import promptReviewMaterial from '../../prompts/review_material.md?raw';
+import { promptGrading } from '../../prompts/grading.js';
+import { promptReadingQuiz } from '../../prompts/reading_quiz.js';
+import { promptReviewMaterial } from '../../prompts/review_material.js';
 
 let ui: { onStatus?: (s: string) => void } | null = null;
 export function setAiUi(u: { onStatus?: (s: string) => void }): void {
