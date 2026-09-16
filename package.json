@@ -20,7 +20,6 @@
     "verify:rust": "cd app/src-tauri && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test",
     "prepare": "husky",
     "fidelity": "node tools/fidelity.mjs",
-    "preflight": "node tools/preflight.mjs",
     "perf:bench": "npm run build && node tools/perf_bench.mjs"
   },
   "lint-staged": {
@@ -48,8 +47,7 @@
     "lint-staged": "^17.5.0",
     "prettier": "^3.9.6",
     "typescript": "^5.6.0",
-    "typescript-eslint": "^8.70.0",
-    "wordnet-db": "^3.1.14"
+    "typescript-eslint": "^8.70.0"
   },
   "license": "SEE LICENSE IN LICENSE",
   "dependencies": {
