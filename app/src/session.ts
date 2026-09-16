@@ -13,6 +13,8 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import { S } from './state.js';
+import { saveConfig } from './ai.js';
+import { scrollNow } from './uikit.js';
 import { makeFirstChangeBackup } from './fsx.js';
 import type { FileSession } from './types.js';
 
@@ -64,4 +66,32 @@ function workPath(s: FileSession): string {
     return `${dir}/${s.fileName.replace(/\.(md|txt|markdown)$/i, '')}_工作稿.md`;
   }
   return ''; // 示例模式由调用方处理
+}
+
+/* ────────────────────── 上次会话的持久化（2026-09-16 从 shelf.ts 下沉，C3 cut2） ────────────────────── */
+/* 原先寄居书架模块：edit.ts 为了防抖保存要 import shelf，shelf 为了滚动位置要 import edit——
+ * edit↔shelf 互指成环。会话的保存本来就是 session 模块的职责（内聚），搬家后双向边都消失。 */
+
+let lastSessionTimer: ReturnType<typeof setTimeout> | null = null;
+
+export function saveLastSession(): void {
+  if (S.sessions.length === 0) return;
+  const cur = activeSession();
+  if (cur) cur.scrollTop = scrollNow();
+  const dir = S.sessions.find((x) => x.sourcePath)?.sourcePath;
+  S.appConfig.lastSession = {
+    /* 书根锚定（书架注册目录）：hero"继续上次编辑"按 bookDir===书.目录 匹配，
+     * 写章目录会导致匹配永远失败（章目录在书根下多层）；无书上下文时退回文件父目录 */
+    bookDir: S.currentBookDir ?? (dir ? dir.slice(0, dir.lastIndexOf('/')) : undefined),
+    workspace: S.activeWorkspace ?? undefined,
+    files: S.sessions.filter((x) => x.sourcePath).map((x) => ({ path: x.sourcePath!, scroll: x.scrollTop ?? 0 })),
+    activeIdx: S.activeIdx,
+    savedAt: new Date().toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }),
+  };
+  void saveConfig();
+}
+
+export function scheduleSaveLastSession(): void {
+  if (lastSessionTimer) clearTimeout(lastSessionTimer);
+  lastSessionTimer = setTimeout(saveLastSession, 1500);
 }

@@ -9,6 +9,19 @@
 
 
 
+## [未发布] - 2026-09-16（C3 lite：清真错位三处 + 残环保留标注；度量切换为横向边数）
+
+**度量修订**：madge 链条数被证实是 SCC 非穷举枚举（cut1 实证：删边后 11→12，逐边举证
+20/20 均为存量边），计数不单调、不可作门槛——**C3 起度量切换为"横向边数"**
+（静态+动态双向扫描，单调可复现）。防 Goodhart 声明与边分类见 docs/文件架构.md 4.2.1。
+
+**cut1（bufToB64→fsx，本提交一并入库，逐边举证表在会话记录）**：report→bookio 边删除。
+**cut2（本提交）**：scrollEl/scrollNow→uikit；saveLastSession/scheduleSaveLastSession→session。
+edit↔shelf 双向边消失。横向边 28→25，全部残边属"已评估保留"或"挂账"两类（见 4.2.1）。
+
+**验证**：npm run verify 全绿；tsc/lint 0 警告；架构地图同步（uikit/session 行 + 4.2.1 治理节）。
+
+
 ## [未发布] - 2026-09-16（C2 解环：UI 总线端口 uibus，main 的 13 条反向边全断）
 
 **补查（三项，全部只读）**

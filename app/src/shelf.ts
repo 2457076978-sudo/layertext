@@ -7,11 +7,11 @@ import { invoke } from '@tauri-apps/api/core';
 import { open as openFileDialog } from '@tauri-apps/plugin-dialog';
 import { S, esc } from './state.js';
 import { $, setStatus, toast, hidePop } from './uikit.js';
-import { activeSession } from './session.js';
+import { activeSession, saveLastSession } from './session.js';
 import { uibus } from './uibus.js';
 import { ensureClassGroups } from './settings.js';
 import { loadBookConfig } from './bookio.js';
-import { scrollEl, scrollNow } from './edit.js';
+import { scrollEl } from './uikit.js';
 import { saveConfig } from './ai.js';
 import { jumpToBookmark } from './review.js';
 import { baseName } from './pure.js';
@@ -721,27 +721,6 @@ export function toggleVersionPop(): void {
 }
 
 /* ---- 会话恢复：回到上次编辑 ---- */
-let lastSessionTimer: ReturnType<typeof setTimeout> | null = null;
-export function saveLastSession(): void {
-  if (S.sessions.length === 0) return;
-  const cur = activeSession();
-  if (cur) cur.scrollTop = scrollNow();
-  const dir = S.sessions.find((x) => x.sourcePath)?.sourcePath;
-  S.appConfig.lastSession = {
-    /* 书根锚定（书架注册目录）：hero"继续上次编辑"按 bookDir===书.目录 匹配，
-     * 写章目录会导致匹配永远失败（章目录在书根下多层）；无书上下文时退回文件父目录 */
-    bookDir: S.currentBookDir ?? (dir ? dir.slice(0, dir.lastIndexOf('/')) : undefined),
-    workspace: S.activeWorkspace ?? undefined,
-    files: S.sessions.filter((x) => x.sourcePath).map((x) => ({ path: x.sourcePath!, scroll: x.scrollTop ?? 0 })),
-    activeIdx: S.activeIdx,
-    savedAt: new Date().toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }),
-  };
-  void saveConfig();
-}
-export function scheduleSaveLastSession(): void {
-  if (lastSessionTimer) clearTimeout(lastSessionTimer);
-  lastSessionTimer = setTimeout(saveLastSession, 1500);
-}
 async function resumeLastSession(): Promise<void> {
   const ls = S.appConfig.lastSession;
   if (!ls?.files?.length) {

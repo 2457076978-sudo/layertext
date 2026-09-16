@@ -12,7 +12,7 @@ import { parseEpubChapters, epubChapterMd } from './bookpure.js';
 import { renderModePill, switchView as switchViewDom, bindViewTabs, type ViewName } from './widgets.js';
 import { createProjectConfig, findProjectConfig, io as panelIo, renderDataPane } from './datapanel.js';
 import { makeFirstChangeBackup, readTextChecked, readTextSmart } from './fsx.js';
-import { activeSession, markPathFor } from './session.js';
+import { activeSession, markPathFor, saveLastSession, scheduleSaveLastSession } from './session.js';
 import { uibus } from './uibus.js';
 import { docxToText } from './bookpure.js';
 import { teacherIdOf } from '../../src/core/teachers.js';
@@ -51,8 +51,6 @@ import {
   closeToc,
   closeShelfCtxMenu,
   switchWorkspace,
-  scheduleSaveLastSession,
-  saveLastSession,
   loadWorkspaces,
   alignWorkspaceToSession,
 } from './shelf.js';
@@ -61,7 +59,8 @@ import { restoreChat, chatRender, hideGatePop, gatePop } from './chat.js';
 import { saveBookConfig, loadBookConfig, exportDocx, exportTts, showRewritePop, showAnkiExport } from './bookio.js';
 import { showGradingPop, showClassGradingPop } from './grading.js';
 import { showRevPop } from './reviewgen.js';
-import { scrollEl, scrollNow, doUndo, doRedo, openFind, closeFind, runFind, jumpFind, replaceAllFind, jumpNextRisk, popHotkey, resetRiskJump } from './edit.js';
+import { doUndo, doRedo, openFind, closeFind, runFind, jumpFind, replaceAllFind, jumpNextRisk, popHotkey, resetRiskJump } from './edit.js';
+import { scrollEl, scrollNow } from './uikit.js';
 import { buildLexiconNow, mergedSelection, reinforceWordsNow, importVocabFile, importTermsFile, importProperFile, loadLocalExampleConfig } from './lexicon.js';
 import { loadConfig, saveConfig, setAiUi } from './ai.js';
 import exampleMd from '../../examples/texts/aesop_tortoise_hare.md?raw';

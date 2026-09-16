@@ -72,3 +72,16 @@ export function showSummaryPop(html: string): void {
     window.dispatchEvent(new CustomEvent('layertext:open-suggest'));
   });
 }
+
+/** 阅读区滚动定位（2026-09-16 从 edit.ts 下沉，C3 cut2）：纯 DOM 工具，
+ *  与 uikit 的 DOM 工具家族同属；原先寄居编辑器模块，是 edit↔shelf 环的一边。 */
+export function scrollEl(): HTMLElement | null {
+  for (const sel of ['#reader', '.content', 'main']) {
+    const el = document.querySelector<HTMLElement>(sel);
+    if (el && el.scrollHeight > el.clientHeight) return el;
+  }
+  return document.querySelector<HTMLElement>('#reader');
+}
+export function scrollNow(): number {
+  return scrollEl()?.scrollTop ?? 0;
+}

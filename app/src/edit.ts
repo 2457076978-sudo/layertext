@@ -7,7 +7,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { $, setStatus, toast, pop } from './uikit.js';
 import { activeSession, persistEdit } from './session.js';
 import { uibus } from './uibus.js';
-import { scheduleSaveLastSession } from './shelf.js';
+import { scheduleSaveLastSession } from './session.js';
 import { csvCell, remapMarks, redoStep, undoStep } from './pure.js';
 import { scheduleSave } from './review.js';
 import { CHANGELOG_HEADER } from './types.js';
@@ -15,17 +15,6 @@ import { simplifyMaxLen } from './ai.js';
 import type { FileSession } from './types.js';
 
 /* ================= UX 补齐（2026-09-08 Wayne：文本软件该有的东西） ================= */
-
-export function scrollEl(): HTMLElement | null {
-  for (const sel of ['#reader', '.content', 'main']) {
-    const el = document.querySelector<HTMLElement>(sel);
-    if (el && el.scrollHeight > el.clientHeight) return el;
-  }
-  return document.querySelector<HTMLElement>('#reader');
-}
-export function scrollNow(): number {
-  return scrollEl()?.scrollTop ?? 0;
-}
 
 /* ---- 撤销 / 重做 ---- */
 export async function applyMdSnapshot(s: FileSession, md: string, label: string, opts: { recordHistory?: boolean } = {}): Promise<void> {
