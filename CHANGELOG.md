@@ -9,6 +9,36 @@
 
 
 
+## [未发布] - 2026-09-16（核心链补测 ①：applyWordSimplifications 原样直测——不拆生产代码）
+
+**决策记录（⑥，避免重议）**：曾提案抽取 wordSimplDecision/wordSimplHits 纯函数再测——
+被否决，理由：**这次拆不是必须，是为测试而拆，方向反了**。依赖经 mockIPC 全部可在 node
+直测；抽取推迟到「语法档」落地时顺手做（届时签名本来要改）。测试夹具表驱动并预留
+语法档参数位（备案字段，现仅缺省档）。
+
+**三条产品纪律各一条 case（(a) 最重）**：
+- (a) 教师指定优先——**两道防线都验**：指定词不进 AI 输入（本例 0 次 AI 调用）+ 指定值最后覆盖；
+- (b) 同词一次决策（uniq Map），段内 3 处全部替换互不错位；
+- (c) AI 兜底 + 中文值拒用（边界防线）→ 降级本地词典加注。
+
+**测试环境新增（披露）**：`@tauri-apps/plugin-dialog` 根 devDeps（A2 同型，app 链第三个小包）；
+`tools/raw-hook-impl.mjs`——vite `?raw` 资产的 node 加载钩子（**随 _dom_env 按需注册**，
+曾试全局 --import，实测注册钩子本身会改变 node:test 求值时序、打破 lexiconstore 真跑组，
+已改按需并记录）；`tools/app-pkg-stubs/`——xlsx/docx 导入占位（带已知未修 advisory 不入根依赖，
+被真用即抛，见其 README）。
+
+**承诺（④）**：等价性 harness（临时探针脚本）用后已删、不入库；本批走直测无 golden 快照，
+未来若有快照须逐条人工 review 确认记的是期望行为而非现状捕捉。
+
+**mockIPC 协议知识（③，活探针实测）**：AI 注入走 plugin-http 三命令
+（fetch→fetch_send→fetch_read_body），**分块字节流协议：数据块 […,0] + 终止块 [1]**
+（喂错 OOM 或空体）；请求体 data 字段是字节数组需先解码；另需 load_api_key。
+全文见 tests/wordsimpl.test.ts 头注释。
+
+**验证**：npm run verify 全绿 **1035 项（1034/0/1）**；eval 基线一致（黑名单 100%）；
+npm audit 0 漏洞。
+
+
 ## [未发布] - 2026-09-16（测试基建三步：A1 幽灵依赖 / A2 根测试依赖 / 甲·提示词内联 TS）
 
 **A1（`87ec2b9`）**：app/package.json 补声明 `@tauri-apps/plugin-http@^2.6.0`——修复幽灵依赖
