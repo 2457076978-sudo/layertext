@@ -229,9 +229,14 @@ function sourceOf(ch) {
 }
 
 const R = { 结构: [], 梯度: [], 语义: [], 注释: [], 照抄: [], 尾部: {} };
+const unnotedWords = {};
 const unnotedRate = { A: { tok: 0, unk: 0 }, M: { tok: 0, unk: 0 }, B: { tok: 0, unk: 0 } };
 const sentLens = { A: [], M: [], B: [] };
-const annoTypes = (t) => new Set([...t.matchAll(/([a-z][a-z-]*)（[^）]*）/g)].map((m) => m[1].toLowerCase()));
+const annoTypes = (t) => {
+  const s = new Set([...t.matchAll(/([A-Za-z][A-Za-z-]*)（[^）]*）/g)].map((m) => m[1].toLowerCase()));
+  for (const w of [...s]) if (w.includes('-')) for (const p of w.split('-')) if (p.length > 2) s.add(p);
+  return s;
+};
 
 for (const ch of CH) {
   const src = sourceOf(ch);
@@ -265,22 +270,35 @@ for (const ch of CH) {
   // ② 梯度：同段 B 未注 ≤ A；B 均句长 ≤ A
   const unnotedSeg = (tk) => {
     const m = new Map();
+    const words = new Map();
     const ann = annoTypes(tiers[tk].md);
     for (const [id, t] of tiers[tk].segs) {
       let n = 0;
+      const ws = [];
       for (const w of clean(t).match(/[a-z]+/g) || []) {
         if (w.length < 2 && w !== 'a' && w !== 'i') continue;
-        if (isUnk(w) && !ann.has(w)) n++;
+        if (isUnk(w) && !ann.has(w)) {
+          n++;
+          ws.push(w);
+        }
       }
       m.set(id, n);
+      words.set(id, ws);
     }
+    unnotedWords[tk] = words;
     return m;
   };
   const uB = unnotedSeg('B'),
     uA = unnotedSeg('A');
   let bOver = [];
   for (const id of ids.B) if (ids.A.includes(id) && (uB.get(id) || 0) > (uA.get(id) || 0)) bOver.push(`${id}(B${uB.get(id)}/A${uA.get(id)})`);
-  if (bOver.length) R.梯度.push(`${ch} 同段B未注>A：${bOver.slice(0, 6).join(' ')}${bOver.length > 6 ? ` 等${bOver.length}段` : ''}`);
+  if (bOver.length) {
+    const wlist = bOver
+      .slice(0, 4)
+      .map((x) => `${x.split('(')[0]}:${(unnotedWords.B.get(x.split('(')[0]) || []).join(',')}`)
+      .join(' | ');
+    R.梯度.push(`${ch} 同段B未注>A：${bOver.slice(0, 6).join(' ')}${bOver.length > 6 ? ` 等${bOver.length}段` : ''} ｜词：${wlist}`);
+  }
   const avgSent = (tk) => {
     const ls = [];
     for (const t of tiers[tk].segs.values())
