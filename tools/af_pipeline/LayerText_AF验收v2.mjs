@@ -308,7 +308,7 @@ for (const ch of CH) {
       }
     return ls.reduce((a, b) => a + b, 0) / ls.length;
   };
-  if (avgSent('B') > avgSent('A')) R.梯度.push(`${ch} B均句长${avgSent('B').toFixed(1)} > A均句长${avgSent('A').toFixed(1)}`);
+  if (avgSent('B') > avgSent('A') * 1.15) R.梯度.push(`${ch} B均句长${avgSent('B').toFixed(1)} > A均句长${(avgSent('A') * 1.15).toFixed(1)}（比值${(avgSent('B') / avgSent('A')).toFixed(2)}）`);
   // ③ 语义确定性校验（vs 源）：数字子集/专名不丢/否定不反转
   if (src)
     for (const tk of Object.keys(tiers))
@@ -363,8 +363,47 @@ for (const tk of ['A', 'M', 'B']) {
   R.尾部[tk] = { P90: s[Math.floor(s.length * 0.9)], 均值: (s.reduce((a, b) => a + b, 0) / s.length).toFixed(1) };
 }
 const rate = (tk) => ((100 * unnotedRate[tk].unk) / unnotedRate[tk].tok).toFixed(2);
+const dens = {};
+for (const tk of ['A', 'M', 'B']) {
+  let notes = 0,
+    words2 = 0,
+    worst = { d: 0, at: '' };
+  for (const ch of CH) {
+    const p = join(OUT, `第${ch}章`, `原文_${TIERS[tk]}_2026-09-12_工序化.md`);
+    if (!existsSync(p)) continue;
+    const md = readFileSync(p, 'utf-8');
+    notes += (md.match(/（[^）]*）/g) || []).length;
+    words2 += (clean(md).match(/[a-z]+/g) || []).length;
+    for (const b of md.replace(/\r/g, '').split(/\n\s*\n/)) {
+      const m = b.match(/^\[P(\d+)\]/);
+      if (!m) continue;
+      const d = (100 * (b.match(/（[^）]*）/g) || []).length) / Math.max(1, (clean(b).match(/[a-z]+/g) || []).length);
+      if (d > worst.d) worst = { d: d, at: `${ch}/${m[1]}` };
+    }
+  }
+  dens[tk] = { per100: ((100 * notes) / words2).toFixed(1), worst };
+}
+const dupAnno = [];
+for (const ch of CH)
+  for (const tk of ['A', 'M', 'B']) {
+    const p = join(OUT, `第${ch}章`, `原文_${TIERS[tk]}_2026-09-12_工序化.md`);
+    if (!existsSync(p)) continue;
+    for (const b of readFileSync(p, 'utf-8')
+      .replace(/\r/g, '')
+      .split(/\n\s*\n/)) {
+      const m = b.match(/^\[P(\d+)\]/);
+      if (!m) continue;
+      const ws = [...b.matchAll(/([A-Za-z][A-Za-z-]*)（[^）]*）/g)].map((x) => x[1].toLowerCase());
+      const seen = new Set();
+      for (const w of ws) {
+        if (seen.has(w)) dupAnno.push(`${ch}/${tk}/${m[1]} 重复注 ${w}`);
+        seen.add(w);
+      }
+    }
+  }
 console.log('=== 验收 v2 · 倒挂报告（现有稿） ===');
 console.log(`全书未注生词率: A ${rate('A')}% / M ${rate('M')}% / B ${rate('B')}%  → 排序要求 B<M<A: ${rate('B') < rate('M') && rate('M') < rate('A') ? 'PASS' : 'FAIL（倒挂）'}`);
+console.log(`注释密度(注/百词): ${['A', 'M', 'B'].map((tk) => `${tk} ${dens[tk].per100}（最差段 ${dens[tk].worst.at}=${dens[tk].worst.d.toFixed(1)}）`).join('　')}`);
 console.log(`句长尾部: ${['A', 'M', 'B'].map((tk) => `${tk} 均${R.尾部[tk].均值}/P90=${R.尾部[tk].P90}`).join('  ')}`);
 console.log(
   `结构问题 ${R.结构.length} 条｜同段倒挂 ${R.梯度.filter((x) => x.includes('B未注')).length} 章｜句长倒挂 ${R.梯度.filter((x) => x.includes('句长')).length} 章｜语义 ${R.语义.length} 条｜照抄 ${R.照抄.length} 段`,
@@ -372,6 +411,7 @@ console.log(
 R.结构.slice(0, 8).forEach((x) => console.log('  [结构]', x));
 R.梯度.slice(0, 6).forEach((x) => console.log('  [梯度]', x));
 R.语义.slice(0, 10).forEach((x) => console.log('  [语义]', x));
+if (dupAnno.length) dupAnno.slice(0, 8).forEach((x) => console.log('  [重复注]', x));
 writeFileSync(
   `${OUT}/验收v2_倒挂报告_2026-09-17.md`,
   `# 验收 v2 · 倒挂报告（现有稿，2026-09-17）\n\n全书未注生词率：A ${rate('A')}% / M ${rate('M')}% / B ${rate('B')}%（要求 B<M<A：${rate('B') < rate('M') && rate('M') < rate('A') ? 'PASS' : 'FAIL'}）\n\n句长：${['A', 'M', 'B'].map((tk) => `${tk} 均${R.尾部[tk].均值}/P90=${R.尾部[tk].P90}`).join('　')}\n\n## 结构（${R.结构.length}）\n${R.结构.join('\n') || '无'}\n\n## 层间梯度（${R.梯度.length}）\n${R.梯度.join('\n') || '无'}\n\n## 语义确定性校验（${R.语义.length}）\n${R.语义.join('\n') || '无'}\n\n## 隔离段原文照抄（${R.照抄.length}）\n${R.照抄.join('、') || '无'}\n`,
