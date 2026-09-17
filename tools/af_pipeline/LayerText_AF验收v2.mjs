@@ -235,7 +235,35 @@ const POEM_SEGS = (() => {
     return [];
   }
 })();
+const POEM_SEGS_BAD = [];
+for (const p of POEM_SEGS) {
+  if (!p.章 || !p.段 || !(p.层 || []).length) {
+    POEM_SEGS_BAD.push(`注册表格式缺字段 ${JSON.stringify(p).slice(0, 40)}`);
+    continue;
+  }
+  for (const tk of p.层 || ['A', 'M', 'B']) {
+    const fp = join(OUT, `第${p.章}章`, `原文_${TIERS[tk] || tk}_2026-09-12_工序化.md`);
+    if (!existsSync(fp)) {
+      POEM_SEGS_BAD.push(`${p.章}/${tk}/${p.段} 产物不存在`);
+      continue;
+    }
+    const seg = [
+      ...readFileSync(fp, 'utf-8')
+        .replace(/\r/g, '')
+        .split(/\n\s*\n/),
+    ].find((b) => b.match(new RegExp(`^\\[${p.段}\\]`)));
+    if (!seg) {
+      POEM_SEGS_BAD.push(`${p.章}/${tk}/${p.段} 段不存在于产物`);
+      continue;
+    }
+    const n = (seg.match(/（[^）]*）/g) || []).length;
+    if (n > 4) POEM_SEGS_BAD.push(`${p.章}/${tk}/${p.段} 注数 ${n}>4（超歌词段上限）`);
+  }
+}
 const isPoem = (ch, id, tk) => POEM_SEGS.some((p) => p.章 === ch && p.段 === id && (p.层 || ['A', 'M', 'B']).includes(tk));
+/* 短语感知窗口（v2.2 参数化）：注覆盖其前方窗口内内容词。
+ * 60 为 AF 全书拟合值（v2.1 调试所得），非推导值——变更必须跑回归用例（见 验收标准 v2.2 待办二）。 */
+const PHRASE_WINDOW = 60;
 const R = { 结构: [], 梯度: [], 语义: [], 注释: [], 照抄: [], 尾部: {} };
 const unnotedWords = {};
 const unnotedRate = { A: { tok: 0, unk: 0 }, M: { tok: 0, unk: 0 }, B: { tok: 0, unk: 0 } };
@@ -245,7 +273,7 @@ const annoTypes = (t) => {
   const s = new Set([...t.matchAll(/([A-Za-z][A-Za-z-]*)（[^）]*）/g)].map((m) => m[1].toLowerCase()));
   // 短语感知：注覆盖其前方短语（≤28 字符内的内容词，含逗号/and 列表）与连字符成分
   for (const m of t.matchAll(/（[^）]*）/g)) {
-    const pre = t.slice(Math.max(0, m.index - 60), m.index).replace(/[,;:."'!?——\s]+$/, '');
+    const pre = t.slice(Math.max(0, m.index - PHRASE_WINDOW), m.index).replace(/[,;:."'!?——\s]+$/, '');
     const run = pre.split(/[.;:!?"]|\s(?:in|on|at|of|to|for|with|from|but|the|a|an|was|were|is|are|be|been|his|her|their|that|this)\s/g).pop() || '';
     for (const w of run.match(/[A-Za-z][A-Za-z-]*/g) || []) if (w.length >= 3 && !FUNCS.has(w.toLowerCase())) s.add(w.toLowerCase());
   }
@@ -435,6 +463,10 @@ for (const ch of CH)
     for (const m of readFileSync(p, 'utf-8').matchAll(/\b(in|to|at|and|that|be|about|of|for|or|but|was|is|the)（[^）]*）/g)) posBad.push(`${ch}/${tk} 注位 ${m[0].slice(0, 24)}`);
   }
 if (posBad.length) posBad.slice(0, 8).forEach((x) => console.log('  [注位]', x));
+if (POEM_SEGS_BAD.length) {
+  console.log(`注册表校验 FAIL（${POEM_SEGS_BAD.length}）:`);
+  POEM_SEGS_BAD.forEach((x) => console.log('  [注册表]', x));
+}
 writeFileSync(
   `${OUT}/验收v2_倒挂报告_2026-09-17.md`,
   `# 验收 v2 · 倒挂报告（现有稿，2026-09-17）\n\n全书未注生词率：A ${rate('A')}% / M ${rate('M')}% / B ${rate('B')}%（要求 B<M<A：${rate('B') < rate('M') && rate('M') < rate('A') ? 'PASS' : 'FAIL'}）\n\n句长：${['A', 'M', 'B'].map((tk) => `${tk} 均${R.尾部[tk].均值}/P90=${R.尾部[tk].P90}`).join('　')}\n\n## 结构（${R.结构.length}）\n${R.结构.join('\n') || '无'}\n\n## 层间梯度（${R.梯度.length}）\n${R.梯度.join('\n') || '无'}\n\n## 语义确定性校验（${R.语义.length}）\n${R.语义.join('\n') || '无'}\n\n## 隔离段原文照抄（${R.照抄.length}）\n${R.照抄.join('、') || '无'}\n`,
