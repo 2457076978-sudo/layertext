@@ -455,6 +455,15 @@ R.结构.slice(0, 8).forEach((x) => console.log('  [结构]', x));
 R.梯度.slice(0, 6).forEach((x) => console.log('  [梯度]', x));
 R.语义.slice(0, 10).forEach((x) => console.log('  [语义]', x));
 if (dupAnno.length) dupAnno.slice(0, 8).forEach((x) => console.log('  [重复注]', x));
+const posAudit = [];
+for (const ch of CH) {
+  const ap = join(OUT, `第${ch}章`, '注位审计.json');
+  if (existsSync(ap)) {
+    const a = JSON.parse(readFileSync(ap, 'utf-8'));
+    for (const d of a.detail || []) posAudit.push(`${ch} ${d.tag} ${d.reason}`);
+  }
+}
+const hasPosAudit = posAudit.length > 0 || existsSync(join(OUT, '第一章', '注位审计.json'));
 const posBad = [];
 for (const ch of CH)
   for (const tk of ['A', 'M', 'B']) {
@@ -463,6 +472,14 @@ for (const ch of CH)
     for (const m of readFileSync(p, 'utf-8').matchAll(/\b(in|to|at|and|that|be|about|of|for|or|but|was|is|the)（[^）]*）/g)) posBad.push(`${ch}/${tk} 注位 ${m[0].slice(0, 24)}`);
   }
 if (posBad.length) posBad.slice(0, 8).forEach((x) => console.log('  [注位]', x));
+if (hasPosAudit) {
+  if (posAudit.length) {
+    console.log(`注位（句法解析主路径）：挂起 ${posAudit.length}`);
+    posAudit.slice(0, 6).forEach((x) => console.log('  [注位·挂起]', x));
+  }
+} else {
+  console.log('⚠ 注位审计.json 缺失——退化为 PHRASE_WINDOW 兜底（v2.2 待办：主路径必须句法）');
+}
 if (POEM_SEGS_BAD.length) {
   console.log(`注册表校验 FAIL（${POEM_SEGS_BAD.length}）:`);
   POEM_SEGS_BAD.forEach((x) => console.log('  [注册表]', x));
