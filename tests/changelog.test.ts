@@ -30,3 +30,11 @@ test('缺版本：退出码非零（Release 工作流据此拦截忘写 CHANGELO
     (err: { status?: number }) => err.status === 2 || err.status === 1,
   );
 });
+
+test('提取 1.3.0 发版段：有正文、含尺子收口、不含 1.2.1 段（Release 正文不串版本）', () => {
+  const out = run('1.3.0');
+  assert.match(out, /词画卷/);
+  assert.match(out, /尺子收口/);
+  assert.doesNotMatch(out, /Anki 弹层修复/); // 1.2.1 段不混入
+  assert.doesNotMatch(out, /^## /); // 发版头本身不输出
+});

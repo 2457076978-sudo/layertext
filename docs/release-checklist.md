@@ -5,7 +5,7 @@
 
 ## 1. 质量门禁
 
-- [ ] `npm test` 全绿（当前基线 176 项）
+- [ ] `npm test` 全绿（当前基线 1108 项：1106 过 / 2 跳过——2026-09-18 尺子收口轮起）
 - [ ] `npm run eval` 输出"✓ 不低于质量基线"（若规则有意变更：已 `--update-baseline` 并书面说明理由）
 - [ ] `node dist/tools/compare.js` 双引擎一致
 - [ ] `cd app && npx tsc --noEmit` 无错误
@@ -37,3 +37,21 @@
 
 - [ ] 在 GitHub Release 描述里附一行已知问题（如有）
 - [ ] 真实使用中发现的问题 → `docs/复盘模板.md` 记一轮 → 归入下个版本
+
+---
+
+## 走查记录 · v1.3.0（2026-09-18，本地就绪待推）
+
+按上方清单逐项过：
+
+1. **质量门禁**：`npm run verify` 全绿（1108 项：1106/0/2，含 eval 基线与双引擎 76/76）；
+   `USER=runner npm run verify` 复现 CI 条件全绿；`cd app && npx tsc --noEmit` 与 `npx vite build` 均过。
+2. **版本与文档**：五处版本一致（`node tools/check_versions.mjs` = 1.3.0）；`CHANGELOG.md` 已收敛为
+   `## [1.3.0] - 2026-09-18`（95 个未发布批次降为 ### 小节，分支 6 节原样保留在引块），
+   `tools/extract_changelog.mjs 1.3.0` 取到 2310 行正文（tests/changelog.test.ts 锁）；
+   README 路线图与当前状态一致（S1 已清理已交付项）；本轮无提示词变更（prompts/manifest 未动，N/A）。
+3. **产物验证**：**CI 绿 / Release dmg / GUI 走查三项依赖 push+tag，列为发版闸门项等作者发话**
+   （本仓 github.com 需网络绕行，且 09-16 起 25 提交未 push——推完后按本清单 3/4 节补走）。
+4. **新手首开路径**：本轮改动限于终审门禁弹层与核对表行，未动首开流程；装机版走查随 dmg 发版做。
+
+结论：**本地就绪待推**——tag 与 push 等作者发话（惯例：GitHub 冻结由 Wayne 拍板）。
