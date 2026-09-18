@@ -5,12 +5,12 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildMcpLexicon, toolAcceptanceV2, toolReworkGates, toolReworkLedger, toolSourceProbe } from '../src/core/mcpTools.js';
+import { buildMcpLexicon, toolAcceptanceV2, toolConcordance, toolReworkGates, toolReworkLedger, toolSourceProbe } from '../src/core/mcpTools.js';
 import { reworkGates } from '../src/core/rework.js';
 import { probeChapterSource } from '../src/core/sourceprobe.js';
 
 /** 词库只认基础词——让 red/未注判定可控（纯文本词表按行拆，别用空格连一行） */
-const lex = buildMcpLexicon({}, ['the\na\nan\nand\nof\nto\nin\non\nfarm\nanimals\nworked\nhard\nquietly\nyear\nmoved\nfield\ngave\norders\ntwo\nnapoleon']);
+const lex = buildMcpLexicon({}, ['the\na\nan\nand\nof\nto\nin\non\nfarm\nanimals\nworked\nhard\nquietly\nyear\nmoved\nfield\ngave\norders\ntwo\nnapoleon\ndog']);
 
 test('layer_rework_gates：改好红词的修订过四闸；引入新红词/丢注释的修订被拦', () => {
   const before = '[P01] The farmz animals toiled mercilessly in the field.';
@@ -93,4 +93,26 @@ test('layer_acceptance_v2：语义校验（凭空数字/专名丢失）需要 so
   );
   const noSrc = toolAcceptanceV2({ A, B }, undefined, undefined, lex) as { semantic: string[] };
   assert.equal(noSrc.semantic.length, 0, '没给 source 就不该有语义结论');
+});
+
+/* ───────────── 项 4a：layer_concordance ───────────── */
+
+test('layer_concordance：词全貌查询与聚合查询都直通 core（同输入同结论）；空 chapters 拒绝', () => {
+  const chapters: Array<{ name: string; tiers: Record<string, string> }> = [
+    { name: '一', tiers: { A: '[P01] The dog ran home.', M: '[P01] The dogs（狗） ran home fast.' } },
+    { name: '二', tiers: { A: '[P03] A dog slept. Pinchfield was far away.' } },
+    { name: '三', tiers: { A: '[P05] Pinchfield appeared again. The dogs barked at Pinchfield.' } },
+  ];
+  assert.ok('error' in toolConcordance([], 'dog', lex));
+  const byWord = toolConcordance(chapters, 'dog', lex) as { total: number; chapters: string[]; unannotated: number };
+  assert.equal(byWord.total, 4); // 一/A dog、一/M dogs、二/A dog、三/A dogs（归并同键）
+  assert.deepEqual(byWord.chapters.sort(), ['一', '三', '二'].sort());
+  assert.equal(byWord.unannotated, 3); // 仅 dogs（狗） 已注
+  const agg = toolConcordance(chapters, undefined, lex) as { matrixTop: Array<{ baseForm: string }>; properSuspects: Array<{ word: string }> };
+  assert.ok(agg.matrixTop.some((x) => x.baseForm === 'dog'));
+  assert.ok(
+    agg.properSuspects.some((x) => x.word === 'pinchfield'),
+    JSON.stringify(agg.properSuspects),
+  );
+  assert.ok('口径说明' in agg);
 });

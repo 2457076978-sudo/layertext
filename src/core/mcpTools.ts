@@ -16,6 +16,7 @@ import { sentenceRisks } from './risks.js';
 import { IRR } from './irregular.js';
 import { triageOov, type ZipfTable } from './wordfreq.js';
 import { acceptanceV2, cleanForAcceptance } from './acceptance.js';
+import { buildConcordance, properSuspects, wordChapterMatrix } from './concordance.js';
 import { reworkGates, summarizeLedger } from './rework.js';
 import { probeChapterSource } from './sourceprobe.js';
 
@@ -211,5 +212,37 @@ export function toolAcceptanceV2(tiers: { A?: string; M?: string; B?: string }, 
     unnotedByTier: undefined,
     口径说明:
       '未注率排序要求 B<M<A；同段倒挂=B 段未注>A 同段；句长梯度=B 均句长≤A×1.15（v2.1 容差）；注密度 per100=注/百词。不含照抄检测与注位审计（要读 recap/注位审计.json，走管线脚本 验收v2.mjs）。',
+  };
+}
+
+/** 工具10 layer_concordance：跨章词画卷——词→全书哪几章哪几句（含层与已注状态）。
+ *  给 word 返回该词全貌；不给 word 返回聚合（章分布矩阵 top50 + 专名候选 + 词表缺口提示）。
+ *  与 core/concordance.ts 同一份实现（App 词画卷视图、传播预览共用同一张图）。 */
+export function toolConcordance(chapters: Array<{ name?: string; tiers?: Record<string, string> }>, word: string | undefined, lex: Lexicon, properNouns?: string[]): Record<string, unknown> {
+  if (!Array.isArray(chapters) || chapters.length === 0) return { error: 'chapters 不能为空：[{name, tiers: {层标签: 整章 md}}]——整本书的章一起给（章分布/专名候选都要跨章比较）' };
+  const conc = buildConcordance(
+    chapters.map((c) => ({ name: String(c?.name ?? ''), tiers: c?.tiers ?? {} })),
+    { known: lex.known },
+  );
+  const 口径说明 = '归并=词形还原命中词库（与判定链同一套）；词表外词按表面形独立成键（unmerged）；同句同词一行。';
+  if (word) {
+    const w = String(word).toLowerCase();
+    const occs = conc.get(w) ?? [];
+    return {
+      word: w,
+      total: occs.length,
+      chapters: [...new Set(occs.map((o) => o.chapter))],
+      byTier: occs.reduce<Record<string, number>>((m, o) => ((m[o.tier] = (m[o.tier] ?? 0) + 1), m), {}),
+      unannotated: occs.filter((o) => !o.annotated).length,
+      occurrences: occs.slice(0, 100),
+      ...(occs.length === 0 ? { note: '全书没有这个词（或它是词表外形——试它的其它词形/原形）' } : {}),
+      口径说明,
+    };
+  }
+  return {
+    matrixTop: wordChapterMatrix(conc).slice(0, 50),
+    properSuspects: properSuspects(conc, { proper: properNouns ?? [], known: lex.known, minChapters: 2 }).slice(0, 30),
+    词表缺口提示: 'matrixTop 里 unmerged 的词=词表外（zipf 分诊走 layer_qc 的 OOV 清单）；properSuspects=专名表漏收候选（≥2 章句中大写）',
+    口径说明,
   };
 }

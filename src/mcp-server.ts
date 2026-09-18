@@ -6,7 +6,7 @@
  * 启动：
  *   node dist/src/mcp-server.js [--vocab 教材词库.csv]... [--wordlist 词表.txt]... [--terms 术语.txt] [--proper 专名.txt]
  *
- * 工具（9 个，全部本地计算、零遥测、不落盘）：
+ * 工具（10 个，全部本地计算、零遥测、不落盘）：
  *   layer_qc              全文体检：生词率/覆盖率/句长/被动/定从/过去完成/OOV清单
  *   layer_word_status     单词词表状态与原形（词库=难度锚点）
  *   layer_sentence_risks  句法黑名单逐句检测（被动/定从/过去完成/超长）
@@ -16,6 +16,7 @@
  *   layer_rework_ledger   回炉台账汇总：挂起按原因分组 + 下一轮建议顺序
  *   layer_source_probe    R0 源完整性探针：词数骤降/章末无收束/碎片残留
  *   layer_acceptance_v2   验收 v2 七维度（可本地计算子集）：未注率排序/同段倒挂/句长梯度/注密度/结构/语义
+ *   layer_concordance     跨章词画卷：词→全书哪几章哪几句（含层与已注）；不给词返回章分布/专名候选
  *
  * 配置示例见 docs/MCP.md。
  */
@@ -33,6 +34,7 @@ import {
   toolAcceptanceV2,
   toolAlignPairs,
   toolCheckRevision,
+  toolConcordance,
   toolQcText,
   toolReworkGates,
   toolReworkLedger,
@@ -220,6 +222,24 @@ async function main(): Promise<void> {
       }),
     },
     async ({ tiers, source, proper_nouns }) => ({ content: [{ type: 'text', text: JSON.stringify(toolAcceptanceV2(tiers, source, proper_nouns, lex), null, 1) }] }),
+  );
+
+  server.registerTool(
+    'layer_concordance',
+    {
+      title: 'LayerText 跨章词画卷',
+      description:
+        '词 → 全书哪几章哪几句（含层标签、段ID、句截断、是否已注）。查一个词的全貌（复现统计/专名排查/传播影响面）；不给 word 则返回聚合：章分布矩阵 top50 + 专名表漏收候选（≥2 章句中大写、不在专名表与词库）。与 App 词画卷视图、传播预览同一份引擎实现。',
+      inputSchema: z.object({
+        chapters: z
+          .array(z.object({ name: z.string().describe('章名，如 第一章'), tiers: z.record(z.string(), z.string()).describe('层标签 → 整章 md（单层书给 {"" 或 "原文": md}）') }))
+          .min(1)
+          .describe('整本书各章（跨章比较才有意义）'),
+        word: z.string().optional().describe('要查全貌的词（小写原形最好；不给则返回聚合）'),
+        proper_nouns: z.array(z.string()).optional().describe('专名表（小写）；给了用它排除已收录专名'),
+      }),
+    },
+    async ({ chapters, word, proper_nouns }) => ({ content: [{ type: 'text', text: JSON.stringify(toolConcordance(chapters, word, lex, proper_nouns), null, 1) }] }),
   );
 
   await server.connect(new StdioServerTransport());
