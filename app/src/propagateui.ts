@@ -10,12 +10,18 @@
  *   · **不留 `_原始备份.md`**：传播只插/剥 `词（中文）`，天然可逆——下级那个
  *     「去除中文标注」按钮才是真撤销路径，而且它也会往下传；
  *   · 变更日志照留：那不是撤销，是"这段现在这样是哪来的"；
- *   · 换词类不改下级正文，只留一张待办清单。
+ *   · 换词类不改下级正文，只留一张待办清单（2026-09-18 起待办里**加列全书跨章出现处**——
+ *     词画卷给的影响面，仍是"只列不改"）；
+ *   · 2026-09-18 词画卷咬合：①补注的完成行报全书影响面与剩余未注（传播前预览在自动时代
+ *     落为完成时审计——preference 的数字都来自 concordance，只读、零额外写）。
  */
 
 import { invoke } from '@tauri-apps/api/core';
 import { setStatus, toast } from './uikit.js';
 import { baseName, csvCell } from './pure.js';
+import { S } from './state.js';
+import { loadBookChapters } from './bookscan.js';
+import { buildConcordance, propagationPreview } from '../../src/core/concordance.js';
 import { CHANGELOG_HEADER, type FileSession } from './types.js';
 import { simplifyMaxLen } from './ai.js';
 import { readTextChecked } from './fsx.js';
@@ -49,7 +55,31 @@ export async function propagateToLowerTiers(s: FileSession, actions: readonly { 
     return;
   }
   const targets = descendantTierFiles(cfg.tree, cfg.naming, fromTag, files);
-  if (!targets.length) return;
+  if (!targets.length && !actions.some((a) => a.op === 'rewrite')) return;
+
+  /* ── 词画卷（只读一次，供 ②跨章待办 与 ①完成审计 用）── */
+  /* 当前章名：章目录布局=目录名；平铺布局=文件基名去扩展（与 bookscan 的章命名同一口径） */
+  const curChapter = /^第.+章$/.test(baseName(dir)) ? baseName(dir) : s.fileName.replace(/\.(md|txt|markdown)$/i, '');
+  let conc: Map<string, import('../../src/core/concordance.js').ConcordanceOccurrence[]> | null = null;
+  try {
+    const scan = await loadBookChapters(s, cfg.naming);
+    if (scan.chapters.length) {
+      const byChapter = new Map<string, Record<string, string>>();
+      for (const row of scan.chapters) {
+        const t = byChapter.get(row.name) ?? {};
+        t[row.tier || ''] = row.text;
+        byChapter.set(row.name, t);
+      }
+      conc = buildConcordance(
+        [...byChapter.entries()].map(([name, tiers]) => ({ name, tiers })),
+        { known: S.currentKnown },
+      );
+    }
+  } catch {
+    /* 有意兜底：画卷建不起来（书目录读不了等）不拦传播主流程——影响面数字缺席，
+     * 主流程（同章自动同步）照常，只是完成行不报全书数。 */
+    conc = null;
+  }
 
   /* 一次加注可能带好几个词：**合并成一次扫描**（每个文件只读一次、只写一次）。
    * 逐词各跑一趟的话，11 章 × 3 层 × N 个词会把同一批文件反复读写。 */
@@ -78,6 +108,16 @@ export async function propagateToLowerTiers(s: FileSession, actions: readonly { 
         for (const a of rewrites) {
           const line = `- ${date0} 上级 ${fromTag} 将「${a.word}」换成了「${a.zh ?? '更简单说法'}」——请核对本层（${t.tag}）文本命中处\n`;
           if (!prev.includes(line) && !add.includes(line)) add += line;
+          /* 跨章出现处（词画卷·只列不改——跨章机器改写语境依赖强，是既有拍板） */
+          const occs = conc?.get(a.word.toLowerCase()) ?? [];
+          const cross = occs.filter((o) => o.chapter !== curChapter);
+          if (cross.length) {
+            const crossLine = `  - 跨章出现处（未改文，供核对）：${cross
+              .map((o) => `${o.chapter}/${o.tier || '原稿'}/${o.segId}`)
+              .slice(0, 8)
+              .join('、')}${cross.length > 8 ? ` 等 ${cross.length} 处` : ''}\n`;
+            if (!prev.includes(crossLine) && !add.includes(crossLine)) add += crossLine;
+          }
         }
         if (add) await invoke('write_text_file', { path: todoPath, content: prev + add });
       } catch (e) {
@@ -161,6 +201,22 @@ export async function propagateToLowerTiers(s: FileSession, actions: readonly { 
     toast(`下级正文已改，但变更日志没写上：${String(e)}——这次传播不会出现在台账里`, 'err');
   }
   const tags = [...new Set(plan.map((p) => p.target.tag))].join('/');
+  /* 完成行补全书影响面（词画卷·审计）：「词」全书共 X 处，还剩 Y 处未注（含他章 Z 处）。
+   * 数字缺席（画卷没建起来）就如实不说，不编 0。 */
+  let scope = '';
+  if (conc) {
+    const annWords = actions.filter((a) => a.op !== 'rewrite');
+    let total = 0;
+    let unnote = 0;
+    let crossUn = 0;
+    for (const a of annWords) {
+      const pv = propagationPreview(conc, a.word, fromTag);
+      total += pv.total;
+      unnote += pv.unannotatedLower.length;
+      crossUn += pv.unannotatedLower.filter((o) => o.chapter !== curChapter).length;
+    }
+    if (total) scope = `；全书共 ${total} 处，还剩 ${unnote} 处未注（他章 ${crossUn}）`;
+  }
   if (failedFiles.length) setStatus(`跨层传播：已写 ${wrote} 个文件；${failedFiles.length} 个失败（${failedFiles.slice(0, 3).join('、')}）`, 'err');
-  else toast(`已自动同步到下级 ${tags}：${wrote} 个文件、${plan.reduce((n, p) => n + p.hits, 0)} 处`, 'ok');
+  else toast(`已自动同步到下级 ${tags}：${wrote} 个文件、${plan.reduce((n, p) => n + p.hits, 0)} 处${scope}`, 'ok');
 }
