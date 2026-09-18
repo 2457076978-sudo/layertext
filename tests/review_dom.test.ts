@@ -243,3 +243,35 @@ test('词面板只摆有落点的标记：超纲 / 事实用词存疑 / 好词�
   assert.equal(typeLabel('factw'), '事实用词存疑');
   assert.equal(typeLabel('goodw'), '好词保留');
 });
+
+/* ── 终审门禁·注密度警戒（第三梯队项 10b）：超线 ⚠ 点名、线内省略；老四条门禁形状不动 ── */
+
+test('10b：QC 门禁行注密度超线 → ⚠ 出现且 title 写明警戒非硬闸；线内 → 无 ⚠', () => {
+  const mkReview = () => {
+    const review = newReviewState('ch1.md');
+    review.quota = [];
+    review.gate = {};
+    review.marks = [];
+    return review;
+  };
+  const handlers = {
+    onQuotaToggle: () => {},
+    onQuotaRemove: () => {},
+    onQuotaAdd: () => {},
+    onGateToggle: () => {},
+    onGateHelp: () => {},
+    onMarkJump: () => {},
+    onMarkRemove: () => {},
+  };
+  // 超线：1 注/4 词 = 25 注/百词 > 8
+  renderSidebar({ review: mkReview(), md: '[P01] the door（门）was open.' } as never, handlers);
+  const warn1 = win.document.querySelector('.gate-warn') as HTMLElement | null;
+  assert.ok(warn1, '超线时 QC 门禁行要有 ⚠');
+  assert.match(warn1!.getAttribute('title') ?? '', /警戒非硬闸/);
+  assert.match(warn1!.getAttribute('title') ?? '', /最差段 P01/);
+  assert.equal(win.document.querySelectorAll('.gate-list li').length, 4, '老四条门禁一条不多一条不少（10c）');
+  // 线内：0 注 → 无 ⚠（线内省略）
+  renderSidebar({ review: mkReview(), md: '[P01] the old keeper walked to the light and saw the sea.' } as never, handlers);
+  assert.equal(win.document.querySelector('.gate-warn'), null, '线内不许出现 ⚠——警戒是提醒不是常态噪音');
+  assert.equal(win.document.querySelectorAll('.gate-list li').length, 4);
+});

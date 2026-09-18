@@ -211,7 +211,7 @@ export function toolAcceptanceV2(tiers: { A?: string; M?: string; B?: string }, 
     ...r,
     unnotedByTier: undefined,
     口径说明:
-      '未注率排序要求 B<M<A；同段倒挂=B 段未注>A 同段；句长梯度=B 均句长≤A×1.15（v2.1 容差）；注密度 per100=注/百词。不含照抄检测与注位审计（要读 recap/注位审计.json，走管线脚本 验收v2.mjs）。',
+      '未注率排序要求 B<M<A；同段倒挂=B 段未注>A 同段；句长梯度=B 均句长≤A×1.15（v2.1 容差）；注密度 per100=注/百词（警戒线 8=ANNO_DENSITY_WARN，v2.1 独立指标、非硬闸）。不含照抄检测与注位审计（要读 recap/注位审计.json，走管线脚本 验收v2.mjs）。',
   };
 }
 

@@ -22,6 +22,7 @@ import {
   withRetry,
   type FailoverRowDraft,
 } from '../app/src/pure.js';
+import { qcDensityRow } from '../app/src/qcdensity.js';
 import { buildBookReportMd, planBatchChapters, filterTargets, mergeTargets, type BatchProgressFile, type BookReportRow, type ClassTarget } from '../app/src/bookpure.js';
 
 test('withRetry：网络错误自动重试后成功', async () => {
@@ -658,4 +659,28 @@ test('failoverKeyAccounts：删掉一行之后，下标账号的归属会变—�
   const { stable, legacy } = failoverKeyAccounts(rowAfterDelete.id, 0);
   assert.equal(stable, 'fb:fb-B');
   assert.equal(legacy, 'fb0', '下标 0 现在属于被删掉的 A 家——所以读取侧不许用它');
+});
+
+/* ── 终审门禁·注密度行（第三梯队项 10b/10d，2026-09-18）：行文案 / 超线 ⚠ / 线内省略 / 人话判读 ── */
+
+test('10b：qcDensityRow 线内——warn=false、判读说健康、文案成对（数字+人话）', () => {
+  const r = qcDensityRow({ per100: 2.1, worst: { d: 4.3, at: 'P03' } });
+  assert.equal(r.name, '注密度');
+  assert.equal(r.warn, false);
+  assert.match(r.value, /2\.1 注\/百词/);
+  assert.match(r.value, /低于警戒线 8——支架密度健康/, 'README 规划项「数字+人话判读」在此先落一例');
+  assert.match(r.ref, /非硬闸/, '参考列要写明警戒非硬闸');
+});
+
+test('10b：qcDensityRow 超线——warn=true、点名最差段、判读给可行动建议', () => {
+  const r = qcDensityRow({ per100: 10.7, worst: { d: 25, at: 'P08' } });
+  assert.equal(r.warn, true);
+  assert.match(r.value, /超警戒线 8，最差段 P08（25）/);
+  assert.match(r.value, /合并|词卡/, '超线判读要给可行动的建议，不只报数');
+});
+
+test('10b：警戒线 8 的边界——8.0 在线上不算超（>8 才警），8.1 才警', () => {
+  assert.equal(qcDensityRow({ per100: 7.9, worst: { d: 0, at: '' } }).warn, false);
+  assert.equal(qcDensityRow({ per100: 8, worst: { d: 0, at: '' } }).warn, false);
+  assert.equal(qcDensityRow({ per100: 8.1, worst: { d: 0, at: '' } }).warn, true);
 });

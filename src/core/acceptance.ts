@@ -9,7 +9,7 @@
  * 从本模块取（dist import）——同一条判定只许有一份实现。改造前后以真项目输出逐字节对照验证。
  *
  * 覆盖的维度（文本可算）：未注率排序 B<M<A ｜层间梯度（同段倒挂、句长 1.15 容差）｜
- * 语义确定性（凭空数字/专名丢失/否定归零）｜注释（未注词清单、注密度、重复注）｜
+ * 语义确定性（凭空数字/专名丢失/否定归零）｜注释（未注词清单、注密度=annotationDensityOfChapter、重复注）｜
  * 结构（段 ID 对齐/空段/注释外中文/近重复代理）。**不含**：照抄检测与注位审计
  * （它们要读 recap/注位审计.json，属文件装配层的活，见 mjs 脚本）。
  */
@@ -282,6 +282,42 @@ export const jaccard = (a: Set<string>, b: Set<string>): number => {
  *  尺子自己的旋钮集中在此——golden 反证（9b）就拧它：改值必须让 tests/acceptance_golden.test.ts 变红。 */
 export const SENT_RATIO_TOLERANCE = 1.15;
 
+/** 注密度警戒线（注/百词）：v2.1 定值（实测 A0.8/M1.8/B2.2、最差段诗歌 10.7 之上的留量）。
+ *  定位=**独立指标的警戒线，不是硬闸**：超线点名最差段、由教师定夺（教学决策不交给尺子）；
+ *  与 adaptcheck 的 ANNO_DENSITY_LIMIT（A6/M4/B3，生成侧拥挤闸）是两把不同的尺，勿混。 */
+export const ANNO_DENSITY_WARN = 8;
+
+/** 章内注密度（per100 + 最差段）。注释=全角（…）对；词数=cleanForAcceptance 后的 [a-z]+ 计数（注释剥掉）。
+ *  入参两种形态：段表 Map（acceptanceV2 内部消费，空表→零值，行为与 2026-09-17 起逐字节一致）；
+ *  整章 md 字符串（App 门禁等调用方）：有 [P##] 段标记按段算；没有则退化为空行分段（段号 ¶1…，
+ *  让"最差段"在无标记的工作稿上仍然指得到地方）。 */
+export function annotationDensityOfChapter(input: string | Map<string, string>): { per100: number; worst: { d: number; at: string } } {
+  const segs: Array<[string, string]> =
+    typeof input === 'string'
+      ? (() => {
+          const byMark = segsOfMd(input);
+          if (byMark.size) return [...byMark];
+          return String(input ?? '')
+            .replace(/\r/g, '')
+            .split(/\n\s*\n/)
+            .filter((b) => b.trim().length > 0)
+            .map((b, i) => [`¶${i + 1}`, b] as [string, string]);
+        })()
+      : [...input];
+  let notes = 0;
+  let words = 0;
+  let worst = { d: 0, at: '' };
+  for (const [id, t] of segs) {
+    const segNotes = (String(t).match(/（[^）]*）/g) || []).length;
+    const segWords = (cleanForAcceptance(t).match(/[a-z]+/g) || []).length;
+    notes += segNotes;
+    words += segWords;
+    const d = segWords > 0 ? (100 * segNotes) / segWords : 0;
+    if (d > worst.d) worst = { d: Number(d.toFixed(1)), at: id };
+  }
+  return { per100: Number(((100 * notes) / Math.max(1, words)).toFixed(1)), worst };
+}
+
 export interface AcceptanceInput {
   tiers: Partial<Record<TierKey, string>>;
   /** 源段表（[P##] → 段文本）；给了才做语义校验 */
@@ -366,22 +402,9 @@ export function acceptanceV2(input: AcceptanceInput): AcceptanceV2Report {
     pass: avgA > 0 ? avgB <= avgA * SENT_RATIO_TOLERANCE : true,
   };
 
-  // 注密度（全书 per100 + 最差段）
+  // 注密度（全书 per100 + 最差段）——消费 annotationDensityOfChapter 唯一实现（传段表 Map：与旧实现逐字节一致）
   const density: AcceptanceV2Report['density'] = {};
-  for (const tk of Object.keys(tiers) as TierKey[]) {
-    let notes = 0;
-    let words = 0;
-    let worst = { d: 0, at: '' };
-    for (const [id, t] of tiers[tk]!) {
-      const segNotes = (String(t).match(/（[^）]*）/g) || []).length;
-      const segWords = (cleanForAcceptance(t).match(/[a-z]+/g) || []).length;
-      notes += segNotes;
-      words += segWords;
-      const d = segWords > 0 ? (100 * segNotes) / segWords : 0;
-      if (d > worst.d) worst = { d: Number(d.toFixed(1)), at: id };
-    }
-    density[tk] = { per100: Number(((100 * notes) / Math.max(1, words)).toFixed(1)), worst };
-  }
+  for (const tk of Object.keys(tiers) as TierKey[]) density[tk] = annotationDensityOfChapter(tiers[tk]!);
 
   // 结构：段 ID 对齐/唯一/非空/杂中文/近重复
   const structure: string[] = [];

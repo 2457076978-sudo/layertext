@@ -18,6 +18,8 @@ import { sentenceRisks } from '../../src/core/risks.js';
 import { buildAssistantPrompt, buildSystemPrompt, callChat, chatStream, simplifyMaxLen } from './ai.js';
 import { chnoFromPath, estTokens, findOriginalFlex, planCompaction } from './pure.js';
 import { GATE_HELP, typeLabel, type Suggestion } from './types.js';
+import { annotationDensityOfChapter } from '../../src/core/acceptance.js';
+import { qcDensityRow } from './qcdensity.js';
 
 /* ---------- AI 会话持久化（防抖落盘，重启可恢复） ---------- */
 
@@ -480,6 +482,9 @@ export function showGateHelp(gate: string, anchor: HTMLElement): void {
   const s = activeSession();
   if (isQc) {
     const maxLen = simplifyMaxLen();
+    /* 注密度行（项 10b/10d）：只吃本章工作稿、不依赖体检报告——没跑体检也能看；
+     * 警戒非硬闸：超线 ⚠ 点名最差段，不拦达标勾选（教学决策留给教师）。 */
+    const densRow = s ? qcDensityRow(annotationDensityOfChapter(s.md)) : null;
     if (s?.report) {
       const r = s.report;
       const row = (name: string, value: string, ref: string, warn = false) => `<tr class="${warn ? 'warnrow' : ''}"><td>${name}</td><td>${value}</td><td>${ref}</td></tr>`;
@@ -495,10 +500,12 @@ export function showGateHelp(gate: string, anchor: HTMLElement): void {
           ${row('定语从句', String(r.relcl), '0（一律禁用）', r.relcl > 0)}
           ${row('过去完成', String(r.pastperf), '0', r.pastperf > 0)}
           ${row('待定词命中', String(r.pendingHits), '逐个复核后定去留', r.pendingHits > 0)}
+          ${densRow ? row(densRow.name, densRow.value, densRow.ref, densRow.warn) : ''}
         </table>`;
     } else {
       body += `<p class="dim">本章尚未体检——打开课文会自动体检，或点「重新质检」。</p>`;
     }
+    if (densRow && !s?.report) body += `<p class="dim">${densRow.name}：${densRow.value}</p>`;
     body += `<p class="dim">参考值即当前简化标准（句长上限 ⓘ 可调）；黄色行 = 超出参考，需你复核后决定。达标与否由你勾选确认（AI 只出数字，教师定稿）。</p>`;
   }
   gatePop.innerHTML = `<div class="pop-h">${esc(gate)}</div>${body}`;

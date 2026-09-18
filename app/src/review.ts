@@ -11,6 +11,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { S, setStatus } from './state.js';
 import { WORD_TYPES, SENT_TYPES, GATES, typeLabel, type FileSession, type Mark } from './types.js';
+import { ANNO_DENSITY_WARN, annotationDensityOfChapter } from '../../src/core/acceptance.js';
 import { planRevisionTask, revisionTaskPreview } from '../../src/core/adaptcheck.js';
 
 const SAVE_DEBOUNCE_MS = 600;
@@ -224,9 +225,13 @@ export function renderSidebar(
     )
     .join('');
 
+  /* 注密度警戒（项 10b）：超线在「QC 指标达标」行标 ⚠——只提醒、不阻塞勾选、不拦终审。 */
+  const dens = annotationDensityOfChapter(session.md ?? '');
+  const densWarn = dens.per100 > ANNO_DENSITY_WARN;
   const gateHtml = GATES.map(
     (g) => `
     <li><label><input type="checkbox" data-gate="${esc(g)}" ${r.gate[g] ? 'checked' : ''} /> ${g}</label>
+        ${g === 'QC 指标达标' && densWarn ? `<span class="gate-warn" title="注密度 ${dens.per100} 注/百词，超警戒线 ${ANNO_DENSITY_WARN}${dens.worst.at ? `（最差段 ${dens.worst.at}，${dens.worst.d}）` : ''}——警戒非硬闸，不拦终审勾选；教学决策留给教师">⚠</span>` : ''}
         <button class="qmark" data-gate-help="${esc(g)}" title="这是什么？">?</button></li>`,
   ).join('');
 
