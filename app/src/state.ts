@@ -15,6 +15,9 @@ export interface AppConfig {
   trustEdit?: boolean;
   /** 标记即改写：点标记后 AI 自动改写该句并直接生效 */
   autoRewriteOnMark?: boolean;
+  /** 「AI 简化本章」的模式：full=整章重写（首次简化）；rework=回炉·只改红项段（2026-09-18，
+   *  09-17 实验证伪整章重生成会引入新低频词——"要更简的版本"从此默认走差量回炉） */
+  draftMode?: 'full' | 'rework';
   /** 直接修改原稿文件（首次修改前自动备份原始版）；关闭写工作稿 */
   inPlaceEdit?: boolean;
   /** 限制思考：请求带 reasoning_effort=low（服务商不识自动去除）；默认开 */

@@ -5,7 +5,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { classifyHangReason, maxSentenceLen } from '../src/core/rework.js';
+import { applyReworkPicks, classifyHangReason, maxSentenceLen, pickReworkSegments, reworkGates } from '../src/core/rework.js';
 
 test('maxSentenceLen：中文注释整体剔除后再计数（word（中文）不算负荷）', () => {
   // 注释里 4 个汉字不进词数；正文 The/windmill/turned/slowly/in/the/wind = 7 词
@@ -65,4 +65,50 @@ test('classifyHangReason：v1 遗留格式（无条件罗列四个测量值）�
   assert.equal(classifyHangReason('未过闸（红0→0 长113→94 注1→1 句max13）', { sentLimit: 19 }), '未知'); // 四项都判不出，如实归未知
   // v1 用「注」不用「注释」：注1→0 = 注释丢失
   assert.equal(classifyHangReason('未过闸（红8→4 长102→101 注1→0）'), '注释丢失');
+});
+
+/* ───────────── 项 1 追加：四闸细节 + 选段/装配（app_rework.test.ts 锁端到端，这里锁原语） ───────────── */
+
+test('reworkGates：段长比只对 ≥20 词的段生效（短段波动是噪音，与整章守恒重试同先例）', () => {
+  const long = Array.from({ length: 25 }, (_, i) => `word${i}`).join(' ') + '.';
+  const shrunk = Array.from({ length: 12 }, (_, i) => `word${i}`).join(' ') + '.'; // 25→12 = 0.48 出带
+  assert.ok(reworkGates({ before: long, after: shrunk, maxLen: 60, redBefore: 1, redAfter: 0 }).failures.some((f) => f.gate === '段长比'));
+  // 短段 6→4（0.67）：不卡段长（红词 1→0 已过）
+  const r = reworkGates({ before: 'The farmzxxx hardxxx animals ran home.', after: 'The animals ran home.', maxLen: 16, redBefore: 1, redAfter: 0 });
+  assert.deepEqual(
+    r.failures.map((f) => f.gate),
+    [],
+  );
+});
+
+test('pickReworkSegments：红项段=未注生词或引语豁免后超长；非红段不进清单', () => {
+  const md = `# 书\n\n## Chapter One\n\n[P01] The animals worked hard.\n\n[P02] The farmzxxx ran home.\n\n[P03] The animals worked and worked and the farm grew and the seasons turned and the years passed by.\n`;
+  const oovOf = (t: string): string[] => (t.includes('farmzxxx') ? ['farmzxxx'] : []);
+  const pick = pickReworkSegments(md, oovOf, 16);
+  assert.deepEqual(
+    pick.reds.map((r) => r.id),
+    ['P02', 'P03'],
+  );
+  assert.equal(pick.segs.length, 3);
+  assert.ok(!pick.redSet.has(pick.segs[0]), '干净段不在红项集合');
+  // 引语内的长句不算红（豁免口径与四闸同源）
+  const md2 = `# 书\n\n## Chapter One\n\n[P01] He said, "I will work harder every single day of my whole life in this farm than ever before." Then he left.\n`;
+  const pick2 = pickReworkSegments(md2, () => [], 16);
+  assert.deepEqual(
+    pick2.reds.map((r) => r.id),
+    [],
+    '引语长句不触发红项',
+  );
+});
+
+test('applyReworkPicks：只替换过闸段；挂起/未选段原文一字不动；锚失效点名', () => {
+  const md = `# 书\n\n## Chapter One\n\n[P01] aaa bbb.\n\n[P02] ccc ddd.\n\n[P03] eee fff.\n`;
+  const seg2 = '[P02] ccc ddd.';
+  const r = applyReworkPicks(md, [
+    { find: seg2, replace: '[P02] ccc ddd eee.' },
+    { find: '[P99] not exists.', replace: 'x' },
+  ]);
+  assert.equal(r.replaced, 1);
+  assert.equal(r.failed.length, 1, '锚失效如实点名');
+  assert.ok(r.md.includes('[P01] aaa bbb.\n\n[P02] ccc ddd eee.\n\n[P03] eee fff.'), '其余段与分隔原样');
 });

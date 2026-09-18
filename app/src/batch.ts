@@ -16,9 +16,10 @@ import { showAiSettings } from './settings.js';
 import { applyRewrite, loadBookConfig } from './bookio.js';
 import { chnoFromPath, normalizeAndSplitChapters } from './pure.js';
 import { buildBookReportMd, planBatchChapters, type BatchChapterItem, type BatchProgressFile, type BookReportRow } from './bookpure.js';
-import { buildDraftSystemPrompt, callChat, simplifyMaxLen } from './ai.js';
+import { buildDraftSystemPrompt, callChat, saveConfig, simplifyMaxLen } from './ai.js';
 import { runQc } from '../../src/core/qc.js';
-import { splitChapter } from '../../src/core/textpipe.js';
+import { hit, splitChapter } from '../../src/core/textpipe.js';
+import { applyReworkPicks, classifyHangReason, pickReworkSegments, reworkGates } from '../../src/core/rework.js';
 
 /* ================= AI 简化本章：整章逐段改写（两阶段工作流的第一阶段；更简版本=把结果再导入再简化） ================= */
 
@@ -35,11 +36,18 @@ export function showDraftPop(): void {
     setStatus('请先打开要简化的章节原文', 'err');
     return;
   }
+  const mode = S.appConfig.draftMode ?? 'full';
   draftPop.innerHTML = `
     <div class="pop-h">AI 简化本章 · 整章逐段改写</div>
     <p style="color:var(--muted);font-size:12px;line-height:1.7;margin:6px 0 10px">
-      对「${esc(s.fileName)}」按<b>当前简化标准（句长上限 ${simplifyMaxLen()} 词，菜单 LayerText → 简化标准… 可调）</b>逐段生成简化版（保留段落结构与全部情节），完成后自动质检、开新 tab——原稿不动，之后进入标记精修。<br/>
-      需要<b>更简的版本</b>？把生成的简化版再导入、再点一次这里即可（词库不变，句子更短更浅）。</p>
+      对「${esc(s.fileName)}」按<b>当前简化标准（句长上限 ${simplifyMaxLen()} 词，菜单 LayerText → 简化标准… 可调）</b>生成简化版（保留段落结构与全部情节），完成后自动质检、开新 tab——原稿不动，之后进入标记精修。</p>
+    <div class="fld"><label>模式</label>
+      <div style="display:flex;flex-direction:column;gap:4px;font-size:12px">
+        <label style="display:flex;gap:6px;align-items:flex-start"><input type="radio" name="draft-mode" value="rework" style="margin-top:3px" ${mode === 'rework' ? 'checked' : ''}/>
+          <span><b>回炉 · 只改红项段</b>（要更简的版本用这个）：本地先找出有未注生词或超长句的段，<b>只把这些段发 AI</b> 修订、过闸才采纳，其余段一字不动——避免整章重写引入新的生词。</span></label>
+        <label style="display:flex;gap:6px;align-items:flex-start"><input type="radio" name="draft-mode" value="full" style="margin-top:3px" ${mode === 'full' ? 'checked' : ''}/>
+          <span><b>整章重写</b>（首次简化用）：逐段全部改写。</span></label>
+      </div></div>
     <div class="fld"><label>方向指令（写你的整体要求，AI 全程遵守）</label>
       <textarea id="draft-instructions" placeholder="例如：面向九年级；歌篇原样保留不改写；人名保留原文；第 3 段 Major 的演讲要压缩到一半"></textarea></div>
     <div class="row-btns">
@@ -72,14 +80,46 @@ function cleanDraftSeg(text: string, fallbackMarker: string): string {
 /** 段词数（收缩率口径）：与 tokenize 同源正则 */
 const segWords = (t: string): number => (t.match(/[A-Za-z][A-Za-z'-]*/g) ?? []).length;
 
+/** 回炉模式的注入位：chat（AI 调用）与 oovOf（未注生词判定）都可替换——node 测试注入假实现，
+ *  生产路径用真 callChat 与 S.currentKnown 词库口径（红词的"什么是生词"由词库锚定，与正文着色同源）。 */
+export interface SimplifyCoreOpts {
+  mode?: 'full' | 'rework';
+  chat?: typeof callChat;
+  oovOf?: (segText: string) => string[];
+}
+
+/** 未注生词（App 口径）：词表外 token、注释过的词不算、<3 字母不算该注（ANNOTATABLE_MIN_LEN 同源） */
+function reworkOovOf(segText: string): string[] {
+  const ann = new Set([...segText.matchAll(/([A-Za-z][A-Za-z-]*)（[^）]*）/g)].map((m) => m[1].toLowerCase()));
+  const out: string[] = [];
+  for (const tok of segText.replace(/（[^）]*）/g, ' ').match(/[A-Za-z]+/g) ?? []) {
+    const w = tok.toLowerCase();
+    if (w.length < 3) continue;
+    if (ann.has(w)) continue;
+    if (!hit(w, S.currentKnown)) out.push(w);
+  }
+  return out;
+}
+
+export interface ReworkOutcome {
+  redCount: number;
+  fixed: number;
+  hung: Array<{ id: string; cls: string; reason: string }>;
+}
+
 /** 整章逐段简化核心（「AI 简化本章」与全书批处理共用）：逐段调用、前文衔接、段标记补回、书级替换。
- *  同义转换守恒（提示词 v1.6 + 引擎侧双保险）：每段改完算词数收缩，>15% 自动带纠正指令重试一次（采纳更长的一版）。 */
-async function simplifyChapterCore(
+ *  同义转换守恒（提示词 v1.6 + 引擎侧双保险）：每段改完算词数收缩，>15% 自动带纠正指令重试一次（采纳更长的一版）。
+ *  mode='rework'（2026-09-18 项 1）：先本地选红项段（未注生词/引语豁免后仍超长），**只把红项段发 AI**、
+ *  过回炉四闸（红词必减/段长比/注释不丢/句长·引语豁免）才采纳，其余段一字不动——09-17 实验证明
+ *  整章重生成会引入新低频词（干净名单重跑 3.73→4.35），"要更简的版本"必须走差量路线。 */
+export async function simplifyChapterCore(
   md: string,
   instructions: string,
   onSeg: (i: number, total: number, segHead: string) => void,
   signal?: AbortSignal,
-): Promise<{ md: string; outTokens: number; segCount: number; srcWords: number; outWords: number; retried: number }> {
+  opts?: SimplifyCoreOpts,
+): Promise<{ md: string; outTokens: number; segCount: number; srcWords: number; outWords: number; retried: number; rework?: ReworkOutcome }> {
+  if (opts?.mode === 'rework') return reworkChapterCore(md, instructions, onSeg, signal, opts);
   const chLine = md.match(/^## Chapter \w+.*$/m)?.[0] ?? '## Chapter One';
   const header = md.slice(0, md.indexOf(chLine)) || '';
   const body = splitChapter(md).body;
@@ -145,6 +185,80 @@ async function simplifyChapterCore(
   return { md: `${header}${chLine}\n\n${out.join('\n\n')}\n`, outTokens: tokens, segCount: segs.length, srcWords: srcTotal, outWords: outTotal, retried };
 }
 
+/** 回炉模式核心：红项段差量修订（其余段不进 AI、装配时原样保留）。 */
+async function reworkChapterCore(
+  md: string,
+  instructions: string,
+  onSeg: (i: number, total: number, segHead: string) => void,
+  signal: AbortSignal | undefined,
+  opts: SimplifyCoreOpts,
+): Promise<{ md: string; outTokens: number; segCount: number; srcWords: number; outWords: number; retried: number; rework: ReworkOutcome }> {
+  const chat = opts.chat ?? callChat;
+  const oovOf = opts.oovOf ?? reworkOovOf;
+  const maxLen = simplifyMaxLen();
+  const pick = pickReworkSegments(md, oovOf, maxLen);
+  const segWordsAll = (t: string): number => (t.match(/[A-Za-z][A-Za-z'-]*/g) ?? []).length;
+  const srcWords = pick.segs.reduce((n, s) => n + segWordsAll(s), 0);
+  const outcome: ReworkOutcome = { redCount: pick.reds.length, fixed: 0, hung: [] };
+  if (!pick.reds.length) {
+    return { md, outTokens: 0, segCount: pick.segs.length, srcWords, outWords: srcWords, retried: 0, rework: outcome };
+  }
+  const system = await buildDraftSystemPrompt({
+    tierRule: simplifyRule(),
+    chnoNote: '',
+    instructions:
+      '你是段级修订器：只修点名的问题，其余一字不动。' +
+      (instructions ? `\n- 教师方向指令（最高优先级）：${instructions}` : '') +
+      (mergedSelection().active ? `\n- 班级定制目标（${mergedSelection().label}）：本篇句长上限取最严 ${mergedSelection().minLen} 词/句` : ''),
+  });
+  const accepted: Array<{ find: string; replace: string }> = [];
+  let tokens = 0;
+  let retried = 0;
+  for (let i = 0; i < pick.reds.length; i++) {
+    const r = pick.reds[i];
+    onSeg(i, pick.reds.length, `[${r.id}]`);
+    const baseUser =
+      `只修这一段的问题，输出修订后的整段（保留 [${r.id}] 标记与已有 word（中文） 注释）：\n` +
+      r.reasons.map((x) => `- ${x}`).join('\n') +
+      `\n- 把未注生词换成词表内已学词（或删冗余）；不要引入新的生词\n- 段词数变化 ±30% 内；已有中文注释一处不丢；每句不超过 ${maxLen} 词\n\n段落：\n${r.text.trim()}`;
+    let hungReason = '';
+    let ok = false;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const { content, usage } = await chat(
+        [
+          { role: 'system', content: system },
+          { role: 'user', content: attempt === 0 ? baseUser : `${baseUser}\n\n你上一版没过闸：${hungReason}。请重修这一段。` },
+        ],
+        2500,
+        signal,
+        'AI 简化本章·回炉',
+      );
+      tokens += Number(usage.match(/(\d+) 出/)?.[1] ?? 0);
+      if (attempt > 0) retried++;
+      const mark = r.text.match(/\[P\d+\]/)![0];
+      const revised = applyRewrite(cleanDraftSeg(content, mark));
+      const redAfter = oovOf(revised);
+      const gate = reworkGates({ before: r.text, after: revised, maxLen, redBefore: r.oov.length, redAfter: redAfter.length });
+      if (gate.pass) {
+        const tailWs = r.text.match(/\s*$/)![0]; // 段尾空白（段间分隔）随替换保留，别把段落粘一起
+        accepted.push({ find: r.text, replace: revised.trim() + tailWs });
+        outcome.fixed++;
+        ok = true;
+        break;
+      }
+      hungReason = gate.failures.map((f) => f.message).join('；');
+    }
+    if (!ok) outcome.hung.push({ id: r.id, cls: classifyHangReason(`未过闸（${hungReason || '两次尝试均未过闸'}）`), reason: hungReason });
+  }
+  const applied = applyReworkPicks(md, accepted);
+  if (applied.failed.length) {
+    /* 替换锚失效如实说出口（不静默丢修订）；产物仍按已替换部分交付 */
+    setStatus(`回炉装配：${applied.failed.length} 段替换锚失效（段原文定位不到），已保留原文——${applied.failed.join('、')}`, 'err');
+  }
+  const outWords = segWordsAll(applied.md);
+  return { md: applied.md, outTokens: tokens, segCount: pick.segs.length, srcWords, outWords, retried, rework: outcome };
+}
+
 async function generateDraft(): Promise<void> {
   const s = activeSession();
   if (!s) return;
@@ -154,6 +268,11 @@ async function generateDraft(): Promise<void> {
     return;
   }
   const instructions = ($('draft-instructions') as HTMLTextAreaElement).value.trim();
+  const mode = (document.querySelector('input[name="draft-mode"]:checked') as HTMLInputElement | null)?.value === 'rework' ? 'rework' : 'full';
+  if (S.appConfig.draftMode !== mode) {
+    S.appConfig.draftMode = mode;
+    void saveConfig(); /* 模式选择记住（下次打开默认上次的选择）；存不上不拦本次运行 */
+  }
 
   S.draftAbort = new AbortController();
   const startBtn = $('draft-start') as HTMLButtonElement;
@@ -168,14 +287,16 @@ async function generateDraft(): Promise<void> {
       srcWords,
       outWords,
       retried,
+      rework,
     } = await simplifyChapterCore(
       s.md,
       instructions,
       (i, total, head) => {
-        $('draft-step').textContent = `正在简化第 ${i + 1}/${total} 段（${head}…）`;
+        $('draft-step').textContent = mode === 'rework' ? `回炉：正在修第 ${i + 1}/${total} 个红项段（${head}…）` : `正在简化第 ${i + 1}/${total} 段（${head}…）`;
         ($('draft-bar') as HTMLElement).style.width = `${(i / total) * 100}%`;
       },
       S.draftAbort!.signal,
+      { mode },
     );
     ($('draft-bar') as HTMLElement).style.width = '100%';
     $('draft-step').textContent = '简化完毕，正在保存并体检…';
@@ -185,7 +306,7 @@ async function generateDraft(): Promise<void> {
     let outPath: string;
     if (s.sourcePath) {
       const dir = s.sourcePath.slice(0, s.sourcePath.lastIndexOf('/'));
-      outPath = `${dir}/${s.fileName.replace(/\.(md|txt|markdown)$/i, '')}_简化_${date}${clsTag}.md`;
+      outPath = `${dir}/${s.fileName.replace(/\.(md|txt|markdown)$/i, '')}_${mode === 'rework' ? '回炉' : '简化'}_${date}${clsTag}.md`;
     } else {
       const dir = await invoke<string>('reports_dir');
       outPath = `${dir}/示例_简化_${date}.md`;
@@ -196,7 +317,16 @@ async function generateDraft(): Promise<void> {
     await uibus.runQcCurrent();
     const shrink = srcWords ? Math.round((1 - outWords / srcWords) * 100) : 0;
     setStatus(
-      `简化版已生成（${segCount} 段，${srcWords}→${outWords} 词${shrink > 0 ? `，收缩 ${shrink}%` : shrink < 0 ? `，扩写 ${-shrink}%` : ''}${retried ? `，${retried} 段触发篇幅守恒重试` : ''}，约 ${tokens} 出tokens）：${outPath}。体检指标见报告页——继续用标记精修；要更简版本：打开它再简化一次`,
+      rework
+        ? `回炉完成：红项段 ${rework.redCount}（修好 ${rework.fixed}｜挂起 ${rework.hung.length}${
+            rework.hung.length
+              ? `——${rework.hung
+                  .map((h) => `${h.id} ${h.cls}`)
+                  .slice(0, 4)
+                  .join('、')}${rework.hung.length > 4 ? ' 等' : ''}`
+              : ''
+          }），其余段一字不动；约 ${tokens} 出tokens）：${outPath}。挂起段保留原文，可在报告页看原因`
+        : `简化版已生成（${segCount} 段，${srcWords}→${outWords} 词${shrink > 0 ? `，收缩 ${shrink}%` : shrink < 0 ? `，扩写 ${-shrink}%` : ''}${retried ? `，${retried} 段触发篇幅守恒重试` : ''}，约 ${tokens} 出tokens）：${outPath}。体检指标见报告页——继续用标记精修；要更简版本：再点一次并选「回炉」模式`,
       'saved',
     );
     void invoke('reveal_path', { path: outPath });

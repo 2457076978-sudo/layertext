@@ -81,6 +81,9 @@ export interface ReworkGateInput {
   redAfter: number;
   /** 段长比带 [下限, 上限]，默认 [0.7, 1.4]（回炉 v2 标定值） */
   lenBand?: [number, number];
+  /** 段长比只对 ≥ 此词数的段生效，默认 20——短段词数波动大（删一个生词就出带），
+   *  与整章模式的篇幅守恒重试同一条先例（srcW >= 20 才卡） */
+  lenMinWords?: number;
   /** 句长容差（上限 + 容差才拦），默认 0；管线侧用 +2 */
   lenTolerance?: number;
 }
@@ -102,18 +105,19 @@ export function reworkWordCount(text: string): number {
 }
 
 export function reworkGates(input: ReworkGateInput): ReworkGateResult {
+  const stripSegMarkers = (t: string): string => String(t ?? '').replace(/\[P\d+\]/g, ' ');
   const wordsBefore = reworkWordCount(input.before);
   const wordsAfter = reworkWordCount(input.after);
   const ratio = wordsBefore > 0 ? wordsAfter / wordsBefore : 1;
   const annoBefore = (String(input.before ?? '').match(/（[^）]*）/g) ?? []).length;
   const annoAfter = (String(input.after ?? '').match(/（[^）]*）/g) ?? []).length;
-  const maxSent = maxSentenceLen(input.after, { exemptQuotes: true });
+  const maxSent = maxSentenceLen(stripSegMarkers(input.after), { exemptQuotes: true }); // [P##] 是结构不是内容，不进句长计量
   const [lo, hi] = input.lenBand ?? [0.7, 1.4];
   const failures: Array<{ gate: ReworkGateName; message: string }> = [];
   if (input.redAfter > input.redBefore || (input.redBefore > 0 && input.redAfter === input.redBefore)) {
     failures.push({ gate: '红词必减', message: `红词 ${input.redBefore}→${input.redAfter}：改前有红词时必须严格减少，且任何时候不得增加` });
   }
-  if (ratio < lo || ratio > hi) {
+  if (wordsBefore >= (input.lenMinWords ?? 20) && (ratio < lo || ratio > hi)) {
     failures.push({ gate: '段长比', message: `段长 ${wordsBefore}→${wordsAfter}（比 ${ratio.toFixed(2)}），出带 [${lo}, ${hi}]` });
   }
   if (annoAfter < annoBefore) {
@@ -121,13 +125,61 @@ export function reworkGates(input: ReworkGateInput): ReworkGateResult {
   }
   const limit = input.maxLen + (input.lenTolerance ?? 0);
   if (maxSent > limit) {
-    failures.push({ gate: '句长上限', message: `最长句 ${maxSent} 词 > ${limit}（引语豁免后计量）` });
+    failures.push({ gate: '句长上限', message: `句长超线：最长句 ${maxSent} 词 > ${limit}（引语豁免后计量）` });
   }
   return {
     pass: failures.length === 0,
     failures,
     measured: { redBefore: input.redBefore, redAfter: input.redAfter, wordsBefore, wordsAfter, ratio: Number(ratio.toFixed(3)), annoBefore, annoAfter, maxSent },
   };
+}
+
+/* ───────────────── 段级回炉的选段与装配（项 1 App / 测试共用；纯函数） ───────────────── */
+
+export interface ReworkPick {
+  id: string;
+  text: string;
+  oov: string[];
+  maxSent: number;
+  reasons: string[];
+}
+
+/** 红项段判定：有未注生词，或引语豁免后仍有超长句。红项段才发 AI，其余一字不动。
+ *  oovTokensOf 由调用方注入（App 用 S.currentKnown 词库口径；测试用可控词典）。 */
+export function pickReworkSegments(md: string, oovTokensOf: (segText: string) => string[], maxLen: number): { reds: ReworkPick[]; segs: string[]; redSet: Set<string> } {
+  const segs = String(md ?? '').match(/\[P\d+\][\s\S]*?(?=\[P\d+\]|$)/g) ?? [];
+  const reds: ReworkPick[] = [];
+  const redSet = new Set<string>();
+  for (const seg of segs) {
+    const id = seg.match(/\[(P\d+)\]/)?.[1] ?? 'P??';
+    const oov = oovTokensOf(seg);
+    const maxSent = maxSentenceLen(seg.replace(/\[P\d+\]/g, ' '), { exemptQuotes: true }); // 标记不算句长
+    const reasons: string[] = [];
+    if (oov.length) reasons.push(`未注生词 ${oov.length} 个（${[...new Set(oov)].slice(0, 8).join('、')}）`);
+    if (maxSent > maxLen) reasons.push(`最长句 ${maxSent} 词超上限 ${maxLen}（引语已豁免）`);
+    if (reasons.length) {
+      reds.push({ id, text: seg, oov, maxSent, reasons });
+      redSet.add(seg);
+    }
+  }
+  return { reds, segs, redSet };
+}
+
+/** 装配：只把「过闸采纳」的段在原文里原位替换；挂起/未选段不进表 → 原文一字不动。
+ *  find 用整段原文锚定（段带 [P##] 编号天然唯一）；替换失败如实点名，不静默。 */
+export function applyReworkPicks(md: string, accepted: Array<{ find: string; replace: string }>): { md: string; replaced: number; failed: string[] } {
+  let out = String(md ?? '');
+  let replaced = 0;
+  const failed: string[] = [];
+  for (const a of accepted) {
+    if (!out.includes(a.find)) {
+      failed.push(a.find.slice(0, 24));
+      continue;
+    }
+    out = out.replace(a.find, a.replace);
+    replaced++;
+  }
+  return { md: out, replaced, failed };
 }
 
 /* ───────────────────────────── 回炉台账汇总（脚本 --report 与 MCP layer_rework_ledger 共用） ── */
