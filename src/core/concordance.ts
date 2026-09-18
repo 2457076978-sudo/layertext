@@ -81,6 +81,9 @@ export function buildConcordance(chapters: ConcordanceChapterInput[], opts?: Con
       for (const seg of segmentsOf(String(text ?? ''))) {
         for (const sent of sentsOf(seg.body, false)) {
           const tokens = sent.match(/[A-Za-z][A-Za-z'-]*/g) ?? [];
+          /* 已注词集每句抽一次（AF 真书实测：逐 token 建正则把重算顶过 200ms 硬阈——
+           * 热点就在这，集合查询等价且 O(1)） */
+          const annSet = new Set([...sent.matchAll(/([A-Za-z][A-Za-z'-]*)（[^）]*）/g)].map((m) => m[1]));
           const seenInSentence = new Set<string>();
           tokens.forEach((tok, idx) => {
             const lower = tok.toLowerCase();
@@ -88,14 +91,13 @@ export function buildConcordance(chapters: ConcordanceChapterInput[], opts?: Con
             const base = origin ?? lower;
             if (seenInSentence.has(base)) return; // 同句同词一行
             seenInSentence.add(base);
-            const annRe = new RegExp(`(?:^|[^A-Za-z'-])${tok.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}（[^）]*）`);
             const row: ConcordanceOccurrence = {
               chapter: name,
               tier,
               segId: seg.segId,
               sentence: cutSentence(sent, maxWords),
               wordForm: tok,
-              annotated: annRe.test(sent),
+              annotated: annSet.has(tok),
               capitalizedMid: idx > 0 && /^[A-Z]/.test(tok) && !SENT_STARTERS.has(lower),
             };
             if (!origin) row.unmerged = true;

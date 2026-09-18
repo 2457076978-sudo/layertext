@@ -131,3 +131,27 @@ test('1f：性能——合成 10 章×3 层全书重算 < 200ms（性能基线�
   assert.ok(ms < 200, `全书重算 ${ms.toFixed(0)}ms 超过硬阈 200ms`);
   assert.ok((conc.get('dog') ?? []).length >= 10, '合成书确实建出了图');
 });
+
+test('1f 补：AF 真项目十章×三层实跑（LAYERTEXT_AF_DIR 有则计时记录，无则 skip 说出口）', { skip: !process.env.LAYERTEXT_AF_DIR }, async () => {
+  const { readdirSync, readFileSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const ws = process.env.LAYERTEXT_AF_DIR!;
+  const srcDir = join(ws, '重制三版');
+  const chapters: ConcordanceChapterInput[] = [];
+  for (const d of readdirSync(srcDir)) {
+    if (!/^第.+章$/.test(d)) continue;
+    const tiers: Record<string, string> = {};
+    for (const f of readdirSync(join(srcDir, d))) {
+      const m = f.match(/^原文_(A层85|M层75|B层60)_.*\.md$/);
+      if (m && !f.includes('备份')) tiers[m[1]] = readFileSync(join(srcDir, d, f), 'utf-8');
+    }
+    if (Object.keys(tiers).length) chapters.push({ name: d, tiers });
+  }
+  if (!chapters.length) return; // 产物目录形态变化时如实不比（existsSync 防御）
+  const t0 = process.hrtime.bigint();
+  const conc = buildConcordance(chapters, { known: new Set(['the', 'and', 'farm', 'animals']) });
+  const ms = Number(process.hrtime.bigint() - t0) / 1e6;
+  console.error(`AF 真文本词画卷重算：${chapters.length} 章 × 3 层，${ms.toFixed(0)}ms（阈值 200ms）`);
+  assert.ok(ms < 200, `AF 实测 ${ms.toFixed(0)}ms 超阈`);
+  assert.ok(conc.size > 500, '真书确实建出了大图');
+});
