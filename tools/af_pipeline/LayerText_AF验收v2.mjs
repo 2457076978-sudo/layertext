@@ -7,8 +7,18 @@
  */
 import { readFileSync, writeFileSync, readdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-const AF = '/Users/wayne/Desktop/工作文档库/01-教学工作/名著阅读工作区_AnimalFarm';
-const LT = '/Users/wayne/Desktop/工作文档库/05-网站与AI工作区/LayerText';
+/* 项目根从 LAYERTEXT_AF_DIR（=AF 调适工作区）取，取不到说清楚并退出（AGENTS 铁律 3：绝对路径不进仓库）。
+ * 引擎目录由词表与词典.mjs 自身位置推出（distOf），不再写死。 */
+const AF_WS = process.env.LAYERTEXT_AF_DIR;
+if (!AF_WS) {
+  console.error('需要 LAYERTEXT_AF_DIR=<AF项目>/调适工作区（上级目录含 调适项目_AnimalFarm.json 与 知识文件/）。用法：');
+  console.error('  LAYERTEXT_AF_DIR=/path/to/名著阅读工作区_AnimalFarm/调适工作区 node LayerText_AF验收v2.mjs [--chapter 1]');
+  process.exit(2);
+}
+import { dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+const AF = dirname(AF_WS);
+const LT = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
 const KV = `${AF}/知识文件`;
 const OUT = `${AF}/调适工作区/重制三版`;
 const RUN = `${OUT}/_运行`;
