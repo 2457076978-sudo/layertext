@@ -2,18 +2,31 @@
  * LayerText · 两遍制段级回炉 v2（2026-09-17 点火 · Wayne 验收 v2 标准）
  * 红项清单：①同段倒挂段（B/M 未注生词数 > A 同段）②语义警报段（专名代词化/凭空数字/否定归零 vs 源）③注释外中文段。
  * 闸序（Wayne 修正二）：锁专名/数字/否定 → 换词降红 → 段长/注释/句长；相似度向量位暂由确定性规则顶。
+ * 句长闸 2026-09-18 起引语豁免（与生成闸门 09-12 定案同口径：句法工序改不了直接引语，不为它否决——
+ * 核心实现 src/core/rework.ts maxSentenceLen，本脚本不自写第二份）。
  * 专名规则（Wayne 修正一）：首次全名、同段后续可代词（段内至少一次全名落地）。
  * 执行顺序（漂移教训）：Phase3 锁修复(AI 最小编辑) → Phase1 确定性补注（零 API）→ Phase2 仍倒挂段 AI 换词。
- * 用法：node LayerText_AF段级回炉.mjs <A|M|B|ALL> [章号|1,2] [--dry]
+ * 用法：LAYERTEXT_AF_DIR=<AF>/调适工作区 node LayerText_AF段级回炉.mjs <A|M|B|ALL> [章号|1,2] [--dry|--report]
+ *   --report 只读台账出挂起分组报告（零 API），不动任何产物。
  */
 import { readFileSync, writeFileSync, existsSync, mkdirSync, copyFileSync, appendFileSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
 const SHARED = await import('./LayerText_AF词表与词典.mjs');
 import { keychainGet } from './keychain.mjs';
-const { loadProject, loadTextbookLearned } = SHARED;
+const { loadProject, loadTextbookLearned, distOf } = SHARED;
+const { maxSentenceLen, classifyHangReason } = await import(`${distOf()}/src/core/rework.js`);
 
-const P = loadProject('/Users/wayne/Desktop/工作文档库/01-教学工作/名著阅读工作区_AnimalFarm/调适项目_AnimalFarm.json');
-const KV = '/Users/wayne/Desktop/工作文档库/01-教学工作/名著阅读工作区_AnimalFarm/知识文件';
+/* 项目根从 LAYERTEXT_AF_DIR（=AF 调适工作区）取（AGENTS 铁律 3：绝对路径不进仓库）。
+ * 其上级目录须含 调适项目_AnimalFarm.json 与 知识文件/。 */
+const AF_WS = process.env.LAYERTEXT_AF_DIR;
+if (!AF_WS) {
+  console.error('需要 LAYERTEXT_AF_DIR=<AF项目>/调适工作区（上级目录含 调适项目_AnimalFarm.json 与 知识文件/）。用法：');
+  console.error('  LAYERTEXT_AF_DIR=/path/to/名著阅读工作区_AnimalFarm/调适工作区 node LayerText_AF段级回炉.mjs A --dry');
+  process.exit(2);
+}
+const AF = dirname(AF_WS);
+const P = loadProject(join(AF, '调适项目_AnimalFarm.json'));
+const KV = join(AF, '知识文件');
 const OUT = P.产物目录;
 const RUN = join(OUT, '_运行');
 const BACK = join(RUN, '回炉v2前_20260917');
@@ -217,14 +230,6 @@ const segsOf = (md) => {
   return out;
 };
 const words = (t) => (clean(t).match(/[a-z]+/g) || []).length;
-const maxSent = (t) =>
-  Math.max(
-    0,
-    ...t
-      .replace(/（[^）]*）/g, ' ')
-      .split(/(?<=[.!?])\s+/)
-      .map((s) => (s.toLowerCase().match(/[a-z]+/g) || []).length),
-  );
 const annoOf = (md) => new Set([...md.matchAll(/([a-z][a-z-]*)（[^）]*）/g)].map((m) => m[1].toLowerCase()));
 function unnotedIn(text, ann) {
   let n = 0;
@@ -297,6 +302,59 @@ const chapters = CHN.filter((c, i) => !chArg || chArg.split(',').includes(String
 const tiersToRun = tierArg === 'ALL' ? ['A', 'M', 'B'] : [tierArg];
 const st = { lock3: 0, anno1: 0, ai2: 0, pend: 0 };
 
+/* ── --report：挂起段分组报告（零 API、只读台账，不发任何 AI 调用）── */
+if (argv.includes('--report')) {
+  if (!existsSync(LEDGER_LOG)) {
+    console.error(`台账不存在：${LEDGER_LOG}——先跑一次回炉，或确认 LAYERTEXT_AF_DIR 指对了项目`);
+    process.exit(2);
+  }
+  const lines = readFileSync(LEDGER_LOG, 'utf8')
+    .split('\n')
+    .filter(Boolean)
+    .map((l) => {
+      try {
+        return JSON.parse(l);
+      } catch {
+        return null; // 坏行跳过但计数（不静默）
+      }
+    });
+  const bad = lines.filter((x) => !x).length;
+  const rows = lines.filter(Boolean);
+  const hangs = rows.filter((x) => x.verdict === '挂起');
+  const groups = new Map();
+  for (const h of hangs) {
+    const cls = h.class || classifyHangReason(h.reason || '', { sentLimit: (TIERS[h.tier] || {}).lim + 2 });
+    if (!groups.has(cls)) groups.set(cls, []);
+    groups.get(cls).push(h);
+  }
+  const ordered = [...groups.entries()].sort((a, b) => b[1].length - a[1].length);
+  const date = new Date().toISOString().slice(0, 10);
+  const byTier = { A: 0, M: 0, B: 0 };
+  for (const h of hangs) byTier[h.tier] = (byTier[h.tier] || 0) + 1;
+  console.log(
+    `回炉台账：共 ${rows.length} 条（✓锁修复 ${rows.filter((x) => x.verdict === '✓锁修复').length}｜✓换词降红 ${rows.filter((x) => x.verdict === '✓换词降红').length}｜挂起 ${hangs.length}：A ${byTier.A}/M ${byTier.M}/B ${byTier.B}）${bad ? `｜⚠ 坏行 ${bad} 条已跳过` : ''}`,
+  );
+  for (const [cls, list] of ordered) {
+    console.log(`  [${cls}] ${list.length} 段`);
+    for (const h of list.slice(0, 6)) console.log(`    ${h.chapter}/${h.tier}/${h.seg}（${h.reason}）`);
+    if (list.length > 6) console.log(`    …等 ${list.length} 段`);
+  }
+  if (ordered.length) console.log(`下一轮建议顺序（组内数量降序）：${ordered.map(([c, l]) => `${c}(${l.length})`).join(' → ')}`);
+  const md = [
+    `# 回炉挂起报告 · ${date}`,
+    '',
+    `台账：共 ${rows.length} 条决定；挂起 ${hangs.length} 段（A ${byTier.A}/M ${byTier.M}/B ${byTier.B}）。`,
+    bad ? `⚠ 坏行 ${bad} 条（JSON 解析失败，已跳过并列数）` : '',
+    '',
+    ...ordered.map(([cls, list]) => `## ${cls}（${list.length} 段）\n\n` + list.map((h) => `- ${h.chapter}章/${h.tier}/${h.seg}：${h.reason}`).join('\n') + '\n'),
+    ordered.length ? `下一轮建议顺序（组内数量降序）：${ordered.map(([c, l]) => `${c}(${l.length})`).join(' → ')}` : '当前没有挂起段。',
+    '',
+  ].join('\n');
+  writeFileSync(join(RUN, `回炉挂起报告_${date}.md`), md, 'utf-8');
+  console.log(`报告已写：${join(RUN, `回炉挂起报告_${date}.md`)}`);
+  process.exit(0);
+}
+
 for (const ch of chapters) {
   const src = sourceOf(ch);
   const prods = {};
@@ -359,7 +417,7 @@ for (const ch of chapters) {
         reason = `未过锁闸（缺${v2.missProps.join(',') || '无'} 数字${v2.fakeNums.join(',') || '无'}${v2.negOk ? '' : ' 否定'}）`;
       }
       st.pend++;
-      appendFileSync(LEDGER_LOG, JSON.stringify({ tier: r.tk, chapter: ch, seg: r.id, verdict, reason }) + '\n');
+      appendFileSync(LEDGER_LOG, JSON.stringify({ tier: r.tk, chapter: ch, seg: r.id, verdict, reason, class: classifyHangReason(reason) }) + '\n');
       console.log(`  挂起 ${r.tk} ${ch} ${r.id}（${reason}）`);
       return r.t;
     });
@@ -450,7 +508,16 @@ ${r.t}`;
         const u2 = unnotedIn(out, annoOf(out));
         const w0 = words(r.t);
         const w1 = words(out);
-        if (lp.ok && u2.n <= r.target && w1 >= 0.7 * w0 && w1 <= 1.4 * w0 && (out.match(/（/g) || []).length >= (r.t.match(/（/g) || []).length && maxSent(out) <= TIERS[r.tk].lim + 2) {
+        const ann0 = (r.t.match(/（/g) || []).length;
+        const ann1 = (out.match(/（/g) || []).length;
+        const sentN = maxSentenceLen(out, { exemptQuotes: true });
+        const fails = [];
+        if (!lp.ok) fails.push('锁✗');
+        if (u2.n > r.target) fails.push(`未注${u2.n}>${r.target}`);
+        if (w1 < 0.7 * w0 || w1 > 1.4 * w0) fails.push(`长${w0}→${w1}`);
+        if (ann1 < ann0) fails.push(`注释${ann0}→${ann1}`);
+        if (sentN > TIERS[r.tk].lim + 2) fails.push(`句长${sentN}>${TIERS[r.tk].lim + 2}`);
+        if (!fails.length) {
           verdict = '✓换词降红';
           reason = `未注 ${r.u.n}→${u2.n}(≤A${r.target})`;
           st.ai2++;
@@ -458,10 +525,10 @@ ${r.t}`;
           console.log(`  ${verdict} ${r.tk} ${ch} ${r.id}（${reason}）`);
           return out;
         }
-        reason = `未过闸（锁${lp.ok ? '✓' : '✗'} 未注${u2.n}>${r.target} 长${w0}→${w1}）`;
+        reason = `未过闸（${fails.join(' ')}）`;
       }
       st.pend++;
-      appendFileSync(LEDGER_LOG, JSON.stringify({ tier: r.tk, chapter: ch, seg: r.id, verdict, reason }) + '\n');
+      appendFileSync(LEDGER_LOG, JSON.stringify({ tier: r.tk, chapter: ch, seg: r.id, verdict, reason, class: classifyHangReason(reason) }) + '\n');
       console.log(`  挂起 ${r.tk} ${ch} ${r.id}（${reason}）`);
       return r.t;
     });
