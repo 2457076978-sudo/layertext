@@ -378,7 +378,7 @@ for (const ch of CH) {
       const recap = `${RUN}/章recap_${TIERS[tk]}_第${ch}章.json`;
       if (!existsSync(recap)) continue;
       const q = JSON.parse(readFileSync(recap, 'utf-8')).quarantined || [];
-      for (const { segment: id, class: cls } of q.filter((x) => x.class === '难度残留')) {
+      for (const { segment: id } of q.filter((x) => x.class === '难度残留')) {
         const prod = tiers[tk].segs.get(id);
         const s = src.get(id);
         if (prod && s && norm(prod) === norm(s)) R.照抄.push(`${ch}/${tk}/${id}`);

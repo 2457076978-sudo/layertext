@@ -7,7 +7,7 @@
  * 用法：node LayerText_AF段级回炉.mjs <A|M|B|ALL> [章号|1,2] [--dry]
  */
 import { readFileSync, writeFileSync, existsSync, mkdirSync, copyFileSync, appendFileSync, readdirSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { join } from 'node:path';
 const SHARED = await import('./LayerText_AF词表与词典.mjs');
 import { keychainGet } from './keychain.mjs';
 const { loadProject, loadTextbookLearned } = SHARED;
