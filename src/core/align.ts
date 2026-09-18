@@ -62,7 +62,8 @@ export const NUM_WORDS: Record<string, string> = {
  *  2026-09-13 删掉了 `'one day'` / `'at last'` 两条死条目：它们从加进来那天起就没生效过，
  *  而且本来也不需要——`one` 与 `at` 已经在表里，句首的 One/At 早被它们挡住了。
  *  （要支持短语，得改成先剥句首短语再取词，为两条冗余条目不值得。） */
-const SENT_STARTERS = new Set([
+/** 句首常见词白名单（专名判定排除句首大写误报）——concordance.properSuspects 复用同一口径 */
+export const SENT_STARTERS = new Set([
   'the',
   'a',
   'an',

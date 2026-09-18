@@ -92,6 +92,18 @@
 
 **验证**：`npm run verify` 全绿；MCP stdio 冒烟 9 工具应答；验收v2.mjs 前后 diff 为空。
 
+## [未发布] - 2026-09-18（词画卷落地 · 项 1：core/concordance.ts 引擎——1a–1f 全 PASS）
+
+按 [规划与验收标准](docs/词画卷与传播咬合_规划与验收标准_2026-09-18.md) 执行的第一步。
+`buildConcordance`：词→全书出现处（章/层/段/句截断/文中形/已注/句中大写信号）；**归并走
+textpipe.hitOrigin 唯一实现**（纪律扫描测试锁死：本模块不许自写剥变形）、词表外不强行归并
+（独立成键+unmerged 标记）、句切分走 sentsOf 同口径。聚合查询：wordChapterMatrix（复现统计底表）、
+properSuspects（专名表漏收候选：≥2 章 + ≥1 次句中非句首大写，SENT_STARTERS 与 align 共口径——
+该集合改为导出，行为零变化）、annotationDebt（传播债务）、propagationPreview（①补注全书预览）、
+attachOrigin（稳定 ID 溯源附加，匹配不上省略不伪造）。**如实记录的口径边界**：f/ves 复数
+（wolves/leaves）引擎现口径不归并（IRR_NOUN 未收，动它=动全局判定链，不属本计划）。
+`tests/concordance.test.ts` 8 例：含静态纪律扫描（1b）与性能硬阈 200ms（1f，合成 10 章×3 层实测过）。
+
 ## [未发布] - 2026-09-18（词画卷与传播咬合：规划与验收标准先行——Wayne 追问"能不能搭配"的定案落档）
 
 新增 [docs/词画卷与传播咬合_规划与验收标准_2026-09-18.md](docs/词画卷与传播咬合_规划与验收标准_2026-09-18.md)。
