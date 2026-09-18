@@ -15,6 +15,9 @@ import { runQc, toLegacyReport } from './qc.js';
 import { sentenceRisks } from './risks.js';
 import { IRR } from './irregular.js';
 import { triageOov, type ZipfTable } from './wordfreq.js';
+import { acceptanceV2, cleanForAcceptance } from './acceptance.js';
+import { reworkGates, summarizeLedger } from './rework.js';
+import { probeChapterSource } from './sourceprobe.js';
 
 /** 任意英文文本 → 章节 md（按空行切段、编 [P01]，与应用"导入归一化"同构的最小版） */
 export function wrapAsChapter(text: string, title = 'MCP text'): string {
@@ -46,14 +49,7 @@ export function buildMcpLexicon(opts: McpLexiconOptions, bundledWordlists: strin
 
 /** 工具1 layer_qc：全文体检（生词率/覆盖率/句长/被动/定从/过去完成/OOV清单）；reinforce=已学词集（⑩复现指标）；
  *  zipfTable=词频先验表（提供时 OOV 清单逐词带 zipf 与分诊：高频未收=疑似漏收候选，低频=真·生词教学优先——只出候选不碰判定） */
-export function toolQcText(
-  text: string,
-  lex: Lexicon,
-  oovLimit = 50,
-  reinforceWords?: string[],
-  zipfTable?: ZipfTable,
-  aoaTable?: ZipfTable,
-): Record<string, unknown> {
+export function toolQcText(text: string, lex: Lexicon, oovLimit = 50, reinforceWords?: string[], zipfTable?: ZipfTable, aoaTable?: ZipfTable): Record<string, unknown> {
   const md = /[P]\d+\]/.test(text) ? `# qc\n\n## Chapter One\n\n${text}` : wrapAsChapter(text);
   const r = runQc(md, lex, { tier: 'M', fileName: 'mcp', ...(reinforceWords ? { reinforceWords } : {}) });
   const oovDetail = [...new Set(r.oov)].slice(0, oovLimit).map((w) => {
@@ -70,9 +66,7 @@ export function toolQcText(
     ...(toLegacyReport(r) as Record<string, unknown>),
     OOV清单前N: oovDetail,
     口径说明: '句法黑名单（被动/定从/过去完成）按初中教学进度一律禁用；直接引语内豁免；词形还原命中内置课标1600+补录+IRR',
-    ...(zipfTable
-      ? { OOV分诊口径: 'zipf 词频先验（wordfreq，纯离线）：≥4.0 高频未收=疑似漏收（教师核对后入库），3.0–4.0 中频，<3.0 低频=真·生词教学优先。只出候选，词库表仍是唯一判定锚' }
-      : {}),
+    ...(zipfTable ? { OOV分诊口径: 'zipf 词频先验（wordfreq，纯离线）：≥4.0 高频未收=疑似漏收（教师核对后入库），3.0–4.0 中频，<3.0 低频=真·生词教学优先。只出候选，词库表仍是唯一判定锚' } : {}),
   };
 }
 
@@ -154,5 +148,68 @@ export function toolAlignPairs(baseText: string, curText: string): Record<string
     新增: added,
     信号缺失: signalLost,
     口径说明: '丢句=基准有此处无（疑似丢情节）；新增=当前版多出；信号缺失=基准句里的数字（three↔3 互认）或专名在配对句中找不到。改写句配对阈值 Jaccard≥0.45。',
+  };
+}
+
+/* ───────────── 2026-09-18 项 2 新增：SOP 闸门 MCP 化（工具 6–9） ───────────── */
+
+/** 红词计数（回炉闸口径）：词库外 token 出现次数，注释过的词不算、词形家族按词库口径 */
+function redCountOf(text: string, lex: Lexicon): number {
+  const ann = new Set([...String(text ?? '').matchAll(/([A-Za-z][A-Za-z-]*)（[^）]*）/g)].map((m) => m[1].toLowerCase()));
+  let n = 0;
+  for (const w of cleanForAcceptance(String(text ?? '')).match(/[a-z]+/g) || []) {
+    if (w.length < 2 && w !== 'a' && w !== 'i') continue;
+    if (!hit(w, lex.known) && !ann.has(w)) n++;
+  }
+  return n;
+}
+
+/** 工具6 layer_rework_gates：一段改写跑回炉四闸（红词必减/段长比/注释不丢/句长上限·引语豁免）。
+ *  AI 改完一段、写回产物之前应调用本工具自查——过闸才许交付。 */
+export function toolReworkGates(before: string, after: string, maxLen: number, lex: Lexicon): Record<string, unknown> {
+  if (!String(before ?? '').trim() || !String(after ?? '').trim()) return { error: 'before 与 after 都不能为空（改前段 / 改后段）' };
+  const r = reworkGates({ before, after, maxLen, redBefore: redCountOf(before, lex), redAfter: redCountOf(after, lex) });
+  return {
+    ...r,
+    口径说明:
+      '四闸=①红词必减（词库外未注 token 不得增、改前有则必须严格减少）②段长比 [0.7,1.4] ③注释不丢（word（中文）处数不减）④句长上限（直接引语豁免后计量）。红词口径=本服务启动时的词库（可叠加 --vocab/--wordlist）。',
+  };
+}
+
+/** 工具7 layer_rework_ledger：回炉台账 JSONL 汇总——决定计数、挂起按原因分组、下一轮建议顺序。
+ *  输入是台账文件内容（agent 自行读文件后传入；本服务不读盘）。 */
+export function toolReworkLedger(ledgerText: string, sentLimits?: Record<string, number>): Record<string, unknown> {
+  const sum = summarizeLedger(String(ledgerText ?? ''), { sentLimitOf: (t) => sentLimits?.[t] });
+  if (!sum) return { error: '台账为空或没有可解析的行（应为一行一条 JSON 的 JSONL）' };
+  return {
+    ...sum,
+    口径说明: '挂起分类 v2 行读 class 字段、v1 遗留行按 reason 数字判真凶；句长超线判定需要各层上限（sent_limits，如 {A:19,M:17,B:16}），不给则句 max 判不了、如实归其它类。',
+  };
+}
+
+/** 工具8 layer_source_probe：R0 源完整性探针——词数骤降/章末无收束/碎片残留。整本书的章一起给。 */
+export function toolSourceProbe(chapters: Array<{ name?: string; text?: string }>): Record<string, unknown> {
+  if (!Array.isArray(chapters) || chapters.length === 0) return { error: 'chapters 不能为空：[{name, text}, …]（整本书一起给——词数骤降要比较相邻章）' };
+  return {
+    results: probeChapterSource(chapters.map((c) => ({ name: String(c?.name ?? ''), text: String(c?.text ?? '') }))),
+    口径说明: '三探针=①词数骤降（<相邻章中位数×0.5）②章末无收束（断章形态）③碎片残留（连续≥3行孤词/词表行）。命中任何一条，R0 应拒绝把这份源喂进生成。',
+  };
+}
+
+/** 工具9 layer_acceptance_v2：验收 v2 七维度（可本地计算子集）——三层文本入，结构化报告出。
+ *  proper_nouns 给了才做专名丢失校验；source 给了（{P01: 源段, …}）才做语义确定性校验。 */
+export function toolAcceptanceV2(tiers: { A?: string; M?: string; B?: string }, source: Record<string, string> | undefined, properNouns: string[] | undefined, lex: Lexicon): Record<string, unknown> {
+  if (!tiers?.A || !tiers?.B) return { error: '至少要给 A 与 B 两层的整章 md（[P##] 段格式）；M 可选。{A: "...", B: "..."}' };
+  const r = acceptanceV2({
+    tiers: { A: tiers.A, ...(tiers.M ? { M: tiers.M } : {}), B: tiers.B },
+    ...(source ? { source: new Map(Object.entries(source)) } : {}),
+    known: lex.known,
+    proper: properNouns ?? [],
+  });
+  return {
+    ...r,
+    unnotedByTier: undefined,
+    口径说明:
+      '未注率排序要求 B<M<A；同段倒挂=B 段未注>A 同段；句长梯度=B 均句长≤A×1.15（v2.1 容差）；注密度 per100=注/百词。不含照抄检测与注位审计（要读 recap/注位审计.json，走管线脚本 验收v2.mjs）。',
   };
 }

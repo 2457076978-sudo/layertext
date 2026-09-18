@@ -65,10 +65,34 @@
 
 **验证**：`npm run verify` 全绿（1055 项：1054/0/1，+7 探针测试）；真项目实跑 exit 2、9/10 章点名。
 
+## [未发布] - 2026-09-18（第一梯队项 2：MCP 工具层 5→9——SOP 闸门 MCP 化 + 验收 v2 判定统一进引擎）
+
+**动机**：SOP v1.0 自定路线"全部闸门机器可查 = MCP 化后 agent 可执行同一份"；此前 MCP 只有 5 个
+查词级工具，验收/回炉/探针都活在 shell 脚本里，agent 每次都得 shell 出去拼参数。
+
+**落地（2a–2d 全 PASS）**：
+
+- **2a 四个新工具**（stdio 冒烟：tools/list 应答 9 个）：
+  `layer_rework_gates`（一段改写过回炉四闸自查——agent 差量修订写回产物前的机器闸）、
+  `layer_rework_ledger`（台账 JSONL 汇总+挂起分组+下一轮顺序；输入为文件内容，维持不读盘）、
+  `layer_source_probe`（R0 源完整性探针，整本书的章一起给）、
+  `layer_acceptance_v2`（七维度可本地计算子集：未注率排序 B<M>A/同段倒挂/句长梯度 1.15 容差/
+  注密度/结构/语义 vs 源）。照抄检测与注位审计要读 recap/注位审计.json，仍走管线脚本（工具说明写明）。
+- **2b 口径唯一**：新增 `src/core/acceptance.ts`——验收 v2 的判定原语（clean/isUnk/annoTypes/
+  未注计数/句长/语义/近重复）从 `验收v2.mjs` 函数体抽进引擎；`验收v2.mjs` 改为消费 dist
+  （本文件只留 AF 文件装配与报告渲染）。`tests/mcp_v2.test.ts` 6 例（每工具正常+校验拒绝路径，
+  并断言 MCP 层与 core 同输入同结论）。
+- **★ 统一无漂移的证明**：重构前后对真项目各跑一遍 `验收v2.mjs`——**控制台输出与报告文件
+  逐字节一致**（diff 为空）。冻结的标准脚本换引擎实现而不动一个数。
+- **2c**（同项 3a）：回炉句长闸消费 `stripDirectQuotes`。
+- **2d 文档同步**：`docs/MCP.md` 与 README 工具表 5→9（README 原先还写着 4——第十九批改了
+  MCP.md 漏了 README，本次一并还账）。
+- 顺带：`段级回炉.mjs --report` 的汇总逻辑改为消费 `summarizeLedger`（进 core，脚本只留格式化）；
+  真台账复跑分组数字不变。
+
+**验证**：`npm run verify` 全绿；MCP stdio 冒烟 9 工具应答；验收v2.mjs 前后 diff 为空。
+
 ## [未发布] - 2026-09-17（全书重跑→两遍制段级回炉→验收 v2 体系→注位结构化解析）
-
-
-
 **全书重跑（Wayne 指令删旧重跑）**：旧产物 108 件归档；词表正本 reimport（f6030ece→6d8a412d）；ecnu-max
 三路并发（A/M/B 各一路，恰满 ChatECNU 3 并发限额）387 调用零失败；三层十章落盘，自动完成 A72%/M49%/B28%。
 **九节点情节验收首次实弹**（底线 v0.1 锚点比对）：抓到 ch7《Beasts of England》三层被改写为 'animals of

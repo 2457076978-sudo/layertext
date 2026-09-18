@@ -15,7 +15,21 @@ const RUN = `${OUT}/_运行`;
 const CH = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十'];
 const TIERS = { A: 'A层85', M: 'M层75', B: 'B层60' };
 
-const { loadTextbookLearned } = await import(`${LT}/tools/af_pipeline/LayerText_AF词表与词典.mjs`);
+const { loadTextbookLearned, distOf } = await import(`${LT}/tools/af_pipeline/LayerText_AF词表与词典.mjs`);
+/* 判定原语唯一实现：src/core/acceptance.ts（MCP layer_acceptance_v2 与本脚本同一把尺）。
+ * 本文件只保留 AF 文件装配与报告渲染——同一条判定不许有两份实现。 */
+const {
+  cleanForAcceptance: clean,
+  makeIsUnknown,
+  segsOfMd: segsOf,
+  norm3: norm,
+  grams3: grams,
+  jaccard: jac,
+  annoTypesOf,
+  unnotedTokensOf,
+  sentLensOfSegs,
+  semanticSuspectsOf,
+} = await import(`${distOf()}/src/core/acceptance.js`);
 const P = JSON.parse(readFileSync(`${AF}/调适项目_AnimalFarm.json`, 'utf-8'));
 const engineKnown = new Set([...loadTextbookLearned(P)].map((w) => w.toLowerCase()));
 const afProper = new Set(
@@ -38,183 +52,7 @@ const K = new Set([
     .filter(Boolean)
     .map((l) => l.split(',')[0].toLowerCase()),
 ]);
-const IRREG = {
-  been: 'be',
-  knew: 'know',
-  stood: 'stand',
-  feet: 'foot',
-  went: 'go',
-  came: 'come',
-  took: 'take',
-  said: 'say',
-  made: 'make',
-  got: 'get',
-  saw: 'see',
-  ran: 'run',
-  brought: 'bring',
-  told: 'tell',
-  thought: 'think',
-  found: 'find',
-  felt: 'feel',
-  left: 'leave',
-  lost: 'lose',
-  kept: 'keep',
-  held: 'hold',
-  met: 'meet',
-  paid: 'pay',
-  built: 'build',
-  spent: 'spend',
-  sang: 'sing',
-  sat: 'sit',
-  spoke: 'speak',
-  wrote: 'write',
-  broke: 'break',
-  ate: 'eat',
-  drank: 'drink',
-  drove: 'drive',
-  fell: 'fall',
-  grew: 'grow',
-  wore: 'wear',
-  won: 'win',
-  woke: 'wake',
-  chose: 'choose',
-  forgot: 'forget',
-  meant: 'mean',
-  drew: 'draw',
-  flew: 'fly',
-  hid: 'hide',
-  swam: 'swim',
-  rose: 'rise',
-  lent: 'lend',
-  sent: 'send',
-  understood: 'understand',
-  done: 'do',
-  given: 'give',
-  gone: 'go',
-  seen: 'see',
-  known: 'know',
-  shown: 'show',
-  spoken: 'speak',
-  written: 'write',
-  broken: 'break',
-  eaten: 'eat',
-  drunk: 'drink',
-  driven: 'drive',
-  fallen: 'fall',
-  grown: 'grow',
-  worn: 'wear',
-  chosen: 'choose',
-  forgotten: 'forget',
-  thrown: 'throw',
-  taken: 'take',
-  taught: 'teach',
-  caught: 'catch',
-  bought: 'buy',
-  sold: 'sell',
-  led: 'lead',
-  fed: 'feed',
-  fled: 'flee',
-  heard: 'hear',
-  beaten: 'beat',
-  froze: 'freeze',
-  drawn: 'draw',
-  torn: 'tear',
-  blown: 'blow',
-  flung: 'fling',
-  bitten: 'bite',
-  forbade: 'forbid',
-  wept: 'weep',
-  dug: 'dig',
-  bred: 'breed',
-  clung: 'cling',
-  swung: 'swing',
-  sank: 'sink',
-  woken: 'wake',
-  swept: 'sweep',
-  shrank: 'shrink',
-  bled: 'bleed',
-  knelt: 'kneel',
-  children: 'child',
-  men: 'man',
-  women: 'woman',
-  teeth: 'tooth',
-  mice: 'mouse',
-  geese: 'goose',
-  halves: 'half',
-  knives: 'knife',
-  lives: 'life',
-  leaves: 'leaf',
-  wolves: 'wolf',
-  shelves: 'shelf',
-  wives: 'wife',
-  better: 'good',
-  best: 'good',
-  worse: 'bad',
-  worst: 'bad',
-  farther: 'far',
-  farthest: 'far',
-};
-function vb(w) {
-  const out = [];
-  if (w.endsWith('ies') && w.length > 4) out.push(w.slice(0, -3) + 'y');
-  if (w.endsWith('es') && w.length >= 4) out.push(w.slice(0, -2));
-  if (w.endsWith('s') && w.length > 3) out.push(w.slice(0, -1));
-  if (w.endsWith('ing') && w.length > 4) out.push(w.slice(0, -3) + 'e', w.slice(0, -4), w.slice(0, -3));
-  if (w.endsWith('ied')) out.push(w.slice(0, -3) + 'y');
-  if (w.endsWith('ed') && w.length > 3) out.push(w.slice(0, -2) + 'e', w.slice(0, -3), w.slice(0, -2));
-  if (w.endsWith('est') && w.length > 4) {
-    const b = w.slice(0, -3);
-    out.push(b, b.slice(0, -1));
-  }
-  if (w.endsWith('er') && w.length > 3) {
-    const b = w.slice(0, -2);
-    out.push(b.endsWith('i') ? b.slice(0, -1) + 'y' : b, b.slice(0, -1), b + 'e');
-  }
-  return out;
-}
-const FUNC = new Set(
-  'a an the this that these those i you he she it we they me him her us them my your his its our their who whom whose which what of in on at by for with about to from and but or nor so yet if because although though while unless since as than whether when where why how is am are was were be been being do does did have has had will would shall should can could may might must not mr mrs ms dr one two three four five six seven eight nine ten hundred thousand toward towards quite within entire yourselves ourselves themselves sth sb'.split(
-    ' ',
-  ),
-);
-const clean = (t) =>
-  t
-    .replace(/\r/g, '')
-    .replace(/（[^）]*）/g, ' ')
-    .replace(/\([^)]*\)/g, ' ')
-    .replace(/\[[^\]]*\]/g, ' ')
-    .replace(/can't/gi, 'cannot')
-    .replace(/won't/gi, 'will not')
-    .replace(/shan't/gi, 'shall not')
-    .replace(/n't/gi, ' not')
-    .replace(/'(s|re|ve|ll|m|d)\b/gi, ' ')
-    .toLowerCase();
-const isUnk = (w) => !(K.has(w) || (IRREG[w] && K.has(IRREG[w])) || vb(w).some((b) => K.has(b)) || FUNC.has(w));
-function segsOf(md) {
-  const out = new Map();
-  for (const b of md.replace(/\r/g, '').split(/\n\s*\n/)) {
-    const m = b.match(/^\[P(\d+)\]\s*([\s\S]*)$/);
-    if (m) out.set(`P${m[1]}`, m[2].trim());
-  }
-  return out;
-}
-const norm = (t) =>
-  clean(t)
-    .replace(/[^a-z0-9 ]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-const grams = (t, n = 3) => {
-  const w = t.split(' ');
-  const s = new Set();
-  for (let i = 0; i + n <= w.length; i++) s.add(w.slice(i, i + n).join(' '));
-  return s;
-};
-const jac = (a, b) => {
-  let i = 0;
-  for (const x of a) if (b.has(x)) i++;
-  return i / (a.size + b.size - i || 1);
-};
-
+const isUnk = makeIsUnknown(K);
 // 源文件（[P##] 段）
 function sourceOf(ch) {
   const dir = `${AF}/调适工作区/原文重制_M50/第${ch}章`;
@@ -268,18 +106,7 @@ const R = { 结构: [], 梯度: [], 语义: [], 注释: [], 照抄: [], 尾部: 
 const unnotedWords = {};
 const unnotedRate = { A: { tok: 0, unk: 0 }, M: { tok: 0, unk: 0 }, B: { tok: 0, unk: 0 } };
 const sentLens = { A: [], M: [], B: [] };
-const FUNCS = new Set('the a an and or but of to in on at for with from that this by as was were is are be been his her their its they he she it not'.split(' '));
-const annoTypes = (t) => {
-  const s = new Set([...t.matchAll(/([A-Za-z][A-Za-z-]*)（[^）]*）/g)].map((m) => m[1].toLowerCase()));
-  // 短语感知：注覆盖其前方短语（≤28 字符内的内容词，含逗号/and 列表）与连字符成分
-  for (const m of t.matchAll(/（[^）]*）/g)) {
-    const pre = t.slice(Math.max(0, m.index - PHRASE_WINDOW), m.index).replace(/[,;:."'!?——\s]+$/, '');
-    const run = pre.split(/[.;:!?"]|\s(?:in|on|at|of|to|for|with|from|but|the|a|an|was|were|is|are|be|been|his|her|their|that|this)\s/g).pop() || '';
-    for (const w of run.match(/[A-Za-z][A-Za-z-]*/g) || []) if (w.length >= 3 && !FUNCS.has(w.toLowerCase())) s.add(w.toLowerCase());
-  }
-  for (const w of [...s]) if (w.includes('-')) for (const p of w.split('-')) if (p.length > 2) s.add(p);
-  return s;
-};
+const annoTypes = (t) => annoTypesOf(t, PHRASE_WINDOW);
 
 for (const ch of CH) {
   const src = sourceOf(ch);
@@ -316,17 +143,9 @@ for (const ch of CH) {
     const words = new Map();
     const ann = annoTypes(tiers[tk].md);
     for (const [id, t] of tiers[tk].segs) {
-      let n = 0;
-      const ws = [];
-      for (const w of clean(t).match(/[a-z]+/g) || []) {
-        if (w.length < 2 && w !== 'a' && w !== 'i') continue;
-        if (isUnk(w) && !ann.has(w)) {
-          n++;
-          ws.push(w);
-        }
-      }
-      m.set(id, n);
-      words.set(id, ws);
+      const u = unnotedTokensOf(t, ann, isUnk);
+      m.set(id, u.n);
+      words.set(id, u.words);
     }
     unnotedWords[tk] = words;
     return m;
@@ -343,13 +162,8 @@ for (const ch of CH) {
     R.梯度.push(`${ch} 同段B未注>A：${bOver.slice(0, 6).join(' ')}${bOver.length > 6 ? ` 等${bOver.length}段` : ''} ｜词：${wlist}`);
   }
   const avgSent = (tk) => {
-    const ls = [];
-    for (const t of tiers[tk].segs.values())
-      for (const s of t.split(/(?<=[.!?])\s+/)) {
-        const n = (s.toLowerCase().match(/[a-z]+/g) || []).length;
-        if (n >= 2) ls.push(n);
-      }
-    return ls.reduce((a, b) => a + b, 0) / ls.length;
+    const ls = sentLensOfSegs(tiers[tk].segs.values());
+    return ls.length ? ls.reduce((a, b) => a + b, 0) / ls.length : 0;
   };
   if (avgSent('B') > avgSent('A') * 1.15) R.梯度.push(`${ch} B均句长${avgSent('B').toFixed(1)} > A均句长${(avgSent('A') * 1.15).toFixed(1)}（比值${(avgSent('B') / avgSent('A')).toFixed(2)}）`);
   // ③ 语义确定性校验（vs 源）：数字子集/专名不丢/否定不反转
@@ -358,19 +172,10 @@ for (const ch of CH) {
       for (const [id, t] of tiers[tk].segs) {
         const s = src.get(id);
         if (!s) continue;
-        const numsP = [...clean(t).matchAll(/\b\d+\b/g)].map((m) => m[0]);
-        const numsS = new Set([...clean(s).matchAll(/\b\d+\b/g)].map((m) => m[0]));
-        if (numsP.some((n) => !numsS.has(n))) R.语义.push(`${ch}/${tk}/${id} 凭空数字 ${numsP.filter((n) => !numsS.has(n)).join(',')}`);
-        const propS = [...clean(s).match(/[a-z]+/g)].filter((w) => afProper.has(w));
-        const txtP = clean(t);
-        for (const pr of new Set(propS))
-          if (!txtP.includes(pr)) {
-            R.语义.push(`${ch}/${tk}/${id} 专名丢失 ${pr}`);
-            break;
-          }
-        const negP = (clean(t).match(/\b(not|never|no|cannot)\b/g) || []).length;
-        const negS = (clean(s).match(/\b(not|never|no|cannot)\b/g) || []).length;
-        if (src && negP < negS && negS >= 2 && negP === 0) R.语义.push(`${ch}/${tk}/${id} 否定疑似反转 ${negS}→0`);
+        const v = semanticSuspectsOf(s, t, afProper);
+        if (v.fakeNums.length) R.语义.push(`${ch}/${tk}/${id} 凭空数字 ${v.fakeNums.join(',')}`);
+        if (v.lostProps.length) R.语义.push(`${ch}/${tk}/${id} 专名丢失 ${v.lostProps[0]}`);
+        if (v.negSuspect) R.语义.push(`${ch}/${tk}/${id} 否定疑似反转 ${v.negSource}→0`);
       }
   // ⑤ 照抄检测（隔离难度残留段）
   if (src)
@@ -388,15 +193,10 @@ for (const ch of CH) {
   for (const tk of Object.keys(tiers)) {
     const ann = annoTypes(tiers[tk].md);
     for (const t of tiers[tk].segs.values()) {
-      for (const w of clean(t).match(/[a-z]+/g) || []) {
-        if (w.length < 2 && w !== 'a' && w !== 'i') continue;
-        unnotedRate[tk].tok++;
-        if (isUnk(w) && !ann.has(w)) unnotedRate[tk].unk++;
-      }
-      for (const s of t.split(/(?<=[.!?])\s+/)) {
-        const n = (s.toLowerCase().match(/[a-z]+/g) || []).length;
-        if (n >= 2) sentLens[tk].push(n);
-      }
+      const u = unnotedTokensOf(t, ann, isUnk);
+      unnotedRate[tk].tok += u.tokens;
+      unnotedRate[tk].unk += u.n;
+      sentLens[tk].push(...sentLensOfSegs([t]));
     }
   }
 }

@@ -63,3 +63,133 @@ export function maxSentenceLen(text: string, opts?: { exemptQuotes?: boolean }):
   }
   return max;
 }
+
+/* ───────────────────────────── 四闸（项 1 App / 项 2 MCP 共用） ─────────────────────────────
+ * 回炉的验收闸。红词数由调用方算（App 用它的词库、管线用分档允许表——"什么是红词"
+ * 是调用方的口径），闸只负责比较；其余三闸（段长比/注释不丢/句长）自含。 */
+
+export type ReworkGateName = '红词必减' | '段长比' | '注释不丢' | '句长上限';
+
+export interface ReworkGateInput {
+  before: string;
+  after: string;
+  /** 句长上限（词/句）；闸内部按引语豁免口径量 */
+  maxLen: number;
+  /** 改前红词数（未注生词出现次数，调用方口径） */
+  redBefore: number;
+  /** 改后红词数 */
+  redAfter: number;
+  /** 段长比带 [下限, 上限]，默认 [0.7, 1.4]（回炉 v2 标定值） */
+  lenBand?: [number, number];
+  /** 句长容差（上限 + 容差才拦），默认 0；管线侧用 +2 */
+  lenTolerance?: number;
+}
+
+export interface ReworkGateResult {
+  pass: boolean;
+  failures: Array<{ gate: ReworkGateName; message: string }>;
+  measured: { redBefore: number; redAfter: number; wordsBefore: number; wordsAfter: number; ratio: number; annoBefore: number; annoAfter: number; maxSent: number };
+}
+
+/** 段词数：剥注释/括号/方括号后数英文词（与回炉管线 words() 同值——撇号形 don't 数 2 词） */
+export function reworkWordCount(text: string): number {
+  return (
+    String(text ?? '')
+      .replace(/[（(][^）)]*[）)]/g, ' ')
+      .replace(/\[[^\]]*\]/g, ' ')
+      .match(/[A-Za-z]+/g) ?? []
+  ).length;
+}
+
+export function reworkGates(input: ReworkGateInput): ReworkGateResult {
+  const wordsBefore = reworkWordCount(input.before);
+  const wordsAfter = reworkWordCount(input.after);
+  const ratio = wordsBefore > 0 ? wordsAfter / wordsBefore : 1;
+  const annoBefore = (String(input.before ?? '').match(/（[^）]*）/g) ?? []).length;
+  const annoAfter = (String(input.after ?? '').match(/（[^）]*）/g) ?? []).length;
+  const maxSent = maxSentenceLen(input.after, { exemptQuotes: true });
+  const [lo, hi] = input.lenBand ?? [0.7, 1.4];
+  const failures: Array<{ gate: ReworkGateName; message: string }> = [];
+  if (input.redAfter > input.redBefore || (input.redBefore > 0 && input.redAfter === input.redBefore)) {
+    failures.push({ gate: '红词必减', message: `红词 ${input.redBefore}→${input.redAfter}：改前有红词时必须严格减少，且任何时候不得增加` });
+  }
+  if (ratio < lo || ratio > hi) {
+    failures.push({ gate: '段长比', message: `段长 ${wordsBefore}→${wordsAfter}（比 ${ratio.toFixed(2)}），出带 [${lo}, ${hi}]` });
+  }
+  if (annoAfter < annoBefore) {
+    failures.push({ gate: '注释不丢', message: `注释 ${annoBefore}→${annoAfter}：已有中文注释一处都不能丢` });
+  }
+  const limit = input.maxLen + (input.lenTolerance ?? 0);
+  if (maxSent > limit) {
+    failures.push({ gate: '句长上限', message: `最长句 ${maxSent} 词 > ${limit}（引语豁免后计量）` });
+  }
+  return {
+    pass: failures.length === 0,
+    failures,
+    measured: { redBefore: input.redBefore, redAfter: input.redAfter, wordsBefore, wordsAfter, ratio: Number(ratio.toFixed(3)), annoBefore, annoAfter, maxSent },
+  };
+}
+
+/* ───────────────────────────── 回炉台账汇总（脚本 --report 与 MCP layer_rework_ledger 共用） ── */
+
+export interface LedgerRow {
+  tier?: string;
+  chapter?: string;
+  seg?: string;
+  verdict?: string;
+  reason?: string;
+  class?: string;
+  [k: string]: unknown;
+}
+
+export interface LedgerSummary {
+  total: number;
+  badLines: number;
+  byVerdict: Record<string, number>;
+  hung: number;
+  hungByTier: Record<string, number>;
+  groups: Array<{ cls: HangClass | string; count: number; items: Array<{ tier: string; chapter: string; seg: string; reason: string }> }>;
+  /** 下一轮建议顺序（组内数量降序） */
+  nextOrder: Array<HangClass | string>;
+}
+
+/** 解析并汇总回炉台账 JSONL。空文本/全坏行返回 null（调用方说出口，不静默当 0）。 */
+export function summarizeLedger(text: string, ctx?: { sentLimitOf?: (tier: string) => number | undefined }): LedgerSummary | null {
+  const lines = String(text ?? '')
+    .split('\n')
+    .filter((l) => l.trim());
+  if (!lines.length) return null;
+  const rows: LedgerRow[] = [];
+  let badLines = 0;
+  for (const l of lines) {
+    try {
+      rows.push(JSON.parse(l) as LedgerRow);
+    } catch {
+      badLines++;
+    }
+  }
+  if (!rows.length) return { total: 0, badLines, byVerdict: {}, hung: 0, hungByTier: {}, groups: [], nextOrder: [] };
+  const byVerdict: Record<string, number> = {};
+  const hungRows: LedgerRow[] = [];
+  for (const r of rows) {
+    const v = String(r.verdict ?? '');
+    byVerdict[v] = (byVerdict[v] ?? 0) + 1;
+    if (v === '挂起') hungRows.push(r);
+  }
+  const hungByTier: Record<string, number> = {};
+  for (const h of hungRows) hungByTier[String(h.tier ?? '?')] = (hungByTier[String(h.tier ?? '?')] ?? 0) + 1;
+  const grouped = new Map<string, LedgerRow[]>();
+  for (const h of hungRows) {
+    const cls = String(h.class || classifyHangReason(String(h.reason ?? ''), { sentLimit: ctx?.sentLimitOf?.(String(h.tier ?? '')) }));
+    if (!grouped.has(cls)) grouped.set(cls, []);
+    grouped.get(cls)!.push(h);
+  }
+  const groups = [...grouped.entries()]
+    .sort((a, b) => b[1].length - a[1].length)
+    .map(([cls, list]) => ({
+      cls,
+      count: list.length,
+      items: list.map((h) => ({ tier: String(h.tier ?? ''), chapter: String(h.chapter ?? ''), seg: String(h.seg ?? ''), reason: String(h.reason ?? '') })),
+    }));
+  return { total: rows.length, badLines, byVerdict, hung: hungRows.length, hungByTier, groups, nextOrder: groups.map((g) => `${g.cls}(${g.count})`) };
+}

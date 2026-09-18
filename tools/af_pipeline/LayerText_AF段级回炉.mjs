@@ -14,7 +14,7 @@ import { join, dirname } from 'node:path';
 const SHARED = await import('./LayerText_AF词表与词典.mjs');
 import { keychainGet } from './keychain.mjs';
 const { loadProject, loadTextbookLearned, distOf } = SHARED;
-const { maxSentenceLen, classifyHangReason } = await import(`${distOf()}/src/core/rework.js`);
+const { maxSentenceLen, classifyHangReason, summarizeLedger } = await import(`${distOf()}/src/core/rework.js`);
 
 /* 项目根从 LAYERTEXT_AF_DIR（=AF 调适工作区）取（AGENTS 铁律 3：绝对路径不进仓库）。
  * 其上级目录须含 调适项目_AnimalFarm.json 与 知识文件/。 */
@@ -302,52 +302,37 @@ const chapters = CHN.filter((c, i) => !chArg || chArg.split(',').includes(String
 const tiersToRun = tierArg === 'ALL' ? ['A', 'M', 'B'] : [tierArg];
 const st = { lock3: 0, anno1: 0, ai2: 0, pend: 0 };
 
-/* ── --report：挂起段分组报告（零 API、只读台账，不发任何 AI 调用）── */
+/* ── --report：挂起段分组报告（零 API、只读台账，不发任何 AI 调用）——汇总逻辑=summarizeLedger（core 唯一实现）── */
 if (argv.includes('--report')) {
   if (!existsSync(LEDGER_LOG)) {
     console.error(`台账不存在：${LEDGER_LOG}——先跑一次回炉，或确认 LAYERTEXT_AF_DIR 指对了项目`);
     process.exit(2);
   }
-  const lines = readFileSync(LEDGER_LOG, 'utf8')
-    .split('\n')
-    .filter(Boolean)
-    .map((l) => {
-      try {
-        return JSON.parse(l);
-      } catch {
-        return null; // 坏行跳过但计数（不静默）
-      }
-    });
-  const bad = lines.filter((x) => !x).length;
-  const rows = lines.filter(Boolean);
-  const hangs = rows.filter((x) => x.verdict === '挂起');
-  const groups = new Map();
-  for (const h of hangs) {
-    const cls = h.class || classifyHangReason(h.reason || '', { sentLimit: (TIERS[h.tier] || {}).lim + 2 });
-    if (!groups.has(cls)) groups.set(cls, []);
-    groups.get(cls).push(h);
+  const sum = summarizeLedger(readFileSync(LEDGER_LOG, 'utf8'), { sentLimitOf: (t) => (TIERS[t] || {}).lim + 2 });
+  if (!sum) {
+    console.error(`台账是空的：${LEDGER_LOG}`);
+    process.exit(2);
   }
-  const ordered = [...groups.entries()].sort((a, b) => b[1].length - a[1].length);
   const date = new Date().toISOString().slice(0, 10);
-  const byTier = { A: 0, M: 0, B: 0 };
-  for (const h of hangs) byTier[h.tier] = (byTier[h.tier] || 0) + 1;
   console.log(
-    `回炉台账：共 ${rows.length} 条（✓锁修复 ${rows.filter((x) => x.verdict === '✓锁修复').length}｜✓换词降红 ${rows.filter((x) => x.verdict === '✓换词降红').length}｜挂起 ${hangs.length}：A ${byTier.A}/M ${byTier.M}/B ${byTier.B}）${bad ? `｜⚠ 坏行 ${bad} 条已跳过` : ''}`,
+    `回炉台账：共 ${sum.total} 条（${Object.entries(sum.byVerdict)
+      .map(([v, n]) => `${v} ${n}`)
+      .join('｜')}；挂起 ${sum.hung}：A ${sum.hungByTier.A || 0}/M ${sum.hungByTier.M || 0}/B ${sum.hungByTier.B || 0}）${sum.badLines ? `｜⚠ 坏行 ${sum.badLines} 条已跳过` : ''}`,
   );
-  for (const [cls, list] of ordered) {
-    console.log(`  [${cls}] ${list.length} 段`);
-    for (const h of list.slice(0, 6)) console.log(`    ${h.chapter}/${h.tier}/${h.seg}（${h.reason}）`);
-    if (list.length > 6) console.log(`    …等 ${list.length} 段`);
+  for (const g of sum.groups) {
+    console.log(`  [${g.cls}] ${g.count} 段`);
+    for (const h of g.items.slice(0, 6)) console.log(`    ${h.chapter}/${h.tier}/${h.seg}（${h.reason}）`);
+    if (g.count > 6) console.log(`    …等 ${g.count} 段`);
   }
-  if (ordered.length) console.log(`下一轮建议顺序（组内数量降序）：${ordered.map(([c, l]) => `${c}(${l.length})`).join(' → ')}`);
+  if (sum.groups.length) console.log(`下一轮建议顺序（组内数量降序）：${sum.nextOrder.join(' → ')}`);
   const md = [
     `# 回炉挂起报告 · ${date}`,
     '',
-    `台账：共 ${rows.length} 条决定；挂起 ${hangs.length} 段（A ${byTier.A}/M ${byTier.M}/B ${byTier.B}）。`,
-    bad ? `⚠ 坏行 ${bad} 条（JSON 解析失败，已跳过并列数）` : '',
+    `台账：共 ${sum.total} 条决定；挂起 ${sum.hung} 段（A ${sum.hungByTier.A || 0}/M ${sum.hungByTier.M || 0}/B ${sum.hungByTier.B || 0}）。`,
+    sum.badLines ? `⚠ 坏行 ${sum.badLines} 条（JSON 解析失败，已跳过并列数）` : '',
     '',
-    ...ordered.map(([cls, list]) => `## ${cls}（${list.length} 段）\n\n` + list.map((h) => `- ${h.chapter}章/${h.tier}/${h.seg}：${h.reason}`).join('\n') + '\n'),
-    ordered.length ? `下一轮建议顺序（组内数量降序）：${ordered.map(([c, l]) => `${c}(${l.length})`).join(' → ')}` : '当前没有挂起段。',
+    ...sum.groups.map((g) => `## ${g.cls}（${g.count} 段）\n\n` + g.items.map((h) => `- ${h.chapter}章/${h.tier}/${h.seg}：${h.reason}`).join('\n') + '\n'),
+    sum.groups.length ? `下一轮建议顺序（组内数量降序）：${sum.nextOrder.join(' → ')}` : '当前没有挂起段。',
     '',
   ].join('\n');
   writeFileSync(join(RUN, `回炉挂起报告_${date}.md`), md, 'utf-8');
