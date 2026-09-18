@@ -75,6 +75,16 @@ test('③碎片残留：歌词行（带逗号/句号）不误杀', () => {
   assert.equal(r[0].suspects.filter((x) => x.probe === '碎片残留').length, 0, JSON.stringify(r[0].suspects));
 });
 
+test('②章末无收束：4 词戏剧性完整短句（带句读）不报——真项目 ch6 清扫后实测过的误报形态', () => {
+  const text = normalCh(2) + '\n\n[P03] Long live Animal Farm!"';
+  const r = probeChapterSource([{ name: '六', text }]);
+  assert.equal(r[0].suspects.filter((x) => x.probe === '章末无收束').length, 0, JSON.stringify(r[0].suspects));
+  // 同样 4 词但没有句读 → 仍要报
+  const t2 = normalCh(2) + '\n\n[P03] and the horses ran';
+  const r2 = probeChapterSource([{ name: '六', text: t2 }]);
+  assert.ok(r2[0].suspects.some((x) => x.probe === '章末无收束'));
+});
+
 test('正常的一组章：零疑点（整本 ok）', () => {
   const r = probeChapterSource([
     { name: '一', text: normalCh(5) },

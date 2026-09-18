@@ -42,6 +42,14 @@ test('classifyHangReason：旧台账 reason 文本 → 机器分类（优先级=
   assert.equal(classifyHangReason('未过闸（锁✓ 未注3>2 长45→45）'), '未注超标');
   assert.equal(classifyHangReason('未过闸（锁✓ 未注1>0 长40→52）'), '未注超标'); // 未注闸先于段长闸
   assert.equal(classifyHangReason('未过闸（锁✓ 长40→52）'), '段长越界');
+  // ★ v2 旧格式罗列全部测量值：达标的数字对不许误判（首版 bug，真台账实跑抓出）
+  assert.equal(classifyHangReason('未过闸（锁✓ 未注1>1 长76→76）'), '未知'); // 1≤1 过、长比 1.0 过——判不出真凶
+  assert.equal(classifyHangReason('未过闸（锁✓ 未注0>2 长157→128）'), '未知'); // 0≤2 过
+  assert.equal(classifyHangReason('未过闸（锁✓ 未注5>4 长132→132）'), '未注超标'); // 5>4 真超标
+  // App 闸消息带空格 + 红词/句长超线关键词
+  assert.equal(classifyHangReason('未过闸（红词 2→1：改前有红词时必须严格减少）'), '未注超标');
+  assert.equal(classifyHangReason('未过闸（句长超线：最长句 19 词 > 16（引语豁免后计量））'), '句长超线');
+  assert.equal(classifyHangReason('未过闸（段长 25→12（比 0.48），出带 [0.7, 1.4]）'), '段长越界');
   assert.equal(classifyHangReason('调用失败'), '调用失败');
   assert.equal(classifyHangReason('未过闸（句长 19>16）'), '句长超线');
   assert.equal(classifyHangReason('注释数减少 3→1'), '注释丢失');

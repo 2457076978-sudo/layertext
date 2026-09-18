@@ -32,17 +32,23 @@ export function classifyHangReason(reason: string, ctx?: { sentLimit?: number })
   const r = String(reason ?? '');
   if (r.includes('调用失败')) return '调用失败';
   if (r.includes('未过锁闸') || r.includes('锁✗') || /缺\S*\s*数字/.test(r)) return '锁失败';
-  const red = r.match(/红(\d+)→(\d+)/);
-  if (/未注\d+>\d+/.test(r) || (red && Number(red[1]) > 0 && Number(red[2]) >= Number(red[1]))) return '未注超标';
-  const sentMax = r.match(/句max(\d+)/);
-  if (r.includes('句长') || (sentMax && ctx?.sentLimit !== undefined && Number(sentMax[1]) > ctx.sentLimit)) return '句长超线';
-  const len = r.match(/长(\d+)→(\d+)/);
+  /* v2 旧格式把四个测量值**全列出来**（不区分过没过），所以必须比数值：
+   * `未注1>1`（1≤目标=过）不是未注超标，`句长19>19`（19≤线=过）不是句长超线。
+   * 首版只做模式匹配，151 段里混进了"其实达标"的段——真台账实跑抓出。 */
+  /* 正则容空格：管线格式无空格（未注3>2），App 闸消息带空格（红词 1→0、段长 6→4）——两边都要认 */
+  const unnoted = r.match(/未注\s*(\d+)\s*>\s*(\d+)/);
+  const red = r.match(/红(?:词)?\s*(\d+)\s*→\s*(\d+)/);
+  if ((unnoted && Number(unnoted[1]) > Number(unnoted[2])) || (red && Number(red[1]) > 0 && Number(red[2]) >= Number(red[1])) || r.includes('红词')) return '未注超标';
+  const sentOver = r.match(/句长\s*(\d+)\s*>\s*(\d+)/);
+  const sentMax = r.match(/句max\s*(\d+)/);
+  if ((sentOver && Number(sentOver[1]) > Number(sentOver[2])) || r.includes('句长超线') || (sentMax && ctx?.sentLimit !== undefined && Number(sentMax[1]) > ctx.sentLimit)) return '句长超线';
+  const len = r.match(/长\s*(\d+)\s*→\s*(\d+)/);
   if (len && Number(len[1]) > 0) {
     const ratio = Number(len[2]) / Number(len[1]);
     if (ratio < 0.75 || ratio > 1.25) return '段长越界';
   }
   if (r.includes('段长')) return '段长越界';
-  const ann = r.match(/注(\d+)→(\d+)/);
+  const ann = r.match(/注(?:释)?\s*(\d+)\s*→\s*(\d+)/);
   if ((ann && Number(ann[2]) < Number(ann[1])) || r.includes('注释')) return '注释丢失';
   return '未知';
 }

@@ -44,7 +44,7 @@ test('layer_rework_ledger：v1/v2 混合台账汇总分组正确；空输入拒�
   assert.equal(r.total, 3);
   assert.equal(r.badLines, 1);
   assert.equal(r.hung, 2);
-  assert.deepEqual(r.groups.map((g) => g.cls).sort(), ['句长超线', '未注超标']);
+  assert.deepEqual(r.groups.map((g) => g.cls).sort(), ['句长超线', '未知']); // 未注1>1=达标罗列（数值比较后不误判）
   assert.ok('error' in toolReworkLedger(''));
   // 全坏行 ≠ 空台账：如实报 total 0 + badLines 2（说出口，不静默当干净）
   const allBad = toolReworkLedger('只有坏行\n不是json') as { total: number; badLines: number };

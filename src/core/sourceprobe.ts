@@ -83,8 +83,10 @@ export function probeChapterSource(chapters: SourceChapterInput[]): ChapterProbe
     if (last) {
       const tail = last.trimEnd().replace(/["”')\]]+$/, '');
       const lastWord = (tail.match(/[A-Za-z]+$/)?.[1] ?? '').toLowerCase();
-      if (wordCount(last) < 5) {
-        suspects.push({ probe: '章末无收束', message: `末段只有 ${wordCount(last)} 词：${last.slice(0, 60)}` });
+      /* 短末段只有**同时缺句读收尾**才算断章——`Long live Animal Farm!"` 这类 4 词戏剧性
+       * 完整短句是真结尾（2026-09-18 真项目清扫后实测命中过的误报）。 */
+      if (wordCount(last) < 5 && !/[.!?”"]$/.test(tail)) {
+        suspects.push({ probe: '章末无收束', message: `末段只有 ${wordCount(last)} 词且无句读收尾：${last.slice(0, 60)}` });
       } else if (/[,:;—–]$/.test(tail)) {
         suspects.push({ probe: '章末无收束', message: `末段以「${tail.slice(-1)}」收尾——疑似断章：…${tail.slice(-60)}` });
       } else if (!/[.!?”"]$/.test(tail) || DANGLING_CONJ.has(lastWord)) {

@@ -29,7 +29,8 @@ const P = loadProject(join(AF, '调适项目_AnimalFarm.json'));
 const KV = join(AF, '知识文件');
 const OUT = P.产物目录;
 const RUN = join(OUT, '_运行');
-const BACK = join(RUN, '回炉v2前_20260917');
+/* 备份目录按日期滚动：固定名会在第二轮起静默跳过备份（ensureBak 只在不存在时拷） */
+const BACK = join(RUN, '回炉前_' + new Date().toISOString().slice(0, 10).replace(/-/g, ''));
 const LEDGER_LOG = join(RUN, '回炉台账.jsonl');
 const MODEL = P.模型 || 'ecnu-max';
 const CFG = { baseUrl: 'https://chat.ecnu.edu.cn/open/api/v1' };
@@ -340,6 +341,95 @@ if (argv.includes('--report')) {
   process.exit(0);
 }
 
+/* ── --recheck：挂起段按当前产物+当前闸（引语豁免后）重测——台账是历史账，真靶子以现状为准（零 API）── */
+if (argv.includes('--recheck')) {
+  if (!existsSync(LEDGER_LOG)) {
+    console.error(`台账不存在：${LEDGER_LOG}——先跑一次回炉，或确认 LAYERTEXT_AF_DIR 指对了项目`);
+    process.exit(2);
+  }
+  const rows = readFileSync(LEDGER_LOG, 'utf8')
+    .split('\n')
+    .filter(Boolean)
+    .map((l) => {
+      try {
+        return JSON.parse(l);
+      } catch {
+        return null;
+      }
+    })
+    .filter(Boolean);
+  // 按 章/层/段 去重，**最新一条不论结论**（append-only 台账：后来的 ✓修订 会覆盖早先的挂起，
+  // 先过滤挂起再取最新会把已修好的段继续当挂起算——首版就是这个错）
+  const bareCh = (c) => String(c).replace(/^第/, '').replace(/章$/, '');
+  const latest = new Map();
+  for (const r of rows) latest.set(`${bareCh(r.chapter)}|${r.tier}|${r.seg}`, r); // 章名两代格式归一后再做键
+  const hungKeys = [...latest.values()].filter((r) => r.verdict === '挂起');
+  const date = new Date().toISOString().slice(0, 10);
+  const out = [];
+  /* 台账两代章名格式混存（「二」与「第二章」）——目录按归一后的裸章名拼，别拼出 第第二章章 */
+  /* 章集合必须按归一后的名字建——「二」与「第二章」是同一章，用原始名建集合会把同一章处理两遍（双重计数） */
+  for (const ch of [...new Set(hungKeys.map((r) => bareCh(r.chapter)))]) {
+    const src = sourceOf(ch);
+    const prods = {};
+    for (const [tk, t] of Object.entries(TIERS)) {
+      const p = join(OUT, `第${ch}章`, `原文_${t.tag}_2026-09-12_工序化.md`);
+      if (existsSync(p)) prods[tk] = { md: readFileSync(p, 'utf-8') };
+    }
+    const refA = prods.A ? new Map([...segsOf(prods.A.md)].map(([id, t]) => [id, unnotedIn(t, annoOf(prods.A.md)).n])) : new Map();
+    for (const r of hungKeys.filter((x) => bareCh(x.chapter) === ch)) {
+      const tk = r.tier;
+      const seg = prods[tk] ? segsOf(prods[tk].md).get(r.seg) : undefined;
+      if (!seg) {
+        out.push({ ...r, now: '产物/段缺失（可能已重生成）', oldCls: r.class || classifyHangReason(r.reason || '') });
+        continue;
+      }
+      const fails = [];
+      const ann = annoOf(prods[tk].md);
+      const u = unnotedIn(seg, ann);
+      const ref = refA.get(r.seg) ?? 0;
+      if (tk !== 'A' && u.n > ref) fails.push(`未注${u.n}>A${ref}：${[...new Set(u.u)].slice(0, 6).join('、')}`);
+      if (maxSentenceLen(seg, { exemptQuotes: true }) > TIERS[tk].lim + 2) fails.push(`句长${maxSentenceLen(seg, { exemptQuotes: true })}>${TIERS[tk].lim + 2}（引语豁免后）`);
+      if (src) {
+        const s = src.get(r.seg);
+        if (s && !lockPass(seg, locksOf(s)).ok) fails.push('锁未过');
+      }
+      if (/[\u4e00-\u9fff]/.test(seg.replace(/（[^）]*）/g, ''))) fails.push('注释外中文');
+      out.push({
+        ...r,
+        now: fails.length ? `仍挂：${fails.join('；')}` : '✓当前测量已过（历史挂起已消化）',
+        oldCls: r.class || classifyHangReason(r.reason || '', { sentLimit: (TIERS[tk] || {}).lim + 2 }),
+      });
+    }
+  }
+  const still = out.filter((x) => x.now.startsWith('仍挂'));
+  const pass = out.filter((x) => x.now.startsWith('✓'));
+  const miss = out.filter((x) => x.now.includes('缺失'));
+  const clsCount = {};
+  for (const x of still) clsCount[x.now.replace(/：.*$/, '').replace('仍挂：', '')] = (clsCount[x.now.replace(/：.*$/, '').replace('仍挂：', '')] || 0) + 1;
+  console.log(
+    `台账最新账面仍挂 ${out.length} 段：✓已消化 ${pass.length}｜仍挂 ${still.length}（${Object.entries(clsCount)
+      .map(([k, v]) => `${k} ${v}`)
+      .join('、')}）｜产物缺失 ${miss.length}`,
+  );
+  for (const x of still.slice(0, 12)) console.log(`  ${x.chapter}/${x.tier}/${x.seg} ${x.now}`);
+  if (still.length > 12) console.log(`  …等 ${still.length} 段`);
+  writeFileSync(
+    join(RUN, `回炉重测_${date}.md`),
+    [
+      `# 回炉挂起重测 · ${date}（当前产物 × 当前闸·引语豁免）`,
+      '',
+      `台账挂起去重 ${out.length} 段：**已消化 ${pass.length}｜仍挂 ${still.length}**｜产物缺失 ${miss.length}。`,
+      '',
+      `## 仍挂（${still.length}）\n\n` + still.map((x) => `- ${x.chapter}/${x.tier}/${x.seg}：${x.now}（旧分类 ${x.oldCls}）`).join('\n') + '\n',
+      `## 已消化（${pass.length}）\n\n` + pass.map((x) => `- ${x.chapter}/${x.tier}/${x.seg}（旧分类 ${x.oldCls}）`).join('\n') + '\n',
+      `## 产物缺失（${miss.length}）\n\n` + miss.map((x) => `- ${x.chapter}/${x.tier}/${x.seg}`).join('\n') + '\n',
+    ].join('\n'),
+    'utf-8',
+  );
+  console.log(`重测报告已写：${join(RUN, '回炉重测_2026-09-18.md'.replace('2026-09-18', date))}`);
+  process.exit(0);
+}
+
 for (const ch of chapters) {
   const src = sourceOf(ch);
   const prods = {};
@@ -457,13 +547,19 @@ for (const ch of chapters) {
     }
   }
 
-  /* ── Phase 2：仍倒挂段 → AI 换词（锁先行）── */
+  /* ── Phase 2：仍倒挂段 + 句长超标段（含 A 层）→ AI 修订（锁先行）──
+   * 2026-09-18 扩：v2 原选段只看未注倒挂，句长闸只验稿不改稿——重测 89 段真挂里的大头
+   * （引语豁免后仍超线的非引语长句）根本不进队列。现在两类都选：
+   * ①未注倒挂（M/B，目标=A 同段参考）②句长超标（全层，目标=拆句）。
+   * A 层句长段的换词闸取「不增」（target=当前值）——A 是参考层，本就不要求它降红。 */
   const aiSegs = [];
-  for (const tk of tiersToRun.filter((x) => x !== 'A')) {
+  for (const tk of tiersToRun) {
     const ann = annoOf(prods[tk].md);
     for (const [id, t] of prods[tk].segs) {
       const u = unnotedIn(t, ann);
-      if (u.n > (refA.get(id) ?? 0)) aiSegs.push({ tk, id, t, u, target: refA.get(id) ?? 0 });
+      const over = maxSentenceLen(t, { exemptQuotes: true }) > TIERS[tk].lim + 2;
+      const inv = tk !== 'A' && u.n > (refA.get(id) ?? 0);
+      if (inv || over) aiSegs.push({ tk, id, t, u, over, target: tk === 'A' ? u.n : (refA.get(id) ?? 0) });
     }
   }
   if (aiSegs.length && !dry) {
@@ -473,8 +569,8 @@ for (const ch of chapters) {
       const sys = '你是分层读物的段级修订器。按顺序执行：先保锁，再降红词。';
       const user = `修订这段${TIERS[r.tk].tag}英语读物，按顺序满足：
 1. 【锁·最先】专名必须保留且本段至少一次全名出现：${L.props.join('、') || '无'}；只可出现这些数字：${L.nums.join('、') || '无'}；否定表达一个都不能丢（源段 ${L.neg} 个）。
-2. 【降红】把下面这些未注释的生词换成课标内常见词（或删去冗余）：${[...new Set(r.u.u)].join('、')}——修完后未注生词数必须 ≤ ${r.target}。
-3. 保留已有中文注释（word（中文））、情节事实；段落词数变化 ±25% 内；每句不超过 ${TIERS[r.tk].lim} 词。
+2. 【降红】把下面这些未注释的生词换成课标内常见词（或删去冗余）：${[...new Set(r.u.u)].join('、') || '无'}——修完后未注生词数必须 ≤ ${r.target}。${r.over ? '\n3. 【拆句】这段有超过 ${TIERS[r.tk].lim} 词的长句：把它们拆成两个以上的短句（直接引语内部不拆）；不要为拆句丢信息。' : ''}
+${r.over ? 4 : 3}. 保留已有中文注释（word（中文））、情节事实；段落词数变化 ±25% 内；每句不超过 ${TIERS[r.tk].lim} 词。
 只输出修订后的整段（保留 [P${r.id}] 标记）。
 
 段落：
