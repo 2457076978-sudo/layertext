@@ -55,7 +55,7 @@
 | 导出        | Word 版（含章末词句卡）/ 朗读音频（系统语音）/ 标记 JSON / 变更日志 CSV                                                                                                                                                                         |
 | 版本对比    | 双版本逐段 diff（原文 vs 简化版 vs 再简化版）                                                                                                                                                                                                   |
 
-引擎质量：**1029 项回归测试（1028 通过 / 1 跳过）**（防坑规则 + 审校 DOM + UI 部件 + 应用逻辑 + 校准台账 / 待确认队列）；TS 引擎与 Python 原型在示例与真实章节上逐字段一致（[M1 对照报告](docs/M1-对照测试报告.md)）。
+引擎质量：**1108 项回归测试（1106 通过 / 2 跳过）**（防坑规则 + 审校 DOM + UI 部件 + 应用逻辑 + 校准台账 / 待确认队列）；TS 引擎与 Python 原型在示例与真实章节上逐字段一致（[M1 对照报告](docs/M1-对照测试报告.md)）。
 产品文档：[项目总说明](docs/项目总说明.md)（**项目是什么、怎么转、到哪一步**） · [文件架构地图](docs/文件架构.md)（**改结构/挪文件前先看它，改完必须同步更新**） · [PRD（一页）](docs/PRD.md) · [CHANGELOG](CHANGELOG.md) · [待确认队列与校准台账](docs/待确认队列与校准台账.md) · [段级门禁与风险队列](docs/段级门禁与风险队列.md) · [工程化开发提示词](docs/工程化开发提示词_v1.0.md)。
 
 **这个工具做的是什么**（定位，两个数分开看不合成）：LayerText 做的是**受控的分层阅读适配**——
@@ -111,7 +111,7 @@ npm run tauri build --target universal-apple-darwin
 git clone https://github.com/<your-org>/layertext.git
 cd layertext
 npm install
-  npm test        # 1029 项回归测试（防坑规则 + 审校 DOM + UI 部件 + 应用逻辑 + 校准台账 / MCP 工具层；node --experimental-test-coverage 可出覆盖率）
+  npm test        # 1108 项回归测试（防坑规则 + 审校 DOM + UI 部件 + 应用逻辑 + 校准台账 / MCP 工具层；node --experimental-test-coverage 可出覆盖率）
 npm run eval    # 金标准评测：黑名单命中率/OOV 对齐 vs 质量基线（低于基线退出码 1）
 
 # 对示例文本跑一次质检（报告自动落盘到文本同目录）
@@ -155,7 +155,7 @@ node dist/src/cli.js qc examples/texts/school_story_club.md \
 src/core/    QC 引擎（纯 TypeScript，无框架依赖：irregular / lexicon / textpipe / qc / risks / adoption / aiops）
 src/cli.ts   命令行入口　　src/eval.ts   评测入口（npm run eval）
 app/         macOS 桌面应用（Tauri 2：前端 Vite + 主进程 Rust，复用 src/core）
-tests/       回归测试（node:test，1029 项）
+tests/       回归测试（node:test，1108 项）
 tools/       qc_chapter_ref.py（Python 参照版）、compare.ts（对照测试）、adoption.ts（采纳率分析）、extract_changelog.mjs（发布）
              af_pipeline/  真实项目的管线脚本（待确认队列 / 校准台账 / 正本核对 / 补注候选 / 本地助手 …）
 prompts/     版本化 AI 提示词（manifest 管版本，教师可自定义覆盖）
@@ -203,7 +203,7 @@ examples/    示例文本与词库（自写 CC0）+ evals/ 金标准评测集
 
 **规划 📌**（素材库，未立项；实现前先过红线检查）
 
-- 内容生产：全书进度看板（章×层质检/审校/终审矩阵）、整本书流水线（逐章排队 AI 初稿，人只处理卡住的章）、书架式多书管理、层数自定义（入门层）、跨章词汇复现统计、AI 出题（阅读理解/词汇练习，沿用候选-采纳-留痕）
+- 内容生产：全书进度看板（章×层质检/审校/终审矩阵）、整本书流水线（逐章排队 AI 初稿，人只处理卡住的章）、跨章词汇复现的间隔复习（词画卷已交付底表，剩 FSRS 接线）
 - 研究侧（课题向）：分层质量档案（指标随版本演进曲线，一键导出课题数据表）、B/M/A 同段改写策略对照报告、改写策略标签库（拆句/换词/去被动/释义/合并）
 - 界面体验：三区定锚布局、阶段步骤条常驻、高亮密度自动降噪、diff 同句连线对齐、投屏演示模式、指标"数字+人话判读"成对、纸面打印预览
 
