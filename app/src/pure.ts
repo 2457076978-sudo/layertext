@@ -1188,6 +1188,8 @@ export interface ConcTierRow {
   annotated: boolean;
   wordForm: string;
   unmerged: boolean;
+  /** 教师决定溯源（attachOrigin 附加；无则省略不伪造） */
+  origin?: string;
 }
 
 export interface ConcGroupRow {
@@ -1201,7 +1203,7 @@ export interface ConcGroupRow {
 /** 画卷行分组：按 章+段 聚（occurrences 保持书序）；同段多层 → compare。
  *  tiersOrder 给了按它排层（如 ['A','M','B'] 的层标签），不给按首次出现序。 */
 export function concordanceRows(
-  occs: Array<{ chapter: string; tier: string; segId: string; sentence: string; annotated: boolean; wordForm: string; unmerged?: boolean }>,
+  occs: Array<{ chapter: string; tier: string; segId: string; sentence: string; annotated: boolean; wordForm: string; unmerged?: boolean; origin?: string }>,
   tiersOrder?: string[],
 ): ConcGroupRow[] {
   const key = (o: { chapter: string; segId: string }): string => `${o.chapter}|${o.segId}`;
@@ -1213,7 +1215,8 @@ export function concordanceRows(
       g = { chapter: o.chapter, segId: o.segId, rows: [], compare: false };
       groups.set(k, g);
     }
-    if (!g.rows.some((r) => r.tier === o.tier)) g.rows.push({ tier: o.tier, sentence: o.sentence, annotated: o.annotated, wordForm: o.wordForm, unmerged: Boolean(o.unmerged) });
+    if (!g.rows.some((r) => r.tier === o.tier))
+      g.rows.push({ tier: o.tier, sentence: o.sentence, annotated: o.annotated, wordForm: o.wordForm, unmerged: Boolean(o.unmerged), ...(o.origin ? { origin: o.origin } : {}) });
     if (g.rows.length >= 2) g.compare = true;
   }
   const out = [...groups.values()];

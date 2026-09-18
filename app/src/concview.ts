@@ -11,7 +11,7 @@ import { $, setStatus } from './uikit.js';
 import { uibus } from './uibus.js';
 import { loadBookChapters } from './bookscan.js';
 import { propagationConfig } from './propagateui.js';
-import { buildConcordance, type ConcordanceOccurrence } from '../../src/core/concordance.js';
+import { attachOrigin, buildConcordance, type ConcordanceMark, type ConcordanceOccurrence } from '../../src/core/concordance.js';
 import { concordanceEntryLine, concordanceRows } from './pure.js';
 import type { FileSession } from './types.js';
 
@@ -25,6 +25,8 @@ interface ConcCache {
   paths: Map<string, string>; // `${章}|${层}` → 文件路径（跳转用）
   coverage: string;
   chapterNames: string[];
+  /** 词级标记的溯源（有 origin 的才算——"教师亲判传播而来"）；稳定 ID=词+章+层+段 */
+  marks: ConcordanceMark[];
 }
 
 let cache: ConcCache | null = null;
@@ -47,8 +49,16 @@ async function buildFor(s: FileSession): Promise<ConcCache | null> {
     chapters.map((name) => ({ name, tiers: byChapter.get(name)! })),
     { known: S.currentKnown },
   );
+  /* 溯源标记（2e）：段的稳定 ID 按 mark 的段索引 pi（0 基）映射 P##——与 App 归一化
+   * 编号同源；对不上的（手工改过段序等）attachOrigin 自然匹配不上、省略不伪造，失效安全。 */
+  const marks: ConcordanceMark[] = [];
+  for (const row of scan.chapters) {
+    for (const m of row.marks) {
+      if (m.word && m.origin) marks.push({ word: m.word, chapter: row.name, tier: row.tier, segId: `P${String(m.pi + 1).padStart(2, '0')}`, origin: m.origin });
+    }
+  }
   const key = s.sourcePath?.slice(0, s.sourcePath.lastIndexOf('/')) ?? s.fileName;
-  return { key, at: Date.now(), conc, paths, coverage: scan.coverage, chapterNames: chapters };
+  return { key, at: Date.now(), conc, paths, coverage: scan.coverage, chapterNames: chapters, marks };
 }
 
 async function ensureConc(s: FileSession, force = false): Promise<ConcCache | null> {
@@ -109,7 +119,7 @@ export async function openConcordanceView(s: FileSession, word: string): Promise
     return;
   }
   const w = word.toLowerCase();
-  const occs = c.conc.get(w) ?? [];
+  const occs = attachOrigin(c.conc.get(w) ?? [], c.marks); // 溯源附加（无匹配省略，不改图本体）
   const byTier = occs.reduce<Record<string, number>>((m, o) => ((m[o.tier] = (m[o.tier] ?? 0) + 1), m), {});
   const entry = concordanceEntryLine(occs.length, new Set(occs.map((o) => o.chapter)).size, byTier);
   const groups = concordanceRows(
@@ -133,7 +143,7 @@ export async function openConcordanceView(s: FileSession, word: string): Promise
             .map(
               (r) => `
           <div class="conc-row${g.compare ? ' compare' : ''}" data-conc-path="${esc(c.paths.get(`${g.chapter}|${r.tier}`) ?? '')}" title="点击打开这一份">
-            ${tierBadge(r.tier)}${r.annotated ? '<span class="ok-badge">已注</span>' : ''}${r.unmerged ? '<span class="warn">词表外</span>' : ''}
+            ${tierBadge(r.tier)}${r.annotated ? '<span class="ok-badge">已注</span>' : ''}${r.unmerged ? '<span class="warn">词表外</span>' : ''}${r.origin ? `<span class="conc-origin" title="此处的教师决定由「${esc(r.origin)}」传播而来（_审校标记.json 溯源）">↔ 亲判·${esc(r.origin)}</span>` : ''}
             <span class="conc-sent">${hl(r.sentence, r.wordForm)}</span>
           </div>`,
             )

@@ -21,6 +21,8 @@ export interface BookChapterText {
   tier: string;
   path: string;
   text: string;
+  /** 该文件同目录的 `<基名>_审校标记.json`（词级标记，含 origin 溯源；读不动/坏了为空数组并点名） */
+  marks: Array<{ word?: string; origin?: string; pi: number }>;
 }
 
 export interface BookScanResult {
@@ -63,6 +65,21 @@ export function probeChapterNames(): string[] {
     out.push(`第${i}章`);
   }
   return [...new Set(out)];
+}
+
+/** 读一份产物文件旁边的 `_审校标记.json`（best-effort：读不动/坏 JSON → 空数组，坏文件点名不静默） */
+async function readMarksFor(path: string, label: string, skipped: string[]): Promise<Array<{ word?: string; origin?: string; pi: number }>> {
+  const markPath = `${path.slice(0, path.lastIndexOf('/'))}/${path.slice(path.lastIndexOf('/') + 1).replace(/\.(md|txt|markdown)$/i, '')}_审校标记.json`;
+  const r = await readTextChecked(markPath);
+  if (r.kind !== 'ok') return [];
+  try {
+    const parsed = JSON.parse(r.text) as unknown;
+    if (!Array.isArray(parsed)) throw new Error('不是数组');
+    return parsed.filter((m): m is { word?: string; origin?: string; pi: number } => typeof m === 'object' && m !== null);
+  } catch (e) {
+    skipped.push(`${label} 的审校标记解析失败（${String(e).slice(0, 40)}）——溯源按无处理`);
+    return [];
+  }
 }
 
 async function dirExists(p: string): Promise<boolean> {
@@ -114,7 +131,7 @@ export async function loadBookChaptersFromPath(path: string | null, naming: Reco
         skipped.push(`${chapterName}/${f}（超过 2MB 上限，没进画卷）`);
         continue;
       }
-      out.push({ name: chapterName, tier: tierOfFile(f, naming), path, text: r.text });
+      out.push({ name: chapterName, tier: tierOfFile(f, naming), path, text: r.text, marks: await readMarksFor(path, `${chapterName}/${f}`, skipped) });
     }
   };
 
@@ -160,7 +177,7 @@ export async function loadBookChaptersFromPath(path: string | null, naming: Reco
           skipped.push(`${f}（超过 2MB 上限，没进画卷）`);
           continue;
         }
-        out.push({ name: f.replace(/\.(md|txt|markdown)$/i, ''), tier: tierOfFile(f, naming), path, text: r.text });
+        out.push({ name: f.replace(/\.(md|txt|markdown)$/i, ''), tier: tierOfFile(f, naming), path, text: r.text, marks: await readMarksFor(path, f, skipped) });
       }
     }
   }

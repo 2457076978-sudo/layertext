@@ -46,6 +46,15 @@ test('3d：unmerged → 行数据带词表外标记（渲染成 warn 徽标的�
   assert.equal(rows[0].rows[0].unmerged, true);
 });
 
+test('2e：concordanceRows 透传 origin（有则带、无则省略——不伪造溯源）', () => {
+  const rows = concordanceRows([
+    { chapter: '一', tier: 'A层85', segId: 'P01', sentence: 'The dog ran.', annotated: false, wordForm: 'dog' },
+    { chapter: '一', tier: 'M层75', segId: 'P01', sentence: 'The dog（狗） ran.', annotated: true, wordForm: 'dog', origin: 'A层85' },
+  ]);
+  assert.equal(rows[0].rows.find((r) => r.tier === 'M层75')?.origin, 'A层85');
+  assert.equal(rows[0].rows.find((r) => r.tier === 'A层85')?.origin, undefined);
+});
+
 test('3 DOM 冒烟：词画卷弹层渲染出章分组、层徽标、词表外徽标与跳转 data 属性', async () => {
   const { mockIPC, clearMocks } = await import('@tauri-apps/api/mocks');
   /* 章目录布局（AF 形态）：项目配置给层命名，文件名带层标签 */
@@ -54,6 +63,9 @@ test('3 DOM 冒烟：词画卷弹层渲染出章分组、层徽标、词表外�
     '/book/第一章/原文_A层85_x.md': '[P01] The dog ran home.\n',
     '/book/第一章/原文_M层75_x.md': '[P01] The dog（狗） ran home fast.\n',
     '/book/第二章/原文_A层85_x.md': '[P02] The farmz grew big in the dog days.\n',
+    /* 2e：M 层有带 origin 的词级标记（dog ← A层85 传播）；二章 A 层有不带 origin 的标记（不该出徽标） */
+    '/book/第一章/原文_M层75_x_审校标记.json': JSON.stringify([{ id: 'm1', level: 'word', pi: 0, si: 0, wi: 1, word: 'dog', type: 'zh', origin: 'A层85', ts: 1 }]),
+    '/book/第二章/原文_A层85_x_审校标记.json': JSON.stringify([{ id: 'm2', level: 'word', pi: 0, si: 0, wi: 6, word: 'dog', type: 'anchor', ts: 2 }]),
   };
   mockIPC((cmd: string, args: Record<string, unknown>) => {
     const path = String(args.path ?? '');
@@ -84,6 +96,10 @@ test('3 DOM 冒烟：词画卷弹层渲染出章分组、层徽标、词表外�
     assert.ok(html.includes('词画卷'), '标题');
     assert.ok((pop?.querySelectorAll('[data-conc-path]')?.length ?? 0) >= 2, '跳转行带文件路径 data 属性');
     assert.ok(html.includes('重扫'), '显式刷新入口（画卷是视图）');
+    // 2e：亲判溯源徽标——M 层 dog 行带「亲判·A层85」；A 层行与二章（无 origin 标记）不带
+    const html2 = pop?.innerHTML ?? '';
+    assert.ok(html2.includes('亲判·A层85'), '溯源徽标渲染');
+    assert.equal(pop?.querySelectorAll('.conc-origin')?.length ?? 0, 1, '恰一处（无 origin 的标记不伪造徽标）');
     // farmz 词表外徽标走另一个词
     await openConcordanceView(session, 'farmz');
     assert.ok((document.getElementById('conc-pop')?.innerHTML ?? '').includes('词表外'), '词表外徽标渲染');
