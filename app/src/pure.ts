@@ -1150,3 +1150,61 @@ export const RULE_BY_TYPE: Record<string, string> = {
   fact: 'R00',
   goods: 'R11',
 };
+
+/* ─────────── 词画卷（项 3）：入口行与行分组的纯逻辑（DOM 在 concview.ts） ─────────── */
+
+/** 词面板「全书 N 处」入口行文案。跨章或多层才有信息量；本章单层不渲染（不摆空行）。 */
+export function concordanceEntryLine(total: number, chapterCount: number, byTier: Record<string, number>): string | null {
+  if (total <= 0) return null;
+  const tiers = Object.keys(byTier).length;
+  if (chapterCount <= 1 && tiers <= 1) return null;
+  const tierStr = Object.entries(byTier)
+    .map(([t, n]) => `${t || '原稿'} ${n}`)
+    .join(' · ');
+  return `全书 ${total} 处 · ${chapterCount} 章（${tierStr}）`;
+}
+
+export interface ConcTierRow {
+  tier: string;
+  sentence: string;
+  annotated: boolean;
+  wordForm: string;
+  unmerged: boolean;
+}
+
+export interface ConcGroupRow {
+  chapter: string;
+  segId: string;
+  rows: ConcTierRow[];
+  /** 同段 ≥2 层含该词 → 三层对照行（A/M/B 各层的句子并排，缺层如实空） */
+  compare: boolean;
+}
+
+/** 画卷行分组：按 章+段 聚（occurrences 保持书序）；同段多层 → compare。
+ *  tiersOrder 给了按它排层（如 ['A','M','B'] 的层标签），不给按首次出现序。 */
+export function concordanceRows(
+  occs: Array<{ chapter: string; tier: string; segId: string; sentence: string; annotated: boolean; wordForm: string; unmerged?: boolean }>,
+  tiersOrder?: string[],
+): ConcGroupRow[] {
+  const key = (o: { chapter: string; segId: string }): string => `${o.chapter}|${o.segId}`;
+  const groups = new Map<string, ConcGroupRow>();
+  for (const o of occs) {
+    const k = key(o);
+    let g = groups.get(k);
+    if (!g) {
+      g = { chapter: o.chapter, segId: o.segId, rows: [], compare: false };
+      groups.set(k, g);
+    }
+    if (!g.rows.some((r) => r.tier === o.tier)) g.rows.push({ tier: o.tier, sentence: o.sentence, annotated: o.annotated, wordForm: o.wordForm, unmerged: Boolean(o.unmerged) });
+    if (g.rows.length >= 2) g.compare = true;
+  }
+  const out = [...groups.values()];
+  if (tiersOrder) {
+    const rank = (t: string): number => {
+      const i = tiersOrder.indexOf(t);
+      return i === -1 ? tiersOrder.length : i;
+    };
+    for (const g of out) g.rows.sort((a, b) => rank(a.tier) - rank(b.tier));
+  }
+  return out;
+}

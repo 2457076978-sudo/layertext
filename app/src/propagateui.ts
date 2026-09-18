@@ -28,7 +28,7 @@ import { readTextChecked } from './fsx.js';
 import { applyWordActionToText, DEFAULT_READER_TREE, descendantTierFiles, normalizeTree, tierTagOfFilename, type PropagationTarget, type ReaderTree } from '../../src/core/propagate.js';
 
 /** 从书根到当前章目录，找一个能读出 调适项目_*.json 的地方拿 产物命名 / 读者层级。 */
-async function propagationConfig(s: FileSession): Promise<{ naming: Record<string, string>; tree: ReaderTree } | null> {
+export async function propagationConfig(s: FileSession): Promise<{ naming: Record<string, string>; tree: ReaderTree } | null> {
   if (!s.sourcePath) return null;
   const { findProjectConfig } = await import('./datapanel.js');
   const dir = s.sourcePath.slice(0, s.sourcePath.lastIndexOf('/'));

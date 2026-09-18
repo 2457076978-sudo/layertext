@@ -5,6 +5,7 @@
 
 import { S, esc } from './state.js';
 import { $, setStatus, toast, pop, hidePop, placePop } from './uikit.js';
+import { openConcordanceView, primeConcordance } from './concview.js';
 import { logCalibration as logCalibrationOf } from './calibrationio.js';
 import { activeSession } from './session.js';
 import { uibus } from './uibus.js';
@@ -318,11 +319,14 @@ export function showWordPanel(session: FileSession, wEl: HTMLElement, x: number,
     <div class="pop-h">${esc(wEl.textContent ?? '')}</div>
     <div class="pop-info">词表状态：${stateLabel}${origin && origin !== tok ? `<br/>词形还原原形：${esc(origin)}` : ''}<br/>${cefrLine(tok)}</div>
     <div class="pop-marks"></div>
-    <div class="pop-btns">${hasAnno ? `<button data-mk="__unanno" class="primary" title="本地去除该词全章的中文标注（不过模型、可撤销），同时把该词登记进词库=学生已会（下次生成不再注它）">✂ 去除中文标注·记已会</button>` : ''}<button data-mk="__rewrite" class="primary" title="让 AI 按当前标记意图改写这一句（快捷键 R）"><svg class="ico"><use href="#i-sparkle"/></svg>AI 改写本句</button><button data-mk="__edit" title="亲手修改这一句（快捷键 E）——直接写入正文，可撤销，不经引擎复核（你是定稿人）">✎ 手动改这句</button></div>
+    <div class="pop-btns">${hasAnno ? `<button data-mk="__unanno" class="primary" title="本地去除该词全章的中文标注（不过模型、可撤销），同时把该词登记进词库=学生已会（下次生成不再注它）">✂ 去除中文标注·记已会</button>` : ''}<button data-mk="__rewrite" class="primary" title="让 AI 按当前标记意图改写这一句（快捷键 R）"><svg class="ico"><use href="#i-sparkle"/></svg>AI 改写本句</button><button data-mk="__edit" title="亲手修改这一句（快捷键 E）——直接写入正文，可撤销，不经引擎复核（你是定稿人）">✎ 手动改这句</button><button id="wp-conc" title="这个词在整本书里的出现处（哪几章哪几句、各层对照、是否已注）——词画卷，只读不改正文">📖 全书词画像</button></div>
     <div class="pop-mk">${WORD_PANEL_TYPES.map((t, i) => `<button data-mk="${t.key}" title="标记为「${t.label}」${t.key === 'anchor' ? '——记录该词为本篇复现锚点（保留并计入复现，不改正文）' : S.appConfig.autoRewriteOnMark ? '——即改模式下点完立即执行（写原稿+日志）' : '——点「AI 改写本句」或批量时按此意图处理'}"><span class="kbd">${i + 1}</span>${t.label}</button>`).join('')}</div>
     <textarea id="pop-note" placeholder="备注（可选，随下一条标记保存）"></textarea>
     <div class="pop-tip">${S.appConfig.autoRewriteOnMark ? '当前为即改模式：点任一标记立即执行（如「加中文标注」插入注释、「词汇简化」换课标内简单词），改动写原稿并记日志，首改前自动备份' : '先标记意图再点「AI 改写本句」，改写会直接出现在正文中供采纳'}</div>`;
   bindTypeButtons(session, 'word', pi, si, wi);
+  const concBtn = document.getElementById('wp-conc');
+  concBtn?.addEventListener('click', () => void openConcordanceView(session, tok));
+  void primeConcordance(session); /* 后台扫一次书，就绪后把按钮文案补成「全书 N 处…」 */
   refreshPop();
   placePop(x, y);
 }

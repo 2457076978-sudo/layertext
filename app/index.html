@@ -1808,6 +1808,72 @@
       }
 
       /* 整章改写弹层 */
+      #conc-pop {
+        position: fixed;
+        top: 64px;
+        right: 16px;
+        width: min(560px, 92vw);
+        max-height: min(72vh, 640px);
+        display: none;
+        flex-direction: column;
+        overflow: hidden;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18);
+        z-index: 90;
+      }
+      #conc-pop.open {
+        display: flex;
+      }
+      #conc-pop .conc-coverage {
+        padding: 4px 12px;
+        font-size: 11px;
+        border-bottom: 1px solid var(--line);
+      }
+      #conc-pop .conc-list {
+        overflow: auto;
+        padding: 8px 12px;
+      }
+      #conc-pop .conc-seg {
+        margin-bottom: 10px;
+      }
+      #conc-pop .conc-seg-h {
+        font-size: 11px;
+        color: var(--muted);
+        margin-bottom: 3px;
+      }
+      #conc-pop .conc-row {
+        display: flex;
+        align-items: baseline;
+        gap: 6px;
+        padding: 3px 6px;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 12px;
+        line-height: 1.6;
+      }
+      #conc-pop .conc-row:hover {
+        background: var(--bg2, rgba(127, 127, 127, 0.08));
+      }
+      #conc-pop .conc-tier {
+        flex: none;
+        font-size: 10px;
+        padding: 1px 5px;
+        border: 1px solid var(--line);
+        border-radius: 4px;
+        color: var(--muted);
+      }
+      #conc-pop .conc-sent b.conc-hit {
+        color: var(--mark-red, #c74c3f);
+      }
+      #conc-pop .conc-foot {
+        padding: 8px 12px;
+        border-top: 1px solid var(--line);
+      }
+      #conc-pop .conc-empty {
+        padding: 16px 12px;
+      }
       #draft-pop {
         position: fixed;
         z-index: 57;
@@ -3793,6 +3859,7 @@
     <div id="ai-pop"></div>
     <div id="draft-pop"></div>
     <div id="batch-pop"></div>
+    <div id="conc-pop"></div>
     <div id="tier-pop"></div>
     <div id="rewrite-pop"></div>
     <div id="welcome-pop"></div>
