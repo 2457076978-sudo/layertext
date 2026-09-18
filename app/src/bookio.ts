@@ -527,7 +527,29 @@ export async function showAnkiExport(): Promise<void> {
     const date = new Date().toLocaleDateString('sv-SE');
     try {
       await invoke('write_text_file', { path: `${dir}/生词卡_Anki_${date}.csv`, content: ankiCsv(rows) });
-      await invoke('write_text_file', { path: `${dir}/复现队列_${date}.csv`, content: reinforceQueueCsv(rows) });
+      /* 章级分布（词画卷）：best-effort 扫一次书——建不起来就照旧两列，不拦导出 */
+      let wordChapters: Map<string, Record<string, number>> | undefined;
+      try {
+        const { loadBookChaptersFromPath } = await import('./bookscan.js');
+        const { buildConcordance } = await import('../../src/core/concordance.js');
+        const scan = await loadBookChaptersFromPath(dir || null, {});
+        if (scan.chapters.length) {
+          const byChapter = new Map<string, Record<string, string>>();
+          for (const row of scan.chapters) {
+            const t = byChapter.get(row.name) ?? {};
+            t[row.tier || ''] = row.text;
+            byChapter.set(row.name, t);
+          }
+          const conc = buildConcordance(
+            [...byChapter.keys()].map((name) => ({ name, tiers: byChapter.get(name)! })),
+            { known: S.currentKnown },
+          );
+          wordChapters = new Map([...conc.entries()].map(([w, occs]) => [w, occs.reduce<Record<string, number>>((m, o) => ((m[o.chapter] = (m[o.chapter] ?? 0) + 1), m), {})]));
+        }
+      } catch {
+        /* 有意兜底：词画卷只是给复现队列加一列参考——扫不动就少这一列，导出主流程照走。 */
+      }
+      await invoke('write_text_file', { path: `${dir}/复现队列_${date}.csv`, content: reinforceQueueCsv(rows, wordChapters) });
       panel.classList.remove('open');
       setStatus(
         `生词卡已导出（${rows.length} 词，含复现队列）：${dir}/生词卡_Anki_${date}.csv——Anki 直接导入（逗号分隔）；复现队列可用 fsrs 命令看间隔建议` +

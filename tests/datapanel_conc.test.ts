@@ -88,3 +88,20 @@ test('4b：generateConcReports 行为——mockIPC 书 + setIo 捕获写：两�
     clearMocks();
   }
 });
+
+test('5a：复现队列 CSV——hits 语义不变（0），第三列章分布=词画卷出现处；FSRS CLI 前两列可解析', async () => {
+  const { reinforceQueueCsv } = await import('../app/src/pure.js');
+  const rows = [{ word: 'dog', cefr: '', zh: '狗', sample: '', from: '' }] as never;
+  const csv = reinforceQueueCsv(rows, new Map([['dog', { 一: 2, 三: 1 }]]));
+  assert.ok(csv.includes('dog,0,一:2|三:1'), csv);
+  const noMap = reinforceQueueCsv(rows);
+  assert.ok(noMap.includes('dog,0\n'), '无画卷时照旧两列（向后兼容）');
+  // CLI 口径：split(/[,;\t]/) 取前两列
+  const line = csv.split('\n').find((l) => l.startsWith('dog,')) ?? '';
+  const cells = line.split(/[,;\t]/);
+  assert.equal(cells[0], 'dog');
+  assert.equal(Number(cells[1]), 0);
+  const { planFsrs } = await import('../src/core/fsrs.js');
+  const plan = planFsrs([{ word: 'dog', hits: 0 }]);
+  assert.ok(plan.length >= 1, 'FSRS 输入形状不变');
+});

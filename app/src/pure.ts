@@ -378,8 +378,26 @@ export function ankiCsv(rows: AnkiRow[]): string {
 
 /** 复现队列 CSV：词,hits（hits=已复现次数，默认 0——画像数据可补；# 注释行 fsrs CLI 会跳过）。
  *  与 CLI 闭环：node dist/src/cli.js fsrs 队列文件.csv → FSRS 建议隔篇 vs 现行固定 2 篇并排 */
-export function reinforceQueueCsv(rows: AnkiRow[]): string {
-  return ['# 复现队列：词,hits（hits=已复现次数，默认 0，画像数据可补）', '# 查看 FSRS 间隔建议：node dist/src/cli.js fsrs 本文件.csv', ...rows.map((r) => `${r.word},0`)].join('\n') + '\n';
+/** 复现队列 CSV：词,hits[,章分布]。hits=已复现次数（默认 0，画像数据可补——语义不变）；
+ *  第三列=词画卷的章级分布（章:数|章:数，全书出现处）——复现统计的底表，
+ *  FSRS CLI 只读前两列（输入宽容），第三列不影响既有用法。 */
+export function reinforceQueueCsv(rows: AnkiRow[], wordChapters?: Map<string, Record<string, number>>): string {
+  const lines = rows.map((r) => {
+    const byChapter = wordChapters?.get(r.word.toLowerCase());
+    const dist = byChapter
+      ? Object.entries(byChapter)
+          .map(([c, n]) => `${c}:${n}`)
+          .join('|')
+      : '';
+    return `${r.word},0${dist ? `,${dist}` : ''}`;
+  });
+  return (
+    [
+      '# 复现队列：词,hits,章分布（hits=已复现次数，默认 0，画像数据可补；章分布=章:数|章:数——词画卷给的全书出现处）',
+      '# 查看 FSRS 间隔建议：node dist/src/cli.js fsrs 本文件.csv（CLI 读前两列，第三列无影响）',
+      ...lines,
+    ].join('\n') + '\n'
+  );
 }
 
 /* ================= 读后检测题（阅读侧配套：AI 出题候选裁决 + 试卷组装） ================= */
