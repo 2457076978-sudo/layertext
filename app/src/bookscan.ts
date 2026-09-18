@@ -76,9 +76,16 @@ async function dirExists(p: string): Promise<boolean> {
 }
 
 /** 扫当前书的全部章层文本。只读；文件数/单文件大小有上限，扫到哪儿如实报。 */
-export async function loadBookChapters(s: FileSession, naming: Record<string, string>): Promise<BookScanResult> {
-  if (!s.sourcePath) return { chapters: [], coverage: '当前会话没有磁盘文件（示例文本）——画卷需要书稿文件' };
-  const chapterDir = s.sourcePath.slice(0, s.sourcePath.lastIndexOf('/'));
+export function loadBookChapters(s: FileSession, naming: Record<string, string>): Promise<BookScanResult> {
+  return loadBookChaptersFromPath(s.sourcePath, naming);
+}
+
+/** 路径化核心：path 可以是**章节文件路径**（会话）也可以是**书目录**（数据面板给书根）。
+ *  目录名是 第X章 → 它是章目录（书根=上一级）；否则它就是书根（章目录探针从这里出发/平铺直接列）。 */
+export async function loadBookChaptersFromPath(path: string | null, naming: Record<string, string>): Promise<BookScanResult> {
+  if (!path) return { chapters: [], coverage: '当前会话没有磁盘文件（示例文本）——画卷需要书稿文件' };
+  const isFile = /\.(md|txt|markdown|docx)$/i.test(baseName(path));
+  const chapterDir = isFile ? path.slice(0, path.lastIndexOf('/')) : path;
   const isChapterDirLayout = /^第.+章$/.test(baseName(chapterDir));
   const skipped: string[] = [];
   const out: BookChapterText[] = [];
@@ -111,42 +118,50 @@ export async function loadBookChapters(s: FileSession, naming: Record<string, st
     }
   };
 
-  if (isChapterDirLayout) {
-    const bookRoot = chapterDir.slice(0, chapterDir.lastIndexOf('/'));
+  /* 统一策略：书根 = 目录名是 第X章 时取上一级，否则就是它本身；先探 第X章 子目录（章目录布局），
+   * 一个都没探到再按平铺收场——数据面板传的是书根、会话传的是章内文件，两边都能走通。 */
+  {
+    const bookRoot = isChapterDirLayout ? chapterDir.slice(0, chapterDir.lastIndexOf('/')) : chapterDir;
     let gap = 0;
+    let foundAnyDir = isChapterDirLayout; // 当前目录本身是章目录 ⇒ 至少这一章在
+    if (isChapterDirLayout) await readTierFiles(chapterDir, baseName(chapterDir));
     for (const name of probeChapterNames()) {
       const dir = `${bookRoot}/${name}`;
       if (await dirExists(dir)) {
         gap = 0;
+        foundAnyDir = true;
         await readTierFiles(dir, name);
       } else if (++gap >= 3 && out.length) break; // 连缺 3 个章目录即停（受控探针）
       if (out.length >= MAX_FILES) break;
     }
-  } else {
-    /* 平铺布局：一个文件=一章（App 主模型）；层标签从文件名认（通常无层=原稿单层书）。
-     * 产物/版本文件（简化/回炉/工序化/工作稿/备份）不进画卷——画卷看的是"这本书有什么"。 */
-    let files: string[] = [];
-    try {
-      files = (await invoke<string[]>('list_dir', { dir: chapterDir })).map(baseName);
-    } catch (e) {
-      skipped.push(`目录读不出来：${String(e).slice(0, 50)}`);
-    }
-    for (const f of flatChapterFiles(files)) {
-      if (out.length >= MAX_FILES) {
-        skipped.push(`已达扫描上限 ${MAX_FILES} 文件——更后面的章没进画卷`);
-        break;
+    if (foundAnyDir) {
+      // 章目录模式收场（覆盖说明统一在尾部拼）
+    } else {
+      /* 平铺布局：一个文件=一章（App 主模型）；层标签从文件名认（通常无层=原稿单层书）。
+       * 产物/版本文件（简化/回炉/工序化/工作稿/备份）不进画卷——画卷看的是"这本书有什么"。 */
+      let files: string[] = [];
+      try {
+        files = (await invoke<string[]>('list_dir', { dir: chapterDir })).map(baseName);
+      } catch (e) {
+        skipped.push(`目录读不出来：${String(e).slice(0, 50)}`);
       }
-      const path = `${chapterDir}/${f}`;
-      const r = await readTextChecked(path);
-      if (r.kind !== 'ok') {
-        skipped.push(`${f}（${r.kind === 'missing' ? '不存在' : `读不出来：${r.error.slice(0, 40)}`}）`);
-        continue;
+      for (const f of flatChapterFiles(files)) {
+        if (out.length >= MAX_FILES) {
+          skipped.push(`已达扫描上限 ${MAX_FILES} 文件——更后面的章没进画卷`);
+          break;
+        }
+        const path = `${chapterDir}/${f}`;
+        const r = await readTextChecked(path);
+        if (r.kind !== 'ok') {
+          skipped.push(`${f}（${r.kind === 'missing' ? '不存在' : `读不出来：${r.error.slice(0, 40)}`}）`);
+          continue;
+        }
+        if (r.text.length > MAX_BYTES) {
+          skipped.push(`${f}（超过 2MB 上限，没进画卷）`);
+          continue;
+        }
+        out.push({ name: f.replace(/\.(md|txt|markdown)$/i, ''), tier: tierOfFile(f, naming), path, text: r.text });
       }
-      if (r.text.length > MAX_BYTES) {
-        skipped.push(`${f}（超过 2MB 上限，没进画卷）`);
-        continue;
-      }
-      out.push({ name: f.replace(/\.(md|txt|markdown)$/i, ''), tier: tierOfFile(f, naming), path, text: r.text });
     }
   }
   const chapters = [...new Set(out.map((x) => x.name))].length;

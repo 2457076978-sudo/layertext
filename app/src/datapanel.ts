@@ -10,7 +10,9 @@
  *  - 纯逻辑（parse/validate/upsert/delete）：可在 node 下直接测试，不依赖 Tauri
  *  - DOM 渲染（renderDataPane）：依赖 invoke 与页面容器
  */
-import { baseName } from './pure.js';
+import { baseName, properSuspectsReportMd, vocabGapReportMd } from './pure.js';
+import { loadBookChaptersFromPath } from './bookscan.js';
+import { buildConcordance, properSuspects } from '../../src/core/concordance.js';
 import { setStatus } from './state.js';
 /** IO 注入点 —— 纯逻辑（parse/validate/upsert/delete）完全不依赖它，
  *  因此可以在 node 下直接测试，不必启动 App。生产环境走 Tauri。 */
@@ -673,6 +675,53 @@ export async function readLedgerSummary(project: ProjectConfig): Promise<LedgerS
   };
 }
 
+/** 词画卷报告（项 4b）：扫书建图 → 专名候选 + 词表缺口 两份 md 落书目录。
+ *  只读正文、只写报告（报告自动落盘的既有约定）；proper 来自内存里的专名表行（reader/qc 同源），
+ *  没加载过就是空表——候选会多报，报告里写明口径，教师核对即可。 */
+export async function generateConcReports(
+  bookDir: string,
+  proper: string[],
+  known: Set<string>,
+): Promise<{ properPath: string; gapPath: string; properCount: number; gapCount: number; coverage: string }> {
+  /* 层命名优先取项目配置（章目录布局靠它认层标签）；取不到退默认层标签——
+   * 报告生成不该因为没有调适项目就瘫掉（默认命名与 propagateui 同一套） */
+  const found = bookDir ? await findProjectConfig(bookDir) : null;
+  const naming = ((found?.config as Record<string, unknown> | undefined)?.['产物命名'] ?? { A: 'A层85', M: 'M层75', B: 'B层60' }) as Record<string, string>;
+  const scan = await loadBookChaptersFromPath(bookDir || null, naming);
+  if (!scan.chapters.length) throw new Error(`这本书没扫到可读的章节文件——${scan.coverage}`);
+  const byChapter = new Map<string, Record<string, string>>();
+  for (const row of scan.chapters) {
+    const t = byChapter.get(row.name) ?? {};
+    t[row.tier || ''] = row.text;
+    byChapter.set(row.name, t);
+  }
+  const conc = buildConcordance(
+    [...byChapter.keys()].map((name) => ({ name, tiers: byChapter.get(name)! })),
+    { known },
+  );
+  const date = new Date().toLocaleDateString('sv-SE');
+  const meta = { date, coverage: scan.coverage };
+  const suspects = properSuspects(conc, { proper, known, minChapters: 2 });
+  const gaps = [...conc.entries()]
+    .filter(([, occs]) => occs.some((o) => o.unmerged))
+    .map(([word, occs]) => ({ word, total: occs.length, chapters: new Set(occs.map((o) => o.chapter)).size }))
+    .sort((a, b) => b.total - a.total || a.word.localeCompare(b.word));
+  const properPath = `${bookDir}/专名候选_${date}.md`;
+  const gapPath = `${bookDir}/词表缺口_${date}.md`;
+  await io.write(properPath, properSuspectsReportMd(suspects, meta));
+  await io.write(gapPath, vocabGapReportMd(gaps, meta));
+  return { properPath, gapPath, properCount: suspects.length, gapCount: gaps.length, coverage: scan.coverage };
+}
+
+/** 词画卷报告卡的 HTML（与台账卡并列）。 */
+export function concReportsCardHtml(hasProject: boolean): string {
+  if (!hasProject) return ''; // 没有项目配置的面板走"怎么建配置"分支，不摆这张卡
+  return `<div class="dp-card"><b>词画卷报告</b>：扫全书出两份核对清单——
+    <button id="dp-conc-proper" style="font-size:var(--fs-xs);padding:2px 8px" title="≥2 章出现+句中非句首大写+不在专名表与词库——pinchfield 型漏收的查询">专名候选</button>
+    <button id="dp-conc-gap" style="font-size:var(--fs-xs);padding:2px 8px" title="词表外词形按全书频次降序——高频优先核对（疑似漏收）">词表缺口</button>
+    <span style="opacity:.7">报告落本书目录（只读正文）</span></div>`;
+}
+
 /** 台账卡片的 HTML（数据面板顶部，与「读者层级」并列） */
 export function ledgerCardHtml(sum: LedgerSummary | null, hasProject: boolean): string {
   if (!hasProject) return '';
@@ -694,6 +743,21 @@ export function ledgerCardHtml(sum: LedgerSummary | null, hasProject: boolean): 
     <button id="dp-ledger-reveal" style="font-size:var(--fs-xs);padding:2px 8px">在访达中显示</button>
     <button id="dp-ledger-copy" style="font-size:var(--fs-xs);padding:2px 8px">复制路径</button></span>
   </div>`;
+}
+
+async function runConcReport(bookDir: string, which: 'proper' | 'gap'): Promise<void> {
+  try {
+    const { S } = await import('./state.js');
+    const r = await generateConcReports(bookDir, S.properRows ?? [], S.currentKnown);
+    setStatus(
+      which === 'proper'
+        ? `专名候选报告：${r.properCount} 个候选 → ${r.properPath}${r.properCount === 0 ? '（专名表覆盖良好）' : '——确认后进专名表'}`
+        : `词表缺口报告：${r.gapCount} 个词形 → ${r.gapPath}——高频优先核对`,
+      'saved',
+    );
+  } catch (e) {
+    setStatus(`词画卷报告没生成：${String(e).slice(0, 120)}`, 'err');
+  }
 }
 
 export async function renderDataPane(bookDir: string): Promise<void> {
@@ -888,6 +952,7 @@ export async function renderDataPane(bookDir: string): Promise<void> {
   el.innerHTML = `<div class="dp">
       <div class="dp-head"><b>数据</b><span class="dp-sub">${esc(cur.note)}</span></div>
       ${ledgerCardHtml(ledgerSum, true)}
+      ${concReportsCardHtml(true)}
       ${treeCard}
       <div class="dp-tabs">${tabs}</div>
       ${st.errs.length ? `<div class="dp-note dp-err">⚠ ${st.errs.length} 个校验问题（不阻塞本次编辑，但不能引入新问题）：<br>${st.errs.slice(0, 5).map(esc).join('<br>')}${st.errs.length > 5 ? '<br>…' : ''}</div>` : '<div class="dp-note dp-ok">✓ 校验通过</div>'}
@@ -896,6 +961,8 @@ export async function renderDataPane(bookDir: string): Promise<void> {
       ${panelState.projectDir ? `<div class="dp-note" style="margin-top:8px;opacity:.7">项目配置：<code>${esc(panelState.projectDir)}</code> ｜ 变更日志：<code>${esc(CHANGE_LOG_NAME)}</code></div>` : ''}
     </div>`;
 
+  el.querySelector('#dp-conc-proper')?.addEventListener('click', () => void runConcReport(bookDir, 'proper'));
+  el.querySelector('#dp-conc-gap')?.addEventListener('click', () => void runConcReport(bookDir, 'gap'));
   el.querySelector('#dp-ledger-reveal')?.addEventListener('click', () => {
     if (ledgerSum) void io.reveal(ledgerSum.path);
   });

@@ -1208,3 +1208,49 @@ export function concordanceRows(
   }
   return out;
 }
+
+/* ─────────── 词画卷（项 4b）：专名候选 / 词表缺口 报告的纯生成器 ─────────── */
+
+export interface ProperSuspectRow {
+  word: string;
+  chapters: string[];
+  occurrences: number;
+}
+
+/** 专名候选报告（落书目录 `专名候选_日期.md`）：pinchfield 型漏收从"人工撞见"变查询。 */
+export function properSuspectsReportMd(suspects: ProperSuspectRow[], meta: { date: string; coverage: string }): string {
+  const lines = [
+    `# 专名候选 · ${meta.date}`,
+    '',
+    `判定：≥2 章出现 + 至少一次句中（非句首）大写 + 不在专名表与词库。句首大写不算（与对齐口径同源）。`,
+    `覆盖：${meta.coverage}`,
+    '',
+    suspects.length === 0 ? '当前没有候选——专名表覆盖良好。' : `共 ${suspects.length} 个候选：`,
+    '',
+    ...suspects.map((s) => `- **${s.word}**：${s.chapters.length} 章 ${s.occurrences} 处（${s.chapters.join('、')}）——确认后进专名表（数据面板「专名表」加行）`),
+    '',
+  ];
+  return lines.join('\n');
+}
+
+export interface VocabGapRow {
+  word: string;
+  total: number;
+  chapters: number;
+}
+
+/** 词表缺口报告（落书目录 `词表缺口_日期.md`）：词表外形（unmerged）按频排——高频优先核对。 */
+export function vocabGapReportMd(gaps: VocabGapRow[], meta: { date: string; coverage: string }): string {
+  const lines = [
+    `# 词表缺口 · ${meta.date}`,
+    '',
+    `口径：词表外词形（归并失败=unmerged），按全书出现次数降序。高频未收优先核对（疑似漏收——词库勾「学生已学过」即入表）；低频=真·生词，教学优先。`,
+    `覆盖：${meta.coverage}`,
+    '',
+    gaps.length === 0 ? '当前没有词表外形——词表覆盖良好。' : `共 ${gaps.length} 个词形（前 100）：`,
+    '',
+    ...gaps.slice(0, 100).map((g) => `- **${g.word}**：${g.total} 次 · ${g.chapters} 章`),
+    '',
+  ];
+  return lines.join('\n');
+}
