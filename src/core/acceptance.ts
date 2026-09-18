@@ -278,6 +278,10 @@ export const jaccard = (a: Set<string>, b: Set<string>): number => {
   return i / (a.size + b.size - i || 1);
 };
 
+/** 句长梯度容差：B 均句长 ≤ A 均句长 × 本值（v2.1 定值，ch4 比值 1.11 放行的依据）。
+ *  尺子自己的旋钮集中在此——golden 反证（9b）就拧它：改值必须让 tests/acceptance_golden.test.ts 变红。 */
+export const SENT_RATIO_TOLERANCE = 1.15;
+
 export interface AcceptanceInput {
   tiers: Partial<Record<TierKey, string>>;
   /** 源段表（[P##] → 段文本）；给了才做语义校验 */
@@ -355,7 +359,12 @@ export function acceptanceV2(input: AcceptanceInput): AcceptanceV2Report {
   const avg = (ls: number[]): number => (ls.length ? ls.reduce((a, b) => a + b, 0) / ls.length : 0);
   const avgA = avg(lensA);
   const avgB = avg(lensB);
-  const sentGradient = { avgA: Number(avgA.toFixed(1)), avgB: Number(avgB.toFixed(1)), ratio: Number((avgA > 0 ? avgB / avgA : 0).toFixed(2)), pass: avgA > 0 ? avgB <= avgA * 1.15 : true };
+  const sentGradient = {
+    avgA: Number(avgA.toFixed(1)),
+    avgB: Number(avgB.toFixed(1)),
+    ratio: Number((avgA > 0 ? avgB / avgA : 0).toFixed(2)),
+    pass: avgA > 0 ? avgB <= avgA * SENT_RATIO_TOLERANCE : true,
+  };
 
   // 注密度（全书 per100 + 最差段）
   const density: AcceptanceV2Report['density'] = {};
