@@ -124,7 +124,35 @@ interface Frozen {
     分章定位: Record<string, Record<string, 两条轴>>;
     全书定位: Record<string, 两条轴 & { 章数: number; 应注词型: number; 已注词型: number }>;
     覆盖: { 章: string[]; 层: string[]; 组合数: number; 段数: number; 缺失: { 章: string; 层: string; 缺: string }[] };
+    /** 验收 v2（9c，2026-09-18 起）：尺子对夹具书的分章+全书数；旧样本为 null（未算不是零） */
+    验收v2?: {
+      口径: string;
+      分章: Record<string, 验收v2章> | null;
+      全书: {
+        rates: Record<string, { tokens: number; unnoted: number; ratePct: number }>;
+        rateOrderPass: boolean;
+        倒挂段数: number;
+        句长: { avgA: number; avgB: number; ratio: number; pass: boolean };
+        密度最差段: Record<string, { d: number; at: string }>;
+        语义警报数: number;
+        结构数: number;
+        重复注数: number;
+      } | null;
+      说明?: string;
+    };
   };
+}
+
+/** 验收 v2 的分章记录（acceptanceV2 摘要：rates/倒挂/句长/密度/三个计数） */
+interface 验收v2章 {
+  rates: Record<string, { tokens: number; unnoted: number; ratePct: number }>;
+  rateOrderPass: boolean;
+  倒挂段: string[];
+  句长: { avgA: number; avgB: number; ratio: number; pass: boolean };
+  密度: Record<string, { per100: number; worst: { d: number; at: string } }>;
+  语义警报数: number;
+  结构数: number;
+  重复注数: number;
 }
 
 const frozen = (): Frozen => JSON.parse(readFileSync(join(FIXTURE, '期望结论.json'), 'utf-8')) as Frozen;
@@ -465,6 +493,128 @@ t('★ 冻结工具对项目**只读**：整棵树指纹冻结前后逐字节一
   } finally {
     rmSync(root, { recursive: true, force: true });
     rmSync(out, { recursive: true, force: true });
+  }
+});
+
+/* ────────────────────── ⑦ 验收 v2 字段（9c，2026-09-18）：装配随样本、聚合自洽、独立重算、隔离反证 ────────────────────── */
+
+t('★ 验收 v2 装配随样本冻下：四样在位、分章盖满、全书聚合自洽', () => {
+  /* 这一条审的是**冻结样本自己的形状**，不重算——装配四样（教材进度/教材单元库/良档允许表/
+   * 歌词诗段表）随样本冻下来，K 的拼法才可审计；分章盖满 + 全书=分章之和，是"聚合没算错"
+   * 的内部一致性。判定行为本身由 tests/acceptance_golden.test.ts 锁（两层分工）。 */
+  const f = frozen();
+  const v2 = f.结论.验收v2;
+  assert.ok(v2?.分章 && v2?.全书, `样本没带验收v2结论（${v2?.说明 ?? '键缺失'}）——2026-09-18 起重冻结的样本必须有，未算不是零`);
+  assert.match(v2.口径, /acceptanceV2/u, '口径要说清判定唯一实现的出处');
+  assert.match(v2.口径, /良档允许表/u, '口径要说清 K 的拼法（装配可审计）');
+
+  const 装配 = JSON.parse(readFileSync(join(FIXTURE, '输入', '验收v2装配.json'), 'utf-8')) as Record<string, string>;
+  assert.equal(typeof 装配.教材进度, 'string', '教材进度是 K 的口径输入，空了整个未注率都变味');
+  for (const k of ['教材单元库', '分档允许表良', '歌词诗段表']) {
+    assert.equal(existsSync(join(FIXTURE, '输入', 装配[k])), true, `装配四样缺 ${k}——装配文件不随样本走，重算就换了一个口径还不知道`);
+  }
+
+  // 分章盖满覆盖清单（与主结论同一条棘轮：少一章要有人解释，静默跳过最坏）
+  for (const ch of f.结论.覆盖.章) {
+    const c: 验收v2章 | undefined = v2.分章![ch];
+    assert.ok(c, `验收v2 分章缺 ${ch}`);
+    for (const tk of f.层) {
+      assert.ok(c.rates[tk]?.tokens > 0, `${ch} ${tk} 层 tokens 为 0——这一章其实没算`);
+    }
+    assert.equal(Array.isArray(c.倒挂段), true);
+    assert.equal(typeof c.语义警报数, 'number');
+  }
+  // 全书聚合自洽：分章求和必须等于全书；ratePct 必须能由 tokens/unnoted 复算
+  const sum = (fn: (c: 验收v2章) => number): number => f.结论.覆盖.章.reduce((n, ch) => n + fn(v2.分章![ch]!), 0);
+  assert.equal(
+    v2.全书!.倒挂段数,
+    sum((c) => c.倒挂段.length),
+    '全书倒挂段数 ≠ 分章之和',
+  );
+  assert.equal(
+    v2.全书!.语义警报数,
+    sum((c) => c.语义警报数),
+    '全书语义警报数 ≠ 分章之和',
+  );
+  assert.equal(
+    v2.全书!.结构数,
+    sum((c) => c.结构数),
+    '全书结构数 ≠ 分章之和',
+  );
+  assert.equal(
+    v2.全书!.重复注数,
+    sum((c) => c.重复注数),
+    '全书重复注数 ≠ 分章之和',
+  );
+  for (const tk of f.层) {
+    const w: { tokens: number; unnoted: number; ratePct: number } = v2.全书!.rates[tk]!;
+    assert.equal(
+      w.tokens,
+      sum((c) => c.rates[tk]?.tokens ?? 0),
+      `全书 ${tk} tokens ≠ 分章之和`,
+    );
+    assert.equal(
+      w.unnoted,
+      sum((c) => c.rates[tk]?.unnoted ?? 0),
+      `全书 ${tk} unnoted ≠ 分章之和`,
+    );
+    assert.equal(w.ratePct, Number(((100 * w.unnoted) / Math.max(1, w.tokens)).toFixed(2)), `全书 ${tk} ratePct 复算不上`);
+    const at = v2.全书!.密度最差段[tk]!.at;
+    assert.ok(v2.分章![at.split('/')[0]]?.密度[tk], `全书最差段 ${at} 指不到分章记录`);
+  }
+});
+
+t('★ 验收 v2 逐字段对数：materialize 后经冻结管线独立重算，分章+全书一致', () => {
+  /* --check 与冻结共用 computeConclusions——同一份代码算两遍，抓得住"数变了"，抓不住
+   * "装配口径悄悄变了"（两边一起变，对账照样绿）。这一条把**冻好的输入**摆成项目、
+   * 真跑一遍冻结管线、验收v2 字段与夹具冻结值逐字段对数：装配或判定任一侧漂了都红。
+   * （engine 的行为本身另有 golden 锁，这里锁的是"报出去的那份 v2 数"的稳定。） */
+  const { root, json } = materialize();
+  const out = mkdtempSync(join(tmpdir(), 'lt-v2refreeze-'));
+  try {
+    const r = spawnSync(process.execPath, [join(AF, 'LayerText_AF冻结回放.mjs'), '--project', json, '--out', out], {
+      cwd: REPO,
+      encoding: 'utf-8',
+      env: ENV,
+      timeout: 300_000,
+    });
+    assert.equal(r.status, 0, `重冻结没跑通：${r.stdout ?? ''}${r.stderr ?? ''}`);
+    const 重冻 = JSON.parse(readFileSync(join(out, '期望结论.json'), 'utf-8')) as Frozen;
+    assert.ok(重冻.结论.验收v2?.分章, '重冻结反而没了验收v2——装配侧的传递断了');
+    assert.deepEqual(重冻.结论.验收v2, frozen().结论.验收v2, '验收v2 字段重算不一致——装配或判定漂了，必须有人解释');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(out, { recursive: true, force: true });
+  }
+});
+
+t('★ 验收 v2 反证：塞一个源里没有的数字，只有验收v2 会红（QC 结论纹丝不动）', () => {
+  /* 专打 v2 的独有盲区：QC 与段级门禁只查"原文数字丢没丢"（FACT-01），**不查多出来的
+   * 数字**；tokenize/句长/篇幅比全都不数数字。所以往 B 层塞一个 "9999"：
+   * 质检/篇幅比/规则命中必须逐字段不变，验收v2 的语义警报（凭空数字）必须亮，
+   * --check 必须红——且失败信息要恰好是"逐章都对得上、口径字段变了"（红的原因只能是 v2）。
+   * 注意必须跑**整本**对账：v2 字段走全量 JSON 比对，带 --chapters/--tiers 过滤会把全量比对
+   * 跳过（那正是这条反证在守的失效形态）。全在临时目录里做，不动真样本。 */
+  const root = mkdtempSync(join(tmpdir(), 'lt-v2perturb-'));
+  try {
+    cpSync(FIXTURE, root, { recursive: true });
+    const victim = join(root, '输入', '产物', '第七章', '原文_B层60_2026-09-10.md');
+    assert.equal(existsSync(victim), true, '样本里没有第七章 B 层产物——反证没靶子');
+    const before = readFileSync(victim, 'utf-8');
+    const after = before.replace('[P01] ', '[P01] 9999 ');
+    assert.notEqual(after, before, 'P01 开头没插进去——反证什么也没改');
+    writeFileSync(victim, after, 'utf-8');
+
+    const r = spawnSync(process.execPath, [join(AF, 'LayerText_AF冻结回放.mjs'), '--check', '--root', root], {
+      cwd: REPO,
+      encoding: 'utf-8',
+      env: ENV,
+      timeout: 300_000,
+    });
+    assert.equal(r.status, 1, `塞了凭空数字对账还是绿——验收v2 根本没参与对账：${r.stdout ?? ''}`);
+    assert.match(r.stdout ?? '', /逐章都对得上.*对账口径字段/su, '失败信息必须恰好是"逐章都对得上、口径字段变了"——证明红的是 v2 不是 QC');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 });
 

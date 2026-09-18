@@ -59,7 +59,7 @@ import { fileURLToPath } from 'node:url';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '..', '..');
 const SHARED = await import('./LayerText_AF词表与词典.mjs');
-const { loadProject, distOf } = SHARED;
+const { loadProject, distOf, loadTextbookLearned } = SHARED;
 /* 引擎的编译产物目录**不写死** `<REPO>/dist`：多人/多 agent 并行改同一个仓库时，
  * 谁都不许去写共享的 dist/，也不必等它被重建——用 LAYERTEXT_DIST 指到自己的 outDir。
  * （这是本仓库自己的约定，见「词表与词典.mjs」里 distOf 的注释。） */
@@ -70,6 +70,9 @@ const { positioningOf } = await import(`${DIST}/src/core/positioning.js`);
 const { parseDictCsv } = await import(`${DIST}/src/core/dictmerge.js`);
 const { splitChapter } = await import(`${DIST}/src/core/textpipe.js`);
 const { atomicWriteFileSync: writeAtomic } = await import(`${DIST}/src/core/files.js`);
+/* 验收 v2 尺子（9c，2026-09-18）：判定唯一实现 src/core/acceptance.ts——
+ * 本脚本只做文件装配与累计，维度一个都不自算（与 验收v2.mjs 同一份尺）。 */
+const { acceptanceV2, segsOfMd, sentLensOfSegs, SENT_RATIO_TOLERANCE } = await import(`${DIST}/src/core/acceptance.js`);
 
 /* 回放夹具**不进公开仓库**（里面是原书正文与教师的三层产物）——放在仓库外，
    用 `LAYERTEXT_REPLAY_DIR` 指过来；调用方也可以用 `--root` 显式指定。 */
@@ -237,6 +240,51 @@ function copyInputs(P, projectPath, chapters, tiers, root, partial = []) {
     const ext = (x) => basename(x).slice(basename(x).lastIndexOf('.'));
     if (typeof p === 'string' && existsSync(p)) put(`知识文件/${name}${ext(p)}`, readFileSync(p, 'utf-8'));
   }
+  /* 验收 v2 装配四样（9c）：教材进度（标量）+ 教材单元库 + 良档允许表 + 歌词诗段表。
+   * 真项目形态：教材两样从 P 取，后两样按 AF 惯例在 知识文件/ 下探（验收v2.mjs 同款路径约定）；
+   * 回放形态（从冻好的输入重冻）：装配信息记在项目根的 验收v2装配.json（相对路径）。
+   * 凑不齐的不硬凑——computeConclusions 会把缺的说出来，静默降级才是事故。 */
+  const 装配侧 = (() => {
+    try {
+      return JSON.parse(readFileSync(join(dirname(projectPath), '验收v2装配.json'), 'utf-8'));
+    } catch {
+      return null;
+    }
+  })();
+  const 知识文件目录 = dirname(P.书级?.知识库 ?? P.词库);
+  const v2files = {
+    教材单元库: P.教材单元库 ?? (装配侧?.教材单元库 ? join(dirname(projectPath), 装配侧.教材单元库) : null),
+    分档允许表良: 装配侧?.分档允许表良 ? join(dirname(projectPath), 装配侧.分档允许表良) : join(知识文件目录, '分档允许表_v0', '允许表_良.csv'),
+    歌词诗段表: 装配侧?.歌词诗段表 ? join(dirname(projectPath), 装配侧.歌词诗段表) : join(知识文件目录, '歌词诗段表_v1.json'),
+  };
+  const 教材进度 = P.教材进度 ?? 装配侧?.教材进度 ?? null;
+  const v2齐 = [];
+  if (教材进度 && v2files.教材单元库 && existsSync(v2files.教材单元库)) {
+    put('知识文件/教材单元库.json', readFileSync(v2files.教材单元库, 'utf-8'));
+    v2齐.push('教材单元库');
+  }
+  if (existsSync(v2files.分档允许表良)) {
+    put('知识文件/允许表_良.csv', readFileSync(v2files.分档允许表良, 'utf-8'));
+    v2齐.push('良档允许表');
+  }
+  if (existsSync(v2files.歌词诗段表)) {
+    put('知识文件/歌词诗段表_v1.json', readFileSync(v2files.歌词诗段表, 'utf-8'));
+    v2齐.push('歌词诗段表');
+  }
+  if (教材进度 || v2齐.length)
+    put(
+      '验收v2装配.json',
+      JSON.stringify(
+        {
+          教材进度,
+          教材单元库: '知识文件/教材单元库.json',
+          分档允许表良: '知识文件/允许表_良.csv',
+          歌词诗段表: '知识文件/歌词诗段表_v1.json',
+        },
+        null,
+        2,
+      ),
+    );
   const ext = (p, d) => basename(p ?? d).slice(basename(p ?? d).lastIndexOf('.'));
   const cfg = {
     _说明: '这是 tests/fixtures/replay 的输入快照：路径全部是**相对本目录**的，回放时由测试复制到临时目录并重写。',
@@ -260,7 +308,7 @@ function copyInputs(P, projectPath, chapters, tiers, root, partial = []) {
     },
   };
   put('调适项目_回放.json', JSON.stringify(cfg, null, 2));
-  return files;
+  return { files, v2齐 };
 }
 
 /* ────────────────────── 算结论 ────────────────────── */
@@ -473,6 +521,125 @@ async function computeConclusions(root, { 章过滤 = null, 层过滤 = null, pa
   }
   out.覆盖.组合数 = Object.values(out.分章).reduce((n, m) => n + Object.keys(m).length, 0);
   out.覆盖.段数 = 段数计;
+
+  /* ────────── 验收 v2（9c，2026-09-18）：尺子对夹具书的数 ──────────
+   * 判定全部经 dist 的 src/core/acceptance.ts（与 MCP layer_acceptance_v2、验收v2.mjs 同一把尺），
+   * 本函数只做装配（K 的拼法与 验收v2.mjs 完全一致：教材已学 ∪ 专名 ∪ mr/mrs/ms/dr ∪ 良档允许表）
+   * 与跨章累计（句长用引擎的 sentLensOfSegs 原语累计后按 SENT_RATIO_TOLERANCE 判）。
+   * 装配四样由 输入/验收v2装配.json 带路（copyInputs 冻进去的）；没有它就不算——
+   * 不算要**说出口**（v2 = null 且缺什么写清楚），静默当零是最坏的一种。
+   * 注意：这里的数是"尺子对夹具书（2026-09-10 代产物）"的数，锁定的是**尺子稳定性**，
+   * 不等于对真项目最新产出的报告值——那两层口径的分工见 docs/第三梯队规划。 */
+  const v2装配文件 = join(root, '验收v2装配.json');
+  if (!existsSync(v2装配文件)) {
+    out.验收v2 = { 说明: '本样本未带 验收v2装配.json（2026-09-18 之前的旧样本）——未算，不是零', 分章: null, 全书: null };
+  } else {
+    const 装配 = JSON.parse(readFileSync(v2装配文件, 'utf-8'));
+    const 缺 = ['教材单元库', '分档允许表良', '歌词诗段表'].filter((k) => !existsSync(abs(装配[k])));
+    if (缺.length || !装配.教材进度) {
+      out.验收v2 = { 说明: `验收v2装配不齐：${[...(!装配.教材进度 ? ['教材进度'] : []), ...缺].join('、')}——未算，不是零`, 分章: null, 全书: null };
+    } else {
+      const engineKnown = loadTextbookLearned({ 教材单元库: abs(装配.教材单元库), 教材进度: 装配.教材进度 });
+      const afProper = new Set(
+        readFileSync(abs(cfg.书级.专名表), 'utf8')
+          .split('\n')
+          .map((l) => l.trim().toLowerCase())
+          .filter((w) => w && !w.startsWith('#')),
+      );
+      const K = new Set([
+        ...[...(engineKnown ?? [])].map((w) => String(w).toLowerCase()),
+        ...afProper,
+        'mr',
+        'mrs',
+        'ms',
+        'dr',
+        ...readFileSync(abs(装配.分档允许表良), 'utf8')
+          .replace(/^\uFEFF/, '')
+          .split('\n')
+          .slice(1)
+          .filter(Boolean)
+          .map((l) => l.split(',')[0].toLowerCase()),
+      ]);
+      const 诗段 = (() => {
+        try {
+          return JSON.parse(readFileSync(abs(装配.歌词诗段表), 'utf-8')).段 || [];
+        } catch {
+          return [];
+        }
+      })();
+      const 累计 = { A: { tok: 0, unk: 0, lens: [] }, M: { tok: 0, unk: 0, lens: [] }, B: { tok: 0, unk: 0, lens: [] } };
+      let 倒挂段数 = 0;
+      let 语义警报数 = 0;
+      let 结构数 = 0;
+      let 重复注数 = 0;
+      const 最差 = { A: { d: 0, at: '' }, M: { d: 0, at: '' }, B: { d: 0, at: '' } };
+      const 分章v2 = {};
+      for (const ch of 章列表) {
+        const srcMd = existsSync(join(P.原文目录, ch, '原文_规范化.md')) ? readFileSync(join(P.原文目录, ch, '原文_规范化.md'), 'utf-8') : null;
+        const tierMd = {};
+        for (const [t, info] of Object.entries(TIER_INFO)) {
+          const p = join(P.产物目录, ch, `原文_${info.tag}_${cfg.日期}.md`);
+          if (existsSync(p)) tierMd[t] = readFileSync(p, 'utf-8');
+        }
+        if (!srcMd || !tierMd.A || !tierMd.B) continue; // 缺输入的组合已在 覆盖.缺失 里点名
+        const r = acceptanceV2({
+          tiers: { A: tierMd.A, ...(tierMd.M ? { M: tierMd.M } : {}), B: tierMd.B },
+          source: segsOfMd(srcMd),
+          known: K,
+          proper: afProper,
+          exemptSeg: (segId, tk) => 诗段.some((p2) => p2.章 === ch.replace(/^第|章$/g, '') && p2.段 === segId && (p2.层 || ['A', 'M', 'B']).includes(tk)),
+        });
+        分章v2[ch] = {
+          rates: r.rates,
+          rateOrderPass: r.rateOrderPass,
+          倒挂段: r.segInversions.map((x) => x.seg),
+          句长: r.sentGradient,
+          密度: r.density,
+          语义警报数: r.semantic.length,
+          结构数: r.structure.length,
+          重复注数: r.duplicateAnnos.length,
+        };
+        for (const tk of Object.keys(累计)) {
+          if (!r.rates[tk]) continue;
+          累计[tk].tok += r.rates[tk].tokens;
+          累计[tk].unk += r.rates[tk].unnoted;
+          累计[tk].lens.push(...sentLensOfSegs(segsOfMd(tierMd[tk]).values()));
+          if (r.density[tk]?.worst.d > 最差[tk].d) 最差[tk] = { d: r.density[tk].worst.d, at: `${ch}/${r.density[tk].worst.at}` };
+        }
+        倒挂段数 += r.segInversions.length;
+        语义警报数 += r.semantic.length;
+        结构数 += r.structure.length;
+        重复注数 += r.duplicateAnnos.length;
+      }
+      const avg全书 = (ls) => (ls.length ? ls.reduce((a, b) => a + b, 0) / ls.length : 0);
+      const avgA书 = avg全书(累计.A.lens);
+      const avgB书 = avg全书(累计.B.lens);
+      const rates书 = Object.fromEntries(Object.entries(累计).map(([tk, v]) => [tk, { tokens: v.tok, unnoted: v.unk, ratePct: Number(((100 * v.unk) / Math.max(1, v.tok)).toFixed(2)) }]));
+      out.验收v2 = {
+        口径:
+          '分章 = acceptanceV2 对该章三层+源段（K = 教材已学 ∪ 专名 ∪ mr/mrs/ms/dr ∪ 良档允许表，与 验收v2.mjs 同拼法；' +
+          '短语窗口 60；同段倒挂豁免 = 歌词诗段表）。全书 = 十章累计（句长按引擎 sentLensOfSegs 原语累计、' +
+          `容差取引擎 SENT_RATIO_TOLERANCE=${SENT_RATIO_TOLERANCE}；密度全书只冻跨章最差段）。` +
+          '判定唯一实现 src/core/acceptance.ts；这些数锁的是尺子对夹具书的稳定性。',
+        分章: 分章v2,
+        全书: {
+          rates: rates书,
+          rateOrderPass: rates书.B.ratePct < rates书.M.ratePct && rates书.M.ratePct < rates书.A.ratePct,
+          倒挂段数,
+          句长: {
+            avgA: Number(avgA书.toFixed(1)),
+            avgB: Number(avgB书.toFixed(1)),
+            ratio: Number((avgA书 > 0 ? avgB书 / avgA书 : 0).toFixed(2)),
+            pass: avgA书 > 0 ? avgB书 <= avgA书 * SENT_RATIO_TOLERANCE : true,
+          },
+          密度最差段: 最差,
+          语义警报数,
+          结构数,
+          重复注数,
+        },
+      };
+    }
+  }
   return { out, LEX, DICT };
 }
 
@@ -592,7 +759,9 @@ mkdirSync(join(OUT_ROOT, '输入'), { recursive: true });
  * 但不进全书分母，也不会被当成"完成了的一章"（第七轮 P2 的口径决定）。 */
 const partial = has('--partial') ? parsePartial(arg('--partial')) : [];
 if (partial.length) console.log(` partial 章（显式声明未写完）：${partial.map(chName).join('、')}——进分章与覆盖，不进全书分母`);
-const files = copyInputs(P, projectPath, chapters, tiers, OUT_ROOT, partial);
+const { files, v2齐 } = copyInputs(P, projectPath, chapters, tiers, OUT_ROOT, partial);
+if (v2齐.length) console.log(` 验收v2装配：${v2齐.join('、')} 已随样本冻下（结论.验收v2 从此被守）`);
+else console.log(' ⚠ 验收v2装配四样不齐——结论.验收v2 将为 null（未算，不是零），冻结照样进行');
 const 字节 = files.reduce((n, f) => n + Buffer.byteLength(readFileSync(join(OUT_ROOT, '输入', f), 'utf-8')), 0);
 console.log(` 输入快照 ${files.length} 个文件 / ${(字节 / 1024).toFixed(0)}KB（**全份**，不做精简——精简会引入一个要永远重新验证的等价性问题）`);
 
@@ -603,7 +772,9 @@ const meta = {
     '真项目回放层的冻结结论。**这些数就是项目报给教师的那些数**（SENT-01 命中数、阅读负荷下降、理解支架覆盖率、每章加注覆盖率、风险队列构成）。' +
     '它们此前没有任何东西在守：一次重构让某个数悄悄变一点点，没人会发现，直到有人拿它去写论文。' +
     'schemaVersion 2 把覆盖面从"第一章"扩到"全书每一章"——上一轮出事的是第七/八/九章，恰好是当时没有守的那三章。' +
-    '第七轮起每章质检带 completeness（partial = 显式声明"这章还没写完"，不进全书分母但仍在覆盖里）。',
+    '第七轮起每章质检带 completeness（partial = 显式声明"这章还没写完"，不进全书分母但仍在覆盖里）。' +
+    '2026-09-18 起 结论.验收v2 = 尺子（acceptanceV2 七维度）对夹具书的分章+全书数（装配四样随样本冻下；' +
+    '旧样本该键为 {说明,分章:null,全书:null}——未算不是零）。',
   冻结自: basename(projectPath),
   章: chapters.map(chName),
   层: tiers,
@@ -630,6 +801,14 @@ for (const t of tiers) {
     );
   const 每章 = Object.entries(out.分章[t]).map(([ch, r]) => `${ch} ${r.质检.加注覆盖率}%(${r.质检.已注词型}/${r.质检.应注词型})`);
   if (每章.length) console.log(`        每章加注覆盖率：${每章.join('｜')}`);
+}
+if (out.验收v2?.全书) {
+  const w = out.验收v2.全书;
+  console.log(
+    ` 验收v2（尺子对夹具书）：未注率 A ${w.rates.A.ratePct}% / M ${w.rates.M.ratePct}% / B ${w.rates.B.ratePct}%（${w.rateOrderPass ? 'PASS' : 'FAIL'}）｜句长 ${w.句长.avgA}→${w.句长.avgB}（${w.句长.pass ? 'PASS' : 'FAIL'}）｜倒挂 ${w.倒挂段数} 段｜语义 ${w.语义警报数}｜结构 ${w.结构数}｜重复注 ${w.重复注数}`,
+  );
+} else if (out.验收v2?.说明) {
+  console.log(` ⚠ 验收v2 未算：${out.验收v2.说明}`);
 }
 
 /* ── 只读保证：冻结**后**再拍一张，两张必须一模一样 ──
