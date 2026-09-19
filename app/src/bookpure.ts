@@ -5,6 +5,7 @@
  */
 
 import { chnoFromPath } from './pure.js';
+import { bookSummaryLine } from './qcreadout.js';
 import { unzipSync, strFromU8 } from 'fflate';
 
 /* ---------- 全书批处理（O2）：队列规划与书级汇总报告（纯逻辑可测） ---------- */
@@ -65,7 +66,7 @@ export function buildBookReportMd(rows: BookReportRow[], meta: { book: string; d
   const done = rows.filter((r) => r.status === 'done');
   const sum = (f: (r: BookReportRow) => number): number => done.reduce((n, r) => n + f(r), 0);
   const cell = (r: BookReportRow, f: (x: BookReportRow) => number | string): string => (r.status === 'failed' ? '—' : String(f(r)));
-  const lines: string[] = [`# 全书简化报告 · ${meta.book}`, '', `- 日期：${meta.date}｜简化标准：句长上限 ${meta.maxLen} 词/句｜完成 ${done.length}/${rows.length} 章`];
+  const lines: string[] = [`# 全书简化报告 · ${meta.book}`, '', `- 日期：${meta.date}｜简化标准：句长上限 ${meta.maxLen} 词/句｜完成 ${done.length}/${rows.length} 章`, `- ${bookSummaryLine(rows)}`];
   if (meta.instructions) lines.push(`- 方向指令：${meta.instructions}`);
   if (meta.provider) lines.push(`- AI 供应商：${meta.provider}`);
   lines.push(

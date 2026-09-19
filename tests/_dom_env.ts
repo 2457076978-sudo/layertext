@@ -19,7 +19,7 @@ document.body.innerHTML =
   '<div id="mode-pill"></div>' +
   '<button id="chat-send"></button><button id="chat-clear"></button><textarea id="chat-input"></textarea>' +
   '<button id="side-tab-ai"></button><button id="side-tab-edit"></button><button id="side-tab-review"></button><div id="side-review"></div>' +
-  '<div id="draft-pop"></div><div id="pop"></div><div id="conc-pop"></div>' +
+  '<div id="draft-pop"></div><div id="pop"></div><div id="conc-pop"></div><section id="pane-report"></section>' +
   '';
 
 /* ── `?raw` 加载钩子：随本模块按需注册（2026-09-16）──────────────────────────

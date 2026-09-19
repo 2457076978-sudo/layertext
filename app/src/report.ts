@@ -16,6 +16,7 @@ import { docxToText } from './bookpure.js';
 import { readTextSmart, bufToB64 } from './fsx.js';
 import { uibus } from './uibus.js';
 import { buildLexiconNow, mergedSelection, reinforceWordsNow } from './lexicon.js';
+import { reportReadouts } from './qcreadout.js';
 import { addMark, sidebarHandlers } from './reader.js';
 import { tocChapters } from './shelf.js';
 import { renderDiffPane } from './widgets.js';
@@ -226,6 +227,11 @@ export function renderReportPane(s: FileSession): void {
       <tr><th>句法黑名单</th><td>${gatesNote}</td></tr>
       <tr><th>覆盖率参考带${sel.active && sel.coverageTarget ? `（本批目标 ≥${sel.coverageTarget}%）` : ''}</th><td class="dim">${sel.active && sel.coverageTarget ? `分层覆盖目标带 ≥${sel.coverageTarget}%（多目标取最严；个体化依据见 docs/文献对齐）` : '95% = 最低限度理解（Laufer 1989）；98% = 无辅助顺畅阅读（Hu & Nation 2000）——文献群体均值'}</td></tr>
     </table>
+
+    <div class="diag-h">数字+人话判读<span class="dim">——同一份指标换成人话（阈值出处见 docs/QC指标说明 与定标文档）</span></div>
+    <div style="margin-bottom:10px;line-height:1.9">${reportReadouts(s.report, simplifyMaxLen())
+      .map((l) => `· ${esc(l)}<br/>`)
+      .join('')}</div>
 
     <div class="diag-h">① 生词清单（去重 ${oov.length} 词${suspects.length ? `，其中 <span style="color:#b45309">疑似漏收 ${suspects.length}</span>` : ''}）<span class="dim">——⚠ 疑似漏收 = zipf≥4 高频词但词库未收（bike/flood/onto 类漏词史），先点「学生会（入库）」核对（教师确认过才算掌握，词库收录≠学生已掌握）；低频词才是真·生词，勾「标记要简化」。勾一个动一个</span></div>
     ${

@@ -20,6 +20,7 @@ import { chnoFromPath, estTokens, findOriginalFlex, planCompaction } from './pur
 import { GATE_HELP, typeLabel, type Suggestion } from './types.js';
 import { annotationDensityOfChapter } from '../../src/core/acceptance.js';
 import { qcDensityRow } from './qcdensity.js';
+import { gateTableHtml } from './qcreadout.js';
 
 /* ---------- AI 会话持久化（防抖落盘，重启可恢复） ---------- */
 
@@ -487,21 +488,7 @@ export function showGateHelp(gate: string, anchor: HTMLElement): void {
     const densRow = s ? qcDensityRow(annotationDensityOfChapter(s.md)) : null;
     if (s?.report) {
       const r = s.report;
-      const row = (name: string, value: string, ref: string, warn = false) => `<tr class="${warn ? 'warnrow' : ''}"><td>${name}</td><td>${value}</td><td>${ref}</td></tr>`;
-      body += `
-        <table class="gtable">
-          <tr><th>指标</th><th>本章实际</th><th>参考</th></tr>
-          ${row('词表覆盖率', (r.coverage * 100).toFixed(1) + '%', '越接近词库上限越好')}
-          ${row('生词率（词型）', (r.newWordRate * 100).toFixed(1) + '%', '越低越好')}
-          ${row('平均句长', r.avgLenNarrRaw.toFixed(1) + ' 词', `≤ ${maxLen} 词（简化标准，ⓘ 可调）`, r.avgLenNarrRaw > maxLen)}
-          ${row('单句最长', r.maxLen + ' 词', `≤ ${maxLen} 词`, r.maxLen > maxLen)}
-          ${row(`超 ${maxLen} 词句数`, String(r.over20), '0（个别文学长句可人工放行）', r.over20 > 0)}
-          ${row('被动式', String(r.passive), '0（一律禁用）', r.passive > 0)}
-          ${row('定语从句', String(r.relcl), '0（一律禁用）', r.relcl > 0)}
-          ${row('过去完成', String(r.pastperf), '0', r.pastperf > 0)}
-          ${row('待定词命中', String(r.pendingHits), '逐个复核后定去留', r.pendingHits > 0)}
-          ${densRow ? row(densRow.name, densRow.value, densRow.ref, densRow.warn) : ''}
-        </table>`;
+      body += gateTableHtml(r, maxLen, densRow);
     } else {
       body += `<p class="dim">本章尚未体检——打开课文会自动体检，或点「重新质检」。</p>`;
     }
