@@ -13,6 +13,23 @@
 
 > 自 1.2.1 起的 95 个批次：词画卷×传播咬合全落地（concordance 引擎/App 视图/MCP 工具）→ 第一梯队（App 回炉模式、MCP 5→10、源完整性探针、验收 v2 七维度引擎化）→ 两大发现清账与八章源碎尾清扫 → 第三梯队尺子收口（两层 golden 锁验收 v2、注密度进 App 门禁为警戒）→ 发版收口。测试 180→1108；架构地图同步至 app/src 36 模块。分支 6 节原样保留（见上方引块）。
 
+### 2026-09-19（功能四项·项 4：分档 × 考试表现回溯——仓外只读，论文证据线，4a–4e 全 PASS）
+
+- **4a** 新脚本 `tools/af_pipeline/LayerText_AF分档考试回溯.mjs`：输入全走 env
+  （`LAYERTEXT_AF_DIR` + `LAYERTEXT_EXAM_DIR`），缺任一 **exit 2 实测**并给用法。
+- **4b join 纯函数**：新增 `src/core/tierexam.ts`——`examWordsOf`（答案提词）/`bandsOfWord`
+  （**hitOrigin 唯一归并**，不自算词形还原）/`aggregateByBand`（档×梯队均值+题数，一题多档各记、
+  词表外单列）/`baselineRates`/`bandVerdict`（差值点名最伤/最稳）。`tests/tierexam.test.ts` 5 例
+  用**仓内合成夹具**（无学生个体数据）：命中/不命中/两档重叠/缺梯队/浮点容差/并列最伤各≥1。
+- **4c 真数据实跑**（E3 区统练 40/40 题、E5 期中 57/59、E6 模拟 33/35 接入）：产物
+  `AF知识文件/分档×考试表现回溯_v0.md`——（考试×档×梯队）聚合表+判读（E3 词表外词题在 M 层
+  -4.1pp 最伤/优档 +4.1pp 最稳；E5 良档 M 层 -2.2pp；E6 良档 A 层 -3.2pp）。**零学生姓名**
+  （对分层名单 81 人抽查零命中）、数据表 12 行（3 考试×4 档）。
+- **4d 措辞纪律**：`EXAM_DISCLAIMER` 引擎常量（exposure≠acquisition／回溯相关不构成因果／无学生个体
+  数据／归并口径），测试锁四要素，报告原样携带。
+- **4e 只读**：跑前后 成绩数据库/试卷原卷与细目 与 AF/调适工作区 **两目录树指纹逐字节一致**（sha256
+  全量快照比对）；脚本仅 readFileSync+一次 writeFileSync（AF知识文件 新报告）。
+
 ### 2026-09-19（功能四项·项 3：FSRS 复现调度 → 本周清单 → 复现词优先入题，3a–3e 全 PASS）
 
 - **3a** `src/core/fsrs.ts` 增 `weeklyDue(items, {today, horizonDays})`：FSRS 建议间隔 ≤ 窗口即本周到期，
