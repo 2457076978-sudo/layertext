@@ -17,6 +17,7 @@ import { readTextSmart, bufToB64 } from './fsx.js';
 import { uibus } from './uibus.js';
 import { buildLexiconNow, mergedSelection, reinforceWordsNow } from './lexicon.js';
 import { reportReadouts } from './qcreadout.js';
+import { loadWeeklyQueue, pickQuizWords } from './weekly.js';
 import { addMark, sidebarHandlers } from './reader.js';
 import { tocChapters } from './shelf.js';
 import { renderDiffPane } from './widgets.js';
@@ -436,7 +437,12 @@ async function aiQuiz(s: FileSession): Promise<void> {
   btn.textContent = '⏳ AI 出题中…';
   try {
     const chapter = splitChapter(s.md).body.slice(0, 12000);
-    const words = reinforceWordsNow()?.slice(0, 30).join(', ') || '（无复现队列——词汇题自选本章关键词）';
+    /* 项 3b：FSRS 到期优先——读本书最新复现队列算本周到期词，到期词带标注、不足补队列前 30；
+     * 没有队列文件时回退 reinforceWordsNow（班级定制到期词路径）与既有空文案。 */
+    const bookDir = s.sourcePath ? s.sourcePath.slice(0, s.sourcePath.lastIndexOf('/')) : S.currentBookDir;
+    const wq = await loadWeeklyQueue(bookDir || null);
+    const picked = wq.queuePath ? pickQuizWords(wq.due, wq.queue, 30) : null;
+    const words = picked?.words || reinforceWordsNow()?.slice(0, 30).join(', ') || '（无复现队列——词汇题自选本章关键词）';
     const { raw } = await chatUntilJson([{ role: 'user', content: await buildReadingQuizPrompt({ chapter, words }) }], 3000, '读后检测题');
     const { ok, rejected } = parseQuizItems(raw);
     if (rejected > 0) setStatus(`已拒收 ${rejected} 道不合规题（题干/选项/答案缺项），其余正常`, 'info');

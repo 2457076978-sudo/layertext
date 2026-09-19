@@ -73,3 +73,35 @@ export function summarizeFsrs(rows: FsrsRow[]): { avgPieces: number; currentPiec
     total: rows.length,
   };
 }
+
+/* ── 本周到期（功能四项 · 项 3，2026-09-19）──────────────────────────────────
+ * 口径不变（并行试点定案）：FSRS 只给建议、不切换现行固定隔 2 篇——weeklyDue 输出的
+ * 行同时带 nextPieces（FSRS 建议）与 currentPieces（现行），教师端两列并排。
+ * 到期判定沿用 hits-only 模型：FSRS 建议的下次间隔 nextDays 天 ≤ 窗口 horizonDays 即
+ * 「本周到期」（空卡=首次复习，自然在窗内）；无真实复习时间戳——这是既有设计，
+ * 不在本项里引入打卡/复习日志（教师端 only 边界）。 */
+
+export interface WeeklyDueOptions extends Partial<FsrsOptions> {
+  /** 窗口起点（默认今天）；测试传固定日期保证确定性 */
+  today?: Date;
+  /** 窗口天数（默认 7） */
+  horizonDays?: number;
+}
+
+export interface WeeklyDueRow extends FsrsRow {
+  /** 到期日（ISO 日期，today + nextDays） */
+  dueDay: string;
+}
+
+/** 本周到期词：FSRS 建议间隔 ≤ 窗口的词，到期早在前（同日按字母序）。 */
+export function weeklyDue(items: FsrsWordInput[], opts: WeeklyDueOptions = {}): WeeklyDueRow[] {
+  const { today = new Date(), horizonDays = 7, ...fsrsOpts } = opts;
+  return planFsrs(items, fsrsOpts)
+    .filter((r) => r.nextDays <= horizonDays)
+    .sort((a, b) => a.nextDays - b.nextDays || a.word.localeCompare(b.word))
+    .map((r) => {
+      const d = new Date(today);
+      d.setDate(d.getDate() + r.nextDays);
+      return { ...r, dueDay: d.toISOString().slice(0, 10) };
+    });
+}

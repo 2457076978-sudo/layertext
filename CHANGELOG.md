@@ -13,6 +13,25 @@
 
 > 自 1.2.1 起的 95 个批次：词画卷×传播咬合全落地（concordance 引擎/App 视图/MCP 工具）→ 第一梯队（App 回炉模式、MCP 5→10、源完整性探针、验收 v2 七维度引擎化）→ 两大发现清账与八章源碎尾清扫 → 第三梯队尺子收口（两层 golden 锁验收 v2、注密度进 App 门禁为警戒）→ 发版收口。测试 180→1108；架构地图同步至 app/src 36 模块。分支 6 节原样保留（见上方引块）。
 
+### 2026-09-19（功能四项·项 3：FSRS 复现调度 → 本周清单 → 复现词优先入题，3a–3e 全 PASS）
+
+- **3a** `src/core/fsrs.ts` 增 `weeklyDue(items, {today, horizonDays})`：FSRS 建议间隔 ≤ 窗口即本周到期，
+  到期早在前、dueDay=today+nextDays；**hits-only 模型不变**（不引入复习日志——教师端 only 边界）。
+  cefr_fsrs +2 例（空卡首复习在窗内/horizon 边界/并行试点两列并排）。
+- **3b 出题选词升级**：`app/src/weekly.ts` 的 `pickQuizWords`——读本书最新 `复现队列_*.csv`（字典序最新）
+  → weeklyDue → 到期词优先且带「（本周到期，优先入题）」标注、不足补队列前 30；无队列文件回退
+  `reinforceWordsNow`（班级定制路径不变）与既有空文案。report.ts 出题链已接。
+- **3c 数据面板「本周复现清单」卡**：无队列给"去导出生词卡"引导（非报错）；无到期=下周再看；
+  有到期=词+到期日 chip（title 带 FSRS 建议 vs 现行固定两列）。CSV 解析宽容口径与 CLI fsrs 同款。
+- **3d 教师端 only 纪律扫描**：weekly/bookcards 源码禁 打卡/提醒/推送 词形、禁本地复刻 FSRS 模拟
+  （createEmptyCard 等）——测试锁。
+- **3e CLI 零变化**：`npm run qc fsrs` 前两列兼容不動，cefr_fsrs 既有用例全绿。
+- 结构：datapanel 撞 max-lines 1000 → 按先例拆出 **`app/src/bookcards.ts`**（书级卡接线；app/src 40 模块），
+  findProjectConfig 走动态 import 避免与 datapanel 成环（propagateui 先例）；setStatus 改从 state 取
+  （保 datapanel 纯测试不拉 DOM 链）。weekly 的 list_dir 兜底 catch 补「有意兜底」注释（appswallow 守卫先红后绿）。
+
+验证：`npm run verify` 1128 项全绿（1126/0/2）+ `vite build` 过。
+
 ### 2026-09-19（功能四项·项 2：人话判读铺满——「数字+人话」成对落地三处界面，2a–2e 全 PASS）
 
 新增 `app/src/qcreadout.ts`（纯模块）+ `tests/qcreadout.test.ts`（8 例）：

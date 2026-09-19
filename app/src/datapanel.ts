@@ -13,7 +13,9 @@
 import { baseName, properSuspectsReportMd, vocabGapReportMd } from './pure.js';
 import { loadBookChaptersFromPath } from './bookscan.js';
 import { buildConcordance, properSuspects } from '../../src/core/concordance.js';
-import { crossTierCardHtml, crossTierOf, type CrossTierReport } from './crosstier.js';
+import { crossTierCardHtml } from './crosstier.js';
+import { weeklyCardHtml } from './weekly.js';
+import { wireBookCards } from './bookcards.js';
 import { setStatus } from './state.js';
 /** IO 注入点 —— 纯逻辑（parse/validate/upsert/delete）完全不依赖它，
  *  因此可以在 node 下直接测试，不必启动 App。生产环境走 Tauri。 */
@@ -746,64 +748,6 @@ export function ledgerCardHtml(sum: LedgerSummary | null, hasProject: boolean): 
   </div>`;
 }
 
-/** 层间体检卡的接线：运行按钮 + 倒挂段行跳转（读 data-path 与 data-seg——段号进状态行，跳完看得见去了哪）。 */
-function wireCrossTierCard(scope: HTMLElement, bookDir: string): void {
-  scope.querySelector('#dp-crosstier-run')?.addEventListener('click', () => void runCrossTier(bookDir));
-  scope.querySelectorAll<HTMLElement>('.dp-ct-inv').forEach((row) =>
-    row.addEventListener(
-      'click',
-      () =>
-        void (async () => {
-          const path = row.dataset.path ?? '';
-          const seg = row.dataset.seg ?? '';
-          setStatus(`层间体检：跳到 ${path.slice(path.lastIndexOf('/') + 1)} 的 ${seg}——处理完这段倒挂可重新体检`, 'info');
-          (await import('./uibus.js')).uibus.openPathIntoSession(path);
-        })(),
-    ),
-  );
-}
-
-/** 层间体检（项 1）：扫书 → 逐章 acceptanceV2（crosstier 装配）→ 重画卡。
- *  known/proper 与词画卷报告同源（S.currentKnown / S.properRows）；源稿=章目录里的
- *  原文_规范化.md（有才算语义维度，没有=未算不是零）。 */
-async function runCrossTier(bookDir: string): Promise<void> {
-  const wrap = document.getElementById('dp-crosstier-wrap');
-  if (!wrap) return;
-  wrap.innerHTML = crossTierCardHtml(null, true);
-  try {
-    const { S } = await import('./state.js');
-    const { readTextChecked } = await import('./fsx.js');
-    const found = bookDir ? await findProjectConfig(bookDir) : null;
-    const naming = ((found?.config as Record<string, unknown> | undefined)?.['产物命名'] ?? { A: 'A层85', M: 'M层75', B: 'B层60' }) as Record<string, string>;
-    const scan = await loadBookChaptersFromPath(bookDir || null, naming);
-    /* 源稿发现：AF 布局=章目录里 原文_规范化.md；平铺布局没有=语义维度未算（卡片写明） */
-    const srcDirOf = new Map<string, string>();
-    for (const row of scan.chapters) srcDirOf.set(row.name, row.path.slice(0, row.path.lastIndexOf('/')));
-    const srcOf = new Map<string, string>();
-    for (const [name, dir] of srcDirOf) {
-      const r = await readTextChecked(`${dir}/原文_规范化.md`);
-      if (r.kind === 'ok') srcOf.set(name, r.text);
-    }
-    const report: CrossTierReport = crossTierOf(scan, {
-      known: S.currentKnown,
-      proper: S.properRows ?? [],
-      ...(srcOf.size ? { sourceOf: (ch: string) => srcOf.get(ch) ?? null } : {}),
-    });
-    wrap.innerHTML = crossTierCardHtml(report, false);
-    wireCrossTierCard(wrap, bookDir);
-    setStatus(
-      report.汇总.倒挂段总数
-        ? `层间体检：${report.汇总.倒挂段总数} 段倒挂（点行跳 B 层产物）——${report.汇总.章数} 章已体检`
-        : `层间体检完成：${report.汇总.章数} 章${report.未算.length ? `（另有 ${report.未算.length} 章缺层未算）` : ''}`,
-      report.汇总.倒挂段总数 ? 'info' : 'saved',
-    );
-  } catch (e) {
-    wrap.innerHTML = crossTierCardHtml(null, false);
-    wireCrossTierCard(wrap, bookDir);
-    setStatus(`层间体检没跑成：${String(e).slice(0, 120)}`, 'err');
-  }
-}
-
 async function runConcReport(bookDir: string, which: 'proper' | 'gap'): Promise<void> {
   try {
     const { S } = await import('./state.js');
@@ -1013,6 +957,7 @@ export async function renderDataPane(bookDir: string): Promise<void> {
       ${ledgerCardHtml(ledgerSum, true)}
       ${concReportsCardHtml(true)}
       <div id="dp-crosstier-wrap">${crossTierCardHtml(null, false)}</div>
+      <div id="dp-weekly-wrap">${weeklyCardHtml(null, false)}</div>
       ${treeCard}
       <div class="dp-tabs">${tabs}</div>
       ${st.errs.length ? `<div class="dp-note dp-err">⚠ ${st.errs.length} 个校验问题（不阻塞本次编辑，但不能引入新问题）：<br>${st.errs.slice(0, 5).map(esc).join('<br>')}${st.errs.length > 5 ? '<br>…' : ''}</div>` : '<div class="dp-note dp-ok">✓ 校验通过</div>'}
@@ -1023,8 +968,7 @@ export async function renderDataPane(bookDir: string): Promise<void> {
 
   el.querySelector('#dp-conc-proper')?.addEventListener('click', () => void runConcReport(bookDir, 'proper'));
   el.querySelector('#dp-conc-gap')?.addEventListener('click', () => void runConcReport(bookDir, 'gap'));
-  el.querySelector('#dp-crosstier-run')?.addEventListener('click', () => void runCrossTier(bookDir));
-  wireCrossTierCard(el, bookDir);
+  wireBookCards(el, bookDir);
   el.querySelector('#dp-ledger-reveal')?.addEventListener('click', () => {
     if (ledgerSum) void io.reveal(ledgerSum.path);
   });

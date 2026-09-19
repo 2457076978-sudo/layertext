@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import { parseCefrLevels, cefrOf, cefrRank } from '../src/core/cefr.js';
-import { planFsrs, summarizeFsrs } from '../src/core/fsrs.js';
+import { planFsrs, summarizeFsrs, weeklyDue } from '../src/core/fsrs.js';
 
 test('CEFR：解析（# 注释跳过、坏行跳过）与词形回退（复数/过去式/进行时）', () => {
   const m = parseCefrLevels('# 头注释\nabandon B1\nzoology C2\nbad line here\n\nzoom B2');
@@ -57,4 +57,47 @@ test('FSRS：单位换算可调（daysPerPiece 影响篇数，currentPieces 影�
   assert.ok(r1.nextPieces >= r3.nextPieces);
   const r5 = planFsrs(items, { currentPolicyPieces: 5 })[0]!;
   assert.equal(r5.currentPieces, 5);
+});
+
+/* ── 3a：weeklyDue 本周到期（功能四项 · 项 3）——教师端清单/出题选词共用的纯函数 ── */
+
+test('3a：weeklyDue——空卡词首次复习在窗内、高频词晚到期可在窗外、到期早在前、dueDay=今天+nextDays', () => {
+  const today = new Date('2026-09-19T00:00:00Z');
+  // hits 0 → nextDays 1（空卡首复习）；hits 8 → 间隔更大（可能超 7 天窗）
+  const rows = weeklyDue(
+    [
+      { word: 'zeta', hits: 8 },
+      { word: 'alpha', hits: 0 },
+      { word: 'mid', hits: 2 },
+    ],
+    { today, horizonDays: 7 },
+  );
+  assert.ok(rows.length >= 1, '至少空卡词在窗内');
+  assert.equal(rows[0]!.word, 'alpha', '到期最早（nextDays 最小）在前');
+  assert.equal(rows[0]!.dueDay, '2026-09-20', 'dueDay = today + nextDays(1)');
+  assert.ok(
+    rows.every((r) => r.nextDays <= 7),
+    '窗外词全部滤掉',
+  );
+  for (let i = 1; i < rows.length; i++) assert.ok(rows[i - 1]!.nextDays <= rows[i]!.nextDays, '按 nextDays 升序');
+  // 高频词大间隔：把窗口收到 1 天，只有 nextDays≤1 的词留下
+  const tight = weeklyDue(
+    [
+      { word: 'alpha', hits: 0 },
+      { word: 'mid', hits: 2 },
+    ],
+    { today, horizonDays: 1 },
+  );
+  assert.deepEqual(
+    tight.map((r) => r.word),
+    ['alpha'],
+    'horizon 边界：只留 nextDays≤1',
+  );
+});
+
+test('3a：weeklyDue 并行试点口径——每行同时带 FSRS 建议（篇）与现行固定（篇）', () => {
+  const rows = weeklyDue([{ word: 'dog', hits: 1 }], { today: new Date('2026-09-19T00:00:00Z') });
+  assert.equal(rows.length, 1);
+  assert.equal(typeof rows[0]!.nextPieces, 'number', 'FSRS 建议列在');
+  assert.equal(rows[0]!.currentPieces, 2, '现行固定隔 2 篇列在（默认）');
 });
