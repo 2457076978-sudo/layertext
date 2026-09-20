@@ -60,6 +60,11 @@ export interface FileSession {
   report: QcResult | null;
   reportSavedPath: string | null;
   dirty: boolean; // 有未落盘的标记变更（防抖中）
+  /* 学段读数（2026-09-19）：同目录 <基名>_学段读数.json 的词→E∈[1,5]，缺失为 null 静默降级。
+   * 判定锚不变（课标+教师词库），E 只做超纲程度着色与词面板量化显示。
+   * gradesConf（2026-09-20）：同文件的 conf 段（within-1 置信），驱动三态门控着色。 */
+  grades?: import('../../src/core/wordgrade.js').WordGrades | null;
+  gradesConf?: import('../../src/core/wordgrade.js').WordConf | null;
   /* UX 补齐（2026-09-08）：文件级撤销栈 + 滚动位置记忆 */
   undoStack?: string[];
   redoStack?: string[];

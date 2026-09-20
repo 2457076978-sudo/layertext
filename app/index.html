@@ -981,6 +981,31 @@
       .w.term::after {
         background: var(--term);
       }
+      /* 学段读数着色（2026-09-19，判定器 v4）：与四态词色正交，用底色不抢文字色；
+       * 骑线=浅橙 / 超纲=浅红 / 硬超纲=深红。无读数文件时这些类不会出现。 */
+      .w.wg3 {
+        background: rgba(230, 145, 30, 0.16);
+        box-shadow: 0 1px 0 rgba(230, 145, 30, 0.5);
+      }
+      .w.wg4 {
+        background: rgba(214, 69, 65, 0.14);
+        box-shadow: 0 1px 0 rgba(214, 69, 65, 0.55);
+      }
+      .w.wg5 {
+        background: rgba(178, 24, 30, 0.2);
+        box-shadow: 0 1px 0 rgba(178, 24, 30, 0.7);
+      }
+      /* 门控三态（2026-09-20，RLCD 门控模式本地版）：中置信淡显 / 低置信灰虚线转人工 */
+      .w.wg-soft {
+        opacity: 0.55;
+      }
+      .w.wg0 {
+        background: transparent;
+        color: var(--oov);
+        text-decoration: dashed underline rgba(128, 128, 128, 0.8);
+        text-underline-offset: 3px;
+        opacity: 0.75;
+      }
       /* 词级标记（可叠加，视觉取优先级最高一种；title 可见全部）。声明顺序 = 优先级从低到高 */
       .w.mk-goodw {
         text-decoration: underline var(--warn);

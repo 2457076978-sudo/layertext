@@ -13,6 +13,7 @@ import { buildLexiconNow } from './lexicon.js';
 import { scheduleHeatRail } from './edit.js';
 import { showGateHelp } from './chat.js';
 import { showSentenceEditor, applyZhAnnotations, applyEnDefinitions, applyWordSimplifications, removeZhAnnotation } from './pipew.js';
+import { appendCsvLine } from './fsx.js';
 import { simplifyMaxLen } from './ai.js';
 import { aiRewriteSentence } from './aiflow.js';
 import { jumpTo, refreshBookmarksDom, refreshMarkDom, removeMarkDom, renderSidebar, restoreAllMarkDom, scheduleSave } from './review.js';
@@ -20,6 +21,7 @@ import { WORD_PANEL_TYPES, SENT_TYPES, newMarkId, typeLabel, type FileSession, t
 import { phraseSpan, toggleParaBookmark } from './pure.js';
 import bundledCefr from '../../assets/wordlists/cefrj_levels.txt?raw';
 import { parseCefrLevels, cefrOf, CEFR_DESC, type CefrLevel } from '../../src/core/cefr.js';
+import { gradeOf, gradeBand, GRADE_BAND_DESC, confOf, confState } from '../../src/core/wordgrade.js';
 import { IRR } from '../../src/core/irregular.js';
 import { cardGlossWords, extractParas, hit, hitOrigin, pendHit, sentsOf, splitChapter, tokenizeTxt } from '../../src/core/textpipe.js';
 import { sentenceRisks } from '../../src/core/risks.js';
@@ -117,12 +119,31 @@ export function renderReader(session: FileSession): void {
         const cls = terms.has(tok) ? 'term' : pendHit(tok, lex.pending) ? 'pending' : hit(tok, S.currentKnown) ? '' : 'oov';
         if (cls === 'oov') oovCount++;
         w.className = 'w' + (cls ? ' ' + cls : '');
+        /* 学段读数着色（2026-09-19）：与词表状态正交——词表内但 E 高=词库可疑收录，
+         * 词表外但 E 低=疑似漏收，两类错配都要显形。无读数文件时零开销跳过。
+         * 门控三态（2026-09-20）：高置信正常着色 / 中置信淡显 / 低置信灰虚线转人工。 */
+        const ge = session.grades ? gradeOf(tok, session.grades) : null;
+        if (ge != null) {
+          const gb = gradeBand(ge);
+          const cf = session.gradesConf ? confOf(tok, session.gradesConf) : null;
+          const cs = confState(cf);
+          if (gb) {
+            if (cs === 'low')
+              w.classList.add('wg0'); // 灰虚线：读数存疑，请人工看
+            else {
+              w.classList.add(gb);
+              if (cs === 'soft') w.classList.add('wg-soft');
+            }
+          }
+          w.dataset.grade = String(ge);
+          w.dataset.conf = cf != null ? String(cf) : '';
+        }
         w.dataset.wi = String(i);
         w.dataset.tok = tok;
         w.dataset.state = cls || 'known';
         w.textContent = raw;
         const label = cls === 'oov' ? '词表外' : cls === 'pending' ? '待定词' : cls === 'term' ? '术语' : '已知';
-        w.title = `${raw} · ${label}`;
+        w.title = `${raw} · ${label}` + (ge != null ? ` · 旋钮E=${ge.toFixed(2)}` : '');
         s.appendChild(w);
         rest = rest.slice(at + raw.length);
       }
@@ -290,6 +311,15 @@ function refreshPop(): void {
   });
 }
 
+/** 学段读数行（词面板显示；E 的口径见 src/core/wordgrade.ts 头注） */
+function gradeLine(tok: string, session: FileSession): string {
+  if (!session.grades) return '学段旋钮：本章未生成读数（判定器 scan_chapter_grades.py）';
+  const ge = gradeOf(tok, session.grades);
+  if (ge == null) return '学段旋钮：未收（读数文件无此词/词形）';
+  const gb = gradeBand(ge);
+  return `学段旋钮：E=${ge.toFixed(2)}${gb ? `（${GRADE_BAND_DESC[gb]}）` : '（初中带内）'} · 本地判定器 v7`;
+}
+
 export function showWordPanel(session: FileSession, wEl: HTMLElement, x: number, y: number): void {
   S.popSession = session;
   const sentHost = wEl.closest('.sent') as HTMLElement | null;
@@ -317,9 +347,9 @@ export function showWordPanel(session: FileSession, wEl: HTMLElement, x: number,
   const hasAnno = new RegExp(`\\b${tok.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}（[^）]*）`, 'i').test(session.md);
   pop.innerHTML = `
     <div class="pop-h">${esc(wEl.textContent ?? '')}</div>
-    <div class="pop-info">词表状态：${stateLabel}${origin && origin !== tok ? `<br/>词形还原原形：${esc(origin)}` : ''}<br/>${cefrLine(tok)}</div>
+    <div class="pop-info">词表状态：${stateLabel}${origin && origin !== tok ? `<br/>词形还原原形：${esc(origin)}` : ''}<br/>${cefrLine(tok)}<br/>${gradeLine(tok, session)}</div>
     <div class="pop-marks"></div>
-    <div class="pop-btns">${hasAnno ? `<button data-mk="__unanno" class="primary" title="本地去除该词全章的中文标注（不过模型、可撤销），同时把该词登记进词库=学生已会（下次生成不再注它）">✂ 去除中文标注·记已会</button>` : ''}<button data-mk="__rewrite" class="primary" title="让 AI 按当前标记意图改写这一句（快捷键 R）"><svg class="ico"><use href="#i-sparkle"/></svg>AI 改写本句</button><button data-mk="__edit" title="亲手修改这一句（快捷键 E）——直接写入正文，可撤销，不经引擎复核（你是定稿人）">✎ 手动改这句</button><button id="wp-conc" title="这个词在整本书里的出现处（哪几章哪几句、各层对照、是否已注）——词画卷，只读不改正文">📖 全书词画像</button></div>
+    <div class="pop-btns">${hasAnno ? `<button data-mk="__unanno" class="primary" title="本地去除该词全章的中文标注（不过模型、可撤销），同时把该词登记进词库=学生已会（下次生成不再注它）">✂ 去除中文标注·记已会</button>` : ''}<button data-mk="__rewrite" class="primary" title="让 AI 按当前标记意图改写这一句（快捷键 R）"><svg class="ico"><use href="#i-sparkle"/></svg>AI 改写本句</button><button data-mk="__edit" title="亲手修改这一句（快捷键 E）——直接写入正文，可撤销，不经引擎复核（你是定稿人）">✎ 手动改这句</button><button id="wp-conc" title="这个词在整本书里的出现处（哪几章哪几句、各层对照、是否已注）——词画卷，只读不改正文">📖 全书词画像</button><button data-mk="__wrongE" title="把这个词的学段读数记为可疑——写入本章同目录 判定器反馈.tsv（供判定器户口补录，不打扰正文）">⚑ 读数可疑</button></div>
     <div class="pop-mk">${WORD_PANEL_TYPES.map((t, i) => `<button data-mk="${t.key}" title="标记为「${t.label}」${t.key === 'anchor' ? '——记录该词为本篇复现锚点（保留并计入复现，不改正文）' : S.appConfig.autoRewriteOnMark ? '——即改模式下点完立即执行（写原稿+日志）' : '——点「AI 改写本句」或批量时按此意图处理'}"><span class="kbd">${i + 1}</span>${t.label}</button>`).join('')}</div>
     <textarea id="pop-note" placeholder="备注（可选，随下一条标记保存）"></textarea>
     <div class="pop-tip">${S.appConfig.autoRewriteOnMark ? '当前为即改模式：点任一标记立即执行（如「加中文标注」插入注释、「词汇简化」换课标内简单词），改动写原稿并记日志，首改前自动备份' : '先标记意图再点「AI 改写本句」，改写会直接出现在正文中供采纳'}</div>`;
@@ -400,6 +430,18 @@ function bindTypeButtons(session: FileSession, level: MarkLevel, pi: number, si:
       if ((type as string) === '__unanno') {
         const w = pop.dataset.tok ?? '';
         if (w) void removeZhAnnotation(session, w);
+        return;
+      }
+      if ((type as string) === '__wrongE') {
+        const w = pop.dataset.tok ?? '';
+        const ge = session.grades ? gradeOf(w, session.grades) : null;
+        const dir = session.sourcePath ? session.sourcePath.replace(/[^/]+$/, '') : null;
+        if (w && dir) {
+          const line = [w, ge == null ? '' : ge.toFixed(2), session.fileName, new Date().toISOString().slice(0, 16)].join('\t');
+          void appendCsvLine(dir + '判定器反馈.tsv', ['词', 'E', '文件', '时间'], line)
+            .then(() => toast(`已记入判定器反馈：${w}${ge != null ? `（E=${ge.toFixed(2)}）` : ''}`))
+            .catch((e: unknown) => toast(`反馈写入失败：${String(e)}`));
+        }
         return;
       }
       if ((type as string) === '__rewrite') {

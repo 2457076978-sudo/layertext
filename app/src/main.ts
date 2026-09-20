@@ -16,6 +16,7 @@ import { activeSession, markPathFor, saveLastSession, scheduleSaveLastSession } 
 import { uibus } from './uibus.js';
 import { docxToText } from './bookpure.js';
 import { teacherIdOf } from '../../src/core/teachers.js';
+import { parseWordGrades, parseWordConf } from '../../src/core/wordgrade.js';
 import { renderRiskPane, setRiskIo, TAGS as RISK_TAGS } from './risk.js';
 import { S, esc } from './state.js';
 import { $, setStatus, toast, pop, hidePop } from './uikit.js';
@@ -128,7 +129,28 @@ async function addSession(md: string, fileName: string, sourcePath: string | nul
       S.markFileBroken.add(markPath);
     }
   }
-  S.sessions.push({ md, fileName, sourcePath, markPath, review, report: null, reportSavedPath: null, dirty: false });
+  /* 学段读数（2026-09-19）：同目录 <基名>_学段读数.json，缺失=未生成静默降级；
+   * 在但解析坏=点名（不静默，同标记文件的事故教训）。生成=判定器项目 scan_chapter_grades.py。
+   * conf 段（2026-09-20）为可选：旧版文件没有时 conf=null 走纯色带模式。 */
+  let grades: import('../../src/core/wordgrade.js').WordGrades | null = null;
+  let gradesConf: import('../../src/core/wordgrade.js').WordConf | null = null;
+  if (sourcePath) {
+    const gradePath = sourcePath.replace(/\.md$/i, '_学段读数.json');
+    const gRead = await readTextChecked(gradePath);
+    if (gRead.kind === 'unreadable') setStatus(`学段读数文件在但读不出来：${gradePath}——着色将缺席，可重跑 scan_chapter_grades.py`, 'err');
+    if (gRead.kind === 'ok') {
+      try {
+        const parsed = JSON.parse(gRead.text);
+        grades = parseWordGrades(gRead.text);
+        gradesConf = parseWordConf(parsed);
+        if (!grades) setStatus(`学段读数文件解析失败（已忽略）：${gradePath}`, 'err');
+      } catch {
+        grades = null;
+        setStatus(`学段读数文件解析失败（已忽略）：${gradePath}`, 'err');
+      }
+    }
+  }
+  S.sessions.push({ md, fileName, sourcePath, markPath, review, report: null, reportSavedPath: null, dirty: false, grades, gradesConf });
   S.activeIdx = S.sessions.length - 1;
   /* ★ 校准台账重放（2026-09-13）：标记文件按**文件名**落盘，管线每重生成一版就换文件名，
    *   于是教师在旧版上点的校准在新版里"不见了"（账没丢，是新文件读了自己那张空表）。
