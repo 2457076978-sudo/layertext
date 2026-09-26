@@ -879,8 +879,9 @@ export async function removeZhAnnotation(s: FileSession, word: string): Promise<
   } catch {
     /* 有意兜底：留痕失败不拦正文修改（applyMdSnapshot 已保存正文）——正文已落盘，这里再抛只会让教师以为改稿失败。 */
   }
-  /* 词库正本登记：从章节目录向上发现项目配置，upsert 一行「单词」进词库 CSV
-   * （AF 场景=知识文件/已知词汇库，管线下次生成直接生效）。面板没打开也能写。 */
+  /* 词库源表登记：从章节目录向上发现项目配置，upsert 一行「单词」进词库 CSV
+   * （AF 场景=知识文件/已知词汇库）。管线**不直读**这张表——词表正本（LexiconData）
+   * 会检测到漂移并拒绝开工，须按提示 `--reimport` 一次才进判定口径（A4 防呆链，2026-09-26）。 */
   let canonical = false;
   try {
     const { findProjectConfig, loadAll, upsertRow, save, DATA_KINDS, panelState } = await import('./datapanel.js');
@@ -903,7 +904,10 @@ export async function removeZhAnnotation(s: FileSession, word: string): Promise<
   const base = S.vocabCsvText?.trim() ? S.vocabCsvText : '词,类型,词性,释义,来源册,来源单元,音标,备注\n';
   S.vocabCsvText = `${base.replace(/\n$/, '')}\n${head},单词,,,教师确认,,,${date} 去除标注时登记\n`;
   await uibus.runQcCurrent({ auto: true });
-  toast(`已去除「${head}」×${count} 处标注，${canonical ? '词库正本+会话均已登记' : '本会话词库已登记'}（↩︎ 可撤销；下次生成不再注它）`, 'ok');
+  toast(
+    `已去除「${head}」×${count} 处标注，${canonical ? '词库源表+会话均已登记' : '仅本会话词表登记（项目词库没配上，没写盘）'}（↩︎ 可撤销${canonical ? '；下次跑生成管线会拦下要求重新导入词表，导入后此词才不再注' : ''}）`,
+    'ok',
+  );
   /* ★ 撤销**也要往下传**（2026-09-14 加）。加注现在是自动传播的；如果"去除"不传播，
    * 上级撤掉的注解会永远留在下级，越积越多——自动传播就变成一个只进不出的漏斗。 */
   void propagateToLowerTiers(s, [{ word: head, op: 'unanno' as const }]);

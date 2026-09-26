@@ -18,6 +18,15 @@
 - verify 链第一步改为 env_doctor（`package.json`）；新增 `bin/lt` 启动器：自寻 `~/.local/node-v2*/bin` 的 node，`lt doctor` 全量自检、`lt verify/test/build…` 先自检再透传 npm scripts。
 - `docs/快速开始.md` 第 1 节：PATH 从一次性 export 改为写进 `~/.zshrc` 的可粘贴行（终端关掉不再失效）。
 
+### 稳定性 · 词库防呆链收口（复盘方案 A4，2026-09-26）
+
+- 复核结论：管线侧闸门**已存在且完备**——`decideLexiconSource`（`src/core/lexiconstore.ts`）在词表正本与现场 CSV 漂移时拒绝开工，报错自带"为什么+后果+reimport 修复命令"，`tests/lexiconstore.test.ts` 在锁；原方案设想的 sidecar 被此更优设计（快照哈希比对）取代，不另造。
+- 真实缺口在 App 侧假预期：`removeZhAnnotation` 的 toast 称"词库**正本**已登记、下次生成不再注它"——实际写的是 CSV 源表，下次管线会先被漂移闸拦下。根修（`app/src/pipew.ts`）：toast 如实说明"源表已登记；下次跑管线会拦下要求重新导入，导入后才生效"；登记失败分支也如实说"仅本会话"；同步纠正代码注释里"管线下次生成直接生效"的错误声明。
+
+### 稳定性 · 发版后备份为固定步骤（复盘方案 A2，2026-09-26）
+
+- `docs/release-checklist.md` 第 5 节新增：发版后 `git bundle` + AF 工作区/工程文档/运行配置三 zip 上传网盘（核对清单与恢复方法在仓外 `LayerText_文档/LayerText_备份核对清单_2026-09-26.md`，含四件 sha256）。
+
 ## [1.3.0] - 2026-09-18
 
 > 自 1.2.1 起的 95 个批次：词画卷×传播咬合全落地（concordance 引擎/App 视图/MCP 工具）→ 第一梯队（App 回炉模式、MCP 5→10、源完整性探针、验收 v2 七维度引擎化）→ 两大发现清账与八章源碎尾清扫 → 第三梯队尺子收口（两层 golden 锁验收 v2、注密度进 App 门禁为警戒）→ 发版收口。测试 180→1108；架构地图同步至 app/src 36 模块。分支 6 节原样保留（见上方引块）。
