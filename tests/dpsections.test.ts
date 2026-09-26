@@ -27,8 +27,7 @@ test('三问分组渲染：组头按 ①②③ 顺序、卡片落进自己的组
   assert.ok(html.indexOf('CROSS') < html.indexOf('CONC') && html.indexOf('CONC') < html.indexOf('LEDGER'), '质量组内顺序=层间体检→词画卷→台账');
   assert.ok(html.indexOf('WEEKLY') > q2 && html.indexOf('WEEKLY') < q3, '复现卡在②组');
   assert.ok(html.indexOf('TREE') > q3, '层级卡在③组');
-  /* data-dp-sec 钩子由本测试以选择器形态消费（clickwiring 纪律：渲染出来的钩子必须有人读） */
-  for (const id of ['quality', 'students', 'todo']) assert.ok(new RegExp(`[data-dp-sec="${id}"]`).test(html), `组 ${id} 必须带 data-dp-sec 钩子`);
+  /* 组锚=组头文本（纯展示分组不带 data-* 钩子——不需要行为就不给 clickwiring 添钩子） */
 });
 
 test('纪律运行时面：未登记的卡片 key 当场抛错', () => {

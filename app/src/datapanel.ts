@@ -14,6 +14,7 @@ import { baseName, properSuspectsReportMd, vocabGapReportMd } from './pure.js';
 import { loadBookChaptersFromPath } from './bookscan.js';
 import { buildConcordance, properSuspects } from '../../src/core/concordance.js';
 import { crossTierCardHtml } from './crosstier.js';
+import { debtCardHtml, readDebtState } from './debtcard.js';
 import { weeklyCardHtml } from './weekly.js';
 import { wireBookCards } from './bookcards.js';
 import { setStatus } from './state.js';
@@ -782,6 +783,7 @@ export const DP_CARD_GROUPS: Record<string, DpSectionId> = {
   'conc-reports-card': 'quality', // 词画卷两报告（专名候选/词表缺口）
   'ledger-card': 'quality', // 校准台账
   'dp-weekly-wrap': 'students', // 本周复现清单
+  'debt-card': 'todo', // 债务总览（A6：回炉挂起/工序化隔离/源残缺——③组第一张）
   'dp-tree': 'todo', // 读者层级编辑
 };
 
@@ -795,9 +797,7 @@ export function dpSectionsHtml(cards: ReadonlyArray<{ key: string; html: string 
     if (!g) throw new Error(`数据面板卡片未归组：${c.key}——B3 纪律：新卡片必须登记进 DP_CARD_GROUPS 三问之一`);
     (byGroup[g] ??= []).push(c.html);
   }
-  return DP_SECTIONS.map(
-    (s) => `<section class="dp-sec" data-dp-sec="${s.id}"><div class="dp-sec-h"><b>${s.q}</b><span class="dp-sec-sub">${s.hint}</span></div>${(byGroup[s.id] ?? []).join('\n')}</section>`,
-  ).join('\n');
+  return DP_SECTIONS.map((s) => `<section class="dp-sec"><div class="dp-sec-h"><b>${s.q}</b><span class="dp-sec-sub">${s.hint}</span></div>${(byGroup[s.id] ?? []).join('\n')}</section>`).join('\n');
 }
 
 export async function renderDataPane(bookDir: string): Promise<void> {
@@ -996,6 +996,7 @@ export async function renderDataPane(bookDir: string): Promise<void> {
         { key: 'conc-reports-card', html: concReportsCardHtml(true) },
         { key: 'ledger-card', html: ledgerCardHtml(ledgerSum, true) },
         { key: 'dp-weekly-wrap', html: `<div id="dp-weekly-wrap">${weeklyCardHtml(null, false)}</div>` },
+        { key: 'debt-card', html: `<div id="dp-debt-wrap">${debtCardHtml(null, false)}</div>` },
         { key: 'dp-tree', html: treeCard },
       ])}
       <div class="dp-tabs">${tabs}</div>
@@ -1008,6 +1009,28 @@ export async function renderDataPane(bookDir: string): Promise<void> {
   el.querySelector('#dp-conc-proper')?.addEventListener('click', () => void runConcReport(bookDir, 'proper'));
   el.querySelector('#dp-conc-gap')?.addEventListener('click', () => void runConcReport(bookDir, 'gap'));
   wireBookCards(el, bookDir);
+  /* 债务总览卡（A6）：异步读台账填充；点行 reveal 原始文件 */
+  {
+    const wrap = el.querySelector('#dp-debt-wrap');
+    if (wrap) {
+      wrap.innerHTML = debtCardHtml(null, true);
+      void readDebtState(project as { 原文目录?: string; 产物目录?: string }, io)
+        .then((st) => {
+          wrap.innerHTML = debtCardHtml(st, false);
+          wrap.querySelectorAll<HTMLElement>('[data-dp-debt="recheck"]').forEach((r) => r.addEventListener('click', () => void io.reveal((st.recheck?.path ?? '').toString())));
+          wrap.querySelectorAll<HTMLElement>('[data-dp-debt="quarantine"]').forEach((r) => r.addEventListener('click', () => void io.reveal(st.quarantine?.firstPath ?? '')));
+          wrap.querySelectorAll<HTMLElement>('[data-dp-src]').forEach((r) =>
+            r.addEventListener('click', () => {
+              const hit = st.sourceBad.find((c) => c.name === r.dataset.dpSrc);
+              if (hit?.path) void io.reveal(hit.path);
+            }),
+          );
+        })
+        .catch(() => {
+          wrap.innerHTML = debtCardHtml(null, false);
+        });
+    }
+  }
   el.querySelector('#dp-ledger-reveal')?.addEventListener('click', () => {
     if (ledgerSum) void io.reveal(ledgerSum.path);
   });
