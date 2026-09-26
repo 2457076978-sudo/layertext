@@ -6,7 +6,7 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import { open as openFileDialog } from '@tauri-apps/plugin-dialog';
-import * as XLSX from 'xlsx';
+import { xlsxFirstColumnToCsv } from './xlsxread.js';
 import { S } from './state.js';
 import { uibus } from './uibus.js';
 import { setStatus } from './uikit.js';
@@ -64,12 +64,7 @@ async function readVocabAsCsv(path: string): Promise<string> {
   if (lower.endsWith('.xlsx') || lower.endsWith('.xls')) {
     const b64 = await invoke<string>('read_file_base64', { path });
     const bin = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
-    const wb = XLSX.read(bin, { type: 'array' });
-    const sheet = wb.Sheets[wb.SheetNames[0]];
-    const words = (XLSX.utils.sheet_to_json<string[]>(sheet, { header: 1, raw: false }) as unknown as string[][])
-      .map((row) => (row?.[0] ?? '').toString().trim())
-      .filter((w) => w && !w.startsWith('#'));
-    return words.map((w) => `${w},单词,,,,,,`).join('\n');
+    return xlsxFirstColumnToCsv(bin); /* 唯一实现（A5 迁移锁盖着） */
   }
   const text = await invoke<string>('read_text_file', { path });
   const rows = parseCsv(text.replace(/^\uFEFF/, ''));

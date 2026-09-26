@@ -9,6 +9,13 @@
 
 
 
+### 稳定性 · A5：xlsx 依赖移除（2026-09-26，两步走）
+
+- **前置更正**：盘点发现 App 的 xlsx 只用于**词表导入读取**（lexicon.readVocabAsCsv 读首列），没有导出面——"导出回归锁"如实改型为**导入解析输出的字节锁**。
+- 第一步（锁）：抽出 `app/src/xlsxread.ts` 唯一实现（原逻辑逐字搬移）+ `tools/make_xlsx_fixtures.mjs` 生成三份典型教师词表夹具 + `tests/xlsxread.test.ts` 用当前 xlsx@0.18.5 **冻结输出**（空行/#注释滤除、数字 raw:false 文本化、多 sheet 只读首个、连字符/空格/重音符/中文原样）。
+- 第二步（换）：迁移评估留档——exceljs ~1MB 重依赖不划算、SheetJS CDN 违背本地优先取向，**采纳自建**：fflate（已在依赖）解压 + 窄口径 XML 解析（sharedStrings/inlineStr/str/数字/布尔四种单元格、rels 映射首 sheet、A 列定位含跳列）——**锁一个字不改全绿**（新读取器与旧实现输出逐字节一致）。
+- 依赖清理：app 与根 package.json 均移除 xlsx；tools/app-pkg-stubs/ 删 xlsx 桩、d.ts 删 xlsx 声明（docx 留）；**根与 app 双端 npm audit = 0**。地图 44 模块。
+
 ### 稳定性 · A6：债务总览卡——内容债不隐形（2026-09-26）
 
 - 新增 `app/src/debtcard.ts`（数据面板③「我还要做什么」组第一张卡）：回炉挂起段（解析 `回炉重测_*.md` 表头=--recheck 的结论）/ 工序化隔离段（各章 `_待复核/工序化待人工_*.md` 表头求和，分层计数）/ 源残缺章（直调 `core.probeChapterSource` 唯一实现）——每行=数量+最后处理日期+点行 reveal 原始文件。
