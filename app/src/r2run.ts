@@ -14,7 +14,8 @@ import { invoke } from '@tauri-apps/api/core';
 import { setStatus } from './state.js';
 import type { FileSession } from './types.js';
 import { buildAdaptReportMd, cleanR2Seg, planRound2, round2SegPrompt, round2SystemPrompt, type Round2Ladder } from '../../src/core/round2.js';
-import { burdenFindings, fidelityFindings, introducedHardWords, knownWordHit, type CheckFinding } from '../../src/core/adaptcheck.js';
+import { burdenFindings, fidelityFindings, introducedHardWords, type CheckFinding } from '../../src/core/adaptcheck.js';
+import { hit } from '../../src/core/textpipe.js'; /* 词形判定用引擎唯一实现（与管线同尺——两套 hit 语义不同的旧坑，见 adaptcheck 注释 */
 
 /* ────────── 目标定位（从 review.ts 移来：r2 执行与反馈框共用一份） ────────── */
 
@@ -139,8 +140,10 @@ async function projectConfigOf(dir: string): Promise<{ 原文目录?: string; �
   }
 }
 
-/** 已学词集：项目词库 CSV 的单词行首列（App 侧口径；与 CLI 正本同源自同一 CSV） */
-function knownSetFromCsv(csv: string): Set<string> {
+/* 已学词集：项目词库 CSV 的单词/课标行首列 ∪ 内置课标1600 ∪ 内置补录——与 CLI legacy
+ * 装载同口径（"已知 = 课标2022三级1600 ∪ 数词/星期/月份补丁 ∪ 学生词库"）。
+ * 内置表 ?raw 动态导入：静态导入会把 ?raw 拖进 review 的 node 可测链（钩子注册前解析会炸）。 */
+async function knownSetForProject(csv: string): Promise<Set<string>> {
   const s = new Set<string>();
   for (const line of csv.split('\n').slice(1)) {
     const cells = line.split(',');
@@ -148,6 +151,12 @@ function knownSetFromCsv(csv: string): Set<string> {
     const kind = (cells[1] ?? '').trim();
     if (w && (kind === '单词' || kind === '课标')) s.add(w);
   }
+  const bundled = await Promise.all([import('../../assets/wordlists/curriculum_2022_level3_1600.txt?raw'), import('../../assets/wordlists/curriculum_2022_amendment.txt?raw')]);
+  for (const mod of bundled)
+    for (const w of String((mod as { default: string }).default).split('\n')) {
+      const v = w.trim().toLowerCase();
+      if (v && !v.startsWith('#')) s.add(v);
+    }
   return s;
 }
 
@@ -254,8 +263,8 @@ export async function runRound2ForSession(s: FileSession): Promise<R2RunResult> 
     return { ok: false };
   }
   const csv = cfg?.词库 ? await readOptional(cfg.词库) : null;
-  const known = knownSetFromCsv(csv ?? '');
-  const isKnownWord = (w: string) => knownWordHit(w, known);
+  const known = await knownSetForProject(csv ?? '');
+  const isKnownWord = (w: string) => hit(w.toLowerCase(), known);
 
   /* 检查（与 CLI localCheck 同件套） */
   const segs = srcMd.match(SEG_RE) ?? [];
@@ -348,8 +357,9 @@ export async function runRound2ForSession(s: FileSession): Promise<R2RunResult> 
     return { ok: true, finalPath, reportPath, changed: 0 };
   }
 
-  /* 逐段复写（ai.ts 动态 import：?raw prompts 不进 node 编译面——main.ts 同款纪律） */
-  const { chatStream } = await import('./ai.js');
+  /* 逐段复写（ai.ts 动态 import：?raw prompts 不进 node 编译面——main.ts 同款纪律）。
+   * callChat=非流式补全（chatUntilJson 同底座），maxTokens 3000 对齐 CLI callChat 缺省。 */
+  const { callChat } = await import('./ai.js');
   const system = round2SystemPrompt(target.tierKey, plan.fb.magnitude === '大幅' ? 1 : target.tierKey === 'A' ? 2 : 1);
   const out = [...r1Segs];
   const changedNotes: string[] = [];
@@ -373,13 +383,13 @@ export async function runRound2ForSession(s: FileSession): Promise<R2RunResult> 
       protectedDimensions: task?.protectedDimensions ?? null,
     });
     /* 第二轮不自动重试：采纳与否交给最终检查与教师（与 CLI 同纪律） */
-    const r = await chatStream(
+    const r = await callChat(
       [
         { role: 'system', content: system },
         { role: 'user', content: user },
       ],
-      [],
-      () => {},
+      3000,
+      undefined,
       '第二轮修订',
     );
     const revised = cleanR2Seg(r.content, marker);

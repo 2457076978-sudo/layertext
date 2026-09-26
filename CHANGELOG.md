@@ -27,6 +27,13 @@
 
 - `docs/release-checklist.md` 第 5 节新增：发版后 `git bundle` + AF 工作区/工程文档/运行配置三 zip 上传网盘（核对清单与恢复方法在仓外 `LayerText_文档/LayerText_备份核对清单_2026-09-26.md`，含四件 sha256）。
 
+### 易用性 · B1 批次③：端到端对撞收官——App 与 CLI 产物逐字节一致（2026-09-26）
+
+- `tests/r2e2e.test.ts`：同一合成项目、同一组 mock AI 回复，CLI 路径（异步 spawn + 本地 mock OpenAI 服务；mjs 新增 `LAYERTEXT_AI_BASE_URL`/`LAYERTEXT_AI_KEY` env 逃生门，生产行为零变化）与 App 路径（mockIPC plugin-http 配方 + r2run 执行器）——**验收 D：终稿与调适报告逐字节一致**；**E：两端第三轮都拒绝**（CLI 打印"两轮已用完"，App gate.ok=false + 按钮条件 disabled）；**F：进度 JSON 新旧形状（R1 代 {done,texts,round} / R2 代 {round,done,feedback}）闸门互读**。
+- 对撞揪出并修复两处口径差：①App 已学词集漏并内置课标1600+补录（与 CLI legacy 装载同口径）；②词形判定必须用引擎 `textpipe.hit`（adaptcheck.knownWordHit 会反查不规则动词、语义更宽——"两套词形实现"旧坑的新实例，came/went 差两词即现形）。r2run 的 AI 调用从 chatStream 换 callChat（非流式，maxTokens 3000 对齐 CLI）。
+- **spawnSync 教训入册**：mock 服务器住在测试进程里时，同步 spawn 会冻结父进程事件循环、子进程 HTTP 永远无人应答——必须异步 spawn。
+- B1 至此三批全收口：规划文档 A-F 六条验收全过。
+
 ### 易用性 · B1 批次②：R2 进 App——执行器与「开始第二轮修订」按钮（2026-09-26）
 
 - 批次②a（共享端口）：core/round2.ts 增 R2_TIERS 三维矩阵 / round2SystemPrompt / protectionLine / round2SegPrompt / cleanR2Seg / buildAdaptReportMd（全部从 mjs 逐字搬移）；mjs 六处本地副本（systemPrompt/DIM_WORD/protectionLineOf/cleanSeg/内联 user 模板/writeReport 正文）删除改消费 core。等价证据：合成项目 `--check` 新旧对撞 **stdout + 调适报告文件双逐字节一致**；+5 例测试。

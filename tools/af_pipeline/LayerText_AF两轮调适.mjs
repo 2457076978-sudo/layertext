@@ -38,8 +38,8 @@ const wc = (t) => (t.match(/[A-Za-z][A-Za-z'-]*/g) ?? []).length;
 
 /* API：ChatECNU（OpenAI 兼容端点，key 在钥匙串 layertext.ecnukey；与 App 的 AI 设置互不相干） */
 const MODEL = 'ecnu-plus';
-const CFG = { baseUrl: 'https://chat.ecnu.edu.cn/open/api/v1' };
-const KEY = () => keychainGet('layertext.ecnukey'); /* 惰性：Linux/CI 无 security 命令，导入期不查钥匙串 */
+const CFG = { baseUrl: process.env.LAYERTEXT_AI_BASE_URL ?? 'https://chat.ecnu.edu.cn/open/api/v1' }; /* env 逃生门：端到端测试指本地 mock 服务，生产行为零变化 */
+const KEY = () => process.env.LAYERTEXT_AI_KEY ?? keychainGet('layertext.ecnukey'); /* 惰性：Linux/CI 无 security 命令，导入期不查钥匙串 */
 /* 调用台账（四方向 v2 批次 0a）：逐调用记 usage/finishReason，主力路径的 token 从此可解释 */
 const { openLedger } = await import('./LayerText_AF调用台账.mjs');
 const LEDGER = await openLedger(P, '两轮调适');
