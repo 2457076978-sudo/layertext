@@ -134,3 +134,77 @@ test('golden·合成夹具全量冻结（回归锚：字段集+关键值）', ()
   assert.equal(r.whole, false);
   assert.equal(r.empty, false);
 });
+
+/* ────────── ②a（2026-09-26）：提示词与报告共享端口 ────────── */
+
+import { buildAdaptReportMd, cleanR2Seg, protectionLine, round2SegPrompt, round2SystemPrompt } from '../src/core/round2.js';
+
+test('系统提示词：档位矩阵进文本；annoCap 覆盖默认', () => {
+  const a = round2SystemPrompt('A');
+  assert.match(a, /独立读通，保留少量原文表达/);
+  assert.match(a, /每段注释不超过 2 处/); // A 默认 2
+  assert.match(a, /参考原文的约 85%/);
+  assert.match(round2SystemPrompt('M'), /每段注释不超过 1 处/);
+  assert.match(round2SystemPrompt('B', 3), /每段注释不超过 3 处/); // 显式覆盖
+});
+
+test('保护维度行：有禁改项列明，无则只保数字否定因果（facts 恒不单列）', () => {
+  assert.equal(protectionLine(['facts', 'plot', 'characters']), '教师明确认可的方面（本轮禁改）：情节顺序与事件、人物关系与称谓。数字、否定与因果关系任何情况下不得改变。');
+  assert.equal(protectionLine([]), '数字、否定与因果关系任何情况下不得改变。');
+});
+
+test('cleanR2Seg：剥代码围栏；丢 [P 标记则补回', () => {
+  assert.equal(cleanR2Seg('```\n[P01] Hello.\n```', '[P01]'), '[P01] Hello.');
+  assert.equal(cleanR2Seg('Hello there.', '[P02]'), '[P02] Hello there.');
+  assert.equal(cleanR2Seg('[P03]  已带标记', '[P03]'), '[P03]  已带标记');
+});
+
+test('单段 prompt：四要素齐（反馈原话/词汇边界/段问题/否定提示），文本形状锁', () => {
+  const u = round2SegPrompt({
+    fbRaw: '词汇太难',
+    boundaryNote: '词汇边界从 九上U3 回退到 九上U1（按你的反馈折算 2 个单元——档位折算，不是精确换算）',
+    removedByLadder: ['j1', 'j2'],
+    reasons: ['一句 3 处注释'],
+    srcSeg: '[P02] The zzxqvw saw a mmbvplk and never forgot it.',
+    r1Seg: '[P02] The zzxqvw saw a mmbvplk today.',
+    marker: '[P02]',
+    protectedDimensions: ['plot'],
+  });
+  assert.match(u, /「词汇太难」/);
+  assert.match(u, /词汇边界调整：词汇边界从 九上U3 回退到 九上U1/);
+  assert.match(u, /以下 2 个词本轮按"未学"处理（教材回退）…：j1, j2|以下 2 个词本轮按"未学"处理（教材回退），换成熟词或用简单英文解释：j1, j2/);
+  assert.match(u, /本段的具体问题：一句 3 处注释/);
+  assert.match(u, /本段含否定表达，方向不能反/); // srcSeg 含 never
+  assert.match(u, /情节顺序与事件/); // protectionLine 生效
+  assert.ok(u.endsWith('输出：保持 [P02] 标记开头，直接输出复写文本。'));
+});
+
+test('调适报告 md：状态行/阈值/负担剖面/反馈折算段形状锁（与 mjs writeReport 同一文本）', () => {
+  const md = buildAdaptReportMd({
+    ch: '第一章',
+    tierKey: 'M',
+    profile: { words: 83, annos: 2, densityPer100: 2.4, worstWindow: { density: 4, head: 'The boy' }, longestSentence: { words: 28 } },
+    findings: [
+      { level: '结构', note: '段落缺失' },
+      { level: '信息变化', note: '数字变化' },
+      { level: '难度', segId: 'P02', note: '一句 3 处注释' },
+    ],
+    ratio: 0.81,
+    isFinal: true,
+    fb: { raw: '词汇太难', dims: ['词汇'], keep: ['情节'], magnitude: '明显' },
+    boundaryNote: '词汇边界从 九上U3 回退到 九上U1',
+    changed: 2,
+    changedNotes: ['[P01]（30→25 词）', '[P02]（20→18 词）'],
+  });
+  assert.match(md, /^# 调适报告 · 第一章 · M层（中层）$/m);
+  assert.match(md, /状态：\*\*待处理（结构问题阻止发布）\*\*/); // 有结构问题
+  assert.match(md, /注释密度 4、句长 17/); // M 档阈值（与 SENT_LEN_CHECK 同值）
+  assert.match(md, /## 负担剖面（终稿）/);
+  assert.match(md, /英文词数 83｜注释 2 处｜全文每百词 2.4 处/);
+  assert.match(md, /篇幅\/原文：81%/);
+  assert.match(md, /处理维度 词汇；保留维度 情节；幅度 明显/);
+  assert.match(md, /## 第二轮修改（2 段，单段最多两次尝试，无自动重试）/);
+  assert.match(md, /- ✗ 段落缺失/);
+  assert.match(md, /- ⚠ 数字变化/);
+  assert.ok(md.endsWith('- · 一句 3 处注释\n'));
+});

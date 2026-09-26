@@ -47,7 +47,7 @@ const LEDGER = await openLedger(P, '两轮调适');
 const { splitChapter } = await import(`${distOf(REPO)}/src/core/textpipe.js`);
 const { makeResolver } = await import(`${distOf(REPO)}/src/core/manifest.js`);
 const { burdenFindings, fidelityFindings, introducedHardWords, planRevisionTask, planRevisionStages, revisionTaskPreview } = await import(`${distOf(REPO)}/src/core/adaptcheck.js`);
-const { planRound2 } = await import(`${distOf(REPO)}/src/core/round2.js`);
+const { planRound2, round2SystemPrompt, protectionLine, round2SegPrompt, cleanR2Seg, buildAdaptReportMd } = await import(`${distOf(REPO)}/src/core/round2.js`);
 
 /* ────────────────────── 层级定义（三维目标矩阵，2026-09-12 定稿；同日考试证据校准） ──────────────────────
  * 篇幅比例不再主导生成：保留篇幅与阅读难度没有稳定的一一对应关系，弱生可能需要更多解释。
@@ -183,30 +183,11 @@ const manualLexiconWords = () => {
 };
 
 /* ────────────────────── Prompt ────────────────────── */
-function systemPrompt(t, { annoCap } = {}) {
-  return `你是面向中国初中生的英语阅读文本调适助手。目标是让指定学生读通英文、理解情节，同时保留必要的学习空间。
-本档定位——${t.goal}。
-【词汇】${t.words}。超出学生词库的实词：能换则换成熟词；必要概念用简单英文解释；最后才加注，且每段注释不超过 ${annoCap ?? (t.key === 'A' ? 2 : 1)} 处。不以密集注释补救整体过难的英文。
-【句式】${t.syntax}；说清必要的时间顺序和因果关系，避免一句承载过多信息。
-【指代】${t.reference}。
-【篇幅】参考原文的约 ${Math.round(t.ratioRef * 100)}%，这只是参考：不为缩短删掉人物提示、原因和解释；允许用更多短句讲清一件事；B 层允许比 M 层更长。
-【保真】保留人物关系、关键事件、数字、否定、因果与叙事顺序。可以补清原文已支持的关系，不得编造背景、动机或事件。专名不译不改，人物称谓前后一致。
-【教师审校知识库（历史成果，必须遵守）】教师确认学生不会的词若保留必须紧跟 word（中文）加注；教师多次换掉的词优先换简单说法。
-输出：保持 [P##] 标记开头，直接输出改写文本（纯英文，除注释外无中文），不解释。`;
-}
 
 async function callChat(messages, maxTokens = 3000) {
   const r = await LEDGER.call(messages, { baseUrl: CFG.baseUrl, key: KEY(), model: MODEL, maxTokens });
   return r.content.trim();
 }
-const cleanSeg = (text, marker) => {
-  let t = text
-    .trim()
-    .replace(/^```[a-z]*\s*/i, '')
-    .replace(/```\s*$/, '');
-  if (!t.includes('[P')) t = marker + ' ' + t;
-  return t.trim();
-};
 
 /* 产物与中间产物路径（一律经 Resolver） */
 const RR = (tag) => makeResolver('legacy', { out: OUT_BASE, work: WORK }, { date: DATE, tier: tag });
@@ -237,19 +218,6 @@ function readFeedback(t, ch, cliFeedback) {
   return { raw, marked };
 }
 /** 把"保护维度"翻译进第二轮 prompt 的硬约束（facts 恒在，不再单列） */
-const DIM_WORD = {
-  plot: '情节顺序与事件',
-  characters: '人物关系与称谓',
-  syntax: '句式结构',
-  vocabulary: '已定稿的词汇选择',
-  coherence: '已清楚的衔接与指代',
-  background: '背景交代',
-  support: '注释安排',
-};
-const protectionLineOf = (task) => {
-  const dims = task.protectedDimensions.filter((d) => d !== 'facts');
-  return dims.length ? `教师明确认可的方面（本轮禁改）：${dims.map((d) => DIM_WORD[d] ?? d).join('、')}。数字、否定与因果关系任何情况下不得改变。` : '数字、否定与因果关系任何情况下不得改变。';
-};
 
 const readSegs = (i) => {
   const ch = CN[i - 1];
@@ -285,7 +253,7 @@ async function round1(i, t) {
     return;
   }
   mkdirSync(dirname(pf), { recursive: true });
-  const system = systemPrompt(t);
+  const system = round2SystemPrompt(t.key);
   /* 2026-09-14 修复（**假交付**）：续跑必须能**还原已完成段的正文**。
    * 旧的进度文件只记 `done: number[]`，那些段的文本从没被存下来——于是
    * `out = [...segs]` 让它们保持**未简化的原文**，循环又因为 `done.includes(k)` 直接跳过，
@@ -305,7 +273,7 @@ async function round1(i, t) {
     const prevTail = k > 0 ? out[k - 1].slice(-500) : '（本章开头）';
     const user = `前文（已简化，供语气与指代衔接参考）：\n…${prevTail}\n\n请把以下段落改写为${t.label}（原文 ${srcW} 词）：\n${segs[k].trim()}\n输出：保持 [P##] 标记开头，直接输出改写文本。`;
     const marker = segs[k].match(/\[P\d+\]/)[0];
-    const revised = cleanSeg(
+    const revised = cleanR2Seg(
       await callChat([
         { role: 'system', content: system },
         { role: 'user', content: user },
@@ -420,7 +388,7 @@ async function round2(t, i, feedbackRaw, task = null) {
     return { ...c, changed: 0, fb, boundaryNote };
   }
 
-  const system = systemPrompt(t, { annoCap: fb.magnitude === '大幅' ? 1 : t.key === 'A' ? 2 : 1 });
+  const system = round2SystemPrompt(t.key, fb.magnitude === '大幅' ? 1 : t.key === 'A' ? 2 : 1);
   const out = [...r1Segs];
   const changedNotes = [];
   for (const k of targets) {
@@ -429,14 +397,17 @@ async function round2(t, i, feedbackRaw, task = null) {
       .filter((f) => f.segId === marker.replace(/[[\]]/g, '') || (f.level === '难度' && !f.segId))
       .map((f) => f.note)
       .slice(0, 3);
-    const user = `教师读了第一轮稿后反馈（原话）：「${fb.raw}」
-${boundaryNote ? `词汇边界调整：${boundaryNote}。` : ''}${removedByLadder.length ? `\n以下 ${removedByLadder.length} 个词本轮按"未学"处理（教材回退），换成熟词或用简单英文解释：${removedByLadder.slice(0, 40).join(', ')}${removedByLadder.length > 40 ? ' …' : ''}` : ''}
-本段的具体问题：${reasons.length ? reasons.join('；') : '（按反馈维度整体处理）'}
-请复写下面这一段，要求：优先替换非必要难词；拆清动作和关系；${task ? protectionLineOf(task) : '保留人物、事件、数字、否定与因果'}（${segs[k].includes(' not ') || /never|no /i.test(segs[k]) ? '本段含否定表达，方向不能反' : ''}）；不得只删中文注释而英文不变容易；从教师点名的词举一反三，同类难度的表达一并处理。
-第一轮稿（待复写）：
-${r1Segs[k].trim()}
-输出：保持 ${marker} 标记开头，直接输出复写文本。`;
-    const revised = cleanSeg(
+    const user = round2SegPrompt({
+      fbRaw: fb.raw,
+      boundaryNote,
+      removedByLadder,
+      reasons,
+      srcSeg: segs[k],
+      r1Seg: r1Segs[k],
+      marker,
+      protectedDimensions: task ? task.protectedDimensions : null,
+    });
+    const revised = cleanR2Seg(
       await callChat([
         { role: 'system', content: system },
         { role: 'user', content: user },
@@ -467,39 +438,26 @@ ${r1Segs[k].trim()}
 
 /* ────────────────────── 调适报告 ────────────────────── */
 function writeReport(t, r) {
+  /* 报告正文唯一实现=core.buildAdaptReportMd（B1 批次②a，2026-09-26）；这里只管写盘与摘要 */
   const structural = r.findings.filter((f) => f.level === '结构');
   const info = r.findings.filter((f) => f.level === '信息变化');
   const hard = r.findings.filter((f) => f.level === '难度');
   const status = structural.length ? '待处理（结构问题阻止发布）' : '可发布（供人工校对）';
-  const L = [
-    `# 调适报告 · ${r.ch} · ${t.label}`,
-    '',
-    `> 状态：**${status}**。语言检查通过≠学生一定读得懂、情节完全正确；数字与专名检查不能代替情节保真。`,
-    `> 阈值为工程试运行阈值（注释密度 ${{ A: 6, M: 4, B: 3 }[t.key]}、句长 ${{ A: 20, M: 17, B: 14 }[t.key]}），非教学标准。`,
-    '',
-    `## 负担剖面（${r.finalMd ? '终稿' : '初稿'}）`,
-    `- 英文词数 ${r.profile.words}｜注释 ${r.profile.annos} 处｜全文每百词 ${r.profile.densityPer100} 处`,
-    `- 最拥挤窗口：每百词 ${r.profile.worstWindow?.density ?? '—'} 处（起于「${r.profile.worstWindow?.head ?? '—'}…」）`,
-    `- 最长句 ${r.profile.longestSentence?.words ?? 0} 词`,
-    `- 篇幅/原文：${(r.ratio * 100).toFixed(0)}%（参考项）`,
-  ];
-  if (r.fb) {
-    L.push(
-      '',
-      '## 教师反馈与折算',
-      `- 反馈原话：「${r.fb.raw}」`,
-      `- 解析：处理维度 ${r.fb.dims.join('/') || '（未识别，按原话整体参考）'}；保留维度 ${r.fb.keep.join('/') || '—'}；幅度 ${r.fb.magnitude ?? '—'}`,
-    );
-    if (r.boundaryNote) L.push(`- ${r.boundaryNote}`);
-    if (r.changedNotes?.length) L.push('', `## 第二轮修改（${r.changed} 段，单段最多两次尝试，无自动重试）`, ...r.changedNotes.slice(0, 20).map((n) => `- ${n}`));
-  }
-  L.push('', '## 分级清单');
-  if (structural.length) L.push('### 结构（阻止发布）', ...structural.map((f) => `- ✗ ${f.note}`));
-  if (info.length) L.push('### 信息变化（请人工确认，不当场判错）', ...info.map((f) => `- ⚠ ${f.note}`));
-  L.push('### 难度（已交第二轮；仍存在允许教师修改或说明保留）', ...(hard.length ? hard.map((f) => `- · ${f.note}`) : ['- 无']));
+  const md = buildAdaptReportMd({
+    ch: r.ch,
+    tierKey: t.key,
+    profile: r.profile,
+    findings: r.findings,
+    ratio: r.ratio,
+    isFinal: !!r.finalMd,
+    fb: r.fb ? { raw: r.fb.raw, dims: r.fb.dims, keep: r.fb.keep, magnitude: r.fb.magnitude } : null,
+    boundaryNote: r.boundaryNote,
+    changed: r.changed,
+    changedNotes: r.changedNotes,
+  });
   const p = reportPathOf(t, r.ch);
   mkdirSync(dirname(p), { recursive: true });
-  writeFileSync(p, L.join('\n') + '\n', 'utf-8');
+  writeFileSync(p, md, 'utf-8');
   console.log(`  ✓ 报告：${p}`);
   return { status, structural: structural.length, info: info.length, hard: hard.length };
 }
