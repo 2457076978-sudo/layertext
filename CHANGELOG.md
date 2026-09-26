@@ -9,6 +9,15 @@
 
 
 
+## [未发布]
+
+### 稳定性 · 环境自举防呆（复盘方案 A3，2026-09-26）
+
+- 动机：09-25 磁盘清理误删 node_modules 后 verify 断在 `sh: tsc: command not found`（机器话，不告诉人怎么修）——"可再生物被删"本身没错，错在断了没人知道、报错没人看得懂。
+- `src/core/envdoctor.ts`（唯一实现）+ `tools/env_doctor.mjs`（薄壳，dist 缺失时走与 core 同步的内置兜底表）：环境自检把"缺什么 / 挡住什么 / 修复命令（可粘贴）"变成第一行输出；`tests/envdoctor.test.ts` 锁报告契约（缺失项"挡住/修复"成对）与模式口径（verify 只拦依赖件，dist 未建属正常——链内 npm test 会先构建）。
+- verify 链第一步改为 env_doctor（`package.json`）；新增 `bin/lt` 启动器：自寻 `~/.local/node-v2*/bin` 的 node，`lt doctor` 全量自检、`lt verify/test/build…` 先自检再透传 npm scripts。
+- `docs/快速开始.md` 第 1 节：PATH 从一次性 export 改为写进 `~/.zshrc` 的可粘贴行（终端关掉不再失效）。
+
 ## [1.3.0] - 2026-09-18
 
 > 自 1.2.1 起的 95 个批次：词画卷×传播咬合全落地（concordance 引擎/App 视图/MCP 工具）→ 第一梯队（App 回炉模式、MCP 5→10、源完整性探针、验收 v2 七维度引擎化）→ 两大发现清账与八章源碎尾清扫 → 第三梯队尺子收口（两层 golden 锁验收 v2、注密度进 App 门禁为警戒）→ 发版收口。测试 180→1108；架构地图同步至 app/src 36 模块。分支 6 节原样保留（见上方引块）。

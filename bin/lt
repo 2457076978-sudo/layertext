@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# LayerText 自举启动器（复盘方案 A3，2026-09-26）
+# 自动找 node；跑构建/测试类命令前先过环境自检——缺件时第一行就是人话+可粘贴修复命令。
+# 用法：bin/lt doctor            全量自检（含 dist 产物）
+#       bin/lt verify|test|build|eval|typecheck …   先自检再透传给对应 npm script
+#       bin/lt qc -- <文件>     等价 npm run qc -- <文件>
+set -euo pipefail
+
+# 1) 自寻 node：PATH 优先，其次 ~/.local/node-v2*/bin（本机 node 不在默认 PATH 的既成事实）
+if ! command -v node >/dev/null 2>&1; then
+  for d in "$HOME"/.local/node-v2*/bin; do
+    if [ -x "$d/node" ]; then export PATH="$d:$PATH"; break; fi
+  done
+fi
+if ! command -v node >/dev/null 2>&1; then
+  cat <<'EOF'
+✗ 环境缺失：找不到 node。
+  修复（写进 shell 配置永久生效）：
+    echo 'export PATH="$HOME/.local/node-v22.23.2-darwin-arm64/bin:$PATH"' >> ~/.zshrc && source ~/.zshrc
+EOF
+  exit 1
+fi
+
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO"
+
+CMD="${1:-doctor}"
+if [ "$#" -gt 0 ]; then shift; fi
+
+# 2) 会跑编译/测试的命令先过依赖自检（秒级，纯文件存在性检查）
+case "$CMD" in
+  doctor)
+    exec node tools/env_doctor.mjs --full
+    ;;
+  verify | test | build | eval | typecheck | verify:all | verify:rust | perf:bench)
+    node tools/env_doctor.mjs --for-verify
+    ;;
+esac
+
+# 3) 透传给 npm scripts
+if [ "$#" -gt 0 ]; then
+  exec npm run "$CMD" -- "$@"
+else
+  exec npm run "$CMD"
+fi
