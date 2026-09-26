@@ -47,7 +47,7 @@ const LEDGER = await openLedger(P, '两轮调适');
 const { splitChapter } = await import(`${distOf(REPO)}/src/core/textpipe.js`);
 const { makeResolver } = await import(`${distOf(REPO)}/src/core/manifest.js`);
 const { burdenFindings, fidelityFindings, introducedHardWords, planRevisionTask, planRevisionStages, revisionTaskPreview } = await import(`${distOf(REPO)}/src/core/adaptcheck.js`);
-const { planRound2, round2SystemPrompt, protectionLine, round2SegPrompt, cleanR2Seg, buildAdaptReportMd } = await import(`${distOf(REPO)}/src/core/round2.js`);
+const { planRound2, round2SystemPrompt, round2SegPrompt, cleanR2Seg, buildAdaptReportMd } = await import(`${distOf(REPO)}/src/core/round2.js`);
 
 /* ────────────────────── 层级定义（三维目标矩阵，2026-09-12 定稿；同日考试证据校准） ──────────────────────
  * 篇幅比例不再主导生成：保留篇幅与阅读难度没有稳定的一一对应关系，弱生可能需要更多解释。

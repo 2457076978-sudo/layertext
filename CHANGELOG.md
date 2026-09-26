@@ -27,6 +27,12 @@
 
 - `docs/release-checklist.md` 第 5 节新增：发版后 `git bundle` + AF 工作区/工程文档/运行配置三 zip 上传网盘（核对清单与恢复方法在仓外 `LayerText_文档/LayerText_备份核对清单_2026-09-26.md`，含四件 sha256）。
 
+### 易用性 · B1 批次②：R2 进 App——执行器与「开始第二轮修订」按钮（2026-09-26）
+
+- 批次②a（共享端口）：core/round2.ts 增 R2_TIERS 三维矩阵 / round2SystemPrompt / protectionLine / round2SegPrompt / cleanR2Seg / buildAdaptReportMd（全部从 mjs 逐字搬移）；mjs 六处本地副本（systemPrompt/DIM_WORD/protectionLineOf/cleanSeg/内联 user 模板/writeReport 正文）删除改消费 core。等价证据：合成项目 `--check` 新旧对撞 **stdout + 调适报告文件双逐字节一致**；+5 例测试。
+- 批次②b（App 侧）：新增 `app/src/r2run.ts`——adaptTargetOf 移入并导出；r2ButtonState 三条件状态机（任务单已确认/打开的是 R1/反馈在盘+两轮闸门放行，禁用时 title 写明缺什么）；runRound2ForSession 执行器（读盘组装 planRound2 输入→逐段 chatStream 复写→终稿/进度/报告落盘，含闸门拒绝/空选定两分支与 CLI 同口径出报告）。review.ts 任务单预览 confirmed 后渲染「▶ 开始第二轮修订」，反馈之后的第二轮不再需要回终端。**既有口径如实保留**：报告篇幅行沿用 R1 比值（CLI 旧账口径，批次③ byte-equal 需要；修正另立账）。ai.ts/datapanel 动态 import 保 node 可测（main.ts 同款纪律）。验收 C=tests/r2run_dom.test.ts 7 例（未确认无按钮/三条件各缺其一时禁用+title 补救路径/闸门理由直通/保守首渲染/纯函数五态）。
+- 架构地图 4.2 节 41→42 模块。
+
 ### 易用性 · B1 批次①：planRound2 决策进 core（2026-09-26）
 
 - 新增 `src/core/round2.ts`（唯一实现）：两轮闸门（round:2+终稿在→拒绝，理由人话）/ 档位折算（幅度→单元回退→退学词，手工词库不动）/ 复写范围选定（难度问题段 ∪ 词汇维度段 ∪ 点名词段）三件纯决策，从 `LayerText_AF两轮调适.mjs` 逐字抽取。CLI round2 与 `--plan` 预计范围改消费同一实现——**消灭了 --plan 侧的第二份选定拷贝**。

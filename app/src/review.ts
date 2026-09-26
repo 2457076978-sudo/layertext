@@ -13,6 +13,7 @@ import { S, setStatus } from './state.js';
 import { WORD_TYPES, SENT_TYPES, GATES, typeLabel, type FileSession, type Mark } from './types.js';
 import { ANNO_DENSITY_WARN, annotationDensityOfChapter } from '../../src/core/acceptance.js';
 import { planRevisionTask, revisionTaskPreview } from '../../src/core/adaptcheck.js';
+import { adaptTargetOf, gatherR2ButtonConds, r2ButtonState, runRound2ForSession, type R2ButtonConds } from './r2run.js';
 
 const SAVE_DEBOUNCE_MS = 600;
 
@@ -364,25 +365,6 @@ export function renderSidebar(
 
 /* ---------- 给第二轮调适的反馈（两轮制教师的入口：读完说一句，第二轮照它复写） ---------- */
 
-const ADAPT_NAME_RE = /原文_(A层85|M层75|B层60)_/;
-
-function adaptTargetOf(sourcePath: string | null): { tierKey: string; tag: string; chapDir: string; outRoot: string; feedbackPath: string; taskPath: string } | null {
-  const m = sourcePath?.match(ADAPT_NAME_RE);
-  if (!m || !sourcePath) return null;
-  const dir = sourcePath.slice(0, sourcePath.lastIndexOf('/'));
-  const chapDir = dir.split('/').pop() ?? '';
-  const outRoot = dir.slice(0, dir.lastIndexOf('/'));
-  if (!chapDir || !outRoot) return null;
-  return {
-    tierKey: m[1]![0],
-    tag: m[1]!,
-    chapDir,
-    outRoot,
-    feedbackPath: `${outRoot}/_运行/调适反馈_${m[1]}_${chapDir}.json`,
-    taskPath: `${outRoot}/_运行/调适任务单_${m[1]}_${chapDir}.json`,
-  };
-}
-
 /** 反馈卡展合状态：**模块级保留**——renderSidebar 每次标记变动都会整块重渲染，
  *  不记住的话教师刚点开就被合上。默认收起：这是阶段动作，不是常驻信息。 */
 let adaptOpen = false;
@@ -408,25 +390,53 @@ interface AdaptTaskFile {
   confirmedAt?: string;
 }
 
-/** 任务单预览：教师先看「系统准备怎么改」，点开始修订才落 confirmed——先确认后执行 */
-function renderAdaptTaskPreview(target: { taskPath: string }, taskFile: AdaptTaskFile): void {
+/** 任务单预览：教师先看「系统准备怎么改」，点开始修订才落 confirmed——先确认后执行。
+ * confirmed 后渲染「▶ 开始第二轮修订」（B1 批次②b，2026-09-26）：三条件状态机
+ * （任务单已确认/打开的是 R1/反馈在盘+两轮闸门放行）——禁用时 title 写明缺什么。 */
+export function renderAdaptTaskPreview(target: { taskPath: string; outRoot: string; tag: string }, taskFile: AdaptTaskFile, session?: FileSession, r2State?: R2ButtonConds): void {
   const box = document.getElementById('adapt-task-preview');
   if (!box) return;
   const lines = revisionTaskPreview(taskFile.task)
     .map((l) => `<div>${esc(l)}</div>`)
     .join('');
-  const state = taskFile.confirmed
-    ? '<div style="color:var(--ok,#2e7d32);margin-top:4px">✓ 已确认——可在终端跑第二轮（--round2）</div>'
-    : `<button id="adapt-task-go" style="margin:6px 4px 0 0">开始修订</button><button id="adapt-task-edit" style="margin-top:6px">修改反馈</button>`;
+  let state: string;
+  if (!taskFile.confirmed) {
+    state = `<button id="adapt-task-go" style="margin:6px 4px 0 0">开始修订</button><button id="adapt-task-edit" style="margin-top:6px">修改反馈</button>`;
+  } else {
+    /* 已确认：直接给「开始第二轮」按钮——反馈之后的第二轮不用再回终端（B1 的缺口就在这） */
+    const bs = r2ButtonState(r2State ?? { confirmed: true, isR1: false, feedbackText: null, gateOk: true, gateReason: '' });
+    state =
+      '<div style="color:var(--ok,#2e7d32);margin-top:4px">✓ 任务单已确认</div>' +
+      `<button id="adapt-r2-run" style="margin:6px 4px 0 0" ${bs.disabled ? 'disabled' : ''} title="${esc(bs.title)}">${bs.label}</button>`;
+  }
   box.innerHTML = `<div style="font-weight:600;margin-bottom:2px">修订任务单（先确认，后执行）</div>${lines}${state}`;
   box.style.display = 'block';
+  const r2btn = document.getElementById('adapt-r2-run');
+  if (r2btn) {
+    if (r2State === undefined) {
+      /* 首次渲染先按最保守态显示，读盘拿到三条件后再重渲染（按钮从禁用变可用的过程可见） */
+      void gatherR2ButtonConds(session?.sourcePath ?? null, true).then((st) => renderAdaptTaskPreview(target, taskFile, session, st));
+    }
+    r2btn.addEventListener('click', () => {
+      if (r2btn.hasAttribute('disabled') || !session) return;
+      r2btn.setAttribute('disabled', '');
+      r2btn.textContent = '第二轮进行中…';
+      void runRound2ForSession(session)
+        .catch((e: unknown) => setStatus(`第二轮执行失败：${String(e).slice(0, 120)}`, 'err'))
+        .finally(() => {
+          r2btn.removeAttribute('disabled');
+          r2btn.textContent = '▶ 开始第二轮修订';
+          void gatherR2ButtonConds(session.sourcePath, true).then((st) => renderAdaptTaskPreview(target, taskFile, session, st));
+        });
+    });
+  }
   const go = document.getElementById('adapt-task-go');
   if (go) {
     go.addEventListener('click', () => {
       taskFile.confirmed = true;
       taskFile.confirmedAt = new Date().toISOString();
       void invoke('write_text_file', { path: target.taskPath, content: JSON.stringify(taskFile, null, 2) })
-        .then(() => renderAdaptTaskPreview(target, taskFile))
+        .then(() => renderAdaptTaskPreview(target, taskFile, session))
         .catch((e: unknown) => {
           go.textContent = '确认失败：' + String(e).slice(0, 50);
         });
@@ -466,7 +476,7 @@ function bindAdaptFeedback(session: FileSession): void {
   const target = adaptTargetOf(session.sourcePath);
   if (target) {
     void invoke<string>('read_text_file', { path: target.taskPath })
-      .then((json) => renderAdaptTaskPreview(target, JSON.parse(json) as AdaptTaskFile))
+      .then((json) => renderAdaptTaskPreview(target, JSON.parse(json) as AdaptTaskFile, session))
       .catch(() => {
         /* 有意兜底：任务单文件还不存在=教师没写过反馈的正常初始态，预览区不显示 */
       });
