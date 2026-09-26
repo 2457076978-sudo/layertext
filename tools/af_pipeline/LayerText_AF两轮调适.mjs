@@ -46,9 +46,8 @@ const LEDGER = await openLedger(P, '两轮调适');
 
 const { splitChapter } = await import(`${distOf(REPO)}/src/core/textpipe.js`);
 const { makeResolver } = await import(`${distOf(REPO)}/src/core/manifest.js`);
-const { burdenFindings, fidelityFindings, introducedHardWords, parseTeacherFeedback, MAGNITUDE_UNITS, planRevisionTask, planRevisionStages, revisionTaskPreview } = await import(
-  `${distOf(REPO)}/src/core/adaptcheck.js`
-);
+const { burdenFindings, fidelityFindings, introducedHardWords, planRevisionTask, planRevisionStages, revisionTaskPreview } = await import(`${distOf(REPO)}/src/core/adaptcheck.js`);
+const { planRound2 } = await import(`${distOf(REPO)}/src/core/round2.js`);
 
 /* ────────────────────── 层级定义（三维目标矩阵，2026-09-12 定稿；同日考试证据校准） ──────────────────────
  * 篇幅比例不再主导生成：保留篇幅与阅读难度没有稳定的一一对应关系，弱生可能需要更多解释。
@@ -353,18 +352,27 @@ function localCheck(t, i) {
 }
 
 /* ────────────────────── 第二轮：按教师反馈复写 ────────────────────── */
+/** 档位折算的梯子装填（core.Round2Ladder 的 IO 侧）：进度或单元库缺一即 null=不可折算 */
+function ladderOrNull() {
+  const prog = progressOf();
+  if (!prog || !UNIT_LIB) return null;
+  return {
+    currentIndex: ladderIndex(prog),
+    labelAt: (idx) => (idx >= 0 ? `${UNIT_LIB.ladder[idx].book}${UNIT_LIB.ladder[idx].unit}` : '课标基础'),
+    wordsAt: (idx) => (idx >= 0 ? UNIT_LIB.ladder[idx].words : []),
+    learnedAt: (idx) => textbookLearned(idx),
+    manualWords: manualLexiconWords(),
+  };
+}
+
 async function round2(t, i, feedbackRaw, task = null) {
   LEDGER.scene = { tier: t.key, chapter: CN[i - 1], tag: 'R2' };
-  const fb = parseTeacherFeedback(feedbackRaw);
-  /* 教师在正文里点的「要简化」标记（simpl）= 词级"太难"反馈，与文字反馈合并——
-   * 点名几个词，第二轮举一反三处理同类难度表达，不只换点名词。 */
+  /* 正文 simpl 标记（词级"太难"反馈）：读文件在 IO 侧，合并解析与决策在 core.planRound2 */
+  let simplWords = [];
   try {
     const markPath = `${r1PathOf(t, CN[i - 1]).replace(/\.md$/, '')}_审校标记.json`.replace(/_R1(?=[^/]*$)/, '');
     if (existsSync(markPath)) {
-      const marks = JSON.parse(readFileSync(markPath, 'utf-8')).marks ?? [];
-      const simpl = marks.filter((m) => m.type === 'simpl' && m.word).map((m) => String(m.word).toLowerCase());
-      if (simpl.length) fb.tooHardWords.push(...simpl.filter((w) => !fb.tooHardWords.includes(w)));
-      if (simpl.length) fb.raw += `（正文标记太难：${[...new Set(simpl)].slice(0, 20).join(', ')}）`;
+      simplWords = (JSON.parse(readFileSync(markPath, 'utf-8')).marks ?? []).filter((m) => m.type === 'simpl' && m.word).map((m) => String(m.word).toLowerCase());
     }
   } catch {
     /* 标记文件读不了就只用文字反馈——如实，不阻断 */
@@ -373,78 +381,39 @@ async function round2(t, i, feedbackRaw, task = null) {
   const { ch, segs, srcMd, r1Md, r1Segs } = c;
   const r1 = r1PathOf(t, ch);
   const dst = finalPathOf(t, ch);
+  const pf = progressFile(t, ch);
+  /* 两轮闸门/档位折算/复写范围：决策唯一实现=core.planRound2（B1 批次①，2026-09-26 抽取） */
+  const plan = planRound2({
+    progressText: existsSync(pf) ? readFileSync(pf, 'utf-8') : null,
+    hasFinal: existsSync(dst),
+    feedbackRaw,
+    simplWords,
+    findings: c.findings,
+    srcSegs: segs,
+    r1Segs,
+    progressSet: !!progressOf(),
+    ladder: ladderOrNull(),
+    isKnownWord,
+  });
+  const { fb, boundaryNote, removedByLadder, targets } = plan;
 
   /* 两轮制闸门：两轮已用完就停止自动重试——剩余问题交教师修改，这是方向文档的硬规矩 */
-  const pf = progressFile(t, ch);
-  if (existsSync(pf)) {
+  if (!plan.gate.ok) {
+    console.log(`  ${ch}：两轮已用完（终稿在 ${dst}）——剩余问题交教师修改或说明保留，不再自动重试。`);
+    const finalMd = readFileSync(dst, 'utf-8');
+    const re = burdenFindings(finalMd, { tier: t.key, properNouns: P.PROPER ?? [] });
+    re.findings.push(...fidelityFindings(srcMd, finalMd));
+    const intro = introducedHardWords(srcMd, finalMd, (w) => !isKnownWord(w));
+    if (intro.length)
+      re.findings.push({ level: '难度', note: `终稿仍引入原文没有的词表外词 ${intro.length} 个：${intro.slice(0, 12).join(', ')}——先核对是否词库漏收（入库即消）；确属超纲的剩余项交教师换写` });
+    let jNote = '';
     try {
-      const j = JSON.parse(readFileSync(pf, 'utf-8'));
-      if (j.round >= 2 && existsSync(dst)) {
-        console.log(`  ${ch}：两轮已用完（终稿在 ${dst}）——剩余问题交教师修改或说明保留，不再自动重试。`);
-        const finalMd = readFileSync(dst, 'utf-8');
-        const re = burdenFindings(finalMd, { tier: t.key, properNouns: P.PROPER ?? [] });
-        re.findings.push(...fidelityFindings(srcMd, finalMd));
-        const intro = introducedHardWords(srcMd, finalMd, (w) => !isKnownWord(w));
-        if (intro.length)
-          re.findings.push({ level: '难度', note: `终稿仍引入原文没有的词表外词 ${intro.length} 个：${intro.slice(0, 12).join(', ')}——先核对是否词库漏收（入库即消）；确属超纲的剩余项交教师换写` });
-        return { ...c, profile: re.profile, findings: re.findings, changed: 0, fb, boundaryNote: j.boundaryNote ?? '', finalMd };
-      }
+      jNote = JSON.parse(readFileSync(pf, 'utf-8')).boundaryNote ?? '';
     } catch {
-      /* 进度文件坏了当没有：往下走正常流程 */
+      /* 同 core：进度坏了当没有 */
     }
+    return { ...c, profile: re.profile, findings: re.findings, changed: 0, fb, boundaryNote: jNote, finalMd };
   }
-
-  /* 档位折算：有教材进度才回退；没有就按幅度收紧注释限额（如实报告，不假装精确）。
-   * 退学词 = 被回退掉的单元里、不在更早边界、也不在教师手工词库里的词——
-   * 手工收录是教师的明确判断，优先于单元回退。 */
-  const prog = progressOf();
-  let boundaryNote = '';
-  const removedByLadder = new Set();
-  if (fb.magnitude && prog && UNIT_LIB) {
-    const idx = ladderIndex(prog);
-    const back = MAGNITUDE_UNITS[fb.magnitude];
-    const newIdx = Math.max(-1, idx - back);
-    const from = idx >= 0 ? `${UNIT_LIB.ladder[idx].book}${UNIT_LIB.ladder[idx].unit}` : '课标基础';
-    const to = newIdx >= 0 ? `${UNIT_LIB.ladder[newIdx].book}${UNIT_LIB.ladder[newIdx].unit}` : '课标基础';
-    const earlier = textbookLearned(newIdx);
-    const manual = manualLexiconWords();
-    for (let i2 = newIdx + 1; i2 <= idx; i2++)
-      for (const w of UNIT_LIB.ladder[i2].words) {
-        if (!earlier.has(w) && !manual.has(w)) removedByLadder.add(w);
-      }
-    boundaryNote = `词汇边界从 ${from} 回退到 ${to}（按你的反馈折算 ${back} 个单元——档位折算，不是精确换算）`;
-  } else if (fb.magnitude) {
-    boundaryNote = prog ? '' : `未设置教材进度——"超前${fb.magnitude}"按注释限额收紧处理（跑 --progress 九上U5 可获得精确的单元回退）`;
-  }
-
-  /* 复写范围：检查出的难度级问题段 ∪ 反馈维度涉及的段（词汇→含超纲词段；句法→长句段；整体→全篇） */
-  const whole = fb.dims.length >= 4 || /整体|全部|全篇/.test(fb.raw);
-  const target = new Set();
-  if (whole) segs.forEach((_, k) => target.add(k));
-  else {
-    for (let k = 0; k < r1Segs.length; k++) {
-      const seg = r1Segs[k];
-      /* 段号**去掉方括号**再比：引擎（`adaptcheck`）给的 `segId` 是 `P03` 形态，
-       * 而 `match(/\[P\d+\]/)` 得到的是 `[P03]`。2026-09-14 之前这里直接拿带括号的去比，
-       * 于是「一句 N 处注释」这类**段级**难度 finding 永远匹配不到自己的段；
-       * 而 `注释拥挤`/`最长句`/`归因` 是**整篇级**（没有 segId），对每一段都成立——
-       * 两个错叠起来：只要全篇有密度或长句问题，第二轮就把**每一段**都标成待复写；
-       * 反之若只有句级问题，则一段都不进。 */
-      const segId = (seg.match(/\[P\d+\]/)?.[0] ?? '').replace(/[[\]]/g, '');
-      const segFindings = c.findings.filter((f) => f.level === '难度' && (f.segId === segId || !f.segId || f.note.includes('注释拥挤') || f.note.includes('最长句') || f.note.startsWith('归因')));
-      if (segFindings.length) target.add(k);
-      if (fb.dims.includes('词汇')) {
-        const hard = [...seg.matchAll(/[A-Za-z][A-Za-z'-]*/g)].map((m) => m[0].toLowerCase()).filter((w) => !isKnownWord(w) || removedByLadder.has(w));
-        if (hard.length >= 2) target.add(k);
-      }
-    }
-    /* 教师点名的词：含这些词的段必进 */
-    for (let k = 0; k < r1Segs.length; k++) {
-      const low = r1Segs[k].toLowerCase();
-      if (fb.tooHardWords.some((w) => low.includes(w))) target.add(k);
-    }
-  }
-  const targets = [...target].sort((a, b) => a - b);
   if (!targets.length) {
     console.log(`  ${ch}：检查与反馈都没有指向需要复写的段——第一轮稿即最终稿。`);
     writeFileSync(dst, r1Md, 'utf-8');
@@ -461,7 +430,7 @@ async function round2(t, i, feedbackRaw, task = null) {
       .map((f) => f.note)
       .slice(0, 3);
     const user = `教师读了第一轮稿后反馈（原话）：「${fb.raw}」
-${boundaryNote ? `词汇边界调整：${boundaryNote}。` : ''}${removedByLadder.size ? `\n以下 ${removedByLadder.size} 个词本轮按"未学"处理（教材回退），换成熟词或用简单英文解释：${[...removedByLadder].slice(0, 40).join(', ')}${removedByLadder.size > 40 ? ' …' : ''}` : ''}
+${boundaryNote ? `词汇边界调整：${boundaryNote}。` : ''}${removedByLadder.length ? `\n以下 ${removedByLadder.length} 个词本轮按"未学"处理（教材回退），换成熟词或用简单英文解释：${removedByLadder.slice(0, 40).join(', ')}${removedByLadder.length > 40 ? ' …' : ''}` : ''}
 本段的具体问题：${reasons.length ? reasons.join('；') : '（按反馈维度整体处理）'}
 请复写下面这一段，要求：优先替换非必要难词；拆清动作和关系；${task ? protectionLineOf(task) : '保留人物、事件、数字、否定与因果'}（${segs[k].includes(' not ') || /never|no /i.test(segs[k]) ? '本段含否定表达，方向不能反' : ''}）；不得只删中文注释而英文不变容易；从教师点名的词举一反三，同类难度的表达一并处理。
 第一轮稿（待复写）：
@@ -562,25 +531,21 @@ for (const tk of tiers) {
         let expected = null;
         try {
           const c = localCheck(t, i);
-          const fb = parseTeacherFeedback(fbInfo.raw);
-          const whole = fb.dims.length >= 4 || /整体|全部|全篇/.test(fb.raw);
-          const target = new Set();
-          if (whole) c.segs.forEach((_, k) => target.add(k));
-          else
-            for (let k = 0; k < c.r1Segs.length; k++) {
-              const seg = c.r1Segs[k];
-              /* 同 427 行：段号去方括号再比（引擎给 `P03`，`match` 给 `[P03]`）。 */
-              const segId = (seg.match(/\[P\d+\]/)?.[0] ?? '').replace(/[[\]]/g, '');
-              if (c.findings.some((f) => f.level === '难度' && (f.segId === segId || !f.segId || f.note.includes('注释拥挤') || f.note.includes('最长句') || f.note.startsWith('归因')))) target.add(k);
-              if (fb.dims.includes('词汇')) {
-                const hard = [...seg.matchAll(/[A-Za-z][A-Za-z'-]*/g)].map((m) => m[0].toLowerCase()).filter((w) => !isKnownWord(w));
-                if (hard.length >= 2) target.add(k);
-              }
-            }
-          for (let k = 0; k < c.r1Segs.length; k++) {
-            if (fb.tooHardWords.some((w) => c.r1Segs[k].toLowerCase().includes(w))) target.add(k);
-          }
-          expected = target.size;
+          /* 与执行侧同源（core.planRound2）：预计范围与实际复写段口径一致。
+           * 旧拷贝漏了 simpl 点名词段（readFeedback 的 marked 没进选定）——2026-09-26 统一时补上。 */
+          const plan = planRound2({
+            progressText: null,
+            hasFinal: false,
+            feedbackRaw: fbInfo.raw,
+            simplWords: fbInfo.marked,
+            findings: c.findings,
+            srcSegs: c.segs,
+            r1Segs: c.r1Segs,
+            progressSet: false,
+            ladder: null,
+            isKnownWord,
+          });
+          expected = plan.targets.length;
         } catch (e) {
           console.log(`  ⚠ 预计范围算不出（${String(e).slice(0, 80)}）——任务单照写，执行时按检查结果圈定`);
         }
