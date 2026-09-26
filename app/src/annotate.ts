@@ -41,6 +41,7 @@ import {
 import { newMarkId, type FileSession, type Mark } from './types.js';
 import { recordCalibration } from './calibrationio.js';
 import { teacherIdOf } from '../../src/core/teachers.js';
+import { aiFailureHint } from './aierr.js';
 import { S } from './state.js';
 
 /**
@@ -315,7 +316,7 @@ export async function renderAnnotatePane(): Promise<void> {
         void refreshPendingBanner();
       } catch (e) {
         /* 执行失败**要说出来**：这条通路是"点完自动排进队列"的最后一截，静默失败等于回到手工找按钮 */
-        io.onStatus(`换词执行失败：${String(e)}`, 'err');
+        io.onStatus(`换词执行失败：${String(e)}${aiFailureHint(e)}`, 'err');
       }
     })();
   });

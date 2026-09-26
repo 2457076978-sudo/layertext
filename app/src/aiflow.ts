@@ -32,6 +32,7 @@ import { LEDGER_HEADER, toLedgerLine } from '../../src/core/adoption.js';
 import { sentenceRisks } from '../../src/core/risks.js';
 import { buildSystemPrompt, buildRewriteSentencePrompt, promptSetVersion, simplifyMaxLen } from './ai.js';
 import { RULE_BY_TYPE } from './pure.js';
+import { aiFailureHint } from './aierr.js';
 import { showAiSettings } from './settings.js';
 import { appendCsvLine, makeFirstChangeBackup } from './fsx.js';
 import { applyZhAnnotations, applyWordSimplifications } from './pipew.js';
@@ -304,8 +305,7 @@ export async function aiSuggest(instruction?: string): Promise<void> {
     uibus.switchView('suggest');
     setStatus(`AI 返回 ${S.suggestions.length} 条修订候选 ${usage}——建议已标到正文里，点 ✓ 采纳 / ✗ 放弃`, 'saved');
   } catch (e) {
-    const hint = String(e).includes('未找到 JSON') ? '（模型思考太长占满输出上限——建议 AI 设置里换非思考型模型，或减少一次标记的数量分批出）' : '';
-    setStatus('AI 请求失败：' + e + hint, 'err');
+    setStatus(`AI 请求失败：${e}${aiFailureHint(e)}`, 'err');
   } finally {
     btn.textContent = '<svg class="ico"><use href="#i-sparkle"/></svg>AI 审核建议';
     btn.disabled = false;
@@ -637,8 +637,7 @@ export async function aiRewriteSentence(pi: number, si: number, intent: string, 
     attachInlineSuggestions();
     setStatus('AI 已给出本句改写——正文黄色区域内点 ✓ 采纳或 ✗ 放弃', 'saved');
   } catch (e) {
-    const hint = String(e).includes('未找到 JSON') ? '（原因：你的模型把"思考过程"写进了回答，占满了输出上限还没写到 JSON——AI 设置里换非思考型模型如 deepseek-chat 最省心）' : '';
-    setStatus('AI 改写失败：' + e + hint, 'err');
+    setStatus(`AI 改写失败：${e}${aiFailureHint(e)}`, 'err');
   } finally {
     if (btn) {
       btn.textContent = '<svg class="ico"><use href="#i-sparkle"/></svg>AI 改写本句';
