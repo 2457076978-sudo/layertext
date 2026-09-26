@@ -763,6 +763,43 @@ async function runConcReport(bookDir: string, which: 'proper' | 'gap'): Promise<
   }
 }
 
+/* ────────── 数据面板三问分组（复盘方案 B3，2026-09-26）──────────
+ * 卡片按交付批次堆积的问题：教师打开面板看到的是"功能史"，不是自己的问题。
+ * 重组为三问：①这本书质量怎样 ②学生学得怎样 ③我还要做什么。
+ * 纪律：**新卡片必须归组**——dpSectionsHtml 对未登记的 key 当场抛错，
+ * tests/dpsections.test.ts 扫描源码锁"注册表与实际渲染的卡片集合一致"。 */
+export type DpSectionId = 'quality' | 'students' | 'todo';
+
+export const DP_SECTIONS: ReadonlyArray<{ id: DpSectionId; q: string; hint: string }> = [
+  { id: 'quality', q: '① 这本书质量怎样', hint: '层间体检 · 词画卷报告 · 校准台账' },
+  { id: 'students', q: '② 学生学得怎样', hint: '复现与到期' },
+  { id: 'todo', q: '③ 我还要做什么', hint: '层级配置与待办' },
+];
+
+/** 卡片 key → 三问分组。加卡片=在这里登记，漏登记渲染期即抛。 */
+export const DP_CARD_GROUPS: Record<string, DpSectionId> = {
+  'dp-crosstier-wrap': 'quality', // 层间体检（教师肉眼盲区，排组内第一）
+  'conc-reports-card': 'quality', // 词画卷两报告（专名候选/词表缺口）
+  'ledger-card': 'quality', // 校准台账
+  'dp-weekly-wrap': 'students', // 本周复现清单
+  'dp-tree': 'todo', // 读者层级编辑
+};
+
+/** 按三问分组渲染卡片；未登记的 key 当场抛错（纪律的运行时面）。
+ * 组内顺序由注册表 key 的书写序决定（与调用方传参顺序无关——组内主次是产品决定）。 */
+export function dpSectionsHtml(cards: ReadonlyArray<{ key: string; html: string }>): string {
+  const orderOf = new Map(Object.keys(DP_CARD_GROUPS).map((k, i) => [k, i] as const));
+  const byGroup: Partial<Record<DpSectionId, string[]>> = {};
+  for (const c of [...cards].sort((a, b) => (orderOf.get(a.key) ?? 0) - (orderOf.get(b.key) ?? 0))) {
+    const g = DP_CARD_GROUPS[c.key];
+    if (!g) throw new Error(`数据面板卡片未归组：${c.key}——B3 纪律：新卡片必须登记进 DP_CARD_GROUPS 三问之一`);
+    (byGroup[g] ??= []).push(c.html);
+  }
+  return DP_SECTIONS.map(
+    (s) => `<section class="dp-sec" data-dp-sec="${s.id}"><div class="dp-sec-h"><b>${s.q}</b><span class="dp-sec-sub">${s.hint}</span></div>${(byGroup[s.id] ?? []).join('\n')}</section>`,
+  ).join('\n');
+}
+
 export async function renderDataPane(bookDir: string): Promise<void> {
   const el = document.getElementById('pane-data');
   if (!el) return;
@@ -954,11 +991,13 @@ export async function renderDataPane(bookDir: string): Promise<void> {
     : '';
   el.innerHTML = `<div class="dp">
       <div class="dp-head"><b>数据</b><span class="dp-sub">${esc(cur.note)}</span></div>
-      ${ledgerCardHtml(ledgerSum, true)}
-      ${concReportsCardHtml(true)}
-      <div id="dp-crosstier-wrap">${crossTierCardHtml(null, false)}</div>
-      <div id="dp-weekly-wrap">${weeklyCardHtml(null, false)}</div>
-      ${treeCard}
+      ${dpSectionsHtml([
+        { key: 'dp-crosstier-wrap', html: `<div id="dp-crosstier-wrap">${crossTierCardHtml(null, false)}</div>` },
+        { key: 'conc-reports-card', html: concReportsCardHtml(true) },
+        { key: 'ledger-card', html: ledgerCardHtml(ledgerSum, true) },
+        { key: 'dp-weekly-wrap', html: `<div id="dp-weekly-wrap">${weeklyCardHtml(null, false)}</div>` },
+        { key: 'dp-tree', html: treeCard },
+      ])}
       <div class="dp-tabs">${tabs}</div>
       ${st.errs.length ? `<div class="dp-note dp-err">⚠ ${st.errs.length} 个校验问题（不阻塞本次编辑，但不能引入新问题）：<br>${st.errs.slice(0, 5).map(esc).join('<br>')}${st.errs.length > 5 ? '<br>…' : ''}</div>` : '<div class="dp-note dp-ok">✓ 校验通过</div>'}
       ${body}
