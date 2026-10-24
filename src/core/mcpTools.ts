@@ -15,10 +15,12 @@ import { runQc, toLegacyReport } from './qc.js';
 import { sentenceRisks } from './risks.js';
 import { IRR } from './irregular.js';
 import { triageOov, type ZipfTable } from './wordfreq.js';
-import { acceptanceV2, cleanForAcceptance } from './acceptance.js';
+import { acceptanceV2 } from './acceptance.js';
 import { buildConcordance, properSuspects, wordChapterMatrix } from './concordance.js';
 import { reworkGates, summarizeLedger } from './rework.js';
 import { probeChapterSource } from './sourceprobe.js';
+import { editSentenceInSegment, redWordsOf, type EditSentenceResult } from './sentunit.js';
+import { textbookProgress, type TextbookUnitsData } from './textbookvocab.js';
 
 /** 任意英文文本 → 章节 md（按空行切段、编 [P01]，与应用"导入归一化"同构的最小版） */
 export function wrapAsChapter(text: string, title = 'MCP text'): string {
@@ -46,6 +48,33 @@ export function buildMcpLexicon(opts: McpLexiconOptions, bundledWordlists: strin
     terms: opts.terms ?? [],
     properNouns: (opts.properNouns ?? []).map((p) => p.toLowerCase()),
   });
+}
+
+/* ───────────────── 2026-10-24 重建：词库按调用覆盖（三形态之二）+ 口径指纹 ─────────────────
+ * 三形态 = @名称（命名词库资产，随 2026-10-09 迁移事故丢失，资产重建后再开放）
+ *          / vocab_csv_content（调用方内联 CSV 文本）
+ *          / vocab_csv_path（服务侧读路径，fs 在 mcp-server.ts，core 只收文本）。
+ * 口径指纹：覆盖词库的 词数 + 内容哈希前 8 位——返回里自述，防止"以为用了项目词库其实没有"。 */
+export interface VocabOverride {
+  vocabCsvTexts?: string[];
+}
+
+export function buildOverriddenLexicon(baseOpts: McpLexiconOptions, bundledWordlists: string[], override?: VocabOverride): Lexicon {
+  if (!override?.vocabCsvTexts?.length) return buildMcpLexicon(baseOpts, bundledWordlists);
+  return buildMcpLexicon({ ...baseOpts, vocabCsvTexts: [...(baseOpts.vocabCsvTexts ?? []), ...override.vocabCsvTexts] }, bundledWordlists);
+}
+
+export function vocabFingerprint(override?: VocabOverride): Record<string, unknown> | undefined {
+  if (!override?.vocabCsvTexts?.length) return undefined;
+  const joined = override.vocabCsvTexts.join('\n');
+  // FNV-1a 32 位（manifest.contentHash 是 128 位变体；这里只要"两份 CSV 是否同一份"的短指纹）
+  let h = 0x811c9dc5;
+  for (let i = 0; i < joined.length; i++) {
+    h ^= joined.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  const lines = joined.split('\n').filter((l) => l.trim() && !l.trim().startsWith('#'));
+  return { 口径: `按调用词库覆盖（${lines.length} 行 CSV，sha8:${h.toString(16).padStart(8, '0')}）——判定锚=调用方给的词库，叠加服务启动词库` };
 }
 
 /** 工具1 layer_qc：全文体检（生词率/覆盖率/句长/被动/定从/过去完成/OOV清单）；reinforce=已学词集（⑩复现指标）；
@@ -154,15 +183,9 @@ export function toolAlignPairs(baseText: string, curText: string): Record<string
 
 /* ───────────── 2026-09-18 项 2 新增：SOP 闸门 MCP 化（工具 6–9） ───────────── */
 
-/** 红词计数（回炉闸口径）：词库外 token 出现次数，注释过的词不算、词形家族按词库口径 */
+/** 红词计数（回炉闸口径）：唯一实现在 sentunit.redWordsOf（2026-10-24 收口——原先这里一份私有实现） */
 function redCountOf(text: string, lex: Lexicon): number {
-  const ann = new Set([...String(text ?? '').matchAll(/([A-Za-z][A-Za-z-]*)（[^）]*）/g)].map((m) => m[1].toLowerCase()));
-  let n = 0;
-  for (const w of cleanForAcceptance(String(text ?? '')).match(/[a-z]+/g) || []) {
-    if (w.length < 2 && w !== 'a' && w !== 'i') continue;
-    if (!hit(w, lex.known) && !ann.has(w)) n++;
-  }
-  return n;
+  return redWordsOf(text, lex).count;
 }
 
 /** 工具6 layer_rework_gates：一段改写跑回炉四闸（红词必减/段长比/注释不丢/句长上限·引语豁免）。
@@ -245,4 +268,64 @@ export function toolConcordance(chapters: Array<{ name?: string; tiers?: Record<
     词表缺口提示: 'matrixTop 里 unmerged 的词=词表外（zipf 分诊走 layer_qc 的 OOV 清单）；properSuspects=专名表漏收候选（≥2 章句中大写）',
     口径说明,
   };
+}
+
+/* ───────────── 2026-10-24 重建：工具 11 layer_sentence_edit / 工具 12 layer_textbook_vocab ───────────── */
+
+/** 工具11 layer_sentence_edit：句级修改双形态（原 10-05 第六线第 24 工具，按定案重写）。
+ *  不带 sentence_id = 拆句看靶（每句词数/最长/红词/超长标记）；
+ *  带 sentence_id + revised = 改一句过双闸（句级四闸 + 拼回后段级四闸一次返回）。
+ *  拼回按拆分序号定位、同文句不误替换——agent 不做字符串手术。落盘由调用方执行（本工具只算不写）。 */
+export function toolSentenceEdit(
+  input: { segment_md: string; sentence_id?: string; revised?: string; max_len?: number; len_tolerance?: number },
+  lex: Lexicon,
+  override?: VocabOverride,
+): Record<string, unknown> {
+  const maxLen = input.max_len ?? 16;
+  try {
+    const r: EditSentenceResult = editSentenceInSegment({
+      segment_md: input.segment_md,
+      ...(input.sentence_id ? { sentence_id: input.sentence_id } : {}),
+      ...(input.revised ? { revised: input.revised } : {}),
+      maxLen,
+      lex,
+      ...(input.len_tolerance !== undefined ? { lenTolerance: input.len_tolerance } : {}),
+    });
+    if (r.units) {
+      return {
+        形态: '看靶（不带 sentence_id）',
+        units: r.units.map((u) => ({ id: u.id, words: u.words, maxSent: u.maxSent, redCount: u.redCount, ...(u.redWords.length ? { redWords: u.redWords } : {}), overlong: u.overlong, text: u.text })),
+        用法: '下一步：sentence_id=S几 + revised=改后的这一句 → 本工具返回双闸结果与拼回后的整段',
+        ...(vocabFingerprint(override) ?? {}),
+      };
+    }
+    return {
+      形态: '修改（双闸）',
+      pass: r.pass,
+      spliced: r.spliced,
+      句级四闸: r.sentenceGates,
+      段级四闸: r.segmentGates,
+      口径说明:
+        '双闸全绿才许落盘（落盘由调用方执行）。句级四闸=红词不增必减/句长上限(引语豁免)/注释不丢/保真(数字与专名信号)；段级四闸与 layer_rework_gates 同一把尺。拼回按拆分序号定位——同段同文句不误替换。',
+      ...(vocabFingerprint(override) ?? {}),
+    };
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
+}
+
+/** 工具12 layer_textbook_vocab：教材已学词口径（BYOT——教材单元库 JSON 由调用方传入，
+ *  生成用 tools/textbook_units.mjs build；资产不进公开仓）。
+ *  教师说"上到八下 U5"→ 已学词清单（基础层+进度内册/单元）+ 已学语法 + 分项明细。 */
+export function toolTextbookVocab(input: { units_json: TextbookUnitsData; at: string; half?: boolean }): Record<string, unknown> {
+  try {
+    const r = textbookProgress({ data: input.units_json, at: input.at, ...(input.half ? { half: true } : {}) });
+    return {
+      ...r,
+      红线自述: 'exposure≠acquisition：这份清单回答"教材教到过什么"，不回答"这个学生学会了什么"。画像/排名永不进判定链。',
+      口径说明: '进度之前的册全册计入（含未标单元）；当前册单元号<目标计入、=目标计入（half=前半词+语法标注）；当前册未标单元不计入（无法判断来自哪个单元）。',
+    };
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
 }

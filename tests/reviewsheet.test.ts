@@ -13,6 +13,7 @@ import { execFile } from 'node:child_process';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { test } from 'node:test';
 
@@ -206,7 +207,7 @@ test('端到端（CLI）：生成审查单 → 判定 → 入台账；源文件�
   writeFileSync(wlPath, 'the\nman\nwas\nand\nslow\nhe\nwatched\nhis\nacross\nsky\n', 'utf-8');
   const run = promisify(execFile);
   const node = process.execPath;
-  const cli = new URL('../src/cli.js', import.meta.url).pathname; // dist/tests/x.test.js → dist/src/cli.js
+  const cli = fileURLToPath(new URL('../src/cli.js', import.meta.url)); // dist/tests/x.test.js → dist/src/cli.js（中文路径必须 fileURLToPath——URL.pathname 是百分号编码的）
 
   const sheetHtml = join(dir, 'sheet.html');
   await run(node, [cli, 'reviewsheet', mdPath, '--wordlist', wlPath, '--tier', 'A', '--out', sheetHtml]);

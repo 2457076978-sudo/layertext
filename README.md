@@ -148,13 +148,16 @@ node dist/src/cli.js reviewsheet-ingest 审查决定_school_story_club.json \
 ## MCP 服务（把质检引擎接进任何 AI 客户端）
 
 `npm run mcp` 启动一个 stdio MCP 服务器（Claude Desktop / ZCode / Cursor 可直接挂），
-暴露 10 个本地工具：`layer_qc`（全文体检）、`layer_word_status`（这个词学生学过吗）、
+暴露 12 个本地工具：`layer_qc`（全文体检）、`layer_word_status`（这个词学生学过吗）、
 `layer_sentence_risks`（句法黑名单逐句检测）、`layer_check_revision`（AI 改完英文自查被动/定从/
 超长残留）、`layer_align`（两版逐句核对丢句/信号缺失）、`layer_rework_gates`（回炉四闸自查：
 红词必减/段长比/注释不丢/句长·引语豁免）、`layer_rework_ledger`（回炉台账汇总与挂起分组）、
 `layer_source_probe`（R0 源完整性探针：词数骤降/断章/碎片）、`layer_acceptance_v2`（验收 v2
 七维度：未注率排序/同段倒挂/句长梯度/注密度）、`layer_concordance`（跨章词画卷：词→全书
-哪几章哪几句，含层与已注状态；不给词返回章分布与专名表漏收候选）。
+哪几章哪几句，含层与已注状态；不给词返回章分布与专名表漏收候选）、`layer_sentence_edit`（句级修改双形态：拆句看靶 →
+改一句过双闸〔句级四闸+拼回+段级四闸〕，拼回按句定位、同文句不误替换，四步 SOP 见
+`prompts/lt_sentence_rework.md`）、`layer_textbook_vocab`（教材已学词口径：进度换算 BYOT，红线 exposure≠acquisition）。
+词库敏感工具可传 `vocab_csv_path` / `vocab_csv_content` 按项目词库覆盖判定口径（返回带口径指纹）。
 口径与桌面应用同一套引擎，零遥测、不落盘。配置示例见 [docs/MCP.md](docs/MCP.md)。
 
 ## QC 指标：为什么这些句法是"黑名单"

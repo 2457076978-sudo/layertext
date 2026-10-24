@@ -7,6 +7,14 @@
 
 > 以下 6 节来自 `codex/total-optimization` 分支的 CHANGELOG——2026-09-14 合并时**原样保留**，不并进主仓的轮次编号里（它们是"同一批改动在分支侧怎么落的"的第一手记录）。
 
+### 句级修改 + MCP 工具面重建（2026-10-24 第二批）
+
+- **句级修改三件**（原 68a9bd2，随迁移事故丢失，按定案重写）：新增 **`src/core/sentunit.ts`**——拆分/句单元/拼回唯一实现（区间保持版：`[P##]` 标记不进句单元、拼回按拆分序号定位、**同文句不误替换**、roundtrip 逐字节回归锁）+ 句级四闸（红词不增必减/句长上限·引语豁免/注释不丢/保真——保真用 layer_align 同一 signalsOf）+ 双闸组合（句级四闸+拼回后段级四闸一次返回，段级一票否决）。
+- **MCP 两新工具**（10→12）：`layer_sentence_edit` 句级修改双形态（不带 sentence_id=拆句看靶；带=改一句双闸，落盘由调用方执行）；`layer_textbook_vocab` 教材已学词口径（**`src/core/textbookvocab.ts`** = tools/textbook_units.mjs progress 的 core 收口；BYOT：教材单元库 JSON 调用方传入；红线自述 exposure≠acquisition 不接画像/判定链）。
+- **词库三形态之二**：词库敏感工具（qc/word_status/rework_gates/acceptance_v2/concordance/sentence_edit）可传 `vocab_csv_path`（服务侧读+内容缓存）或 `vocab_csv_content` 按调用覆盖判定口径，返回带口径指纹（行数+sha8）——防"以为用了项目词库其实没有"。@名称（命名词库资产）随迁移事故丢失，资产重建后再开放。
+- 红词计数收口：mcpTools 私有 redCountOf 改调 `sentunit.redWordsOf`（原先两处实现，按「同一条判定只许有一份实现」合流）；prompts/lt_sentence_rework.md 四步 SOP（拆句看靶→改写→双闸→align 终检）。
+- `tests/sentunit.test.ts` 14 例：区间/roundtrip/同文句只改指定句/红词注释豁免/四闸各红各/引语豁免/看靶/双闸全绿/段级否决/工具 error 契约/词库叠加覆盖与指纹/教材口径三条（进度册全计入、half 前半词、未标单元规则）。地图 core 计数 57→59（实数）。
+
 ### 教师审查单（A 方案重写版，2026-10-24）
 
 - **背景（如实记录）**：审查单 A 方案原实现（2026-10-05，`834f378`）连同 09-27→10-05 的全部本地提交，在 2026-10-09 的旧机→新机迁移事故中丢失（工作区文件未随 rsync 到达、`.git` 同毁；旧 Mac mini 已报废不可恢复）。本条为**按 2026-10-05 设计定案的重写**，非原件恢复。恢复基线 = 百度网盘 09-26 git bundle（401 提交）+ GitHub 远端 3 提交（共 404，verify 1174/0/2 绿复现）。

@@ -6,8 +6,8 @@
  * 启动：
  *   node dist/src/mcp-server.js [--vocab 教材词库.csv]... [--wordlist 词表.txt]... [--terms 术语.txt] [--proper 专名.txt]
  *
- * 工具（10 个，全部本地计算、零遥测、不落盘）：
- *   layer_qc              全文体检：生词率/覆盖率/句长/被动/定从/过去完成/OOV清单
+ * 工具（12 个，全部本地计算、零遥测、不落盘）：
+ *   layer_qc              全文体检：生词率/覆盖率/句长/被动/定语从句/过去完成/OOV清单
  *   layer_word_status     单词词表状态与原形（词库=难度锚点）
  *   layer_sentence_risks  句法黑名单逐句检测（被动/定从/过去完成/超长）
  *   layer_check_revision  改写句复核：AI 改写后自查黑名单与超长残留
@@ -17,6 +17,12 @@
  *   layer_source_probe    R0 源完整性探针：词数骤降/章末无收束/碎片残留
  *   layer_acceptance_v2   验收 v2 七维度（可本地计算子集）：未注率排序/同段倒挂/句长梯度/注密度/结构/语义
  *   layer_concordance     跨章词画卷：词→全书哪几章哪几句（含层与已注）；不给词返回章分布/专名候选
+ *   layer_sentence_edit   句级修改双形态：拆句看靶 / 改一句过双闸（句级四闸+拼回+段级四闸）
+ *   layer_textbook_vocab  教材已学词口径：进度换算（BYOT：教材单元库 JSON 调用方传入）
+ *
+ * 词库三形态（2026-10-24 重建其二）：词库敏感工具可传 vocab_csv_path（服务侧读该 CSV）
+ *   或 vocab_csv_content（内联 CSV 文本）按调用覆盖判定口径，返回带口径指纹自述；
+ *   @名称（命名词库资产）随迁移事故丢失，资产重建后再开放。
  *
  * 配置示例见 docs/MCP.md。
  */
@@ -30,6 +36,7 @@ import { z } from 'zod';
 import { readWordFile } from './core/files.js';
 import { parseZipfTable, type ZipfTable } from './core/wordfreq.js';
 import {
+  buildOverriddenLexicon,
   buildMcpLexicon,
   toolAcceptanceV2,
   toolAlignPairs,
@@ -38,11 +45,15 @@ import {
   toolQcText,
   toolReworkGates,
   toolReworkLedger,
+  toolSentenceEdit,
   toolSentenceRisks,
   toolSourceProbe,
+  toolTextbookVocab,
   toolWordStatus,
   type McpLexiconOptions,
+  type VocabOverride,
 } from './core/mcpTools.js';
+import type { TextbookUnitsData } from './core/textbookvocab.js';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
@@ -92,11 +103,35 @@ async function main(): Promise<void> {
   const zipf = bundledZipfTable();
   const aoa = bundledAoaTable();
 
+  /** 词库覆盖解析（三形态之二）：vocab_csv_path 服务侧读文件（按内容缓存防重复解析），
+   *  vocab_csv_content 内联直用。读不了的路径如实报错——词库静默缺失比报错危险。 */
+  const vocabCache = new Map<string, string>();
+  const resolveOverride = async (p?: { vocab_csv_path?: string; vocab_csv_content?: string }): Promise<VocabOverride | undefined> => {
+    const path = p?.vocab_csv_path;
+    const content = p?.vocab_csv_content;
+    if (!path && !content) return undefined;
+    const texts: string[] = [];
+    if (content) texts.push(content);
+    if (path) {
+      let cached = vocabCache.get(path);
+      if (cached === undefined) {
+        cached = readFileSync(path, 'utf-8');
+        vocabCache.set(path, cached);
+      }
+      texts.push(cached);
+    }
+    return { vocabCsvTexts: texts };
+  };
+  const overridden = async (p?: { vocab_csv_path?: string; vocab_csv_content?: string }): Promise<{ lex: typeof lex; ov?: VocabOverride }> => {
+    const ov = await resolveOverride(p);
+    return ov ? { lex: buildOverriddenLexicon(opts, bundledWordlists(), ov), ov } : { lex };
+  };
+
   const server = new McpServer(
-    { name: 'layertext-qc', version: '1.0.0' },
+    { name: 'layertext-qc', version: '1.1.0' },
     {
       instructions:
-        'LayerText 分层读质检引擎：面向初中英语教师的文本简化质检。词库=难度锚点（词表内=学生已学）；被动/定语从句/过去完成按初中教学进度一律禁用；直接引语内豁免。改写英文后务必用 layer_check_revision 自查残留；差量修订段落用 layer_rework_gates 过回炉四闸；交付前用 layer_align 核对丢句；三层产物用 layer_acceptance_v2 验收；回炉规划用 layer_rework_ledger；喂生成管线前用 layer_source_probe 查源完整性。',
+        'LayerText 分层读质检引擎：面向初中英语教师的文本简化质检。词库=难度锚点（词表内=学生已学）；被动/定语从句/过去完成按初中教学进度一律禁用；直接引语内豁免。改写英文后务必用 layer_check_revision 自查残留；一句有问题用 layer_sentence_edit（拆句看靶→改一句双闸），多句连环走 layer_rework_gates；差量修订段落用 layer_rework_gates 过回炉四闸；交付前用 layer_align 核对丢句；三层产物用 layer_acceptance_v2 验收；回炉规划用 layer_rework_ledger；喂生成管线前用 layer_source_probe 查源完整性；"上到八下U5学到哪些词"用 layer_textbook_vocab。词库敏感工具可传 vocab_csv_path/vocab_csv_content 按项目口径覆盖。',
     },
   );
 
@@ -109,9 +144,14 @@ async function main(): Promise<void> {
       inputSchema: z.object({
         text: z.string().describe('英文文本（任意格式；按空行分段自动处理）'),
         reinforce: z.array(z.string()).optional().describe('已学词集/复现队列（词形家族按词种计命中）'),
+        vocab_csv_path: z.string().optional().describe('项目词库 CSV 路径（服务侧读取；判定锚=这份词库，叠加内置课标）'),
+        vocab_csv_content: z.string().optional().describe('项目词库 CSV 全文内联（与 path 二选一或叠加）'),
       }),
     },
-    async ({ text, reinforce }) => ({ content: [{ type: 'text', text: JSON.stringify(toolQcText(text, lex, 50, reinforce, zipf, aoa), null, 1) }] }),
+    async ({ text, reinforce, vocab_csv_path, vocab_csv_content }) => {
+      const { lex: lx } = await overridden({ vocab_csv_path, vocab_csv_content });
+      return { content: [{ type: 'text', text: JSON.stringify(toolQcText(text, lx, 50, reinforce, zipf, aoa), null, 1) }] };
+    },
   );
 
   server.registerTool(
@@ -119,9 +159,16 @@ async function main(): Promise<void> {
     {
       title: 'LayerText 单词词表状态',
       description: '查一个英文单词是否在词库内（学生已学）/待定/词表外（生词），并给出词形还原原形。',
-      inputSchema: z.object({ word: z.string().describe('英文单词（自动小写、还原词形）') }),
+      inputSchema: z.object({
+        word: z.string().describe('英文单词（自动小写、还原词形）'),
+        vocab_csv_path: z.string().optional().describe('项目词库 CSV 路径'),
+        vocab_csv_content: z.string().optional().describe('项目词库 CSV 全文内联'),
+      }),
     },
-    async ({ word }) => ({ content: [{ type: 'text', text: JSON.stringify(toolWordStatus(word, lex), null, 1) }] }),
+    async ({ word, vocab_csv_path, vocab_csv_content }) => {
+      const { lex: lx } = await overridden({ vocab_csv_path, vocab_csv_content });
+      return { content: [{ type: 'text', text: JSON.stringify(toolWordStatus(word, lx), null, 1) }] };
+    },
   );
 
   server.registerTool(
@@ -174,9 +221,14 @@ async function main(): Promise<void> {
         before: z.string().describe('改前段原文（含 [P##] 标记与 word（中文）注释原样）'),
         after: z.string().describe('改后段（AI 修订稿）'),
         max_len: z.number().int().min(8).max(40).default(16).describe('句长上限（词/句），默认 16'),
+        vocab_csv_path: z.string().optional().describe('项目词库 CSV 路径（红词口径按它算）'),
+        vocab_csv_content: z.string().optional().describe('项目词库 CSV 全文内联'),
       }),
     },
-    async ({ before, after, max_len }) => ({ content: [{ type: 'text', text: JSON.stringify(toolReworkGates(before, after, max_len, lex), null, 1) }] }),
+    async ({ before, after, max_len, vocab_csv_path, vocab_csv_content }) => {
+      const { lex: lx } = await overridden({ vocab_csv_path, vocab_csv_content });
+      return { content: [{ type: 'text', text: JSON.stringify(toolReworkGates(before, after, max_len, lx), null, 1) }] };
+    },
   );
 
   server.registerTool(
@@ -219,9 +271,14 @@ async function main(): Promise<void> {
         tiers: z.object({ A: z.string(), M: z.string().optional(), B: z.string() }).describe('三层整章 md（[P##] 段格式；A、B 必给，M 可选）'),
         source: z.record(z.string(), z.string()).optional().describe('源段表 {"P01":"原文段",…}；给了才做语义确定性校验'),
         proper_nouns: z.array(z.string()).optional().describe('专名表（小写）；给了才做专名丢失校验'),
+        vocab_csv_path: z.string().optional().describe('项目词库 CSV 路径'),
+        vocab_csv_content: z.string().optional().describe('项目词库 CSV 全文内联'),
       }),
     },
-    async ({ tiers, source, proper_nouns }) => ({ content: [{ type: 'text', text: JSON.stringify(toolAcceptanceV2(tiers, source, proper_nouns, lex), null, 1) }] }),
+    async ({ tiers, source, proper_nouns, vocab_csv_path, vocab_csv_content }) => {
+      const { lex: lx } = await overridden({ vocab_csv_path, vocab_csv_content });
+      return { content: [{ type: 'text', text: JSON.stringify(toolAcceptanceV2(tiers, source, proper_nouns, lx), null, 1) }] };
+    },
   );
 
   server.registerTool(
@@ -237,9 +294,56 @@ async function main(): Promise<void> {
           .describe('整本书各章（跨章比较才有意义）'),
         word: z.string().optional().describe('要查全貌的词（小写原形最好；不给则返回聚合）'),
         proper_nouns: z.array(z.string()).optional().describe('专名表（小写）；给了用它排除已收录专名'),
+        vocab_csv_path: z.string().optional().describe('项目词库 CSV 路径'),
+        vocab_csv_content: z.string().optional().describe('项目词库 CSV 全文内联'),
       }),
     },
-    async ({ chapters, word, proper_nouns }) => ({ content: [{ type: 'text', text: JSON.stringify(toolConcordance(chapters, word, lex, proper_nouns), null, 1) }] }),
+    async ({ chapters, word, proper_nouns, vocab_csv_path, vocab_csv_content }) => {
+      const { lex: lx } = await overridden({ vocab_csv_path, vocab_csv_content });
+      return { content: [{ type: 'text', text: JSON.stringify(toolConcordance(chapters, word, lx, proper_nouns), null, 1) }] };
+    },
+  );
+
+  server.registerTool(
+    'layer_sentence_edit',
+    {
+      title: 'LayerText 句级修改（拆句看靶 / 改一句双闸）',
+      description:
+        '句级差量修订（一段里只有一两句有问题时用，不要整段重写）。双形态：①只给 segment_md（不带 sentence_id）→ 返回句单元列表（id/词数/最长/红词/超长标记），挑出要改的句；②给 sentence_id + revised → 返回拼回后的整段 + 双闸结果（句级四闸：红词不增必减/句长上限·引语豁免/注释不丢/保真〔数字与专名信号〕；段级四闸：与 layer_rework_gates 同一把尺）。双闸全绿才许把 spliced 落盘。拼回按拆分序号定位，同段同文句不误替换——不要自己做字符串替换。',
+      inputSchema: z.object({
+        segment_md: z.string().describe('整段文本（含 [P##] 标记与 word（中文）注释原样）'),
+        sentence_id: z.string().optional().describe('句单元 id（S1、S2…；不给=看靶列表）'),
+        revised: z.string().optional().describe('改后的这一句（给了 sentence_id 就必须给）'),
+        max_len: z.number().int().min(8).max(40).default(16).describe('句长上限（词/句），默认 16'),
+        len_tolerance: z.number().int().min(0).max(10).optional().describe('句长容差（上限+容差才拦）'),
+        vocab_csv_path: z.string().optional().describe('项目词库 CSV 路径（红词口径按它算）'),
+        vocab_csv_content: z.string().optional().describe('项目词库 CSV 全文内联'),
+      }),
+    },
+    async ({ segment_md, sentence_id, revised, max_len, len_tolerance, vocab_csv_path, vocab_csv_content }) => {
+      const { lex: lx, ov } = await overridden({ vocab_csv_path, vocab_csv_content });
+      return { content: [{ type: 'text', text: JSON.stringify(toolSentenceEdit({ segment_md, sentence_id, revised, max_len, len_tolerance }, lx, ov), null, 1) }] };
+    },
+  );
+
+  server.registerTool(
+    'layer_textbook_vocab',
+    {
+      title: 'LayerText 教材已学词口径',
+      description:
+        '教师说"我教人教版，上到八下 Unit 5"→ 这节课学生学过哪些词、哪些语法。进度换算：之前的册全册计入；当前册单元号<目标计入、=目标计入（half=只学到一半取前半词）；当前册未标单元不计入。BYOT：教材单元库 JSON（tools/textbook_units.mjs build 生成，资产不进公开仓）由调用方读文件后经 units_json 传入。红线：exposure≠acquisition——它回答"教材教到过什么"，不回答"这个学生学会了什么"；不接画像/排名。',
+      inputSchema: z.object({
+        units_json: z
+          .object({ base: z.array(z.string()).optional(), books: z.record(z.string(), z.record(z.string(), z.object({ 词: z.array(z.string()).optional(), 语法: z.array(z.string()).optional() }))) })
+          .describe('教材单元库 JSON 对象（agent 读 教材单元_人教版.json 后传入）'),
+        at: z.string().describe('进度，如 "八下:U5"（八下 U5 已学完，含之前所有册与单元）'),
+        half: z.boolean().optional().describe('at 那个单元只学到一半（取前半数词，语法标注可能未讲完）'),
+      }),
+    },
+    async ({ units_json, at, half }) => {
+      const r = toolTextbookVocab({ units_json: units_json as TextbookUnitsData, at, half });
+      return { content: [{ type: 'text', text: JSON.stringify(r, null, 1) }] };
+    },
   );
 
   await server.connect(new StdioServerTransport());
