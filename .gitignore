@@ -26,3 +26,4 @@ tests/fixtures/replay/
 
 # 评测报告（生成物，不入库；基线在 examples/evals/baseline.json）
 eval-reports/
+tools/_npm_pkg/

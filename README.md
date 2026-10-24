@@ -145,6 +145,16 @@ node dist/src/cli.js reviewsheet-ingest 审查决定_school_story_club.json \
 #    执行权在机器侧的这份人机分工契约里，ingest 不碰正文一个字。
 ```
 
+## 免克隆安装（npx，国内走 npmmirror 镜像不用翻墙）
+
+```bash
+# MCP 客户端（Claude Desktop / ZCode / Cursor）的 MCP 配置里写：
+#   "command": "npx", "args": ["-y", "layertext-mcp", "--registry=https://registry.npmmirror.com"]
+# 命令行直接用（全文体检 / 生成教师审查单）：
+npx -y -p layertext-mcp layertext-qc qc 课文.md --vocab 教材词库.csv
+npx -y -p layertext-mcp layertext-qc reviewsheet 课文.md --vocab 教材词库.csv   # 教师三键审查单
+```
+
 ## MCP 服务（把质检引擎接进任何 AI 客户端）
 
 `npm run mcp` 启动一个 stdio MCP 服务器（Claude Desktop / ZCode / Cursor 可直接挂），

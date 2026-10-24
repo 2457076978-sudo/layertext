@@ -7,6 +7,14 @@
 
 > 以下 6 节来自 `codex/total-optimization` 分支的 CHANGELOG——2026-09-14 合并时**原样保留**，不并进主仓的轮次编号里（它们是"同一批改动在分支侧怎么落的"的第一手记录）。
 
+### npm 发包就绪：layertext-mcp（2026-10-24 第三批）
+
+- 新增 **`tools/make_npm_pkg.mjs`**：生成发布正本 `tools/_npm_pkg/`（name=layertext-mcp、bin=layertext-mcp/layertext-qc、
+  文件白名单 dist/src+assets+prompts+三文档、依赖三件 SDK/zod/ts-fsrs）。**实装复验两轮抓两 bug**：漏 dependencies
+  （tgz 装完起不来）、漏 ts-fsrs（CLI 的 fsrs 链路）；修后干净目录装 tgz 双 bin 冒烟全绿（MCP 12 工具 + CLI 用法 + reviewsheet 子命令，899KB）。
+- 包名 layertext-mcp 于 2026-10-24 经 npmmirror 查重可用；发布命令与国内 npmmirror 同步说明已写进脚本输出与 README。
+  发布待办：npm 账号登录（Wayne）→ `npm publish`；Gitee 网页导入仓 + 魔搭 MCP 广场上架为国内分发二、三渠道。
+
 ### 句级修改 + MCP 工具面重建（2026-10-24 第二批）
 
 - **句级修改三件**（原 68a9bd2，随迁移事故丢失，按定案重写）：新增 **`src/core/sentunit.ts`**——拆分/句单元/拼回唯一实现（区间保持版：`[P##]` 标记不进句单元、拼回按拆分序号定位、**同文句不误替换**、roundtrip 逐字节回归锁）+ 句级四闸（红词不增必减/句长上限·引语豁免/注释不丢/保真——保真用 layer_align 同一 signalsOf）+ 双闸组合（句级四闸+拼回后段级四闸一次返回，段级一票否决）。
