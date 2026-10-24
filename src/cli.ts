@@ -20,7 +20,7 @@
  * 报告自动落盘（无需 --out）：输入文件所在目录 / 质检报告_<tag>.json
  */
 
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, appendFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { findAssetPath, readWordFile } from './core/files.js';
 import { buildLexicon, parseReinforceText } from './core/lexicon.js';
@@ -28,6 +28,8 @@ import { runQc, toLegacyReport, type Tier } from './core/qc.js';
 import { chnoFromPath, tagFromPath } from './core/textpipe.js';
 import { parseZipfTable, triageOov, TRIAGE_RANK, type ZipfTable } from './core/wordfreq.js';
 import { planFsrs, summarizeFsrs, type FsrsWordInput } from './core/fsrs.js';
+import { parseDecisionLog } from './core/decision.js';
+import { buildReviewSheet, buildReviewSheetHtml, reviewEventLines, reviewEventsFromDecisions, type ReviewDecisionsFile, type ReviewSheetManifest } from './core/reviewsheet.js';
 
 /** fsrs 子命令：复现队列（"词,hits" CSV 或纯词列表=hits 0）→ FSRS 建议间隔 vs 现行固定策略并排。
  *  画像侧回写脚本可调本命令拿对照表（数据只存本地，不进仓）。 */
@@ -95,12 +97,119 @@ function bundledTable(rel: string): ZipfTable | undefined {
   return p ? parseZipfTable(readFileSync(p, 'utf-8')) : undefined;
 }
 
+/** reviewsheet 子命令：体检 → 自包含 HTML 审查单（教师手机三键）+ 清单正本 JSON。
+ *  换词候选（--kb 换词对.csv，两列：原词,候选替换）只预填，教师定稿。 */
+function reviewSheetMain(argv: string[]): void {
+  const path = argv[0];
+  if (!path || path.startsWith('--')) {
+    console.error('用法: node dist/src/cli.js reviewsheet <候选md> [--tier A|B|M] [--vocab x.csv]... [--wordlist x.txt]... [--kb 换词对.csv] [--teacher 名] [--out 审查单.html]');
+    process.exit(2);
+  }
+  const opts = parseFlags(argv.slice(1));
+  const vocabPaths = opts.vocab ?? [];
+  let wordlistPaths = opts.wordlist ?? [];
+  if (wordlistPaths.length === 0) {
+    const bundled = findAssetPath(BUNDLED_WORDLIST);
+    const amendment = findAssetPath(AMENDMENT_WORDLIST);
+    wordlistPaths = [bundled, amendment].filter((x): x is string => x !== null);
+  }
+  const terms = opts.terms ? opts.terms.flatMap(readWordFile) : [];
+  const proper = opts.proper ? opts.proper.flatMap(readWordFile) : [];
+  const md = readFileSync(path, 'utf-8');
+  const lex = buildLexicon({
+    vocabCsvTexts: vocabPaths.map((p) => readFileSync(p, 'utf-8')),
+    plainWordlistTexts: wordlistPaths.map((p) => readFileSync(p, 'utf-8')),
+    terms,
+    properNouns: proper,
+  });
+
+  // 换词对资产只预填：两列 CSV（原词,候选），# 注释跳过
+  const candidates = new Map<string, string>();
+  for (const kbPath of opts.kb ?? []) {
+    for (const line of readFileSync(kbPath, 'utf-8').split('\n')) {
+      const t = line.trim();
+      if (!t || t.startsWith('#')) continue;
+      const cells = t.split(/[,;\t]/);
+      const w = cells[0]?.trim().toLowerCase();
+      const v = cells[1]?.trim();
+      if (w && v && !candidates.has(w)) candidates.set(w, v);
+    }
+  }
+
+  const sheet = buildReviewSheet(md, lex, {
+    tier: (opts.tier?.[0] as Tier) ?? 'M',
+    fileName: basename(path),
+    ...(candidates.size ? { candidates } : {}),
+  });
+  const html = buildReviewSheetHtml(sheet, opts.teacher?.[0] ?? '');
+  const base = opts.out?.[0] ?? join(dirname(resolve(path)), `审查单_${tagFromPath(path)}`);
+  writeFileSync(base, html, 'utf-8');
+  writeFileSync(`${base}.json`, JSON.stringify(sheet, null, 1), 'utf-8');
+  console.log(`OOV 词型 ${sheet.oovWordCount} 个（${sheet.tier} 层口径）；已生成：`);
+  console.log(`  审查单(发给教师): ${base}`);
+  console.log(`  清单正本(留档):   ${base}.json`);
+  console.error('教师判完后导出的决定 JSON 用 reviewsheet-ingest 入台账；改文由 agent 消费台账执行——ingest 只校验不改文。');
+}
+
+/** reviewsheet-ingest 子命令：决定 JSON → 校验 → append-only 事件台账。只校验，不执行改文。 */
+function reviewIngestMain(argv: string[]): void {
+  const path = argv[0];
+  const opts = parseFlags(argv.slice(1));
+  const sheetPath = opts.sheet?.[0];
+  const ledger = opts.ledger?.[0];
+  if (!path || !sheetPath || !ledger || path.startsWith('--')) {
+    console.error('用法: node dist/src/cli.js reviewsheet-ingest <决定.json> --sheet 审查单.json --ledger 决定事件.jsonl');
+    process.exit(2);
+  }
+  const decisions = JSON.parse(readFileSync(path, 'utf-8')) as ReviewDecisionsFile;
+  const sheet = JSON.parse(readFileSync(sheetPath, 'utf-8')) as ReviewSheetManifest;
+  const existingText = existsSync(ledger) ? readFileSync(ledger, 'utf-8') : '';
+  const { events: existing, badLines } = parseDecisionLog(existingText);
+  if (badLines > 0) console.error(`警告：台账里有 ${badLines} 行坏数据（不静默丢弃，请人工核查后再继续）`);
+
+  let r;
+  try {
+    r = reviewEventsFromDecisions(decisions, sheet, existing);
+  } catch (err) {
+    console.error(`校验失败，台账未动：${(err as Error).message}`);
+    process.exit(1);
+  }
+  if (r.events.length) appendFileSync(ledger, reviewEventLines(r), 'utf-8');
+  console.log(`入库 ${r.events.length} 条（幂等跳过 ${r.skipped} 条）；未判 ${r.pendingWords.length} 词${r.pendingWords.length ? '：' + r.pendingWords.join(' ') : ''}`);
+  console.error(`台账: ${ledger}`);
+}
+
+/** `--key value` 旗标解析（reviewsheet 系子命令共用；与 qc 的手写循环同一口径） */
+function parseFlags(args: string[]): Record<string, string[]> {
+  const opts: Record<string, string[]> = {};
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (!a.startsWith('--')) {
+      console.error(`无法识别的参数: ${a}`);
+      process.exit(2);
+    }
+    const key = a.slice(2);
+    const val = args[i + 1];
+    if (!val || val.startsWith('--')) {
+      console.error(`参数 ${a} 需要值`);
+      process.exit(2);
+    }
+    i++;
+    (opts[key] ??= []).push(val);
+  }
+  return opts;
+}
+
 function main(): void {
   const argv = process.argv.slice(2);
   if (argv[0] === 'fsrs') return fsrsMain(argv.slice(1));
+  if (argv[0] === 'reviewsheet') return reviewSheetMain(argv.slice(1));
+  if (argv[0] === 'reviewsheet-ingest') return reviewIngestMain(argv.slice(1));
   if (argv[0] !== 'qc' || !argv[1] || argv[1].startsWith('--')) {
     console.error(
       '用法: node dist/src/cli.js qc <候选md> [--tier A|B|M] [--vocab x.csv]... [--reinforce 已学词.txt]... [--wordlist x.txt]... [--terms x.txt] [--proper x.txt] [--anchor "短语"]... [--tag t] [--out file]\n' +
+        '     node dist/src/cli.js reviewsheet <候选md> [--tier A|B|M] [--vocab x.csv]... [--kb 换词对.csv] [--teacher 名] [--out 审查单.html]   # 生成教师三键审查单（HTML+清单JSON）\n' +
+        '     node dist/src/cli.js reviewsheet-ingest <决定.json> --sheet 审查单.json --ledger 决定事件.jsonl   # 决定入台账（只校验不改文）\n' +
         '     node dist/src/cli.js fsrs <复现队列.csv|txt> [--days-per-piece 3] [--current-pieces 2]   # FSRS vs 现行固定策略并排（并行试点）',
     );
     process.exit(2);

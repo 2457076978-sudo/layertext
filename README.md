@@ -122,6 +122,29 @@ node dist/src/cli.js qc examples/texts/school_story_club.md \
   --vocab examples/vocab/sample_teaching_vocab.csv
 ```
 
+## 教师审查单：人工校对"哪些词超纲"，导出 JSON 给 agent 执行
+
+机器出数字，教师定稿。整个循环四步（教师的界面只有一张手机能打开的网页）：
+
+```bash
+# ① 生成审查单：自包含 HTML（离线可用，手机优先）+ 清单正本 JSON
+node dist/src/cli.js reviewsheet examples/texts/school_story_club.md \
+  --vocab examples/vocab/sample_teaching_vocab.csv --teacher 王老师
+
+# ② 把 审查单_*.html 发给教师（微信/AirDrop 均可）。页面上每个超纲词三键：
+#      ① 补注 —— 词保留，注中文释义（释义是资产，可跨章传播）
+#      ② 换成X —— 全文替换成教师填的词（机器候选只预填，教师可改）
+#      ③ 忽略 —— 本篇不再提示（判定误报）
+#    出处句高亮、localStorage 草稿、键盘 J/K 上下 + 1/2/3 三键，判完点「导出决定 JSON」。
+
+# ③ 决定入台账：只校验、不执行改文（append-only，重复入库幂等跳过）
+node dist/src/cli.js reviewsheet-ingest 审查决定_school_story_club.json \
+  --sheet 审查单_xxx.json --ledger 决定事件.jsonl
+
+# ④ agent 读台账执行替换/加注（换词=edit 待办、补注=accept 资产、忽略=false-positive 本层）——
+#    执行权在机器侧的这份人机分工契约里，ingest 不碰正文一个字。
+```
+
 ## MCP 服务（把质检引擎接进任何 AI 客户端）
 
 `npm run mcp` 启动一个 stdio MCP 服务器（Claude Desktop / ZCode / Cursor 可直接挂），

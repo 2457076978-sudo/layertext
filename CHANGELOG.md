@@ -7,6 +7,14 @@
 
 > 以下 6 节来自 `codex/total-optimization` 分支的 CHANGELOG——2026-09-14 合并时**原样保留**，不并进主仓的轮次编号里（它们是"同一批改动在分支侧怎么落的"的第一手记录）。
 
+### 教师审查单（A 方案重写版，2026-10-24）
+
+- **背景（如实记录）**：审查单 A 方案原实现（2026-10-05，`834f378`）连同 09-27→10-05 的全部本地提交，在 2026-10-09 的旧机→新机迁移事故中丢失（工作区文件未随 rsync 到达、`.git` 同毁；旧 Mac mini 已报废不可恢复）。本条为**按 2026-10-05 设计定案的重写**，非原件恢复。恢复基线 = 百度网盘 09-26 git bundle（401 提交）+ GitHub 远端 3 提交（共 404，verify 1174/0/2 绿复现）。
+- 新增 **`src/core/reviewsheet.ts`**（纯函数层）：`buildReviewSheet`（OOV 判定→清单正本 JSON：词型按出现次数降序、出处句高亮**TS 侧预计算**成 pre/hit/post 三段、机器候选只预填）+ `buildReviewSheetHtml`（自包含 HTML：手机优先、三键①补注②换成X③忽略、localStorage 草稿、键盘 J/K/1/2/3、导出决定 JSON；**内嵌 JS 零正则零模板字符串**——2026-10-05 定案：复刻正则会炸 `${}`）+ `reviewEventsFromDecisions`（决定 JSON→校验→`DecisionEvent[]`，**只校验不执行改文**；三键映射＝补注→accept（释义资产可传播）/换成X→edit（只记待办）/忽略→false-positive（本层）；eventId 幂等，重复入库全跳过；校验失败抛 `ReviewValidationError` 台账一字不落）。
+- CLI 新命令：`reviewsheet <md> [--vocab] [--kb 换词对.csv] [--teacher] [--out]`（产出 `审查单_*.html` + 同名 `.json` 清单正本）与 `reviewsheet-ingest <决定.json> --sheet <清单.json> --ledger <台账.jsonl>`（append-only；台账坏行计数报警不静默）。
+- `tests/reviewsheet.test.ts` 14 例：清单排序/哈希锚定/候选只预填/段落双路（[P##] 与空行裸文本）/高亮整词边界/自包含无外链/三键与键盘流/**内嵌 JS 禁模板字符串与正则构造（铁律断言）**/HTML 转义（教师内容不可信）/三键→事件映射/幂等/九类校验拒绝/CLI 端到端（源文件分毫不动）。地图 core 计数校准 53/48→57（实数）。
+- 分工不变（2026-10-05 拍板）：「老师的界面留在人侧越薄越好、机器全 MCP 化、中间靠清单+三键+台账契约咬合」——改文由 agent 消费台账执行，ingest 永不碰正文。
+
 
 
 ### 稳定性 · A5：xlsx 依赖移除（2026-09-26，两步走）
