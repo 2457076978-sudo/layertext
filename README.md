@@ -155,6 +155,19 @@ npx -y -p layertext-mcp layertext-qc qc 课文.md --vocab 教材词库.csv
 npx -y -p layertext-mcp layertext-qc reviewsheet 课文.md --vocab 教材词库.csv   # 教师三键审查单
 ```
 
+MCP 客户端标准配置（复制即用，国内不用翻墙）：
+
+```json
+{
+  "mcpServers": {
+    "layertext": {
+      "command": "npx",
+      "args": ["-y", "layertext-mcp", "--registry=https://registry.npmmirror.com"]
+    }
+  }
+}
+```
+
 ## MCP 服务（把质检引擎接进任何 AI 客户端）
 
 `npm run mcp` 启动一个 stdio MCP 服务器（Claude Desktop / ZCode / Cursor 可直接挂），
